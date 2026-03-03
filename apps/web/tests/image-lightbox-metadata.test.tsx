@@ -9,6 +9,7 @@ const buildMetadata = (overrides?: Partial<PhotoMetadata>): PhotoMetadata => ({
   contentType: "PROMO",
   isS3Mirrored: true,
   s3MirrorFileName: "4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
+  mirrorHostedUrl: "https://d1fmdyqfafwim3.cloudfront.net/media/4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
   sourcePageTitle: "Lisa Barlow",
   sourceUrl: "https://real-housewives.fandom.com/wiki/Lisa_Barlow",
   originalImageUrl: "https://static.wikia.nocookie.net/rhoslc/images/lisa.jpg",
@@ -44,6 +45,12 @@ describe("ImageLightbox metadata panel", () => {
 
     expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
     expect(screen.getAllByText("S3 MIRROR").length).toBeGreaterThan(0);
+    const mirrorLinks = screen.getAllByRole("link", { name: "S3 MIRROR" });
+    expect(mirrorLinks.length).toBeGreaterThan(0);
+    expect(mirrorLinks[0]).toHaveAttribute(
+      "href",
+      "https://d1fmdyqfafwim3.cloudfront.net/media/4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
+    );
   });
 
   it("hides S3 mirror details when media is not mirrored", () => {
@@ -146,7 +153,7 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByText("The Traitors")).toBeInTheDocument();
   });
 
-  it("renders credit type and event metadata rows", () => {
+  it("renders credit media type, title imdb link, and event metadata rows", () => {
     render(
       <ImageLightbox
         src="https://cdn.example.com/image.jpg"
@@ -157,15 +164,19 @@ describe("ImageLightbox metadata panel", () => {
           contentType: "EVENT",
           mediaTypeLabel: "Event",
           eventName: "The 77th Primetime Emmy Awards",
-          imdbCreditType: "TV Movie",
+          imdbCreditMediaType: "TV Movie",
+          imdbTitleId: "tt1234567",
+          imdbTitleUrl: "https://www.imdb.com/title/tt1234567/",
         })}
       />
     );
 
     openMetadataPanel();
 
-    expect(screen.getByText("Credit Type")).toBeInTheDocument();
+    expect(screen.getByText("Credit Media Type")).toBeInTheDocument();
     expect(screen.getByText("TV Movie")).toBeInTheDocument();
+    const titleLink = screen.getByRole("link", { name: "tt1234567" });
+    expect(titleLink).toHaveAttribute("href", "https://www.imdb.com/title/tt1234567/");
     expect(screen.getByText("Media Type")).toBeInTheDocument();
     expect(screen.getAllByText("Event").length).toBeGreaterThan(0);
     expect(screen.getByText("Event Name")).toBeInTheDocument();
@@ -213,6 +224,149 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByText("Watch What Happens Live with Andy Cohen")).toBeInTheDocument();
     expect(screen.getAllByText("Face Crops").length).toBeGreaterThan(0);
     expect(screen.getByAltText("Alan")).toBeInTheDocument();
+  });
+
+  it("shows face match reason and top candidates in chip + diagnostics", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.1,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              person_name: "Alan Cumming",
+              match_status: "below_threshold",
+              match_reason: "no_candidates",
+              match_similarity: 0.812,
+              confidence: 0.901,
+              match_candidates: [
+                {
+                  person_name: "Susan Lucci",
+                  similarity: 0.812,
+                },
+              ],
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.08,
+              y: 0.06,
+              width: 0.26,
+              height: 0.26,
+              variantUrl: "https://cdn.example.com/face-crops/alan-wwhl.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getAllByText("Reason no candidates").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Top Susan Lucci 81.2%").length).toBeGreaterThan(0);
+  });
+
+  it("prefers top candidate name over metadata people index fallback for chip labels", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          people: ["Milo Ventimiglia"],
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.1,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              match_status: "matched",
+              match_reason: "matched",
+              match_similarity: 0.768,
+              match_candidates: [
+                {
+                  person_name: "Alan Cumming",
+                  similarity: 0.768,
+                },
+              ],
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.08,
+              y: 0.06,
+              width: 0.26,
+              height: 0.26,
+              variantUrl: "https://cdn.example.com/face-crops/alan-wwhl.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByAltText("Alan")).toBeInTheDocument();
+    expect(screen.queryByAltText("Milo")).not.toBeInTheDocument();
+  });
+
+  it("shows best-effort fallback name in chips even when match status is below threshold", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.1,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              person_name: "Milo Ventimiglia",
+              label: "Milo Ventimiglia",
+              label_source: "best_effort_tag_map",
+              match_status: "below_threshold",
+              match_reason: "below_threshold",
+              match_similarity: 0.078,
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.08,
+              y: 0.06,
+              width: 0.26,
+              height: 0.26,
+              variantUrl: "https://cdn.example.com/face-crops/milo.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByAltText("Milo")).toBeInTheDocument();
   });
 
   it("shows unified Content Type control with Profile Picture option", () => {
@@ -388,8 +542,99 @@ describe("ImageLightbox metadata panel", () => {
     openMetadataPanel();
 
     expect(screen.getAllByText("Face Crops").length).toBeGreaterThan(0);
-    expect(screen.getByText("Person 1")).toBeInTheDocument();
+    expect(screen.getAllByText("Person 1").length).toBeGreaterThan(0);
     expect(screen.getByAltText("Person 1")).toBeInTheDocument();
+  });
+
+  it("renders face match diagnostics with status, similarity, confidence, and label source", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.1,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              person_name: "Alan Cumming",
+              confidence: 0.934,
+              match_status: "matched",
+              match_similarity: 0.912,
+              label_source: "identity_match",
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.08,
+              y: 0.06,
+              width: 0.26,
+              height: 0.26,
+              variantUrl: "https://cdn.example.com/face-crops/alan.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByText("Face Match Diagnostics")).toBeInTheDocument();
+    expect(screen.getByText("Status matched | Similarity 91.2% | Detect 93.4%")).toBeInTheDocument();
+    expect(screen.getByText("Label Source identity match")).toBeInTheDocument();
+    expect(screen.getByText("Status matched | Sim 91.2% | Detect 93.4%")).toBeInTheDocument();
+  });
+
+  it("does not show identity names on face chips when status is unassigned", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          people: [],
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.1,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              person_name: "Alan Cumming",
+              confidence: 0.82,
+              match_status: "unassigned",
+              label_source: "identity_match",
+            },
+          ],
+          faceCrops: [
+            {
+              index: 1,
+              x: 0.08,
+              y: 0.06,
+              width: 0.26,
+              height: 0.26,
+              variantUrl: "https://cdn.example.com/face-crops/alan.jpg",
+              size: 256,
+            },
+          ],
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.queryByText("Alan")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Face 1").length).toBeGreaterThan(0);
+    expect(screen.getByText("Status unassigned | Sim — | Detect 82.0%")).toBeInTheDocument();
   });
 
   it("renders Edit and Star/Flag labels in manage mode", () => {

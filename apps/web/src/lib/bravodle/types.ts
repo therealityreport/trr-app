@@ -91,11 +91,11 @@ export interface BravodleTalentRecord {
 
 export interface BravodleAnswerKeyRecord {
   id: string;
-  castId: string;
-  castName: string;
+  castId?: string;
+  castName?: string;
   clue?: string;
   imageUrl?: string;
-  metadata: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RawBravodleGuess {
@@ -130,7 +130,7 @@ export interface BravodleGameSnapshot {
   guesses: BravodleGuess[];
   hasExistingDoc: boolean;
   answerKey: BravodleAnswerKeyRecord | null;
-  talent: BravodleTalentRecord | null;
+  talent?: BravodleTalentRecord | null;
 }
 
 export interface BravodleAggregateStats {

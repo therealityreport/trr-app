@@ -23,11 +23,9 @@ const buildShowImage = (
   }) as SeasonAsset;
 
 describe("ShowFeaturedMediaSelectors", () => {
-  it("updates featured poster and backdrop from selector containers", () => {
+  it("renders browse buttons for poster and backdrop", () => {
     const poster = buildShowImage("poster-1", "poster");
     const backdrop = buildShowImage("backdrop-1", "backdrop");
-    const onSetFeaturedPoster = vi.fn();
-    const onSetFeaturedBackdrop = vi.fn();
 
     render(
       <ShowFeaturedMediaSelectors
@@ -36,16 +34,69 @@ describe("ShowFeaturedMediaSelectors", () => {
         featuredPosterImageId={null}
         featuredBackdropImageId={null}
         getAssetDisplayUrl={(asset) => asset.hosted_url}
-        onSetFeaturedPoster={onSetFeaturedPoster}
-        onSetFeaturedBackdrop={onSetFeaturedBackdrop}
+        onSetFeaturedPoster={vi.fn()}
+        onSetFeaturedBackdrop={vi.fn()}
       />
     );
 
-    const selects = screen.getAllByRole("combobox");
-    fireEvent.change(selects[0], { target: { value: "poster-1" } });
-    expect(onSetFeaturedPoster).toHaveBeenCalledWith("poster-1");
+    expect(screen.getByRole("button", { name: /Select Featured Poster/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Select Featured Backdrop/i })).toBeInTheDocument();
+  });
 
-    fireEvent.change(selects[1], { target: { value: "backdrop-1" } });
-    expect(onSetFeaturedBackdrop).toHaveBeenCalledWith("backdrop-1");
+  it("shows change label when a featured image is already set", () => {
+    const poster = buildShowImage("poster-1", "poster");
+    const backdrop = buildShowImage("backdrop-1", "backdrop");
+
+    render(
+      <ShowFeaturedMediaSelectors
+        posterAssets={[poster]}
+        backdropAssets={[backdrop]}
+        featuredPosterImageId="poster-1"
+        featuredBackdropImageId="backdrop-1"
+        getAssetDisplayUrl={(asset) => asset.hosted_url}
+        onSetFeaturedPoster={vi.fn()}
+        onSetFeaturedBackdrop={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /Change Featured Poster/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Change Featured Backdrop/i })).toBeInTheDocument();
+  });
+
+  it("shows featured badges when images are selected", () => {
+    const poster = buildShowImage("poster-1", "poster");
+
+    render(
+      <ShowFeaturedMediaSelectors
+        posterAssets={[poster]}
+        backdropAssets={[]}
+        featuredPosterImageId="poster-1"
+        featuredBackdropImageId={null}
+        getAssetDisplayUrl={(asset) => asset.hosted_url}
+        onSetFeaturedPoster={vi.fn()}
+        onSetFeaturedBackdrop={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Featured")).toBeInTheDocument();
+    expect(screen.getByText("Not Set")).toBeInTheDocument();
+  });
+
+  it("disables button when no assets are available", () => {
+    render(
+      <ShowFeaturedMediaSelectors
+        posterAssets={[]}
+        backdropAssets={[]}
+        featuredPosterImageId={null}
+        featuredBackdropImageId={null}
+        getAssetDisplayUrl={(asset) => asset.hosted_url}
+        onSetFeaturedPoster={vi.fn()}
+        onSetFeaturedBackdrop={vi.fn()}
+      />
+    );
+
+    const buttons = screen.getAllByRole("button", { name: /No images available/i });
+    expect(buttons).toHaveLength(2);
+    buttons.forEach((btn) => expect(btn).toBeDisabled());
   });
 });

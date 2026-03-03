@@ -599,6 +599,37 @@ describe("person gallery media view helpers", () => {
     expect(buckets.matchesUnknownShows).toBe(true);
   });
 
+  it("prioritizes IMDb episode evidence over mismatched request-context show tags for Traitors", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "imdb",
+        caption: "Episode 2 (2025)",
+        metadata: {
+          show_context_source: "request_context",
+          show_name: "Wrong Show",
+          imdb_fallback_show_name: "The Traitors",
+          episode_title: "Revenge Is a Dish Best Served Cold",
+          season_number: 3,
+          episode_number: 2,
+          imdb_title_type: "TVEpisode",
+          imdb_image_type: "still_frame",
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "TT",
+      allKnownShowNameMatches: ["the traitors", "wrong show"],
+      allKnownShowAcronymMatches: new Set(["TT", "WS"]),
+      allKnownShowIds: ["show-traitors"],
+      otherShowNameMatches: ["wrong show"],
+      otherShowAcronymMatches: new Set(["WS"]),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesThisShow).toBe(true);
+    expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
   it("treats request_context_rejected IMDb metadata as explicitly untrusted", () => {
     const buckets = computePersonPhotoShowBuckets({
       photo: makePhoto({

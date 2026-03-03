@@ -93,10 +93,25 @@ const SORTS: RedditListingSort[] = ["new", "hot", "top"];
 const POLL_INTERVAL_MS = 2_000;
 const POLL_TIMEOUT_MS_DEFAULT = 24_000;
 const POLL_TIMEOUT_MS_REFRESH = 170_000;
-const CACHE_LOOKUP_TIMEOUT_MS = 8_000;
-const CACHE_LOOKUP_RETRIES = 0;
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const readNonNegativeIntEnv = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const CACHE_LOOKUP_TIMEOUT_MS = readPositiveIntEnv("TRR_REDDIT_CACHE_LOOKUP_TIMEOUT_MS", 20_000);
+const CACHE_LOOKUP_RETRIES = readNonNegativeIntEnv("TRR_REDDIT_CACHE_LOOKUP_RETRIES", 1);
 const SHOW_CONTEXT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DISCOVERY_NEGATIVE_CACHE_TTL_MS = 60 * 1000;
+const CACHE_LOOKUP_DEGRADED_WARNING = "Cached reddit discovery lookup was unavailable; treating cache lookup as a miss.";
 const ENABLE_DISCOVERY_TIMINGS =
   process.env.NODE_ENV !== "test" && process.env.REDDIT_DISCOVERY_DEBUG_TIMINGS !== "0";
 
@@ -163,10 +178,11 @@ const parseBoolean = (value: string | null): boolean => {
 const parseMaxPages = (value: string | null): number | null => {
   if (!value) return null;
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return null;
   }
-  return Math.min(parsed, 1000);
+  // 0 = unlimited (no page cap); positive = hard cap (no upper clamp)
+  return parsed;
 };
 
 const parseCoverageMode = (value: string | null): CoverageMode | null => {
@@ -178,7 +194,7 @@ const parseCoverageMode = (value: string | null): CoverageMode | null => {
   return null;
 };
 
-const parseForceFlares = (values: string[]): string[] => {
+const parseForceFlairs = (values: string[]): string[] => {
   const deduped = new Map<string, string>();
   for (const value of values) {
     const normalized = value.trim();
@@ -218,9 +234,9 @@ const buildRunConfigHash = (input: {
   maxPages: number | null;
   exhaustiveWindow: boolean;
   searchBackfill: boolean;
-  analysisFlares: string[];
-  analysisAllFlares: string[];
-  forceIncludeFlares: string[];
+  analysisFlairs: string[];
+  analysisAllFlairs: string[];
+  forceIncludeFlairs: string[];
   seedPostUrls: string[];
   periodStart: string | null;
   periodEnd: string | null;
@@ -232,9 +248,9 @@ const buildRunConfigHash = (input: {
     max_pages: input.maxPages ?? null,
     exhaustive_window: input.exhaustiveWindow,
     search_backfill: input.searchBackfill,
-    analysis_flares: [...input.analysisFlares].map((value) => value.trim()).filter(Boolean).sort(),
-    analysis_all_flares: [...input.analysisAllFlares].map((value) => value.trim()).filter(Boolean).sort(),
-    force_include_flares: [...input.forceIncludeFlares].map((value) => value.trim()).filter(Boolean).sort(),
+    analysis_flairs: [...input.analysisFlairs].map((value) => value.trim()).filter(Boolean).sort(),
+    analysis_all_flairs: [...input.analysisAllFlairs].map((value) => value.trim()).filter(Boolean).sort(),
+    force_include_flairs: [...input.forceIncludeFlairs].map((value) => value.trim()).filter(Boolean).sort(),
     seed_post_urls: [...input.seedPostUrls].map((value) => value.trim()).filter(Boolean).sort(),
     period_start: input.periodStart,
     period_end: input.periodEnd,
@@ -259,13 +275,13 @@ const buildStableContainerPeriodKey = (input: {
   communityId: string;
   seasonId: string;
   containerKey: string;
-  forceFlares: string[];
+  forceFlairs: string[];
 }): string => {
-  const flaresCanonical = input.forceFlares.map((value) => value.trim().toLowerCase()).sort().join(",");
-  const flaresSuffix = flaresCanonical
-    ? `:f:${createHash("sha1").update(flaresCanonical).digest("hex").slice(0, 12)}`
+  const flairsCanonical = input.forceFlairs.map((value) => value.trim().toLowerCase()).sort().join(",");
+  const flairsSuffix = flairsCanonical
+    ? `:f:${createHash("sha1").update(flairsCanonical).digest("hex").slice(0, 12)}`
     : "";
-  return `community:${input.communityId}:season:${input.seasonId}:container:${input.containerKey}${flaresSuffix}`;
+  return `community:${input.communityId}:season:${input.seasonId}:container:${input.containerKey}${flairsSuffix}`;
 };
 
 const buildPeriodKey = (input: {
@@ -273,12 +289,12 @@ const buildPeriodKey = (input: {
   seasonId: string;
   periodStart: string | null;
   periodEnd: string | null;
-  forceFlares: string[];
+  forceFlairs: string[];
 }): string => {
   const start = input.periodStart ?? "none";
   const end = input.periodEnd ?? "none";
-  const flares = input.forceFlares.map((value) => value.trim().toLowerCase()).sort().join(",") || "none";
-  const canonical = `window:${start}:${end}:flares:${flares}`;
+  const flairs = input.forceFlairs.map((value) => value.trim().toLowerCase()).sort().join(",") || "none";
+  const canonical = `window:${start}:${end}:flairs:${flairs}`;
   const digest = createHash("sha1").update(canonical).digest("hex");
   return `community:${input.communityId}:season:${input.seasonId}:window:${digest}`;
 };
@@ -288,12 +304,12 @@ const buildLegacyPeriodKey = (input: {
   seasonId: string;
   periodStart: string | null;
   periodEnd: string | null;
-  forceFlares: string[];
+  forceFlairs: string[];
 }): string => {
   const start = input.periodStart ?? "none";
   const end = input.periodEnd ?? "none";
-  const flares = input.forceFlares.map((value) => value.trim().toLowerCase()).sort().join(",") || "none";
-  return `community:${input.communityId}:season:${input.seasonId}:window:${start}:${end}:flares:${flares}`;
+  const flairs = input.forceFlairs.map((value) => value.trim().toLowerCase()).sort().join(",") || "none";
+  return `community:${input.communityId}:season:${input.seasonId}:window:${start}:${end}:flairs:${flairs}`;
 };
 
 const toFiniteNumber = (value: unknown, fallback = 0): number => {
@@ -459,14 +475,14 @@ const buildLegacySingleFlairFallbackPeriodKeys = (input: {
   seasonId: string;
   periodStart: string | null;
   periodEnd: string | null;
-  trackedFlares: string[];
+  trackedFlairs: string[];
 }): string[] => {
   if (!input.periodStart || !input.periodEnd) return [];
-  const normalizedFlares = parseForceFlares(input.trackedFlares);
-  if (normalizedFlares.length === 0) return [];
+  const normalizedFlairs = parseForceFlairs(input.trackedFlairs);
+  if (normalizedFlairs.length === 0) return [];
   const preferredFlair =
-    normalizedFlares.find((flair) => /\bsalt\s+lake\s+city\b|\brhoslc\b|\bslc\b/i.test(flair)) ??
-    normalizedFlares[0];
+    normalizedFlairs.find((flair) => /\bsalt\s+lake\s+city\b|\brhoslc\b|\bslc\b/i.test(flair)) ??
+    normalizedFlairs[0];
   if (!preferredFlair) return [];
   return [
     buildPeriodKey({
@@ -474,14 +490,14 @@ const buildLegacySingleFlairFallbackPeriodKeys = (input: {
       seasonId: input.seasonId,
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
-      forceFlares: [preferredFlair],
+      forceFlairs: [preferredFlair],
     }),
     buildLegacyPeriodKey({
       communityId: input.communityId,
       seasonId: input.seasonId,
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
-      forceFlares: [preferredFlair],
+      forceFlairs: [preferredFlair],
     }),
   ];
 };
@@ -696,6 +712,24 @@ const fetchCachedDiscoveryByPeriodKeys = async (input: {
   };
 };
 
+const fetchCachedDiscoveryByPeriodKeysSafe = async (input: {
+  communityId: string;
+  seasonId: string;
+  periodKeys: string[];
+  containerKeys?: string[];
+}): Promise<{
+  discovery: DiscoveryPayload | null;
+  matchedPeriodKey: string | null;
+  degraded: boolean;
+}> => {
+  try {
+    const result = await fetchCachedDiscoveryByPeriodKeys(input);
+    return { ...result, degraded: false };
+  } catch {
+    return { discovery: null, matchedPeriodKey: null, degraded: true };
+  }
+};
+
 const getShowDiscoveryContext = async (
   showId: string,
   fallbackShowName: string,
@@ -831,44 +865,47 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const coverageMode =
       requestedCoverageMode ??
       (containerKey === "period-preseason" ? "adaptive_deep" : "standard");
-    const forceIncludeFlares = parseForceFlares(
+    const forceIncludeFlairs = parseForceFlairs(
       request.nextUrl.searchParams.getAll("force_flair"),
     );
     const seedPostUrls = parseSeedPostUrls([
       ...request.nextUrl.searchParams.getAll("seed_post_url"),
       ...request.nextUrl.searchParams.getAll("seed_post_urls"),
     ]);
-    const forceFlairOnlyMode = forceIncludeFlares.length > 0;
-    const analysisFlares = forceFlairOnlyMode ? [] : community.analysis_flares ?? [];
-    const analysisAllFlares = forceFlairOnlyMode
-      ? forceIncludeFlares
-      : community.analysis_all_flares ?? [];
+    const rawMode = request.nextUrl.searchParams.get("mode");
+    const refreshMode: "sync_posts" | "sync_details" | undefined =
+      rawMode === "sync_posts" || rawMode === "sync_details" ? rawMode : undefined;
+    const forceFlairOnlyMode = forceIncludeFlairs.length > 0;
+    const analysisFlairs = forceFlairOnlyMode ? [] : community.analysis_flairs ?? [];
+    const analysisAllFlairs = forceFlairOnlyMode
+      ? forceIncludeFlairs
+      : community.analysis_all_flairs ?? [];
 
     const periodKeyInput = {
       communityId,
       seasonId: resolvedSeasonId,
       periodStart: parsedPeriodStart.value,
       periodEnd: parsedPeriodEnd.value,
-      forceFlares: forceIncludeFlares,
+      forceFlairs: forceIncludeFlairs,
     };
     const periodKey = containerKey
       ? buildStableContainerPeriodKey({
           communityId,
           seasonId: resolvedSeasonId,
           containerKey,
-          forceFlares: forceIncludeFlares,
+          forceFlairs: forceIncludeFlairs,
         })
       : buildPeriodKey(periodKeyInput);
     const legacyPeriodKey = buildLegacyPeriodKey(periodKeyInput);
     const hashedPeriodKey = buildPeriodKey(periodKeyInput);
     const legacySingleFlairFallbackKeys =
-      forceIncludeFlares.length === 0
+      forceIncludeFlairs.length === 0
         ? buildLegacySingleFlairFallbackPeriodKeys({
             communityId,
             seasonId: resolvedSeasonId,
             periodStart: parsedPeriodStart.value,
             periodEnd: parsedPeriodEnd.value,
-            trackedFlares: [...(community.analysis_all_flares ?? []), ...(community.analysis_flares ?? [])],
+            trackedFlairs: [...(community.analysis_all_flairs ?? []), ...(community.analysis_flairs ?? [])],
           })
         : [];
     const cacheLookupPeriodKeys = Array.from(
@@ -878,15 +915,41 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ),
       ),
     );
-
-    const canUsePeriodWindowCache = Boolean(containerKey || parsedPeriodStart.value || parsedPeriodEnd.value);
-    if (canUsePeriodWindowCache && !forceRefresh) {
-      const cachedLookup = await fetchCachedDiscoveryByPeriodKeys({
+    const responseWarnings = new Set<string>();
+    const combineWarning = (baseWarning?: string): string | undefined => {
+      const warnings = [...responseWarnings];
+      if (baseWarning) {
+        warnings.unshift(baseWarning);
+      }
+      const deduped = [...new Set(warnings.filter((warning) => warning.trim().length > 0))];
+      return deduped.length > 0 ? deduped.join(" ") : undefined;
+    };
+    const safeCacheLookup = async (): Promise<{
+      discovery: DiscoveryPayload | null;
+      matchedPeriodKey: string | null;
+    }> => {
+      const cachedLookup = await fetchCachedDiscoveryByPeriodKeysSafe({
         communityId,
         seasonId: resolvedSeasonId,
         periodKeys: cacheLookupPeriodKeys,
         containerKeys: containerKey ? [containerKey] : [],
       });
+      if (cachedLookup.degraded) {
+        responseWarnings.add(CACHE_LOOKUP_DEGRADED_WARNING);
+        logDiscoveryTiming("cache_lookup_degraded", requestStartedAtMs, {
+          community_id: communityId,
+          season_id: resolvedSeasonId,
+        });
+      }
+      return {
+        discovery: cachedLookup.discovery,
+        matchedPeriodKey: cachedLookup.matchedPeriodKey,
+      };
+    };
+
+    const canUsePeriodWindowCache = Boolean(containerKey || parsedPeriodStart.value || parsedPeriodEnd.value);
+    if (canUsePeriodWindowCache && !forceRefresh) {
+      const cachedLookup = await safeCacheLookup();
       if (cachedLookup.discovery) {
         logDiscoveryTiming("cache_hit", requestStartedAtMs, {
           community_id: communityId,
@@ -897,6 +960,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           community,
           discovery: cachedLookup.discovery,
           source: "cache",
+          warning: combineWarning(),
           cache: {
             hit_used: true,
             fallback_used: false,
@@ -907,7 +971,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({
         community,
         discovery: null,
-        warning: "No cached posts found yet for this window. Use Refresh Posts to run a live scrape.",
+        warning: combineWarning(
+          "No cached posts found yet for this window. Use Sync Posts to run a live scrape.",
+        ),
         source: "cache",
         cache: {
           hit_used: false,
@@ -918,9 +984,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const showContext = await getShowDiscoveryContext(community.trr_show_id, community.trr_show_name);
-    const effectiveMaxPages =
-      maxPages ??
-      (coverageMode === "adaptive_deep" || coverageMode === "max_coverage" ? 1000 : 500);
+    // 0 = unlimited (scrape all posts in the time window).
+    // The backend loop uses `range(max_pages)` so 0 would mean zero iterations.
+    // Translate 0 → 10 000 (effectively unlimited) before sending to backend.
+    const effectiveMaxPages = (maxPages ?? 0) === 0 ? 10_000 : maxPages!;
     const fetchComments = true;
     const commentDeltaOnly = true;
     const runConfigHash = buildRunConfigHash({
@@ -928,9 +995,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       maxPages: effectiveMaxPages,
       exhaustiveWindow,
       searchBackfill,
-      analysisFlares,
-      analysisAllFlares,
-      forceIncludeFlares,
+      analysisFlairs,
+      analysisAllFlairs,
+      forceIncludeFlairs,
       seedPostUrls,
       periodStart: parsedPeriodStart.value,
       periodEnd: parsedPeriodEnd.value,
@@ -950,9 +1017,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       show_aliases: showContext.showAliases,
       cast_names: showContext.castNames,
       is_show_focused: community.is_show_focused,
-      analysis_flares: analysisFlares,
-      analysis_all_flares: analysisAllFlares,
-      force_include_flares: forceIncludeFlares,
+      analysis_flairs: analysisFlairs,
+      analysis_all_flairs: analysisAllFlairs,
+      force_include_flairs: forceIncludeFlairs,
       sort_modes: sortModes,
       limit_per_mode: limitPerMode,
       period_start: parsedPeriodStart.value,
@@ -965,6 +1032,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       fetch_comments: fetchComments,
       comment_delta_only: commentDeltaOnly,
       max_pages: effectiveMaxPages,
+      ...(refreshMode ? { mode: refreshMode } : {}),
     };
 
     const started = await fetchSocialBackendJson("/reddit/runs", {
@@ -991,14 +1059,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const shouldWaitForCompletion = forceRefresh ? waitForCompletion : true;
     if (!shouldWaitForCompletion) {
       const cachedFallback = canUsePeriodWindowCache
-        ? (
-            await fetchCachedDiscoveryByPeriodKeys({
-              communityId,
-              seasonId: resolvedSeasonId,
-              periodKeys: cacheLookupPeriodKeys,
-              containerKeys: containerKey ? [containerKey] : [],
-            })
-          ).discovery
+        ? (await safeCacheLookup()).discovery
         : null;
       const discovery = cachedFallback ?? run.discovery ?? null;
       return NextResponse.json({
@@ -1006,13 +1067,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         discovery,
         run,
         source: "live_run",
-        warning: discovery
-          ? run.status === "running"
-            ? "Refresh running in backend; showing latest cached posts while scraping this window."
-            : "Refresh queued in backend; showing latest cached posts while scraping this window."
-          : run.status === "running"
-            ? "Refresh running; no cached posts found yet for this window."
-            : "Refresh queued; no cached posts found yet for this window.",
+        warning: combineWarning(
+          discovery
+            ? run.status === "running"
+              ? "Refresh running in backend; showing latest cached posts while scraping this window."
+              : "Refresh queued in backend; showing latest cached posts while scraping this window."
+            : run.status === "running"
+              ? "Refresh running; no cached posts found yet for this window."
+              : "Refresh queued; no cached posts found yet for this window.",
+        ),
         cache: {
           hit_used: Boolean(cachedFallback),
           fallback_used: false,
@@ -1027,14 +1090,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     try {
       finalRun = TERMINAL_RUN_STATUSES.has(run.status) ? run : await waitForRunCompletion(run.run_id, pollTimeout);
     } catch (pollError) {
-      const cachedFallback = (
-        await fetchCachedDiscoveryByPeriodKeys({
-          communityId,
-          seasonId: resolvedSeasonId,
-          periodKeys: cacheLookupPeriodKeys,
-          containerKeys: containerKey ? [containerKey] : [],
-        })
-      ).discovery;
+      const cachedFallback = (await safeCacheLookup()).discovery;
       if (!cachedFallback) {
         throw pollError;
       }
@@ -1042,6 +1098,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         community,
         discovery: cachedFallback,
         source: "live_run",
+        warning: combineWarning(),
         cache: {
           hit_used: false,
           fallback_used: true,
@@ -1056,14 +1113,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const discovery = finalRun.discovery;
     if (!discovery) {
-      const cachedFallback = (
-        await fetchCachedDiscoveryByPeriodKeys({
-          communityId,
-          seasonId: resolvedSeasonId,
-          periodKeys: cacheLookupPeriodKeys,
-          containerKeys: containerKey ? [containerKey] : [],
-        })
-      ).discovery;
+      const cachedFallback = (await safeCacheLookup()).discovery;
       if (!cachedFallback) {
         throw new Error("No discovery payload returned");
       }
@@ -1071,6 +1121,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         community,
         discovery: cachedFallback,
         source: "live_run",
+        warning: combineWarning(),
         cache: {
           hit_used: false,
           fallback_used: true,
@@ -1092,6 +1143,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       community,
       discovery,
       source: "live_run",
+      warning: combineWarning(),
       cache: {
         hit_used: false,
         fallback_used: false,

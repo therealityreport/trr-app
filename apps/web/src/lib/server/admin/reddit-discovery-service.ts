@@ -50,9 +50,9 @@ export interface DiscoverSubredditThreadsInput {
   showAliases?: string[] | null;
   castNames?: string[] | null;
   isShowFocused?: boolean;
-  analysisFlares?: string[] | null;
-  analysisAllFlares?: string[] | null;
-  forceIncludeFlares?: string[] | null;
+  analysisFlairs?: string[] | null;
+  analysisAllFlairs?: string[] | null;
+  forceIncludeFlairs?: string[] | null;
   sortModes?: RedditListingSort[];
   limitPerMode?: number;
   periodStart?: string | null;
@@ -148,7 +148,7 @@ export interface DiscoverEpisodeDiscussionThreadsInput {
   seasonNumber: number;
   seasonEpisodes?: Array<{ episode_number: number; air_date: string | null }> | null;
   episodeTitlePatterns?: string[] | null;
-  episodeRequiredFlares?: string[] | null;
+  episodeRequiredFlairs?: string[] | null;
   isShowFocused?: boolean;
   periodStart?: string | null;
   periodEnd?: string | null;
@@ -183,7 +183,7 @@ export interface DiscoverEpisodeDiscussionThreadsResult {
   filters_applied: {
     season_number: number;
     title_patterns: string[];
-    required_flares: string[];
+    required_flairs: string[];
     show_focused: boolean;
     period_start: string | null;
     period_end: string | null;
@@ -1098,18 +1098,18 @@ const applyMatchMetadata = (
   castTerms: string[],
   subreddit: string,
   isShowFocused: boolean,
-  analysisScanFlares: string[],
-  analysisAllFlares: string[],
-  forcedAllPostFlares: string[],
+  analysisScanFlairs: string[],
+  analysisAllFlairs: string[],
+  forcedAllPostFlairs: string[],
 ): { threads: RedditDiscoveryThread[]; hints: RedditDiscoveryHints } => {
   const includeCounts = new Map<string, number>();
   const excludeCounts = new Map<string, number>();
-  const analysisAllFlairKeys = new Set(analysisAllFlares.map((flair) => toCanonicalFlairKey(flair)));
-  for (const forcedFlair of forcedAllPostFlares) {
+  const analysisAllFlairKeys = new Set(analysisAllFlairs.map((flair) => toCanonicalFlairKey(flair)));
+  for (const forcedFlair of forcedAllPostFlairs) {
     analysisAllFlairKeys.add(toCanonicalFlairKey(forcedFlair));
   }
   const analysisScanFlairKeys = new Set(
-    analysisScanFlares
+    analysisScanFlairs
       .map((flair) => toCanonicalFlairKey(flair))
       .filter((flair) => flair.length > 0)
       .filter((flair) => !analysisAllFlairKeys.has(flair)),
@@ -1201,13 +1201,13 @@ export async function discoverSubredditThreads(
   );
   const terms = buildShowTerms(input.showName, input.showAliases ?? []);
   const castTerms = buildCastTerms(input.castNames ?? []);
-  const analysisScanFlares = sanitizeRedditFlairList(subreddit, input.analysisFlares ?? []);
-  const analysisAllFlares = sanitizeRedditFlairList(subreddit, input.analysisAllFlares ?? []);
-  const forcedAllPostFlares = sanitizeRedditFlairList(subreddit, input.forceIncludeFlares ?? []);
+  const analysisScanFlairs = sanitizeRedditFlairList(subreddit, input.analysisFlairs ?? []);
+  const analysisAllFlairs = sanitizeRedditFlairList(subreddit, input.analysisAllFlairs ?? []);
+  const forcedAllPostFlairs = sanitizeRedditFlairList(subreddit, input.forceIncludeFlairs ?? []);
   const trackedFlairs = [
-    ...analysisAllFlares,
-    ...analysisScanFlares,
-    ...forcedAllPostFlares,
+    ...analysisAllFlairs,
+    ...analysisScanFlairs,
+    ...forcedAllPostFlairs,
   ].filter((flair) => flair.trim().length > 0);
   const isShowFocused = input.isShowFocused ?? false;
   const periodStartDate = parseIsoDate(input.periodStart);
@@ -1317,9 +1317,9 @@ export async function discoverSubredditThreads(
     castTerms,
     subreddit,
     isShowFocused,
-    analysisScanFlares,
-    analysisAllFlares,
-    forcedAllPostFlares,
+    analysisScanFlairs,
+    analysisAllFlairs,
+    forcedAllPostFlairs,
   );
   const trackedFlairRows =
     trackedFlairKeySet.size === 0
@@ -1731,8 +1731,8 @@ export async function discoverEpisodeDiscussionThreads(
   const seasonNumber = Math.max(1, Math.floor(input.seasonNumber));
   const showTerms = buildShowTerms(input.showName, input.showAliases ?? []);
   const titlePatterns = sanitizeEpisodeTitlePatterns(input.episodeTitlePatterns ?? []);
-  const requiredFlares = sanitizeRedditFlairList(subreddit, input.episodeRequiredFlares ?? []);
-  const requiredFlairKeys = new Set(requiredFlares.map((flair) => flair.toLowerCase()));
+  const requiredFlairs = sanitizeRedditFlairList(subreddit, input.episodeRequiredFlairs ?? []);
+  const requiredFlairKeys = new Set(requiredFlairs.map((flair) => flair.toLowerCase()));
   const isShowFocused = input.isShowFocused ?? false;
   const periodStartDate = parseIsoDate(input.periodStart);
   const periodEndDate = parseIsoDate(input.periodEnd);
@@ -1974,7 +1974,7 @@ export async function discoverEpisodeDiscussionThreads(
     filters_applied: {
       season_number: seasonNumber,
       title_patterns: titlePatterns,
-      required_flares: requiredFlares,
+      required_flairs: requiredFlairs,
       show_focused: isShowFocused,
       period_start: periodStartDate?.toISOString() ?? null,
       period_end: periodEndDate?.toISOString() ?? null,

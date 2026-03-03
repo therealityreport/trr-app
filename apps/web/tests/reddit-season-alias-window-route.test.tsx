@@ -16,6 +16,14 @@ vi.mock("@/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page", () => ({
   default: () => null,
 }));
 
+vi.mock("@/app/admin/reddit-window-posts/page", () => ({
+  default: () => null,
+}));
+
+vi.mock("@/app/admin/reddit-post-details/page", () => ({
+  default: () => null,
+}));
+
 import RootShowSeasonAliasPage from "@/app/[showId]/s[seasonNumber]/[[...rest]]/page";
 
 describe("root show season alias reddit window routing", () => {
@@ -33,7 +41,7 @@ describe("root show season alias reddit window routing", () => {
         }),
       }),
     ).rejects.toThrow(
-      "REDIRECT:/admin/social-media/reddit/BravoRealHousewives?showSlug=rhoslc&season=6",
+      "REDIRECT:/rhoslc/social/reddit/BravoRealHousewives/s6",
     );
   });
 
@@ -51,44 +59,64 @@ describe("root show season alias reddit window routing", () => {
         }),
       }),
     ).rejects.toThrow(
-      "REDIRECT:/admin/social-media/reddit/BravoRealHousewives?showSlug=rhoslc&season=6",
+      "REDIRECT:/rhoslc/social/reddit/BravoRealHousewives/s6",
     );
   });
 
-  it("redirects reddit window paths to admin reddit window resolver", async () => {
-    redirectMock.mockImplementation((href: string) => {
-      throw new Error(`REDIRECT:${href}`);
+  it("renders window page directly for reddit window paths (no redirect)", async () => {
+    redirectMock.mockReset();
+
+    await RootShowSeasonAliasPage({
+      params: Promise.resolve({
+        showId: "rhoslc",
+        seasonNumber: "social",
+        rest: ["reddit", "BravoRealHousewives", "w0"],
+      }),
     });
 
-    await expect(
-      RootShowSeasonAliasPage({
-        params: Promise.resolve({
-          showId: "rhoslc",
-          seasonNumber: "social",
-          rest: ["reddit", "BravoRealHousewives", "w0"],
-        }),
-      }),
-    ).rejects.toThrow(
-      "REDIRECT:/admin/reddit-window-posts?showSlug=rhoslc&community_slug=BravoRealHousewives&windowKey=w0",
-    );
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 
-  it("redirects reddit window paths when season token is parsed as 'ocial'", async () => {
-    redirectMock.mockImplementation((href: string) => {
-      throw new Error(`REDIRECT:${href}`);
+  it("renders window page directly when season token is parsed as 'ocial'", async () => {
+    redirectMock.mockReset();
+
+    await RootShowSeasonAliasPage({
+      params: Promise.resolve({
+        showId: "rhoslc",
+        seasonNumber: "ocial",
+        rest: ["reddit", "BravoRealHousewives", "w0"],
+      }),
     });
 
-    await expect(
-      RootShowSeasonAliasPage({
-        params: Promise.resolve({
-          showId: "rhoslc",
-          seasonNumber: "ocial",
-          rest: ["reddit", "BravoRealHousewives", "w0"],
-        }),
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("renders window page directly for reddit window paths with season", async () => {
+    redirectMock.mockReset();
+
+    await RootShowSeasonAliasPage({
+      params: Promise.resolve({
+        showId: "rhoslc",
+        seasonNumber: "social",
+        rest: ["reddit", "BravoRealHousewives", "s6", "w0"],
       }),
-    ).rejects.toThrow(
-      "REDIRECT:/admin/reddit-window-posts?showSlug=rhoslc&community_slug=BravoRealHousewives&windowKey=w0",
-    );
+    });
+
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("renders reddit post details page directly for reddit post paths", async () => {
+    redirectMock.mockReset();
+
+    await RootShowSeasonAliasPage({
+      params: Promise.resolve({
+        showId: "rhoslc",
+        seasonNumber: "social",
+        rest: ["reddit", "BravoRealHousewives", "s6", "w0", "post", "abc123"],
+      }),
+    });
+
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 
   it("does not redirect valid numeric season routes", async () => {

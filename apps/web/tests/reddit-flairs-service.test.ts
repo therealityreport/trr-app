@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { fetchSubredditPostFlares } from "@/lib/server/admin/reddit-flairs-service";
+import { fetchSubredditPostFlairs } from "@/lib/server/admin/reddit-flairs-service";
 
 const jsonResponse = (body: unknown, status = 200): Response =>
   ({
@@ -17,7 +17,7 @@ describe("reddit-flairs-service", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns API flares when flair endpoint succeeds", async () => {
+  it("returns API flairs when flair endpoint succeeds", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/link_flair_v2.json")) {
@@ -27,10 +27,10 @@ describe("reddit-flairs-service", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const result = await fetchSubredditPostFlares("BravoRealHousewives");
+    const result = await fetchSubredditPostFlairs("BravoRealHousewives");
 
     expect(result).toEqual({
-      flares: ["Episode Discussion", "Live Thread"],
+      flairs: ["Episode Discussion", "Live Thread"],
       source: "api",
       warning: null,
     });
@@ -66,10 +66,10 @@ describe("reddit-flairs-service", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const result = await fetchSubredditPostFlares("BravoRealHousewives");
+    const result = await fetchSubredditPostFlairs("BravoRealHousewives");
 
     expect(result.source).toBe("listing_fallback");
-    expect(result.flares).toEqual(["Episode Discussion", "Live Thread", "Rewatch"]);
+    expect(result.flairs).toEqual(["Episode Discussion", "Live Thread", "Rewatch"]);
     expect(result.warning).toContain("Reddit request failed");
   });
 
@@ -89,18 +89,18 @@ describe("reddit-flairs-service", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const result = await fetchSubredditPostFlares("realhousewivesofSLC");
+    const result = await fetchSubredditPostFlairs("realhousewivesofSLC");
 
-    expect(result.flares).toEqual([
+    expect(result.flairs).toEqual([
       "Chat/Discussion",
       "General",
       "Meredith Marksss",
       "S7",
     ]);
-    expect(result.flares.some((flair) => flair.toLowerCase().includes("whitney"))).toBe(false);
+    expect(result.flairs.some((flair) => flair.toLowerCase().includes("whitney"))).toBe(false);
   });
 
-  it("returns empty flares when both API and fallback have none", async () => {
+  it("returns empty flairs when both API and fallback have none", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/link_flair_v2.json")) return jsonResponse([]);
@@ -115,10 +115,10 @@ describe("reddit-flairs-service", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const result = await fetchSubredditPostFlares("BravoRealHousewives");
+    const result = await fetchSubredditPostFlairs("BravoRealHousewives");
 
     expect(result).toEqual({
-      flares: [],
+      flairs: [],
       source: "none",
       warning: null,
     });
@@ -128,7 +128,7 @@ describe("reddit-flairs-service", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    await expect(fetchSubredditPostFlares("not valid!!")).rejects.toThrow("Invalid subreddit");
+    await expect(fetchSubredditPostFlairs("not valid!!")).rejects.toThrow("Invalid subreddit");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

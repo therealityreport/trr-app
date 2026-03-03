@@ -132,7 +132,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const seasonIdHint = seasonIdHintRaw ?? undefined;
     forwardedSearchParams.delete("season_id");
 
-    const refreshTimeoutMs = platform === "youtube" ? 120_000 : 30_000;
+    const refreshTimeoutMs = platform === "youtube" ? 120_000 : 90_000;
     const data = await fetchSeasonBackendJson(
       showId,
       seasonNumber,

@@ -55,6 +55,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!forwardedSearchParams.has("max_comments_per_post")) {
       forwardedSearchParams.set("max_comments_per_post", "0");
     }
+    if (!forwardedSearchParams.has("include")) {
+      forwardedSearchParams.set("include", "totals_only");
+    }
 
     const data = await fetchSeasonBackendJson(
       showId,

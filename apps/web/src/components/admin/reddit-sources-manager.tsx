@@ -45,14 +45,15 @@ interface RedditCommunity {
   subreddit: string;
   display_name: string | null;
   notes: string | null;
-  post_flares: string[];
-  analysis_flares: string[];
-  analysis_all_flares: string[];
+  post_flairs: string[];
+  analysis_flairs: string[];
+  analysis_all_flairs: string[];
   is_show_focused: boolean;
   network_focus_targets: string[];
   franchise_focus_targets: string[];
   episode_title_patterns: string[];
-  post_flares_updated_at: string | null;
+  post_flair_categories: Record<string, string>;
+  post_flairs_updated_at: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -64,6 +65,8 @@ interface RedditCommunityResponse extends Omit<RedditCommunity, "assigned_thread
   assigned_thread_count?: number;
   assigned_threads?: RedditThreadResponse[];
 }
+
+type PeriodPostMatchType = "flair" | "scan" | "all";
 
 interface DiscoveryThread {
   reddit_post_id: string;
@@ -86,6 +89,17 @@ interface DiscoveryThread {
   match_score: number;
   suggested_include_terms: string[];
   suggested_exclude_terms: string[];
+  match_type?: PeriodPostMatchType | null;
+  admin_approved?: boolean | null;
+  upvote_ratio?: number | null;
+  is_self?: boolean | null;
+  post_type?: string | null;
+  thumbnail?: string | null;
+  media_metadata?: Record<string, unknown> | null;
+  content_url?: string | null;
+  is_nsfw?: boolean | null;
+  is_spoiler?: boolean | null;
+  author_flair_text?: string | null;
 }
 
 interface DiscoveryPayload {
@@ -173,6 +187,23 @@ interface SeasonEpisodeRow {
   air_date: string | null;
 }
 
+interface StoredSupabaseFlairContainerCount {
+  container_key: string;
+  post_count: number;
+}
+
+interface StoredSupabaseFlairCount {
+  flair_key: string;
+  flair_label: string;
+  post_count: number;
+  container_counts: StoredSupabaseFlairContainerCount[];
+}
+
+interface LegacyStoredSupabaseFlairCount {
+  flair?: string;
+  post_count?: number;
+}
+
 type SyncCandidateStatus = "auto_saved" | "skipped_conflict" | "not_eligible";
 
 type SyncCandidateReasonCode =
@@ -201,8 +232,8 @@ interface EpisodeDiscussionRefreshPayload {
     total_found?: number;
     filters_applied?: Record<string, unknown>;
     effective_episode_title_patterns?: string[];
-    effective_required_flares?: string[];
-    auto_seeded_required_flares?: boolean;
+    effective_required_flairs?: string[];
+    auto_seeded_required_flairs?: boolean;
     successful_sorts?: Array<"new" | "hot" | "top">;
     failed_sorts?: Array<"new" | "hot" | "top">;
     rate_limited_sorts?: Array<"new" | "hot" | "top">;
@@ -298,9 +329,9 @@ interface EpisodePeriodOption {
 
 type CommunityContextSeed = Pick<RedditCommunity, "id" | "trr_show_id" | "trr_show_name" | "subreddit">;
 
-interface CommunityFlaresRefreshResponse {
+interface CommunityFlairsRefreshResponse {
   community?: RedditCommunityResponse;
-  flares?: string[];
+  flairs?: string[];
   source?: "api" | "listing_fallback" | "none";
   warning?: string | null;
   error?: string;
@@ -318,9 +349,10 @@ interface DiscoveryFetchOptions {
   refresh?: boolean;
   waitForCompletion?: boolean;
   forceFlair?: string | null;
-  forceFlares?: string[];
+  forceFlairs?: string[];
   maxPages?: number;
   timeoutMs?: number;
+  mode?: "sync_posts" | "sync_details";
 }
 
 interface DiscoveryFetchResult {
@@ -334,6 +366,7 @@ interface RefreshRunStatus {
   run_id: string;
   status: "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
   error?: string | null;
+  discovered_flairs?: string[];
   totals?: {
     fetched_rows?: number;
     matched_rows?: number;
@@ -373,6 +406,11 @@ interface RefreshRunStatus {
       comments_targets_total?: number;
       comments_targets_done?: number;
       comments_rows_upserted?: number;
+      detail_posts_total?: number;
+      detail_posts_done?: number;
+      comments_upserted?: number;
+      media_queued?: number;
+      media_mirrored?: number;
       updated_at?: string;
     };
   };
@@ -423,6 +461,22 @@ const fmtNum = (value: number): string => {
   return value.toLocaleString();
 };
 
+const buildExhaustiveWindowIncompleteWarning = (discovery: DiscoveryPayload): string => {
+  const maxPagesApplied =
+    typeof discovery.max_pages_applied === "number" && Number.isFinite(discovery.max_pages_applied)
+      ? discovery.max_pages_applied
+      : null;
+  const maxPagesSuffix =
+    maxPagesApplied && maxPagesApplied > 0 ? ` after scanning up to ${fmtNum(maxPagesApplied)} pages` : "";
+  const searchBackfillIncomplete =
+    discovery.search_backfill?.enabled === true && discovery.search_backfill?.complete === false;
+
+  if (searchBackfillIncomplete) {
+    return `Exhaustive crawl remains incomplete (search backfill not fully complete)${maxPagesSuffix}; totals may be incomplete.`;
+  }
+  return `Exhaustive crawl remains incomplete${maxPagesSuffix}; totals may be incomplete.`;
+};
+
 const fmtDate = (value: string | null | undefined): string => {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -447,6 +501,26 @@ const parseDateMs = (value: string | null | undefined): number | null => {
 };
 
 const normalizeFlairKey = (value: string | null | undefined): string => toCanonicalFlairKey(value);
+
+/** Strip Reddit emoji shortcodes (`:name:`) and trim for clean display. */
+const displayFlair = (raw: string | null | undefined): string => {
+  if (!raw) return "";
+  return raw.replace(/:[a-zA-Z0-9_-]+:/g, "").trim() || raw.trim();
+};
+
+type FlairCategory = "cast" | "season";
+
+const FLAIR_CATEGORY_LABELS: Record<FlairCategory, string> = {
+  cast: "Cast",
+  season: "Season",
+};
+
+const FLAIR_CATEGORY_COLORS: Record<FlairCategory, { bg: string; text: string }> = {
+  cast: { bg: "bg-purple-100", text: "text-purple-700" },
+  season: { bg: "bg-amber-100", text: "text-amber-700" },
+};
+
+const FLAIR_CATEGORY_CYCLE: (FlairCategory | undefined)[] = [undefined, "cast", "season"];
 
 const describeFlairMode = (mode: DiscoveryThread["flair_mode"]): string | null => {
   if (!mode) return null;
@@ -630,6 +704,21 @@ const parseRefreshRunDiagnostics = (value: unknown): RefreshRunStatus["diagnosti
             comments_rows_upserted: parseOptionalNumber(
               (progressRaw as Record<string, unknown>).comments_rows_upserted,
             ),
+            detail_posts_total: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).detail_posts_total,
+            ),
+            detail_posts_done: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).detail_posts_done,
+            ),
+            comments_upserted: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).comments_upserted,
+            ),
+            media_queued: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).media_queued,
+            ),
+            media_mirrored: parseOptionalNumber(
+              (progressRaw as Record<string, unknown>).media_mirrored,
+            ),
             updated_at:
               typeof (progressRaw as Record<string, unknown>).updated_at === "string"
                 ? ((progressRaw as Record<string, unknown>).updated_at as string)
@@ -669,6 +758,8 @@ const sleep = async (ms: number): Promise<void> => {
 };
 
 const isTimeoutErrorMessage = (message: string): boolean => /\btimed out\b|\btimeout\b/i.test(message);
+const isRateLimitErrorMessage = (message: string): boolean =>
+  /\brate[ -]?limit(?:ed)?\b|\btoo many requests\b|\b429\b/i.test(message);
 const isNoCacheYetWarning = (message: string | null | undefined): boolean =>
   typeof message === "string" && /no cached posts found yet/i.test(message);
 
@@ -681,6 +772,11 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
   const commentTargetsTotal = liveProgress?.comments_targets_total;
   const commentTargetsDone = liveProgress?.comments_targets_done;
   const commentsUpserted = liveProgress?.comments_rows_upserted;
+  const detailPostsTotal = liveProgress?.detail_posts_total;
+  const detailPostsDone = liveProgress?.detail_posts_done;
+  const detailCommentsUpserted = liveProgress?.comments_upserted;
+  const mediaQueued = liveProgress?.media_queued;
+  const mediaMirrored = liveProgress?.media_mirrored;
   const listingText = typeof listingPages === "number" ? ` · listings ${fmtNum(listingPages)}` : "";
   const searchText = typeof searchPages === "number" ? ` · search pages ${fmtNum(searchPages)}` : "";
   const rowText =
@@ -693,11 +789,22 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
       : "";
   const commentsUpsertedText =
     typeof commentsUpserted === "number" ? ` · comment rows ${fmtNum(commentsUpserted)}` : "";
+  const detailPostsText =
+    typeof detailPostsTotal === "number"
+      ? ` · detail posts ${fmtNum(detailPostsDone ?? 0)}/${fmtNum(detailPostsTotal)}`
+      : "";
+  const detailCommentsText =
+    typeof detailCommentsUpserted === "number" ? ` · ${fmtNum(detailCommentsUpserted)} comments` : "";
+  const mediaText =
+    typeof mediaQueued === "number" || typeof mediaMirrored === "number"
+      ? ` · media ${fmtNum(mediaMirrored ?? 0)}${typeof mediaQueued === "number" ? `/${fmtNum(mediaQueued)} queued` : " mirrored"}`
+      : "";
   const stageTextByKey: Record<string, string> = {
     discovering_posts: "discovering posts",
     persisting_posts: "saving posts",
     persisting_period_matches: "saving period matches",
     fetching_comments: "fetching comments",
+    syncing_details: "syncing details",
     finalizing: "finalizing run",
   };
   const normalizedStage = (liveProgress?.stage ?? "").trim().toLowerCase();
@@ -735,7 +842,7 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
       typeof otherRunning === "number" && otherRunning > 0
         ? ` · ${fmtNum(otherRunning)} other running`
         : "";
-    return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}`;
+    return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}${detailPostsText}${detailCommentsText}${mediaText}`;
   }
   if (run.status === "completed" || run.status === "partial") {
     const tracked = run.totals?.tracked_flair_rows;
@@ -1074,23 +1181,23 @@ const isSeasonEligibleForRedditSelection = (
   return true;
 };
 
-const getRelevantPostFlares = (community: RedditCommunity): string[] => {
+const getRelevantPostFlairs = (community: RedditCommunity): string[] => {
   const selectedFlairKeys = new Set(
-    [...community.analysis_all_flares, ...community.analysis_flares].map((value) => normalizeFlairKey(value)),
+    [...community.analysis_all_flairs, ...community.analysis_flairs].map((value) => normalizeFlairKey(value)),
   );
   if (selectedFlairKeys.size === 0) return [];
 
   const relevant: string[] = [];
   const seen = new Set<string>();
 
-  for (const flair of community.post_flares) {
+  for (const flair of community.post_flairs) {
     const key = normalizeFlairKey(flair);
     if (!selectedFlairKeys.has(key) || seen.has(key)) continue;
     relevant.push(flair);
     seen.add(key);
   }
 
-  for (const flair of [...community.analysis_all_flares, ...community.analysis_flares]) {
+  for (const flair of [...community.analysis_all_flairs, ...community.analysis_flairs]) {
     const key = normalizeFlairKey(flair);
     if (seen.has(key)) continue;
     relevant.push(flair);
@@ -1301,11 +1408,16 @@ const renderEpisodeMatrixCards = (
     unassignedFlairCountBySeasonBoundaryPeriod?: Map<string, number>;
     totalTrackedFlairCountBySeasonBoundaryPeriod?: Map<string, number>;
     linkedPostsByContainer?: Map<string, EpisodeDiscussionCandidate[]>;
+    pendingPostsByContainer?: Map<string, EpisodeWindowPostItem[]>;
+    pendingPrimaryFlairKey?: string | null;
     refreshProgressByContainer?: Record<string, ContainerRefreshProgress | undefined>;
     onOpenContainerPosts?: (containerKey: string) => void;
     onViewAllContainerPosts?: (containerKey: string) => void;
     onRefreshContainerPosts?: (containerKey: string) => void;
+    onSyncContainerDetails?: (containerKey: string) => void;
     refreshingContainerKey?: string | null;
+    refreshingContainerKeys?: Set<string>;
+    syncingDetailsContainerKey?: string | null;
     refreshPostsDisabled?: boolean;
     periodsLoading?: boolean;
   },
@@ -1317,6 +1429,33 @@ const renderEpisodeMatrixCards = (
   const trailingBoundaryPeriods = allBoundaryPeriods.filter(
     (period) => !isPreSeasonPeriodLabel(period.label),
   );
+  const pendingPrimaryFlairKey = normalizeFlairKey(options?.pendingPrimaryFlairKey);
+
+  const buildPendingFlairGroups = (posts: EpisodeWindowPostItem[]) => {
+    const groups = new Map<string, { flairLabel: string; postCount: number }>();
+    for (const post of posts) {
+      const flairKey = normalizeFlairKey(post.flair);
+      const flairLabel = displayFlair(post.flair) || "(No Flair)";
+      const existing = groups.get(flairKey);
+      if (existing) {
+        existing.postCount += 1;
+        continue;
+      }
+      groups.set(flairKey, { flairLabel, postCount: 1 });
+    }
+    return [...groups.entries()]
+      .sort((a, b) => {
+        const aIsPrimary =
+          pendingPrimaryFlairKey.length > 0 && a[0] === pendingPrimaryFlairKey;
+        const bIsPrimary =
+          pendingPrimaryFlairKey.length > 0 && b[0] === pendingPrimaryFlairKey;
+        if (aIsPrimary && !bIsPrimary) return -1;
+        if (!aIsPrimary && bIsPrimary) return 1;
+        if (b[1].postCount !== a[1].postCount) return b[1].postCount - a[1].postCount;
+        return a[1].flairLabel.localeCompare(b[1].flairLabel);
+      })
+      .map(([, group]) => group);
+  };
 
   const renderBoundaryPeriodCard = (period: {
     key: string;
@@ -1328,6 +1467,8 @@ const renderEpisodeMatrixCards = (
     const containerKey = `period-${period.key}`;
     const containerPosts = options?.linkedPostsByContainer?.get(containerKey) ?? [];
     const progress = options?.refreshProgressByContainer?.[containerKey];
+    const pendingPosts = options?.pendingPostsByContainer?.get(containerKey) ?? [];
+    const pendingFlairGroups = buildPendingFlairGroups(pendingPosts);
     const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
     const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
     const viewAllCount =
@@ -1343,14 +1484,30 @@ const renderEpisodeMatrixCards = (
             <button
               type="button"
               disabled={
-                options?.refreshPostsDisabled || options?.refreshingContainerKey === containerKey
+                options?.refreshPostsDisabled || (options?.refreshingContainerKeys ?? new Set()).has(containerKey) || (options?.refreshingContainerKeys ?? new Set()).size >= 3
               }
               onClick={() => options?.onRefreshContainerPosts?.(containerKey)}
-              aria-label="Refresh Posts"
-              title="Scrape posts for this window (add new and update existing)"
+              aria-label="Sync Posts"
+              title="Sync posts for this window (add new and update existing)"
               className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
             >
-              {options?.refreshingContainerKey === containerKey ? "⏳" : "🕷️"}
+              {(options?.refreshingContainerKeys ?? new Set()).has(containerKey) ? "⏳" : "🕷️"}
+            </button>
+            <button
+              type="button"
+              disabled={
+                options?.refreshPostsDisabled ||
+                options?.syncingDetailsContainerKey === containerKey ||
+                (options?.refreshingContainerKeys ?? new Set()).has(containerKey)
+              }
+              onClick={() => options?.onSyncContainerDetails?.(containerKey)}
+              aria-label="Sync Details"
+              title="Deep-scrape comments, media, and post details for this window"
+              className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+            >
+              {options?.syncingDetailsContainerKey === containerKey
+                ? "Syncing Details…"
+                : "Sync Details 🕷️"}
             </button>
             <button
               type="button"
@@ -1387,6 +1544,23 @@ const renderEpisodeMatrixCards = (
         {progress?.message && (
           <p className="mt-1 text-[11px] text-blue-700">{progress.message}</p>
         )}
+        {pendingFlairGroups.length > 0 && (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+              PENDING POSTS
+            </p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {pendingFlairGroups.map((group) => (
+                <span
+                  key={`pending-period-${period.key}-${group.flairLabel}`}
+                  className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                >
+                  {group.flairLabel} · {fmtNum(group.postCount)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </article>
     );
   };
@@ -1403,6 +1577,8 @@ const renderEpisodeMatrixCards = (
       const containerKey = `episode-${row.episode_number}`;
       const containerPosts = options?.linkedPostsByContainer?.get(containerKey) ?? [];
       const progress = options?.refreshProgressByContainer?.[containerKey];
+      const pendingPosts = options?.pendingPostsByContainer?.get(containerKey) ?? [];
+      const pendingFlairGroups = buildPendingFlairGroups(pendingPosts);
       const episodeWindow = options?.episodeWindowByContainer?.get(containerKey) ?? null;
       const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
       const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
@@ -1452,14 +1628,30 @@ const renderEpisodeMatrixCards = (
               <button
                 type="button"
                 disabled={
-                  options?.refreshPostsDisabled || options?.refreshingContainerKey === containerKey
+                  options?.refreshPostsDisabled || (options?.refreshingContainerKeys ?? new Set()).has(containerKey) || (options?.refreshingContainerKeys ?? new Set()).size >= 3
                 }
                 onClick={() => options?.onRefreshContainerPosts?.(containerKey)}
-                aria-label="Refresh Posts"
-                title="Scrape posts for this episode window (add new and update existing)"
+                aria-label="Sync Posts"
+                title="Sync posts for this episode window (add new and update existing)"
                 className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
               >
-                {options?.refreshingContainerKey === containerKey ? "⏳" : "🕷️"}
+                {(options?.refreshingContainerKeys ?? new Set()).has(containerKey) ? "⏳" : "🕷️"}
+              </button>
+              <button
+                type="button"
+                disabled={
+                  options?.refreshPostsDisabled ||
+                  options?.syncingDetailsContainerKey === containerKey ||
+                  (options?.refreshingContainerKeys ?? new Set()).has(containerKey)
+                }
+                onClick={() => options?.onSyncContainerDetails?.(containerKey)}
+                aria-label="Sync Details"
+                title="Deep-scrape comments, media, and post details for this episode window"
+                className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+              >
+                {options?.syncingDetailsContainerKey === containerKey
+                  ? "Syncing Details…"
+                  : "Sync Details 🕷️"}
               </button>
               <button
                 type="button"
@@ -1522,6 +1714,23 @@ const renderEpisodeMatrixCards = (
           )}
           {progress?.message && (
             <p className="mt-2 text-[11px] text-blue-700">{progress.message}</p>
+          )}
+          {pendingFlairGroups.length > 0 && (
+            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                PENDING POSTS
+              </p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {pendingFlairGroups.map((group) => (
+                  <span
+                    key={`pending-episode-${row.episode_number}-${group.flairLabel}`}
+                    className="rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                  >
+                    {group.flairLabel} · {fmtNum(group.postCount)}
+                  </span>
+                ))}
+              </div>
+            </div>
           )}
         </article>
       );
@@ -1648,14 +1857,20 @@ const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity =
         source_kind: thread.source_kind === "episode_discussion" ? "episode_discussion" : "manual",
       }))
     : [],
-  post_flares: normalizeFlairList(community.post_flares),
-  analysis_flares: normalizeFlairList(community.analysis_flares),
-  analysis_all_flares: normalizeFlairList(community.analysis_all_flares),
+  post_flairs: normalizeFlairList(community.post_flairs),
+  analysis_flairs: normalizeFlairList(community.analysis_flairs),
+  analysis_all_flairs: normalizeFlairList(community.analysis_all_flairs),
   is_show_focused: community.is_show_focused ?? false,
   network_focus_targets: normalizeFlairList(community.network_focus_targets),
   franchise_focus_targets: normalizeFlairList(community.franchise_focus_targets),
   episode_title_patterns: normalizeFlairList(community.episode_title_patterns),
-  post_flares_updated_at: community.post_flares_updated_at ?? null,
+  post_flair_categories:
+    typeof community.post_flair_categories === "object" &&
+    community.post_flair_categories !== null &&
+    !Array.isArray(community.post_flair_categories)
+      ? (community.post_flair_categories as Record<string, string>)
+      : {},
+  post_flairs_updated_at: community.post_flairs_updated_at ?? null,
 });
 
 const sortCommunityList = (list: RedditCommunity[]): RedditCommunity[] =>
@@ -1778,7 +1993,7 @@ export default function RedditSourcesManager({
   const [error, setError] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [refreshingFlaresCommunityId, setRefreshingFlaresCommunityId] = useState<string | null>(null);
+  const [refreshingFlairsCommunityId, setRefreshingFlairsCommunityId] = useState<string | null>(null);
 
   const [showCommunityForm, setShowCommunityForm] = useState(false);
   const [showThreadForm, setShowThreadForm] = useState(false);
@@ -1803,6 +2018,14 @@ export default function RedditSourcesManager({
   const [windowDiscoveryByContainer, setWindowDiscoveryByContainer] = useState<
     Record<string, DiscoveryPayload | undefined>
   >({});
+  const [storedPostCountsByContainer, setStoredPostCountsByContainer] = useState<
+    Record<string, number>
+  >({});
+  const [storedSupabasePostTotal, setStoredSupabasePostTotal] = useState<number | null>(null);
+  const [storedSupabaseFlairCounts, setStoredSupabaseFlairCounts] = useState<StoredSupabaseFlairCount[]>(
+    [],
+  );
+  const [selectedSupabaseFlairKeys, setSelectedSupabaseFlairKeys] = useState<Set<string>>(new Set());
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
   const [selectedNetworkTargetInput, setSelectedNetworkTargetInput] = useState("");
   const [selectedFranchiseTargetInput, setSelectedFranchiseTargetInput] = useState("");
@@ -1818,7 +2041,13 @@ export default function RedditSourcesManager({
   const [episodeCandidates, setEpisodeCandidates] = useState<EpisodeDiscussionCandidate[]>([]);
   const [episodeSelectedPostIds, setEpisodeSelectedPostIds] = useState<string[]>([]);
   const [episodeRefreshing, setEpisodeRefreshing] = useState(false);
-  const [refreshingContainerKey, setRefreshingContainerKey] = useState<string | null>(null);
+  const [refreshingContainerKeys, setRefreshingContainerKeys] = useState<Set<string>>(new Set());
+  // Keep season fanout sequential to avoid Reddit API bursts across many windows.
+  const MAX_CONCURRENT_CONTAINER_SYNCS = 1;
+  // Backwards-compatible alias: returns first active key for legacy single-key checks
+  const refreshingContainerKey = refreshingContainerKeys.size > 0 ? [...refreshingContainerKeys][0] : null;
+  const [syncingDetailsContainerKey, setSyncingDetailsContainerKey] = useState<string | null>(null);
+  const [detailsSyncing, setDetailsSyncing] = useState(false);
   const [containerRefreshProgressByKey, setContainerRefreshProgressByKey] = useState<
     Record<string, ContainerRefreshProgress | undefined>
   >({});
@@ -1969,9 +2198,9 @@ export default function RedditSourcesManager({
                   ...patch,
                   assigned_threads: patch.assigned_threads ?? community.assigned_threads,
                   assigned_thread_count: patch.assigned_thread_count ?? community.assigned_thread_count,
-                  post_flares: patch.post_flares ?? community.post_flares,
-                  analysis_flares: patch.analysis_flares ?? community.analysis_flares,
-                  analysis_all_flares: patch.analysis_all_flares ?? community.analysis_all_flares,
+                  post_flairs: patch.post_flairs ?? community.post_flairs,
+                  analysis_flairs: patch.analysis_flairs ?? community.analysis_flairs,
+                  analysis_all_flairs: patch.analysis_all_flairs ?? community.analysis_all_flairs,
                   is_show_focused: patch.is_show_focused ?? community.is_show_focused,
                   network_focus_targets:
                     patch.network_focus_targets ?? community.network_focus_targets,
@@ -1979,7 +2208,9 @@ export default function RedditSourcesManager({
                     patch.franchise_focus_targets ?? community.franchise_focus_targets,
                   episode_title_patterns:
                     patch.episode_title_patterns ?? community.episode_title_patterns,
-                  post_flares_updated_at: patch.post_flares_updated_at ?? community.post_flares_updated_at,
+                  post_flairs_updated_at: patch.post_flairs_updated_at ?? community.post_flairs_updated_at,
+                  post_flair_categories:
+                    patch.post_flair_categories ?? community.post_flair_categories,
                 }
               : community,
           ),
@@ -1989,40 +2220,40 @@ export default function RedditSourcesManager({
     [],
   );
 
-  const refreshCommunityFlares = useCallback(
+  const refreshCommunityFlairs = useCallback(
     async (communityId: string) => {
-      setRefreshingFlaresCommunityId(communityId);
+      setRefreshingFlairsCommunityId(communityId);
       try {
         const headers = await getAuthHeaders();
-        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}/flares/refresh`, {
+        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}/flairs/refresh`, {
           method: "POST",
           headers,
         });
 
-        const payload = (await response.json().catch(() => ({}))) as CommunityFlaresRefreshResponse;
+        const payload = (await response.json().catch(() => ({}))) as CommunityFlairsRefreshResponse;
         if (!response.ok) {
-          throw new Error(payload.error ?? "Failed to refresh community post flares");
+          throw new Error(payload.error ?? "Failed to refresh community post flairs");
         }
 
         if (payload.community) {
           const next = toCommunityModel(payload.community);
           mergeCommunityPatch(communityId, {
-            post_flares: next.post_flares,
-            post_flares_updated_at: next.post_flares_updated_at,
+            post_flairs: next.post_flairs,
+            post_flairs_updated_at: next.post_flairs_updated_at,
           });
           return;
         }
 
-        if (Array.isArray(payload.flares)) {
+        if (Array.isArray(payload.flairs)) {
           mergeCommunityPatch(communityId, {
-            post_flares: normalizeFlairList(payload.flares),
-            post_flares_updated_at: new Date().toISOString(),
+            post_flairs: normalizeFlairList(payload.flairs),
+            post_flairs_updated_at: new Date().toISOString(),
           });
         }
       } catch (err) {
-        console.warn("[reddit] Failed to refresh community post flares", err);
+        console.warn("[reddit] Failed to refresh community post flairs", err);
       } finally {
-        setRefreshingFlaresCommunityId((current) => (current === communityId ? null : current));
+        setRefreshingFlairsCommunityId((current) => (current === communityId ? null : current));
       }
     },
     [fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
@@ -2201,6 +2432,9 @@ export default function RedditSourcesManager({
     setEpisodeSeasonId(null);
     setEpisodeContextWarning(null);
     setEpisodeMatrix([]);
+    setStoredSupabasePostTotal(null);
+    setStoredSupabaseFlairCounts([]);
+    setSelectedSupabaseFlairKeys(new Set());
     setAssignedThreadsExpanded(true);
     setShowCommunitySettingsModal(false);
     setShowDedicatedSeasonMenu(false);
@@ -2210,7 +2444,7 @@ export default function RedditSourcesManager({
     setWindowDiscoveryByContainer({});
     setSyncStatusFilter("all");
     setSyncReasonCodeFilter("all");
-    setRefreshingContainerKey(null);
+    setRefreshingContainerKeys(new Set());
     setContainerRefreshProgressByKey({});
     containerRefreshPollTokenRef.current = {};
     hydratingWindowContainersRef.current.clear();
@@ -2277,10 +2511,227 @@ export default function RedditSourcesManager({
     };
   }, [communitiesIncludeAssignedThreads, fetchCommunities, loading, selectedCommunityContextSeed]);
 
-  const selectedRelevantPostFlares = useMemo(
-    () => (selectedCommunity ? getRelevantPostFlares(selectedCommunity) : []),
+  // Fetch stored post counts from DB on community+season mount so counts
+  // display immediately without waiting for the async cache hydration.
+  // Use primitive ID deps (not object refs) to avoid spurious effect re-fires.
+  const storedCountsCommunityId = selectedCommunityContextSeed?.id ?? null;
+  useEffect(() => {
+    if (!storedCountsCommunityId || !episodeSeasonId) {
+      setStoredSupabasePostTotal(null);
+      setStoredSupabaseFlairCounts([]);
+      setSelectedSupabaseFlairKeys(new Set());
+      return;
+    }
+    setStoredSupabasePostTotal(null);
+    setStoredSupabaseFlairCounts([]);
+    setSelectedSupabaseFlairKeys(new Set());
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/reddit/communities/${storedCountsCommunityId}/stored-post-counts?season_id=${episodeSeasonId}`,
+          { signal: controller.signal },
+          { allowDevAdminBypass: true },
+        );
+        if (controller.signal.aborted) return;
+        if (response.ok) {
+          const data = (await response.json()) as {
+            counts?: Record<string, number>;
+            total_posts?: number;
+            tracked_total_posts?: number;
+            tracked_flair_counts?: StoredSupabaseFlairCount[];
+            flair_counts?: LegacyStoredSupabaseFlairCount[];
+          };
+          if (!controller.signal.aborted) {
+            const trackedFlairCounts = Array.isArray(data.tracked_flair_counts)
+              ? data.tracked_flair_counts
+                  .filter(
+                    (row): row is StoredSupabaseFlairCount =>
+                      typeof row?.flair_key === "string" &&
+                      typeof row?.flair_label === "string" &&
+                      typeof row?.post_count === "number" &&
+                      Number.isFinite(row.post_count) &&
+                      Array.isArray(row.container_counts),
+                  )
+                  .map((row) => ({
+                    flair_key: row.flair_key,
+                    flair_label: row.flair_label,
+                    post_count: row.post_count,
+                    container_counts: row.container_counts
+                      .filter(
+                        (container): container is StoredSupabaseFlairContainerCount =>
+                          typeof container?.container_key === "string" &&
+                          typeof container?.post_count === "number" &&
+                          Number.isFinite(container.post_count),
+                      )
+                      .map((container) => ({
+                        container_key: container.container_key,
+                        post_count: container.post_count,
+                      })),
+                  }))
+              : [];
+            const legacyFlairCounts =
+              trackedFlairCounts.length > 0
+                ? trackedFlairCounts
+                : Array.isArray(data.flair_counts)
+                  ? data.flair_counts
+                      .filter(
+                        (row): row is LegacyStoredSupabaseFlairCount =>
+                          typeof row?.flair === "string" &&
+                          typeof row?.post_count === "number" &&
+                          Number.isFinite(row.post_count),
+                      )
+                      .map((row) => ({
+                        flair_key: normalizeFlairKey(row.flair) || row.flair || "(no-flair)",
+                        flair_label: row.flair || "(No Flair)",
+                        post_count: row.post_count ?? 0,
+                        container_counts: [],
+                      }))
+                  : [];
+            setStoredPostCountsByContainer(data.counts ?? {});
+            setStoredSupabasePostTotal(
+              typeof data.tracked_total_posts === "number" && Number.isFinite(data.tracked_total_posts)
+                ? data.tracked_total_posts
+                : typeof data.total_posts === "number" && Number.isFinite(data.total_posts)
+                  ? data.total_posts
+                : null,
+            );
+            setStoredSupabaseFlairCounts(legacyFlairCounts);
+          }
+        }
+      } catch {
+        // Non-critical — counts will populate from cache hydration
+      }
+    })();
+    return () => {
+      controller.abort();
+    };
+  }, [storedCountsCommunityId, episodeSeasonId]);
+
+  const selectedRelevantPostFlairs = useMemo(
+    () => (selectedCommunity ? getRelevantPostFlairs(selectedCommunity) : []),
     [selectedCommunity],
   );
+
+  const allPostsFlairKeys = useMemo(
+    () =>
+      new Set(
+        (selectedCommunity?.analysis_all_flairs ?? [])
+          .map((flair) => normalizeFlairKey(flair))
+          .filter((value) => value.length > 0),
+      ),
+    [selectedCommunity?.analysis_all_flairs],
+  );
+
+  const pendingReviewFlairKeys = useMemo(
+    () =>
+      new Set(
+        (selectedCommunity?.analysis_flairs ?? [])
+          .map((flair) => normalizeFlairKey(flair))
+          .filter((value) => value.length > 0 && !allPostsFlairKeys.has(value)),
+      ),
+    [allPostsFlairKeys, selectedCommunity?.analysis_flairs],
+  );
+
+  const supabaseFlairPills = useMemo(
+    () =>
+      storedSupabaseFlairCounts
+        .filter((row) => row.post_count > 0)
+        .sort((a, b) =>
+          b.post_count === a.post_count
+            ? a.flair_label.localeCompare(b.flair_label)
+            : b.post_count - a.post_count,
+        ),
+    [storedSupabaseFlairCounts],
+  );
+
+  useEffect(() => {
+    if (selectedSupabaseFlairKeys.size === 0) return;
+    const available = new Set(supabaseFlairPills.map((row) => row.flair_key));
+    setSelectedSupabaseFlairKeys((current) => {
+      if (current.size === 0) return current;
+      const next = new Set([...current].filter((key) => available.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [selectedSupabaseFlairKeys.size, supabaseFlairPills]);
+
+  const isSupabaseFlairFilterActive = selectedSupabaseFlairKeys.size > 0;
+
+  const selectedSupabaseVisibleContainerKeys = useMemo(() => {
+    if (!isSupabaseFlairFilterActive) return null;
+    const visible = new Set<string>();
+    for (const flair of supabaseFlairPills) {
+      if (!selectedSupabaseFlairKeys.has(flair.flair_key)) continue;
+      for (const container of flair.container_counts) {
+        if (container.post_count > 0) {
+          visible.add(container.container_key);
+        }
+      }
+    }
+    return visible;
+  }, [isSupabaseFlairFilterActive, selectedSupabaseFlairKeys, supabaseFlairPills]);
+
+  const toggleSupabaseFlairKey = useCallback((flairKey: string) => {
+    setSelectedSupabaseFlairKeys((current) => {
+      const next = new Set(current);
+      if (next.has(flairKey)) {
+        next.delete(flairKey);
+      } else {
+        next.add(flairKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const renderSupabaseSummary = useCallback(() => {
+    if (typeof storedSupabasePostTotal !== "number" && supabaseFlairPills.length === 0) return null;
+    return (
+      <div className="mt-1 space-y-1">
+        {typeof storedSupabasePostTotal === "number" && (
+          <p className="text-xs text-zinc-500">Supabase Posts: {fmtNum(storedSupabasePostTotal)}</p>
+        )}
+        {supabaseFlairPills.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSelectedSupabaseFlairKeys(new Set())}
+              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
+                isSupabaseFlairFilterActive
+                  ? "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                  : "bg-zinc-900 text-white"
+              }`}
+              aria-label="All flairs"
+            >
+              All
+            </button>
+            {supabaseFlairPills.map((row) => {
+              const isActive = selectedSupabaseFlairKeys.has(row.flair_key);
+              return (
+                <button
+                  key={`supabase-flair-pill-${row.flair_key}`}
+                  type="button"
+                  onClick={() => toggleSupabaseFlairKey(row.flair_key)}
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
+                    isActive
+                      ? "bg-zinc-900 text-white"
+                      : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                  }`}
+                >
+                  {displayFlair(row.flair_label) || "(No Flair)"} · {fmtNum(row.post_count)}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }, [
+    isSupabaseFlairFilterActive,
+    selectedSupabaseFlairKeys,
+    storedSupabasePostTotal,
+    supabaseFlairPills,
+    toggleSupabaseFlairKey,
+  ]);
 
   useEffect(() => {
     if (!showCommunitySettingsModal) return;
@@ -2345,25 +2796,27 @@ export default function RedditSourcesManager({
   }, [seasonEpisodes]);
 
   const trackedUnassignedFlairLabel = useMemo(() => {
-    if (selectedRelevantPostFlares.length === 0) return null;
-    const slcFlair = selectedRelevantPostFlares.find((flair) => /salt lake city/i.test(flair));
-    return slcFlair ?? selectedRelevantPostFlares[0] ?? null;
-  }, [selectedRelevantPostFlares]);
+    if (!selectedCommunity || selectedCommunity.analysis_flairs.length === 0) return null;
+    const pendingReviewFlair = selectedCommunity.analysis_flairs.find((flair) => {
+      const key = normalizeFlairKey(flair);
+      return key.length > 0 && pendingReviewFlairKeys.has(key);
+    });
+    return pendingReviewFlair ?? null;
+  }, [pendingReviewFlairKeys, selectedCommunity]);
 
   const unassignedFlairCountBySlot = useMemo(() => {
     const counts = new Map<string, number>();
-    const targetFlairKey = normalizeFlairKey(trackedUnassignedFlairLabel);
-    if (!targetFlairKey) return counts;
+    if (pendingReviewFlairKeys.size === 0) return counts;
     for (const candidate of episodeCandidates) {
       const candidateFlairKey = normalizeFlairKey(candidate.link_flair_text);
-      if (candidateFlairKey !== targetFlairKey) continue;
+      if (!pendingReviewFlairKeys.has(candidateFlairKey)) continue;
       const syncStatus = syncCandidateResultByPostId.get(candidate.reddit_post_id)?.status ?? null;
       if (syncStatus === "auto_saved") continue;
       const key = buildEpisodeSlotKey(candidate.episode_number, candidate.discussion_type);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return counts;
-  }, [episodeCandidates, syncCandidateResultByPostId, trackedUnassignedFlairLabel]);
+  }, [episodeCandidates, pendingReviewFlairKeys, syncCandidateResultByPostId]);
 
   const linkedDiscussionPostsByContainer = useMemo(() => {
     const byContainer = new Map<string, EpisodeDiscussionCandidate[]>();
@@ -2638,6 +3091,23 @@ export default function RedditSourcesManager({
     [episodeWindowBoundsByContainer],
   );
 
+  const filteredEpisodeMatrixRowsForDisplay = useMemo(() => {
+    if (!selectedSupabaseVisibleContainerKeys) return episodeMatrixRowsForDisplay;
+    return episodeMatrixRowsForDisplay.filter((row) =>
+      selectedSupabaseVisibleContainerKeys.has(`episode-${row.episode_number}`),
+    );
+  }, [episodeMatrixRowsForDisplay, selectedSupabaseVisibleContainerKeys]);
+
+  const filteredSeasonalBoundaryPeriods = useMemo(() => {
+    if (!selectedSupabaseVisibleContainerKeys) return seasonalBoundaryPeriods;
+    return seasonalBoundaryPeriods.filter((period) =>
+      selectedSupabaseVisibleContainerKeys.has(`period-${period.key}`),
+    );
+  }, [seasonalBoundaryPeriods, selectedSupabaseVisibleContainerKeys]);
+
+  const hasVisibleEpisodeWindows =
+    filteredEpisodeMatrixRowsForDisplay.length > 0 || filteredSeasonalBoundaryPeriods.length > 0;
+
   const seasonDiscoveryWindow = useMemo(() => {
     const windows = [...episodeWindowBoundsByContainer.values()];
     const startCandidates = windows
@@ -2675,8 +3145,7 @@ export default function RedditSourcesManager({
 
   const unassignedFlairCountBySeasonBoundaryPeriod = useMemo(() => {
     const counts = new Map<string, number>();
-    const targetFlairKey = normalizeFlairKey(trackedUnassignedFlairLabel);
-    if (!targetFlairKey || seasonalBoundaryPeriods.length === 0) return counts;
+    if (pendingReviewFlairKeys.size === 0 || seasonalBoundaryPeriods.length === 0) return counts;
 
     for (const period of seasonalBoundaryPeriods) {
       const periodStartMs = parseDateMs(period.start);
@@ -2684,7 +3153,7 @@ export default function RedditSourcesManager({
       let count = 0;
       for (const candidate of episodeCandidates) {
         const candidateFlairKey = normalizeFlairKey(candidate.link_flair_text);
-        if (candidateFlairKey !== targetFlairKey) continue;
+        if (!pendingReviewFlairKeys.has(candidateFlairKey)) continue;
         const syncStatus = syncCandidateResultByPostId.get(candidate.reddit_post_id)?.status ?? null;
         if (syncStatus === "auto_saved") continue;
         const postedMs = parseDateMs(candidate.posted_at);
@@ -2696,7 +3165,7 @@ export default function RedditSourcesManager({
       counts.set(period.key, count);
     }
     return counts;
-  }, [episodeCandidates, seasonalBoundaryPeriods, syncCandidateResultByPostId, trackedUnassignedFlairLabel]);
+  }, [episodeCandidates, pendingReviewFlairKeys, seasonalBoundaryPeriods, syncCandidateResultByPostId]);
 
   const savedRedditPostIds = useMemo(
     () => new Set((selectedCommunity?.assigned_threads ?? []).map((thread) => thread.reddit_post_id)),
@@ -2753,7 +3222,7 @@ export default function RedditSourcesManager({
       const bounds = episodeWindowBoundsByContainer.get(containerKey);
       if (!bounds) return [];
       const relevantFlairKeys = new Set(
-        selectedRelevantPostFlares
+        selectedRelevantPostFlairs
           .map((flair) => normalizeFlairKey(flair))
           .filter((value) => value.length > 0),
       );
@@ -2797,45 +3266,101 @@ export default function RedditSourcesManager({
     },
     [
       episodeWindowBoundsByContainer,
-      selectedRelevantPostFlares,
+      selectedRelevantPostFlairs,
     ],
   );
 
   const filterUnassignedDiscoveryPostsForContainer = useCallback(
     (threads: DiscoveryThread[], containerKey: string): EpisodeWindowPostItem[] => {
+      if (pendingReviewFlairKeys.size === 0) return [];
       const linkedIds = linkedDiscussionPostIdsByContainer.get(containerKey) ?? new Set<string>();
       return filterTrackedDiscoveryPostsForContainer(threads, containerKey).filter((post) => {
+        const flairKey = normalizeFlairKey(post.flair);
+        if (!pendingReviewFlairKeys.has(flairKey)) return false;
+        if (allPostsFlairKeys.has(flairKey)) return false;
         if (savedRedditPostIds.has(post.redditPostId)) return false;
         if (linkedIds.has(post.redditPostId)) return false;
         return true;
       });
     },
     [
+      allPostsFlairKeys,
       filterTrackedDiscoveryPostsForContainer,
       linkedDiscussionPostIdsByContainer,
+      pendingReviewFlairKeys,
       savedRedditPostIds,
     ],
   );
 
+  const seasonScopedDiscoveryThreads = useMemo(() => {
+    const directSeasonThreads = Array.isArray(discovery?.threads) ? discovery.threads : [];
+    if (directSeasonThreads.length > 0) return directSeasonThreads;
+    const syncDetailsSeasonThreads = Array.isArray(windowDiscoveryByContainer["sync-details-season"]?.threads)
+      ? windowDiscoveryByContainer["sync-details-season"]?.threads ?? []
+      : [];
+    return syncDetailsSeasonThreads;
+  }, [discovery?.threads, windowDiscoveryByContainer]);
+
+  const getDiscoveryThreadsForContainer = useCallback(
+    (containerKey: string): DiscoveryThread[] => {
+      const scopedThreads = windowDiscoveryByContainer[containerKey]?.threads ?? [];
+      if (scopedThreads.length > 0) return scopedThreads;
+      return seasonScopedDiscoveryThreads;
+    },
+    [seasonScopedDiscoveryThreads, windowDiscoveryByContainer],
+  );
+
+  const pendingTrackedPostsByContainerWindow = useMemo(() => {
+    const map = new Map<string, EpisodeWindowPostItem[]>();
+    for (const key of episodeWindowBoundsByContainer.keys()) {
+      const threads = getDiscoveryThreadsForContainer(key);
+      if (threads.length === 0) continue;
+      const pendingPosts = filterUnassignedDiscoveryPostsForContainer(threads, key);
+      if (pendingPosts.length === 0) continue;
+      map.set(key, pendingPosts);
+    }
+    return map;
+  }, [
+    episodeWindowBoundsByContainer,
+    filterUnassignedDiscoveryPostsForContainer,
+    getDiscoveryThreadsForContainer,
+  ]);
+
   const trackedFlairTotalCountByContainerWindow = useMemo(() => {
     const map = new Map<string, number>();
+    // Seed with stored DB counts so values are visible before cache hydration
+    for (const [key, count] of Object.entries(storedPostCountsByContainer)) {
+      if (count > 0) {
+        map.set(key, count);
+      }
+    }
+    // Override with discovery-derived counts (more accurate, includes filtering)
     for (const key of episodeWindowBoundsByContainer.keys()) {
-      const threads = windowDiscoveryByContainer[key]?.threads ?? [];
+      const threads = getDiscoveryThreadsForContainer(key);
       if (threads.length === 0) continue;
       map.set(key, filterTrackedDiscoveryPostsForContainer(threads, key).length);
     }
     return map;
-  }, [episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer, windowDiscoveryByContainer]);
+  }, [
+    episodeWindowBoundsByContainer,
+    filterTrackedDiscoveryPostsForContainer,
+    getDiscoveryThreadsForContainer,
+    storedPostCountsByContainer,
+  ]);
 
   const unassignedFlairCountByContainerWindow = useMemo(() => {
     const map = new Map<string, number>();
     for (const key of episodeWindowBoundsByContainer.keys()) {
-      const threads = windowDiscoveryByContainer[key]?.threads ?? [];
+      const threads = getDiscoveryThreadsForContainer(key);
       if (threads.length === 0) continue;
       map.set(key, filterUnassignedDiscoveryPostsForContainer(threads, key).length);
     }
     return map;
-  }, [episodeWindowBoundsByContainer, filterUnassignedDiscoveryPostsForContainer, windowDiscoveryByContainer]);
+  }, [
+    episodeWindowBoundsByContainer,
+    filterUnassignedDiscoveryPostsForContainer,
+    getDiscoveryThreadsForContainer,
+  ]);
 
   const matrixUnassignedFlairCountBySlot = useMemo(() => {
     if (unassignedFlairCountByContainerWindow.size === 0) {
@@ -2901,7 +3426,7 @@ export default function RedditSourcesManager({
     if (episodeWindowBoundsByContainer.size === 0) return 0;
     const postIds = new Set<string>();
     for (const key of episodeWindowBoundsByContainer.keys()) {
-      const threads = windowDiscoveryByContainer[key]?.threads ?? [];
+      const threads = getDiscoveryThreadsForContainer(key);
       if (threads.length === 0) continue;
       const posts = filterTrackedDiscoveryPostsForContainer(threads, key);
       for (const post of posts) {
@@ -2909,7 +3434,7 @@ export default function RedditSourcesManager({
       }
     }
     return postIds.size;
-  }, [episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer, windowDiscoveryByContainer]);
+  }, [episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer, getDiscoveryThreadsForContainer]);
 
   useEffect(() => {
     if (syncStatusFilter === "no_sync_result" && syncReasonCodeFilter !== "all") {
@@ -3451,10 +3976,11 @@ export default function RedditSourcesManager({
     });
     const normalizedInferredShowSlug = inferredShowSlug === "show" ? null : inferredShowSlug;
     const fallbackShowSlug =
+      selectedCommunityShowSlug ??
+      normalizedInferredShowSlug ??
       showSlug ??
       routeShowSlugFromPath ??
-      selectedCommunityShowSlug ??
-      normalizedInferredShowSlug;
+      routeRedditPathContext.showSlug;
     const fallbackSeasonNumber =
       typeof selectedSeasonNumber === "number" && Number.isFinite(selectedSeasonNumber)
         ? selectedSeasonNumber
@@ -3469,8 +3995,25 @@ export default function RedditSourcesManager({
         seasonNumber: fallbackSeasonNumber,
       });
     }
+    // Last-resort: derive slug from community show name to avoid admin URL fallback.
+    if (normalizedCommunitySlug && community.trr_show_name) {
+      const derivedSlug = community.trr_show_name
+        .trim()
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+      if (derivedSlug) {
+        return buildShowRedditCommunityUrl({
+          showSlug: derivedSlug,
+          communitySlug: normalizedCommunitySlug,
+          seasonNumber: fallbackSeasonNumber,
+        });
+      }
+    }
     return `/admin/social-media/reddit/communities/${encodeURIComponent(community.id)}`;
   }, [
+    routeRedditPathContext.showSlug,
     routeShowSlugFromPath,
     seasonNumber,
     selectedCommunity?.trr_show_id,
@@ -3514,22 +4057,22 @@ export default function RedditSourcesManager({
     selectedShowSlug,
   ]);
 
-  const persistAnalysisFlareModes = useCallback(
+  const persistAnalysisFlairModes = useCallback(
     async (
       communityId: string,
-      payload: { analysisFlares: string[]; analysisAllFlares: string[] },
+      payload: { analysisFlairs: string[]; analysisAllFlairs: string[] },
     ) => {
       const previous = communities.find((community) => community.id === communityId);
       if (!previous) return;
 
-      const nextScan = normalizeFlairList(payload.analysisFlares);
-      const nextAll = normalizeFlairList(payload.analysisAllFlares);
+      const nextScan = normalizeFlairList(payload.analysisFlairs);
+      const nextAll = normalizeFlairList(payload.analysisAllFlairs);
       mergeCommunityPatch(communityId, {
-        analysis_flares: nextScan,
-        analysis_all_flares: nextAll,
+        analysis_flairs: nextScan,
+        analysis_all_flairs: nextAll,
       });
-      setBusyAction("save-analysis-flares");
-      setBusyLabel("Saving analysis flares...");
+      setBusyAction("save-analysis-flairs");
+      setBusyLabel("Saving analysis flairs...");
       setError(null);
       try {
         const headers = await getAuthHeaders();
@@ -3537,8 +4080,8 @@ export default function RedditSourcesManager({
           method: "PATCH",
           headers: { ...headers, "Content-Type": "application/json" },
           body: JSON.stringify({
-            analysis_flares: nextScan,
-            analysis_all_flares: nextAll,
+            analysis_flairs: nextScan,
+            analysis_all_flairs: nextAll,
           }),
         });
         const payload = (await response.json().catch(() => ({}))) as {
@@ -3546,20 +4089,61 @@ export default function RedditSourcesManager({
           community?: RedditCommunityResponse;
         };
         if (!response.ok) {
-          throw new Error(payload.error ?? "Failed to save analysis flares");
+          throw new Error(payload.error ?? "Failed to save analysis flairs");
         }
         if (payload.community) {
           mergeCommunityPatch(communityId, {
-            analysis_flares: toCommunityModel(payload.community).analysis_flares,
-            analysis_all_flares: toCommunityModel(payload.community).analysis_all_flares,
+            analysis_flairs: toCommunityModel(payload.community).analysis_flairs,
+            analysis_all_flairs: toCommunityModel(payload.community).analysis_all_flairs,
           });
         }
       } catch (err) {
         mergeCommunityPatch(communityId, {
-          analysis_flares: previous.analysis_flares,
-          analysis_all_flares: previous.analysis_all_flares,
+          analysis_flairs: previous.analysis_flairs,
+          analysis_all_flairs: previous.analysis_all_flairs,
         });
-        setError(err instanceof Error ? err.message : "Failed to save analysis flares");
+        setError(err instanceof Error ? err.message : "Failed to save analysis flairs");
+      } finally {
+        setBusyAction(null);
+        setBusyLabel(null);
+      }
+    },
+    [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
+  );
+
+  const persistFlairCategories = useCallback(
+    async (communityId: string, nextCategories: Record<string, string>) => {
+      const previous = communities.find((community) => community.id === communityId);
+      if (!previous) return;
+
+      mergeCommunityPatch(communityId, { post_flair_categories: nextCategories });
+      setBusyAction("save-flair-categories");
+      setBusyLabel("Saving flair categories...");
+      setError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ post_flair_categories: nextCategories }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          community?: RedditCommunityResponse;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to save flair categories");
+        }
+        if (payload.community) {
+          mergeCommunityPatch(communityId, {
+            post_flair_categories: toCommunityModel(payload.community).post_flair_categories,
+          });
+        }
+      } catch (err) {
+        mergeCommunityPatch(communityId, {
+          post_flair_categories: previous.post_flair_categories,
+        });
+        setError(err instanceof Error ? err.message : "Failed to save flair categories");
       } finally {
         setBusyAction(null);
         setBusyLabel(null);
@@ -3701,7 +4285,7 @@ export default function RedditSourcesManager({
     const items = discovery?.threads ?? [];
     if (selectedCommunity?.is_show_focused) return items;
     if (!showOnlyMatches) return items;
-    const hasAllPostsFlairMode = (selectedCommunity?.analysis_all_flares.length ?? 0) > 0;
+    const hasAllPostsFlairMode = (selectedCommunity?.analysis_all_flairs.length ?? 0) > 0;
     if (!hasAllPostsFlairMode) {
       return items.filter((thread) => thread.is_show_match);
     }
@@ -3709,48 +4293,6 @@ export default function RedditSourcesManager({
       (thread) => thread.is_show_match || Boolean(thread.passes_flair_filter),
     );
   }, [discovery, selectedCommunity, showOnlyMatches]);
-
-  const isBravoRealHousewivesCommunity =
-    normalizeCommunityLookupKey(selectedCommunity?.subreddit) === "bravorealhousewives";
-
-  const episodeDiscussionTitlePatterns = useMemo(
-    () =>
-      normalizeFlairList([
-        "Live Episode Discussion",
-        "Post Episode Discussion",
-        "Weekly Episode Discussion",
-        ...(selectedCommunity?.episode_title_patterns ?? []),
-      ]).map((value) => value.toLowerCase()),
-    [selectedCommunity?.episode_title_patterns],
-  );
-
-  const nonEpisodeDiscoveryThreads = useMemo(() => {
-    if (episodeDiscussionTitlePatterns.length === 0) return visibleDiscoveryThreads;
-    return visibleDiscoveryThreads.filter((thread) => {
-      const title = thread.title.trim().toLowerCase();
-      return !episodeDiscussionTitlePatterns.some((pattern) => title.includes(pattern));
-    });
-  }, [episodeDiscussionTitlePatterns, visibleDiscoveryThreads]);
-
-  const flairGroupedDiscoveryThreads = useMemo(() => {
-    if (!hideCommunityList) return [];
-    const groups = new Map<string, { flairLabel: string; threads: DiscoveryThread[] }>();
-    for (const thread of nonEpisodeDiscoveryThreads) {
-      const flairLabel = thread.link_flair_text?.trim();
-      if (!flairLabel) continue;
-      const flairKey = normalizeFlairKey(flairLabel);
-      if (!flairKey) continue;
-      const existing = groups.get(flairKey);
-      if (existing) {
-        existing.threads.push(thread);
-        continue;
-      }
-      groups.set(flairKey, { flairLabel, threads: [thread] });
-    }
-    return [...groups.values()].sort(
-      (a, b) => b.threads.length - a.threads.length || a.flairLabel.localeCompare(b.flairLabel),
-    );
-  }, [hideCommunityList, nonEpisodeDiscoveryThreads]);
 
   const networkFocusSuggestions = useMemo(() => {
     const values = communities.flatMap((community) => community.network_focus_targets);
@@ -3987,7 +4529,7 @@ export default function RedditSourcesManager({
       setWindowDiscoveryByContainer({});
       resetCommunityForm();
       setShowCommunityForm(false);
-      void refreshCommunityFlares(createdCommunity.id);
+      void refreshCommunityFlairs(createdCommunity.id);
       void fetchCommunities().catch((err) => {
         console.warn("[reddit] Failed to sync communities after create", err);
       });
@@ -4351,14 +4893,17 @@ export default function RedditSourcesManager({
       if (options?.searchBackfill) {
         params.set("search_backfill", "true");
       }
+      if (options?.mode) {
+        params.set("mode", options.mode);
+      }
       if (options?.refresh) {
         params.set("refresh", "true");
         if (typeof options.waitForCompletion === "boolean") {
           params.set("wait", options.waitForCompletion ? "true" : "false");
         }
       }
-      if (options?.forceFlares && options.forceFlares.length > 0) {
-        for (const flair of options.forceFlares) {
+      if (options?.forceFlairs && options.forceFlairs.length > 0) {
+        for (const flair of options.forceFlairs) {
           const normalized = flair.trim();
           if (!normalized) continue;
           params.append("force_flair", normalized);
@@ -4367,7 +4912,8 @@ export default function RedditSourcesManager({
         params.set("force_flair", options.forceFlair);
       }
       if (typeof options?.maxPages === "number" && Number.isFinite(options.maxPages)) {
-        params.set("max_pages", String(Math.max(1, Math.trunc(options.maxPages))));
+        // 0 = unlimited (no page cap); positive = hard cap
+        params.set("max_pages", String(Math.max(0, Math.trunc(options.maxPages))));
       }
       const qs = params.toString();
       const requestUrl = `/api/admin/reddit/communities/${communityId}/discover${qs ? `?${qs}` : ""}`;
@@ -4483,6 +5029,11 @@ export default function RedditSourcesManager({
         run_id: String(payload.run_id ?? runId),
         status,
         error: typeof payload.error === "string" ? payload.error : null,
+        discovered_flairs: Array.isArray(payload.discovered_flairs)
+          ? (payload.discovered_flairs as unknown[]).filter(
+              (v): v is string => typeof v === "string" && v.trim().length > 0,
+            )
+          : undefined,
         totals:
           payload.totals && typeof payload.totals === "object"
             ? {
@@ -4574,7 +5125,7 @@ export default function RedditSourcesManager({
           exhaustive: true,
           searchBackfill: true,
           refresh: false,
-          maxPages: 500,
+          maxPages: 0,
           timeoutMs: REQUEST_TIMEOUT_MS.discover,
         });
         if (containerRefreshPollTokenRef.current[input.containerKey] !== nextToken) {
@@ -4697,7 +5248,7 @@ export default function RedditSourcesManager({
               exhaustive: true,
               searchBackfill: true,
               refresh: false,
-              maxPages: 500,
+              maxPages: 0,
               timeoutMs: REQUEST_TIMEOUT_MS.discover,
             });
             if (isCancelled || windowCacheHydrationTokenRef.current !== token) return;
@@ -4861,6 +5412,36 @@ export default function RedditSourcesManager({
     ],
   );
 
+  const mergeDiscoveredFlairsIntoCommunity = useCallback(
+    async (communityId: string, discoveredFlairs: string[] | undefined) => {
+      if (!discoveredFlairs || discoveredFlairs.length === 0) return;
+      const community = communities.find((c) => c.id === communityId);
+      if (!community) return;
+      const existingSet = new Set(community.post_flairs.map((f) => f.toLowerCase().trim()));
+      const newFlairs = discoveredFlairs.filter(
+        (f) => f.trim().length > 0 && !existingSet.has(f.toLowerCase().trim()),
+      );
+      if (newFlairs.length === 0) return;
+      const mergedFlairs = [...community.post_flairs, ...newFlairs];
+      mergeCommunityPatch(communityId, { post_flairs: mergedFlairs });
+      try {
+        const headers = await getAuthHeaders();
+        await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ post_flairs: mergedFlairs }),
+        });
+      } catch {
+        // Non-critical: flair merge persist failed silently; optimistic update still in place.
+      }
+      setEpisodeContextWarning((prev) => {
+        const flairMsg = `Discovered ${newFlairs.length} new flair${newFlairs.length === 1 ? "" : "s"}: ${newFlairs.join(", ")}`;
+        return prev ? `${prev} | ${flairMsg}` : flairMsg;
+      });
+    },
+    [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
+  );
+
   const handleRefreshPostsForContainer = useCallback(
     async (containerKey: string) => {
       if (!selectedCommunity) return;
@@ -4868,15 +5449,15 @@ export default function RedditSourcesManager({
       if (!bounds) return;
       let discovered: DiscoveryPayload | null = null;
       const coverageMode = containerKey === "period-preseason" ? "adaptive_deep" : "standard";
-      const maxPagesForContainer = coverageMode === "adaptive_deep" ? 1000 : 500;
+      const maxPagesForContainer = 0; // unlimited — scrape all posts in the time window
 
       containerRefreshPollTokenRef.current[containerKey] =
         (containerRefreshPollTokenRef.current[containerKey] ?? 0) + 1;
-      setRefreshingContainerKey(containerKey);
+      setRefreshingContainerKeys((prev) => new Set([...prev, containerKey]));
       setContainerRefreshProgress(containerKey, {
         runId: "pending",
         status: "queued",
-        message: `${bounds.label}: starting refresh…`,
+        message: `${bounds.label}: starting sync…`,
       });
       setError(null);
       setEpisodeContextWarning(null);
@@ -4893,6 +5474,7 @@ export default function RedditSourcesManager({
           waitForCompletion: false,
           maxPages: maxPagesForContainer,
           timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
+          mode: "sync_posts",
         });
         discovered = discoveryResult.discovery;
         if (!discovered) {
@@ -4920,11 +5502,14 @@ export default function RedditSourcesManager({
             if (discovered) {
               upsertWindowDiscovery(containerKey, discovered);
             }
+            if (polled.run?.discovered_flairs) {
+              void mergeDiscoveredFlairsIntoCommunity(selectedCommunity.id, polled.run.discovered_flairs);
+            }
             if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
             } else if (!discovered) {
               setEpisodeContextWarning(
-                `${bounds.label}: refresh completed but no posts were found in this window.`,
+                `${bounds.label}: sync completed but no posts were found in this window.`,
               );
             }
             return;
@@ -4956,11 +5541,14 @@ export default function RedditSourcesManager({
             if (discovered) {
               upsertWindowDiscovery(containerKey, discovered);
             }
+            if (polled.run?.discovered_flairs) {
+              void mergeDiscoveredFlairsIntoCommunity(selectedCommunity.id, polled.run.discovered_flairs);
+            }
             if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
             } else if (!discovered) {
               setEpisodeContextWarning(
-                `${bounds.label}: refresh completed but no posts were found in this window.`,
+                `${bounds.label}: sync completed but no posts were found in this window.`,
               );
             } else {
               setEpisodeContextWarning(null);
@@ -4979,7 +5567,8 @@ export default function RedditSourcesManager({
       } catch (err) {
         const failedMessage = toErrorMessage(err, `Failed to refresh posts for ${bounds.label}.`);
         const isTimeoutFailure = isTimeoutErrorMessage(failedMessage);
-        if (!isTimeoutFailure) {
+        const isRateLimitFailure = isRateLimitErrorMessage(failedMessage);
+        if (!isTimeoutFailure && !isRateLimitFailure) {
           setContainerRefreshProgress(containerKey, {
             runId: "error",
             status: "failed",
@@ -4990,7 +5579,7 @@ export default function RedditSourcesManager({
           return;
         }
         try {
-          // Timeout fallback: return cached period-window rows when live Reddit refresh stalls.
+          // Fallback: return cached period-window rows when live Reddit refresh stalls or is rate-limited.
           const cachedResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
             periodStart: bounds.start ?? null,
             periodEnd: bounds.end ?? null,
@@ -4999,7 +5588,7 @@ export default function RedditSourcesManager({
             exhaustive: true,
             searchBackfill: true,
             refresh: false,
-            maxPages: 500,
+            maxPages: 0,
             timeoutMs: REQUEST_TIMEOUT_MS.discover,
           });
           discovered = cachedResult.discovery;
@@ -5009,13 +5598,18 @@ export default function RedditSourcesManager({
             );
           }
           upsertWindowDiscovery(containerKey, discovered);
+          const fallbackPrefix = isRateLimitFailure
+            ? `${bounds.label}: live refresh hit Reddit rate limits; showing cached Supabase posts.`
+            : `${bounds.label}: live refresh timed out; showing cached Supabase posts.`;
           setContainerRefreshProgress(containerKey, {
-            runId: "timeout-fallback",
+            runId: isRateLimitFailure ? "rate-limit-fallback" : "timeout-fallback",
             status: "partial",
-            message: `${bounds.label}: live refresh timed out; showing cached Supabase posts.`,
+            message: fallbackPrefix,
           });
           setEpisodeContextWarning(
-            `Live refresh timed out for ${bounds.label}; showing cached posts from Supabase.`,
+            isRateLimitFailure
+              ? `Live refresh hit Reddit rate limits for ${bounds.label}; showing cached posts from Supabase.`
+              : `Live refresh timed out for ${bounds.label}; showing cached posts from Supabase.`,
           );
         } catch (cacheErr) {
           const cacheMessage = toErrorMessage(
@@ -5031,7 +5625,98 @@ export default function RedditSourcesManager({
           setError(cacheMessage);
         }
       } finally {
-        setRefreshingContainerKey((current) => (current === containerKey ? null : current));
+        setRefreshingContainerKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(containerKey);
+          return next;
+        });
+      }
+    },
+    [
+      episodeWindowBoundsByContainer,
+      fetchDiscoveryForCommunity,
+      mergeDiscoveredFlairsIntoCommunity,
+      pollContainerRefreshRun,
+      setContainerRefreshProgress,
+      selectedCommunity,
+      upsertWindowDiscovery,
+    ],
+  );
+
+  const handleSyncDetailsForContainer = useCallback(
+    async (containerKey: string) => {
+      if (!selectedCommunity) return;
+      const bounds = episodeWindowBoundsByContainer.get(containerKey);
+      if (!bounds) return;
+
+      containerRefreshPollTokenRef.current[containerKey] =
+        (containerRefreshPollTokenRef.current[containerKey] ?? 0) + 1;
+      setSyncingDetailsContainerKey(containerKey);
+      setContainerRefreshProgress(containerKey, {
+        runId: "pending",
+        status: "queued",
+        message: `${bounds.label}: starting detail sync…`,
+      });
+      setError(null);
+      setEpisodeContextWarning(null);
+      try {
+        const discoveryResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
+          periodStart: bounds.start ?? null,
+          periodEnd: bounds.end ?? null,
+          containerKey,
+          periodLabel: bounds.label,
+          exhaustive: true,
+          searchBackfill: false,
+          refresh: true,
+          waitForCompletion: false,
+          timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
+          mode: "sync_details",
+        });
+        const run = discoveryResult.run;
+        if (run) {
+          setContainerRefreshProgress(containerKey, {
+            runId: run.run_id,
+            status: run.status,
+            message: buildContainerRunProgressMessage(bounds.label, run),
+          });
+          if (run.status === "queued" || run.status === "running") {
+            const polled = await pollContainerRefreshRun({
+              communityId: selectedCommunity.id,
+              containerKey,
+              label: bounds.label,
+              runId: run.run_id,
+              periodStart: bounds.start ?? null,
+              periodEnd: bounds.end ?? null,
+            });
+            if (polled.discovery) {
+              upsertWindowDiscovery(containerKey, polled.discovery);
+            }
+            if (polled.warning && !polled.discovery) {
+              setEpisodeContextWarning(polled.warning);
+            }
+            return;
+          }
+          if (run.status === "failed" || run.status === "cancelled") {
+            throw new Error(run.error || `Detail sync ${run.status} for ${bounds.label}.`);
+          }
+        }
+        if (discoveryResult.discovery) {
+          upsertWindowDiscovery(containerKey, discoveryResult.discovery);
+        }
+        if (discoveryResult.warning) {
+          setEpisodeContextWarning(discoveryResult.warning);
+        }
+      } catch (err) {
+        const failedMessage = toErrorMessage(err, `Failed to sync details for ${bounds.label}.`);
+        setContainerRefreshProgress(containerKey, {
+          runId: "error",
+          status: "failed",
+          message: `${bounds.label}: ${failedMessage}`,
+        });
+        setEpisodeContextWarning(failedMessage);
+        setError(failedMessage);
+      } finally {
+        setSyncingDetailsContainerKey((current) => (current === containerKey ? null : current));
       }
     },
     [
@@ -5043,6 +5728,75 @@ export default function RedditSourcesManager({
       upsertWindowDiscovery,
     ],
   );
+
+  const handleSyncDetails = useCallback(async () => {
+    if (!selectedCommunity) return;
+    setDetailsSyncing(true);
+    setBusyAction("sync-details");
+    setBusyLabel("Starting detail sync…");
+    setError(null);
+    setEpisodeContextWarning(null);
+    try {
+      const periodStart = selectedPeriod?.start ?? seasonDiscoveryWindow.start;
+      const periodEnd = selectedPeriod?.end ?? seasonDiscoveryWindow.end;
+      const periodLabel = selectedPeriod?.label ?? "Season";
+      const discoveryResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
+        periodStart,
+        periodEnd,
+        periodLabel,
+        exhaustive: true,
+        searchBackfill: false,
+        refresh: true,
+        waitForCompletion: false,
+        timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
+        mode: "sync_details",
+      });
+      const run = discoveryResult.run;
+      if (run) {
+        setBusyLabel(buildContainerRunProgressMessage(periodLabel, run));
+        if (run.status === "queued" || run.status === "running") {
+          const polled = await pollContainerRefreshRun({
+            communityId: selectedCommunity.id,
+            containerKey: "sync-details-season",
+            label: periodLabel,
+            runId: run.run_id,
+            periodStart,
+            periodEnd,
+          });
+          if (polled.discovery) {
+            upsertWindowDiscovery("sync-details-season", polled.discovery);
+          }
+          if (polled.warning) {
+            setEpisodeContextWarning(polled.warning);
+          }
+          setBusyLabel(null);
+          return;
+        }
+        if (run.status === "failed" || run.status === "cancelled") {
+          throw new Error(run.error || `Detail sync ${run.status}.`);
+        }
+      }
+      if (discoveryResult.warning) {
+        setEpisodeContextWarning(discoveryResult.warning);
+      }
+      setBusyLabel(null);
+    } catch (err) {
+      const failedMessage = toErrorMessage(err, "Failed to sync details.");
+      setEpisodeContextWarning(failedMessage);
+      setError(failedMessage);
+      setBusyLabel(null);
+    } finally {
+      setDetailsSyncing(false);
+      setBusyAction(null);
+    }
+  }, [
+    fetchDiscoveryForCommunity,
+    pollContainerRefreshRun,
+    seasonDiscoveryWindow,
+    selectedCommunity,
+    selectedPeriod,
+    upsertWindowDiscovery,
+  ]);
 
   const saveDiscoveredThread = async (thread: DiscoveryThread) => {
     if (!selectedCommunity) return;
@@ -5085,13 +5839,13 @@ export default function RedditSourcesManager({
   const handleRefreshEpisodeDiscussions = useCallback(async () => {
     if (!selectedCommunity) return;
 
-    setEpisodeRefreshing(true);
-    setRefreshingContainerKey(null);
-    setError(null);
-    setEpisodeContextWarning(null);
-    try {
-      const headers = await getAuthHeaders();
-      const params = new URLSearchParams();
+      setEpisodeRefreshing(true);
+      setRefreshingContainerKeys(new Set());
+      setError(null);
+      setEpisodeContextWarning(null);
+      try {
+        const headers = await getAuthHeaders();
+        const params = new URLSearchParams();
       const requestedSeasonId = await resolveSeasonIdForRequests(selectedCommunity.id);
       if (requestedSeasonId) {
         params.set("season_id", requestedSeasonId);
@@ -5136,32 +5890,64 @@ export default function RedditSourcesManager({
         setEpisodeSeasonId(resolvedSeasonId);
       }
       try {
-        // Sync Posts triggers a backend scrape/update pass for the season window, then shows cached Supabase rows.
-        const cachedResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
-          periodStart: seasonDiscoveryWindow.start,
-          periodEnd: seasonDiscoveryWindow.end,
-          coverageMode: "max_coverage",
-          exhaustive: true,
-          searchBackfill: true,
-          refresh: true,
-          waitForCompletion: false,
-          maxPages: 1000,
-          timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
-        });
-        if (cachedResult.discovery) {
-          setSeasonDiscovery(cachedResult.discovery);
-        } else if (cachedResult.warning) {
-          setEpisodeContextWarning(cachedResult.warning);
-        }
-        if (cachedResult.run && isRefreshRunActiveStatus(cachedResult.run.status)) {
+        const seasonWindowKeys = [...episodeWindowBoundsByContainer.entries()]
+          .filter(([containerKey, bounds]) => {
+            if (containerKey === "period-preseason" || containerKey === "period-postseason") return true;
+            return bounds.type === "episode" && /^episode-\d+$/i.test(containerKey);
+          })
+          .sort((a, b) => {
+            const startDiff = (parseDateMs(a[1].start) ?? 0) - (parseDateMs(b[1].start) ?? 0);
+            if (startDiff !== 0) return startDiff;
+            return a[0].localeCompare(b[0]);
+          })
+          .map(([containerKey]) => containerKey);
+
+        if (seasonWindowKeys.length === 0) {
+          setSeasonDiscovery(null);
           setEpisodeContextWarning(
-            `Season sync running in backend (run ${cachedResult.run.run_id.slice(0, 8)}); showing cached Supabase posts while it updates.`,
+            "No episode windows are available yet. Refresh episode discussions first to build season windows.",
+          );
+        } else {
+          setSeasonDiscovery(null);
+          try {
+            // Seed season-scoped cached rows so pending posts can still be bucketed
+            // by window even when some live container refreshes are rate-limited.
+            const cachedSeasonDiscovery = await fetchDiscoveryForCommunity(selectedCommunity.id, {
+              seasonId: requestedSeasonId ?? resolvedSeasonId ?? undefined,
+              periodStart: seasonDiscoveryWindow.start,
+              periodEnd: seasonDiscoveryWindow.end,
+              periodLabel: "Season",
+              exhaustive: true,
+              searchBackfill: true,
+              refresh: false,
+              maxPages: 0,
+              timeoutMs: REQUEST_TIMEOUT_MS.discover,
+            });
+            if (cachedSeasonDiscovery.discovery) {
+              setSeasonDiscovery(cachedSeasonDiscovery.discovery);
+            }
+          } catch {
+            // Non-critical: window-level refreshes still run and hydrate container payloads.
+          }
+          setEpisodeContextWarning(
+            `Season sync running across ${seasonWindowKeys.length} windows using each post's created timestamp.`,
+          );
+          const queue = [...seasonWindowKeys];
+          const workerCount = Math.min(MAX_CONCURRENT_CONTAINER_SYNCS, queue.length);
+          await Promise.all(
+            Array.from({ length: workerCount }, async () => {
+              while (queue.length > 0) {
+                const nextContainerKey = queue.shift();
+                if (!nextContainerKey) return;
+                await handleRefreshPostsForContainer(nextContainerKey);
+              }
+            }),
           );
         }
       } catch (discoverErr) {
         const discoverMessage = toErrorMessage(
           discoverErr,
-          "Episode discussions refreshed, but cached tracked-flair totals could not be loaded.",
+          "Episode discussions refreshed, but tracked-flair post windows could not be synced.",
         );
         setEpisodeContextWarning(discoverMessage);
       }
@@ -5174,13 +5960,16 @@ export default function RedditSourcesManager({
       setEpisodeRefreshing(false);
     }
   }, [
+    MAX_CONCURRENT_CONTAINER_SYNCS,
     enableEpisodeSync,
-    fetchDiscoveryForCommunity,
     fetchCommunities,
+    fetchDiscoveryForCommunity,
     fetchWithTimeout,
     getAuthHeaders,
+    handleRefreshPostsForContainer,
     isDedicatedCommunityView,
     mergeCommunityPatch,
+    episodeWindowBoundsByContainer,
     seasonDiscoveryWindow.end,
     seasonDiscoveryWindow.start,
     selectedPeriod,
@@ -5399,7 +6188,7 @@ export default function RedditSourcesManager({
               <span>sort: {thread.source_sorts.join(", ")}</span>
               {thread.link_flair_text && (
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                  Flair: {thread.link_flair_text}
+                  Flair: {displayFlair(thread.link_flair_text)}
                 </span>
               )}
             </div>
@@ -5437,8 +6226,8 @@ export default function RedditSourcesManager({
                   - {term}
                 </span>
               ))}
-              {(selectedCommunity.analysis_flares.length > 0 ||
-                selectedCommunity.analysis_all_flares.length > 0) && (
+              {(selectedCommunity.analysis_flairs.length > 0 ||
+                selectedCommunity.analysis_all_flairs.length > 0) && (
                 <span
                   className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                     (thread.passes_flair_filter ?? true)
@@ -5571,7 +6360,7 @@ export default function RedditSourcesManager({
         </div>
         {!selectedCommunity.is_show_focused && (
           <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-600">
-            Required flares for episode refresh are sourced from{" "}
+            Required flairs for episode refresh are sourced from{" "}
             <span className="font-semibold">All Posts With Flair</span>.
           </div>
         )}
@@ -5657,7 +6446,7 @@ export default function RedditSourcesManager({
           </div>
         )}
 
-        {episodeMeta?.auto_seeded_required_flares && (
+        {episodeMeta?.auto_seeded_required_flairs && (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
             Using temporary required flair: Salt Lake City (set in All Posts With Flair to persist).
           </div>
@@ -5715,7 +6504,7 @@ export default function RedditSourcesManager({
                 {episodeMeta.coverage_found_slots ?? 0}/{episodeMeta.coverage_expected_slots}
               </p>
             )}
-            {episodeMeta.discovery_source_summary && (
+            {!isDedicatedCommunityView && episodeMeta.discovery_source_summary && (
               <p className="text-xs text-zinc-500">
                 Listings: {episodeMeta.discovery_source_summary.listing_count ?? 0} · Search hits:{" "}
                 {episodeMeta.discovery_source_summary.search_count ?? 0} · Search pages:{" "}
@@ -5723,38 +6512,39 @@ export default function RedditSourcesManager({
                 queries: {episodeMeta.discovery_source_summary.gap_fill_queries_run ?? 0}
               </p>
             )}
-            {selectedRelevantPostFlares.length > 0 && (
+            {selectedRelevantPostFlairs.length > 0 && (
               <p className="text-xs text-zinc-500">
                 {episodeRefreshing ? (
                   "Refreshing tracked flair totals across episode windows..."
                 ) : (
                   <>
-                    Season total tracked flair posts across episode windows (
-                    {discovery?.collection_mode === "exhaustive_window" ? "exhaustive" : "sample"}) ·{" "}
+                    Season total tracked flair posts across episode windows
+                    {discovery?.collection_mode === "exhaustive_window" ? " (exhaustive)" : ""} ·{" "}
                     {fmtNum(trackedFlairWindowPostCount)}
                   </>
                 )}
               </p>
             )}
-            {discovery?.totals && (
+            {!isDedicatedCommunityView && discovery?.totals && (
               <p className="text-xs text-zinc-500">
                 Discover totals · fetched {fmtNum(discovery.totals.fetched_rows)} · matched{" "}
                 {fmtNum(discovery.totals.matched_rows)} · tracked flair{" "}
                 {fmtNum(discovery.totals.tracked_flair_rows)}
               </p>
             )}
-            {discovery?.collection_mode === "exhaustive_window" &&
+            {!isDedicatedCommunityView &&
+              discovery?.collection_mode === "exhaustive_window" &&
               discovery.window_exhaustive_complete === false && (
                 <p className="text-xs text-amber-700">
-                  Exhaustive crawl hit max pages ({fmtNum(discovery.max_pages_applied ?? 0)}); totals may be incomplete.
+                  {buildExhaustiveWindowIncompleteWarning(discovery)}
                 </p>
               )}
           </div>
         )}
 
-        {!isDedicatedCommunityView && episodeMatrixRowsForDisplay.length > 0 && (
+        {!isDedicatedCommunityView && hasVisibleEpisodeWindows && (
           <div className="mb-3">
-            {renderEpisodeMatrixCards(episodeMatrixRowsForDisplay, {
+            {renderEpisodeMatrixCards(filteredEpisodeMatrixRowsForDisplay, {
               episodeAirDateByNumber,
               episodeWindowByContainer: episodeWindowBoundsByContainer,
               totalsLoading: episodeRefreshing,
@@ -5762,20 +6552,30 @@ export default function RedditSourcesManager({
               unassignedFlairCountByContainer: unassignedFlairCountByContainerWindow,
               unassignedFlairCountBySlot: matrixUnassignedFlairCountBySlot,
               totalTrackedFlairCountBySlot: matrixTrackedFlairTotalCountBySlot,
-              seasonalBoundaryPeriods: seasonalBoundaryPeriods,
+              seasonalBoundaryPeriods: filteredSeasonalBoundaryPeriods,
               unassignedFlairCountBySeasonBoundaryPeriod: matrixUnassignedFlairCountBySeasonBoundaryPeriod,
               totalTrackedFlairCountBySeasonBoundaryPeriod:
                 matrixTrackedFlairTotalCountBySeasonBoundaryPeriod,
               linkedPostsByContainer: linkedDiscussionPostsByContainer,
+              pendingPostsByContainer: pendingTrackedPostsByContainerWindow,
+              pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
               refreshProgressByContainer: containerRefreshProgressByKey,
               onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
+              onSyncContainerDetails: (containerKey) => void handleSyncDetailsForContainer(containerKey),
               refreshingContainerKey,
+              refreshingContainerKeys,
+              syncingDetailsContainerKey,
               refreshPostsDisabled: isBusy || episodeRefreshing,
               periodsLoading,
               onOpenContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
               onViewAllContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
             })}
           </div>
+        )}
+        {!isDedicatedCommunityView && isSupabaseFlairFilterActive && !hasVisibleEpisodeWindows && (
+          <p className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+            No episode/week windows contain the selected Supabase flair filter.
+          </p>
         )}
 
         {!isDedicatedCommunityView && episodeCandidates.length > 0 && (
@@ -5907,7 +6707,7 @@ export default function RedditSourcesManager({
                         <span>{fmtDateTime(candidate.posted_at)}</span>
                         {candidate.link_flair_text && (
                           <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                            Flair: {candidate.link_flair_text}
+                            Flair: {displayFlair(candidate.link_flair_text)}
                           </span>
                         )}
                         {syncResult && (
@@ -6046,10 +6846,11 @@ export default function RedditSourcesManager({
                 <h3 className="text-xl font-bold text-zinc-900">{getCommunityTitle(selectedCommunity)}</h3>
                 <p className="text-sm text-zinc-500">{selectedCommunity.trr_show_name}</p>
                 <p className="mt-1 text-xs text-zinc-500">
-                  {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
-                  {selectedCommunity.analysis_flares.length} scan ·{" "}
-                  {selectedRelevantPostFlares.length} relevant flares
+                  {selectedCommunity.analysis_all_flairs.length} all-post ·{" "}
+                  {selectedCommunity.analysis_flairs.length} scan ·{" "}
+                  {selectedRelevantPostFlairs.length} relevant flairs
                 </p>
+                {renderSupabaseSummary()}
               </>
             ) : (
               <h3 className="text-xl font-bold text-zinc-900">Community</h3>
@@ -6111,16 +6912,28 @@ export default function RedditSourcesManager({
               Add Thread
             </button>
             {selectedCommunity && (
-              <button
-                type="button"
-                disabled={isBusy || episodeRefreshing || periodsLoading}
-                onClick={() => void handleRefreshEpisodeDiscussions()}
-                aria-label="Sync Posts"
-                title="Scrape posts, update metrics/comments, and sync discussion candidates"
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={isBusy || episodeRefreshing || periodsLoading}
+                  onClick={() => void handleRefreshEpisodeDiscussions()}
+                  aria-label="Sync Posts"
+                  title="Scrape posts, update metrics/comments, and sync discussion candidates"
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy || detailsSyncing || episodeRefreshing || periodsLoading}
+                  onClick={() => void handleSyncDetails()}
+                  aria-label="Sync Details"
+                  title="Deep-scrape comment trees, media, and post details for the current period"
+                  className="rounded-lg border border-indigo-300 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {detailsSyncing ? "Syncing Details…" : "Sync Details 🕷️"}
+                </button>
+              </>
             )}
           </div>
         )}
@@ -6135,6 +6948,16 @@ export default function RedditSourcesManager({
               className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
+            </button>
+            <button
+              type="button"
+              disabled={isBusy || detailsSyncing || episodeRefreshing || periodsLoading}
+              onClick={() => void handleSyncDetails()}
+              aria-label="Sync Details"
+              title="Deep-scrape comment trees, media, and post details for the current period"
+              className="rounded-lg border border-indigo-300 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {detailsSyncing ? "Syncing Details…" : "Sync Details 🕷️"}
             </button>
             <button
               type="button"
@@ -6507,11 +7330,74 @@ export default function RedditSourcesManager({
             </div>
           ) : (
             <div className="space-y-4">
+              {showId && communities.some((c) => c.is_show_focused && c.post_flairs.length > 0) && (
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={async () => {
+                      setBusyAction("auto-categorize-all-flairs");
+                      setBusyLabel("Auto-categorizing flairs for all communities...");
+                      setError(null);
+                      try {
+                        const headers = await getAuthHeaders();
+                        const response = await fetchWithTimeout(
+                          "/api/admin/reddit/auto-categorize-flairs-batch",
+                          {
+                            method: "POST",
+                            headers: { ...headers, "Content-Type": "application/json" },
+                            body: JSON.stringify({ show_id: showId }),
+                          },
+                        );
+                        const payload = (await response.json().catch(() => ({}))) as {
+                          error?: string;
+                          communities?: Array<{
+                            community_id: string;
+                            subreddit: string;
+                            categories: Record<string, string>;
+                            matched: number;
+                            total: number;
+                          }>;
+                          total_communities?: number;
+                          total_matched?: number;
+                          total_flairs?: number;
+                        };
+                        if (!response.ok) {
+                          throw new Error(payload.error ?? "Failed to batch auto-categorize flairs");
+                        }
+                        if (payload.communities) {
+                          for (const entry of payload.communities) {
+                            const existing = communities.find((c) => c.id === entry.community_id);
+                            if (existing && entry.categories) {
+                              const merged = {
+                                ...existing.post_flair_categories,
+                                ...entry.categories,
+                              };
+                              void persistFlairCategories(entry.community_id, merged);
+                            }
+                          }
+                        }
+                        setBusyLabel(
+                          `Categorized ${payload.total_matched ?? 0} flairs across ${payload.total_communities ?? 0} communities`,
+                        );
+                        setTimeout(() => setBusyLabel(null), 4000);
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : "Failed to batch auto-categorize flairs");
+                      } finally {
+                        setBusyAction(null);
+                      }
+                    }}
+                  >
+                    Auto-Categorize All Flairs
+                  </button>
+                </div>
+              )}
               {communities.map((community) => {
                 const communityPageHref = buildCommunityViewHref(community);
                 const communityTypeBadges = getCommunityTypeBadges(community);
                 const communityTitle = getCommunityTitle(community);
-                const relevantPostFlares = getRelevantPostFlares(community);
+                const relevantPostFlairs = getRelevantPostFlairs(community);
                 return (
                   <article key={community.id} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap items-start gap-3">
@@ -6539,17 +7425,17 @@ export default function RedditSourcesManager({
                       </div>
                     </div>
                     <p className="mt-2 text-xs text-zinc-500">
-                      {community.analysis_all_flares.length} all-post · {community.analysis_flares.length} scan ·{" "}
-                      {relevantPostFlares.length} relevant flares
+                      {community.analysis_all_flairs.length} all-post · {community.analysis_flairs.length} scan ·{" "}
+                      {relevantPostFlairs.length} relevant flairs
                     </p>
-                    {relevantPostFlares.length > 0 && (
+                    {relevantPostFlairs.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        {relevantPostFlares.map((flair) => (
+                        {relevantPostFlairs.map((flair) => (
                           <span
                             key={`${community.id}-post-flair-${flair}`}
                             className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
                           >
-                            {flair}
+                            {displayFlair(flair)}
                           </span>
                         ))}
                       </div>
@@ -6673,10 +7559,11 @@ export default function RedditSourcesManager({
                       </div>
                     </div>
                     <p className="mt-2 text-xs text-zinc-500">
-                      {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
-                      {selectedCommunity.analysis_flares.length} scan ·{" "}
-                      {selectedRelevantPostFlares.length} relevant flares
+                      {selectedCommunity.analysis_all_flairs.length} all-post ·{" "}
+                      {selectedCommunity.analysis_flairs.length} scan ·{" "}
+                      {selectedRelevantPostFlairs.length} relevant flairs
                     </p>
+                    {renderSupabaseSummary()}
                     {selectedCommunity.notes && (
                       <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                         {selectedCommunity.notes}
@@ -6721,25 +7608,149 @@ export default function RedditSourcesManager({
 
                       <div className="mb-3 rounded-lg border border-zinc-200 p-3">
                         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                          Post Flares
+                          Post Flairs
                         </p>
-                        {refreshingFlaresCommunityId === selectedCommunity.id ? (
-                          <p className="text-xs text-zinc-500">Loading post flares...</p>
-                        ) : selectedRelevantPostFlares.length > 0 ? (
+                        {refreshingFlairsCommunityId === selectedCommunity.id ? (
+                          <p className="text-xs text-zinc-500">Loading post flairs...</p>
+                        ) : selectedCommunity.is_show_focused ? (
+                          selectedCommunity.post_flairs.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {selectedCommunity.post_flairs.map((flair) => (
+                                <span
+                                  key={`selected-flair-${selectedCommunity.id}-${flair}`}
+                                  className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                >
+                                  {displayFlair(flair)}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-zinc-500">No post flairs discovered yet.</p>
+                          )
+                        ) : selectedRelevantPostFlairs.length > 0 ? (
                           <div className="flex flex-wrap gap-1.5">
-                            {selectedRelevantPostFlares.map((flair) => (
+                            {selectedRelevantPostFlairs.map((flair) => (
                               <span
                                 key={`selected-flair-${selectedCommunity.id}-${flair}`}
                                 className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
                               >
-                                {flair}
+                                {displayFlair(flair)}
                               </span>
                             ))}
                           </div>
                         ) : (
-                          <p className="text-xs text-zinc-500">No relevant post flares selected yet.</p>
+                          <p className="text-xs text-zinc-500">No relevant post flairs selected yet.</p>
                         )}
                       </div>
+
+                      {selectedCommunity.is_show_focused &&
+                        selectedCommunity.post_flairs.length > 0 && (
+                          <div className="mb-3 rounded-lg border border-zinc-200 p-3">
+                            <div className="mb-1 flex items-center justify-between">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                Flair Categories
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                  onClick={async () => {
+                                    setBusyAction("auto-categorize-flairs");
+                                    setBusyLabel("Auto-categorizing flairs...");
+                                    setError(null);
+                                    try {
+                                      const headers = await getAuthHeaders();
+                                      const response = await fetchWithTimeout(
+                                        `/api/admin/reddit/communities/${selectedCommunity.id}/auto-categorize-flairs`,
+                                        {
+                                          method: "POST",
+                                          headers: { ...headers, "Content-Type": "application/json" },
+                                          body: JSON.stringify({ show_id: selectedCommunity.trr_show_id }),
+                                        },
+                                      );
+                                      const payload = (await response.json().catch(() => ({}))) as {
+                                        error?: string;
+                                        categories?: Record<string, string>;
+                                        matched?: number;
+                                        total?: number;
+                                      };
+                                      if (!response.ok) {
+                                        throw new Error(payload.error ?? "Failed to auto-categorize flairs");
+                                      }
+                                      if (payload.categories) {
+                                        const merged = {
+                                          ...selectedCommunity.post_flair_categories,
+                                          ...payload.categories,
+                                        };
+                                        void persistFlairCategories(selectedCommunity.id, merged);
+                                      }
+                                      setBusyLabel(
+                                        `Categorized ${payload.matched ?? 0} of ${payload.total ?? 0} flairs`,
+                                      );
+                                      setTimeout(() => setBusyLabel(null), 3000);
+                                    } catch (err) {
+                                      setError(err instanceof Error ? err.message : "Failed to auto-categorize flairs");
+                                    } finally {
+                                      setBusyAction(null);
+                                    }
+                                  }}
+                                >
+                                  Auto-Categorize
+                                </button>
+                                <span className="text-[11px] text-zinc-400">
+                                  {(() => {
+                                    const cats = selectedCommunity.post_flair_categories;
+                                    const castCount = Object.values(cats).filter((c) => c === "cast").length;
+                                    const seasonCount = Object.values(cats).filter((c) => c === "season").length;
+                                    const parts: string[] = [];
+                                    if (castCount > 0) parts.push(`${castCount} cast`);
+                                    if (seasonCount > 0) parts.push(`${seasonCount} season`);
+                                    return parts.length > 0 ? parts.join(" · ") : "Click to categorize";
+                                  })()}
+                                </span>
+                              </div>
+                            </div>
+                            <p className="mb-2 text-[11px] text-zinc-400">
+                              Click a flair to cycle: uncategorized → cast → season
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {selectedCommunity.post_flairs.map((flair) => {
+                                const key = normalizeFlairKey(flair);
+                                const category = selectedCommunity.post_flair_categories[key] as
+                                  | FlairCategory
+                                  | undefined;
+                                const colors = category
+                                  ? FLAIR_CATEGORY_COLORS[category]
+                                  : { bg: "bg-zinc-100", text: "text-zinc-700" };
+                                const label = category ? FLAIR_CATEGORY_LABELS[category] : null;
+                                return (
+                                  <button
+                                    key={`flair-cat-${selectedCommunity.id}-${flair}`}
+                                    type="button"
+                                    disabled={isBusy}
+                                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors ${colors.bg} ${colors.text} hover:opacity-80 disabled:opacity-50`}
+                                    onClick={() => {
+                                      const currentIdx = FLAIR_CATEGORY_CYCLE.indexOf(category);
+                                      const nextCategory =
+                                        FLAIR_CATEGORY_CYCLE[(currentIdx + 1) % FLAIR_CATEGORY_CYCLE.length];
+                                      const nextMap = { ...selectedCommunity.post_flair_categories };
+                                      if (nextCategory) {
+                                        nextMap[key] = nextCategory;
+                                      } else {
+                                        delete nextMap[key];
+                                      }
+                                      void persistFlairCategories(selectedCommunity.id, nextMap);
+                                    }}
+                                  >
+                                    {label ? `${label}: ` : ""}
+                                    {displayFlair(flair)}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
                       <div className="space-y-3">
                     <div className="rounded-lg border border-zinc-200 p-3">
@@ -6967,16 +7978,16 @@ export default function RedditSourcesManager({
                       <div className="rounded-lg border border-zinc-200 p-3">
                         <div className="mb-1 flex items-center justify-between">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                            Analysis Flares
+                            Analysis Flairs
                           </p>
                           <span className="text-[11px] font-semibold text-zinc-500">
-                            {selectedCommunity.analysis_all_flares.length} all-post ·{" "}
-                            {selectedCommunity.analysis_flares.length} scan
+                            {selectedCommunity.analysis_all_flairs.length} all-post ·{" "}
+                            {selectedCommunity.analysis_flairs.length} scan
                           </span>
                         </div>
-                        {selectedCommunity.post_flares.length === 0 ? (
+                        {selectedCommunity.post_flairs.length === 0 ? (
                           <p className="text-xs text-zinc-500">
-                            Refresh post flares first to assign analysis flares.
+                            Refresh post flairs first to assign analysis flairs.
                           </p>
                         ) : (
                           <div className="space-y-3">
@@ -6985,9 +7996,9 @@ export default function RedditSourcesManager({
                                 All Posts With Flair
                               </p>
                               <div className="flex flex-wrap gap-1.5">
-                                {selectedCommunity.post_flares.map((flair) => {
+                                {selectedCommunity.post_flairs.map((flair) => {
                                   const flairKey = normalizeFlairKey(flair);
-                                  const isSelected = selectedCommunity.analysis_all_flares.some(
+                                  const isSelected = selectedCommunity.analysis_all_flairs.some(
                                     (value) => normalizeFlairKey(value) === flairKey,
                                   );
                                   return (
@@ -6997,16 +8008,16 @@ export default function RedditSourcesManager({
                                       disabled={isBusy}
                                       onClick={() => {
                                         const nextAll = isSelected
-                                          ? selectedCommunity.analysis_all_flares.filter(
+                                          ? selectedCommunity.analysis_all_flairs.filter(
                                               (value) => normalizeFlairKey(value) !== flairKey,
                                             )
-                                          : [...selectedCommunity.analysis_all_flares, flair];
-                                        const nextScan = selectedCommunity.analysis_flares.filter(
+                                          : [...selectedCommunity.analysis_all_flairs, flair];
+                                        const nextScan = selectedCommunity.analysis_flairs.filter(
                                           (value) => normalizeFlairKey(value) !== flairKey,
                                         );
-                                        void persistAnalysisFlareModes(selectedCommunity.id, {
-                                          analysisAllFlares: nextAll,
-                                          analysisFlares: nextScan,
+                                        void persistAnalysisFlairModes(selectedCommunity.id, {
+                                          analysisAllFlairs: nextAll,
+                                          analysisFlairs: nextScan,
                                         });
                                       }}
                                       className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
@@ -7016,7 +8027,7 @@ export default function RedditSourcesManager({
                                       } disabled:cursor-not-allowed disabled:opacity-60`}
                                     >
                                       {isSelected ? "All posts · " : ""}
-                                      {flair}
+                                      {displayFlair(flair)}
                                     </button>
                                   );
                                 })}
@@ -7028,9 +8039,9 @@ export default function RedditSourcesManager({
                                 Scan Flair For Relevant Terms
                               </p>
                               <div className="flex flex-wrap gap-1.5">
-                                {selectedCommunity.post_flares.map((flair) => {
+                                {selectedCommunity.post_flairs.map((flair) => {
                                   const flairKey = normalizeFlairKey(flair);
-                                  const isSelected = selectedCommunity.analysis_flares.some(
+                                  const isSelected = selectedCommunity.analysis_flairs.some(
                                     (value) => normalizeFlairKey(value) === flairKey,
                                   );
                                   return (
@@ -7040,16 +8051,16 @@ export default function RedditSourcesManager({
                                       disabled={isBusy}
                                       onClick={() => {
                                         const nextScan = isSelected
-                                          ? selectedCommunity.analysis_flares.filter(
+                                          ? selectedCommunity.analysis_flairs.filter(
                                               (value) => normalizeFlairKey(value) !== flairKey,
                                             )
-                                          : [...selectedCommunity.analysis_flares, flair];
-                                        const nextAll = selectedCommunity.analysis_all_flares.filter(
+                                          : [...selectedCommunity.analysis_flairs, flair];
+                                        const nextAll = selectedCommunity.analysis_all_flairs.filter(
                                           (value) => normalizeFlairKey(value) !== flairKey,
                                         );
-                                        void persistAnalysisFlareModes(selectedCommunity.id, {
-                                          analysisAllFlares: nextAll,
-                                          analysisFlares: nextScan,
+                                        void persistAnalysisFlairModes(selectedCommunity.id, {
+                                          analysisAllFlairs: nextAll,
+                                          analysisFlairs: nextScan,
                                         });
                                       }}
                                       className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
@@ -7059,7 +8070,7 @@ export default function RedditSourcesManager({
                                       } disabled:cursor-not-allowed disabled:opacity-60`}
                                     >
                                       {isSelected ? "Scan terms · " : ""}
-                                      {flair}
+                                      {displayFlair(flair)}
                                     </button>
                                   );
                                 })}
@@ -7089,18 +8100,20 @@ export default function RedditSourcesManager({
                     </h5>
                     <span className="text-xs font-semibold text-zinc-600">
                       {isDedicatedCommunityView
-                        ? `${episodeMatrixRowsForDisplay.length} episodes`
+                        ? `${filteredEpisodeMatrixRowsForDisplay.length} episodes`
                         : `${selectedCommunity.assigned_threads.length} saved`}
                     </span>
                   </button>
                   {assignedThreadsExpanded &&
                     (isDedicatedCommunityView ? (
-                      episodeMatrixRowsForDisplay.length === 0 ? (
+                      !hasVisibleEpisodeWindows ? (
                         <p className="text-sm text-zinc-500">
-                          No episode discussion rows found for this community yet.
+                          {isSupabaseFlairFilterActive
+                            ? "No episode/week windows contain the selected Supabase flair filter."
+                            : "No episode discussion rows found for this community yet."}
                         </p>
                       ) : (
-                        renderEpisodeMatrixCards(episodeMatrixRowsForDisplay, {
+                        renderEpisodeMatrixCards(filteredEpisodeMatrixRowsForDisplay, {
                           episodeAirDateByNumber,
                           episodeWindowByContainer: episodeWindowBoundsByContainer,
                           totalsLoading: episodeRefreshing,
@@ -7108,14 +8121,19 @@ export default function RedditSourcesManager({
                           unassignedFlairCountByContainer: unassignedFlairCountByContainerWindow,
                           unassignedFlairCountBySlot: matrixUnassignedFlairCountBySlot,
                           totalTrackedFlairCountBySlot: matrixTrackedFlairTotalCountBySlot,
-                          seasonalBoundaryPeriods,
+                          seasonalBoundaryPeriods: filteredSeasonalBoundaryPeriods,
                           unassignedFlairCountBySeasonBoundaryPeriod: matrixUnassignedFlairCountBySeasonBoundaryPeriod,
                           totalTrackedFlairCountBySeasonBoundaryPeriod:
                             matrixTrackedFlairTotalCountBySeasonBoundaryPeriod,
                           linkedPostsByContainer: linkedDiscussionPostsByContainer,
+                          pendingPostsByContainer: pendingTrackedPostsByContainerWindow,
+                          pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
                           refreshProgressByContainer: containerRefreshProgressByKey,
                           onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
+                          onSyncContainerDetails: (containerKey) => void handleSyncDetailsForContainer(containerKey),
                           refreshingContainerKey,
+                          refreshingContainerKeys,
+                          syncingDetailsContainerKey,
                           refreshPostsDisabled: isBusy || episodeRefreshing,
                           periodsLoading,
                           onOpenContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
@@ -7178,103 +8196,80 @@ export default function RedditSourcesManager({
                     ))}
                 </article>
 
-                <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h5 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                      Discovered Threads
-                    </h5>
-                    {selectedCommunity.is_show_focused ? (
-                      <span className="text-xs font-semibold text-emerald-700">
-                        Show-focused: all discovered posts shown
-                      </span>
-                    ) : (
-                      <label className="inline-flex items-center gap-2 text-xs text-zinc-600">
-                        <input
-                          type="checkbox"
-                          checked={showOnlyMatches}
-                          onChange={(event) => setShowOnlyMatches(event.target.checked)}
-                        />
-                        Show matched only
-                      </label>
-                    )}
-                  </div>
-
-                  {discovery?.hints && (
-                    <div className="mb-4 space-y-2">
-                      {discovery.hints.suggested_include_terms.length > 0 && (
-                        <div>
-                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-600">
-                            Suggested Include Terms
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {discovery.hints.suggested_include_terms.map((term) => (
-                              <span
-                                key={`inc-${term}`}
-                                className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                              >
-                                {term}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {discovery.hints.suggested_exclude_terms.length > 0 && (
-                        <div>
-                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-600">
-                            Suggested Exclude Terms
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {discovery.hints.suggested_exclude_terms.map((term) => (
-                              <span
-                                key={`exc-${term}`}
-                                className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700"
-                              >
-                                {term}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
+                {!isDedicatedCommunityView && (
+                  <article className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h5 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                        Discovered Threads
+                      </h5>
+                      {selectedCommunity.is_show_focused ? (
+                        <span className="text-xs font-semibold text-emerald-700">
+                          Show-focused: all discovered posts shown
+                        </span>
+                      ) : (
+                        <label className="inline-flex items-center gap-2 text-xs text-zinc-600">
+                          <input
+                            type="checkbox"
+                            checked={showOnlyMatches}
+                            onChange={(event) => setShowOnlyMatches(event.target.checked)}
+                          />
+                          Show matched only
+                        </label>
                       )}
                     </div>
-                  )}
 
-                  {!discovery ? (
-                    <p className="text-sm text-zinc-500">
-                      Run discovery to load recent `new`/`hot`/`top` threads and show-match hints.
-                    </p>
-                  ) : visibleDiscoveryThreads.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No threads matched the current filter.</p>
-                  ) : isDedicatedCommunityView ? (
-                    flairGroupedDiscoveryThreads.length === 0 ? (
+                    {discovery?.hints && (
+                      <div className="mb-4 space-y-2">
+                        {discovery.hints.suggested_include_terms.length > 0 && (
+                          <div>
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-600">
+                              Suggested Include Terms
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {discovery.hints.suggested_include_terms.map((term) => (
+                                <span
+                                  key={`inc-${term}`}
+                                  className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                >
+                                  {term}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {discovery.hints.suggested_exclude_terms.length > 0 && (
+                          <div>
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-600">
+                              Suggested Exclude Terms
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {discovery.hints.suggested_exclude_terms.map((term) => (
+                                <span
+                                  key={`exc-${term}`}
+                                  className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700"
+                                >
+                                  {term}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!discovery ? (
                       <p className="text-sm text-zinc-500">
-                        {isBravoRealHousewivesCommunity
-                          ? "No additional tracked flair posts found outside episode discussions."
-                          : "No non-episode posts with selected flairs matched the current filter."}
+                        Run discovery to load recent `new`/`hot`/`top` threads and show-match hints.
                       </p>
+                    ) : visibleDiscoveryThreads.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No threads matched the current filter.</p>
                     ) : (
                       <div className="space-y-3">
-                        {flairGroupedDiscoveryThreads.map((group) => (
-                          <details
-                            key={`flair-group-${group.flairLabel.toLowerCase()}`}
-                            open
-                            className="rounded-lg border border-zinc-200 bg-zinc-50/50 p-3"
-                          >
-                            <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-800">
-                              {group.flairLabel} · {fmtNum(group.threads.length)} posts
-                            </summary>
-                            <div className="mt-3 space-y-3">
-                              {group.threads.map((thread) => renderDiscoveryThreadCard(thread))}
-                            </div>
-                          </details>
-                        ))}
+                        {visibleDiscoveryThreads.map((thread) => renderDiscoveryThreadCard(thread))}
                       </div>
-                    )
-                  ) : (
-                    <div className="space-y-3">
-                      {visibleDiscoveryThreads.map((thread) => renderDiscoveryThreadCard(thread))}
-                    </div>
-                  )}
-                </article>
+                    )}
+                  </article>
+                )}
               </>
             )}
           </section>

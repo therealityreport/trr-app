@@ -55,7 +55,7 @@ describe("social ingest proxy route", () => {
       showId,
       "6",
       "/ingest",
-      expect.objectContaining({ seasonIdHint: seasonId }),
+      expect.objectContaining({ seasonIdHint: seasonId, retries: 0, timeoutMs: 210_000 }),
     );
   });
 
@@ -75,5 +75,31 @@ describe("social ingest proxy route", () => {
     expect(payload.code).toBe("BAD_REQUEST");
     expect(payload.error).toContain("season_id");
     expect(fetchSeasonBackendJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("passes scheduler payload fields through to backend ingest body", async () => {
+    const request = new NextRequest(
+      `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/ingest?season_id=${seasonId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          source_scope: "bravo",
+          runner_strategy: "adaptive_dual_runner",
+          runner_count: 2,
+          window_shard_hours: 2,
+          day_weight_profile: "rhoslc_default",
+          priority_mode: "episode_peak_weighted",
+        }),
+      },
+    );
+
+    const response = await POST(request, { params: Promise.resolve({ showId, seasonNumber: "6" }) });
+    expect(response.status).toBe(200);
+    const body = String(fetchSeasonBackendJsonMock.mock.calls[0]?.[3]?.body ?? "");
+    expect(body).toContain("\"runner_strategy\":\"adaptive_dual_runner\"");
+    expect(body).toContain("\"runner_count\":2");
+    expect(body).toContain("\"window_shard_hours\":2");
+    expect(body).toContain("\"day_weight_profile\":\"rhoslc_default\"");
+    expect(body).toContain("\"priority_mode\":\"episode_peak_weighted\"");
   });
 });

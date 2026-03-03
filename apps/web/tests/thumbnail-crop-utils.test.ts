@@ -88,22 +88,21 @@ describe("thumbnail-crop utils", () => {
     expect(result.zoom).toBe(1.12);
   });
 
-  it("computes preview viewport box for 4:5 thumbnails", () => {
+  it("computes preview viewport box for 3:4 thumbnails", () => {
     const rect = resolveThumbnailViewportRect({
       imageWidth: 1000,
       imageHeight: 1500,
       focusX: 50,
       focusY: 50,
       zoom: 1,
-      aspectRatio: 4 / 5,
+      aspectRatio: 3 / 4,
     });
 
-    expect(rect).toEqual({
-      leftPct: 0,
-      topPct: 8.333333333333332,
-      widthPct: 100,
-      heightPct: 83.33333333333334,
-    });
+    expect(rect).not.toBeNull();
+    expect(rect!.leftPct).toBe(0);
+    expect(rect!.topPct).toBeCloseTo(5.555555555555555, 10);
+    expect(rect!.widthPct).toBe(100);
+    expect(rect!.heightPct).toBeCloseTo(88.88888888888889, 10);
   });
 
   it("clamps preview viewport to image bounds near edges", () => {
@@ -113,7 +112,7 @@ describe("thumbnail-crop utils", () => {
       focusX: 0,
       focusY: 0,
       zoom: 1.6,
-      aspectRatio: 4 / 5,
+      aspectRatio: 3 / 4,
     });
 
     expect(rect).not.toBeNull();

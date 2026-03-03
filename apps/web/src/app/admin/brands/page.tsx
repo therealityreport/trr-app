@@ -1,15 +1,61 @@
 "use client";
 
 import Link from "next/link";
+import { useCallback, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 export default function AdminBrandsPage() {
   const { user, checking, hasAccess } = useAdminGuard();
+  const [syncing, setSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const syncAllBrandLogos = useCallback(async () => {
+    setSyncing(true);
+    setSyncNotice(null);
+    setSyncError(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        "/api/admin/trr-api/brands/logos/sync",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scope: "all",
+            only_missing: true,
+            force: false,
+            limit: 200,
+          }),
+        },
+        { preferredUser: user, allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        targets_scanned?: number;
+        imports_created?: number;
+        imports_updated?: number;
+        unresolved?: number;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to sync brand logos");
+      }
+      setSyncNotice(
+        `Scanned ${Number(payload.targets_scanned ?? 0)} targets, imported ${
+          Number(payload.imports_created ?? 0) + Number(payload.imports_updated ?? 0)
+        }, unresolved ${Number(payload.unresolved ?? 0)}.`,
+      );
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Failed to sync brand logos");
+    } finally {
+      setSyncing(false);
+    }
+  }, [user]);
 
   if (checking) {
     return (
@@ -40,6 +86,14 @@ export default function AdminBrandsPage() {
               <BrandsTabs activeTab="brands" className="mt-4" />
             </div>
             <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void syncAllBrandLogos()}
+                disabled={syncing}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
+              >
+                {syncing ? "Syncing..." : "Sync All Brand Logos"}
+              </button>
               <Link
                 href="/admin"
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
@@ -84,6 +138,14 @@ export default function AdminBrandsPage() {
                 Open Shows & Franchises
               </Link>
             </div>
+            {syncError ? (
+              <p className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncError}</p>
+            ) : null}
+            {syncNotice ? (
+              <p className="mt-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                {syncNotice}
+              </p>
+            ) : null}
           </section>
         </main>
       </div>

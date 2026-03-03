@@ -6,6 +6,27 @@ import {
 } from "@/lib/photo-metadata";
 
 describe("mapPhotoToMetadata", () => {
+  it("exposes mirror hosted url when hosted asset is present", () => {
+    const result = mapPhotoToMetadata({
+      id: "mirror-1",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/source.jpg",
+      hosted_url: "https://d1fmdyqfafwim3.cloudfront.net/media/example.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.mirrorHostedUrl).toBe("https://d1fmdyqfafwim3.cloudfront.net/media/example.jpg");
+  });
+
   it("maps source to badge color", () => {
     const result = mapPhotoToMetadata({
       id: "1",
@@ -110,6 +131,60 @@ describe("mapPhotoToMetadata", () => {
     expect(result.faceCrops?.length).toBe(1);
     expect(result.faceCrops?.[0].variantUrl).toBe("https://cdn.example.com/face-crops/imdb/1.jpg");
     expect(result.faceCrops?.[0].size).toBe(256);
+  });
+
+  it("parses face-box match diagnostics metadata", () => {
+    const result = mapPhotoToMetadata({
+      id: "face-boxes-1",
+      person_id: "p1",
+      source: "imdb",
+      url: null,
+      hosted_url: "https://example.com/image.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+      face_boxes: [
+        {
+          index: 1,
+          kind: "face",
+          x: 0.1,
+          y: 0.2,
+          width: 0.3,
+          height: 0.3,
+          confidence: 0.9,
+          person_name: "Alan Cumming",
+          match_status: "below_threshold",
+          match_similarity: 0.811,
+          match_reason: "candidate_filter_empty",
+          label_source: "reference_pool",
+          match_candidates: [
+            {
+              person_name: "Susan Lucci",
+              similarity: 0.811,
+            },
+            {
+              person_id: "person-2",
+              similarity: 0.643,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.faceBoxes).toBeDefined();
+    expect(result.faceBoxes?.length).toBe(1);
+    expect(result.faceBoxes?.[0].match_status).toBe("below_threshold");
+    expect(result.faceBoxes?.[0].match_reason).toBe("candidate_filter_empty");
+    expect(result.faceBoxes?.[0].match_candidates).toEqual([
+      { person_name: "Susan Lucci", similarity: 0.811 },
+      { person_id: "person-2", similarity: 0.643 },
+    ]);
   });
 
   it("normalizes source case for badge colors", () => {
@@ -553,6 +628,34 @@ describe("mapPhotoToMetadata", () => {
     expect(unresolvedResult.showId).toBeNull();
     expect(unresolvedResult.showName).toBe("The Traitors");
     expect(unresolvedResult.showContextSource).toBeNull();
+  });
+
+  it("maps canonical IMDb title fields and credit media type", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-title-canonical",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/M/MV5BTITLE._V1_.jpg",
+      hosted_url: "https://cdn.example.com/imdb-title.jpg",
+      caption: "Alan Cumming in Episode Name (2025)",
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: ["Episode Name"],
+      metadata: {
+        imdb_title_id: "tt26755932",
+        imdb_title_type: "TVEpisode",
+        imdb_credit_media_type: "TV Episode",
+      },
+      fetched_at: null,
+    });
+
+    expect(result.imdbTitleId).toBe("tt26755932");
+    expect(result.imdbTitleUrl).toBe("https://www.imdb.com/title/tt26755932/");
+    expect(result.imdbCreditMediaType).toBe("TV Episode");
+    expect(result.imdbCreditType).toBe("TV Episode");
   });
 
   it("derives s3 mirror filename from hosted URL", () => {

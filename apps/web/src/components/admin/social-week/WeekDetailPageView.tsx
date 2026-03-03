@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import Link from "next/link";
@@ -17,7 +17,11 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildSeasonAdminUrl, buildSeasonSocialWeekUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
-import { pickFirstNonVideoUrl, selectTwitterThumbnailUrl } from "./social-media-thumbnails";
+import {
+  pickFirstNonVideoUrl,
+  selectInstagramTikTokThumbnailUrl,
+  selectTwitterThumbnailUrl,
+} from "./social-media-thumbnails";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -88,7 +92,43 @@ interface PostUserSummary {
 
 interface PostCollaboratorDetail {
   username?: string | null;
+  user_name?: string | null;
+  handle?: string | null;
+  screen_name?: string | null;
+  full_name?: string | null;
+  fullName?: string | null;
+  display_name?: string | null;
+  displayName?: string | null;
+  name?: string | null;
   profile_pic_url?: string | null;
+  profile_pic_url_hd?: string | null;
+  user_avatar_url?: string | null;
+  avatar_url?: string | null;
+  profile_image_url?: string | null;
+  profileImageUrl?: string | null;
+  profile_url?: string | null;
+  profileUrl?: string | null;
+  user_url?: string | null;
+  url?: string | null;
+  is_verified?: boolean | null;
+  verified?: boolean | null;
+  tag_x?: number | null;
+  tag_y?: number | null;
+  tag_position_source?: string | null;
+}
+
+interface InstagramChildPostData {
+  slide_index?: number | null;
+  media_url?: string | null;
+  thumbnail_url?: string | null;
+  source_media_url?: string | null;
+  hosted_media_url?: string | null;
+  source_thumbnail_url?: string | null;
+  hosted_thumbnail_url?: string | null;
+  media_urls?: string[] | null;
+  tagged_users_detail?: PostCollaboratorDetail[] | null;
+  profile_tags_detail?: PostCollaboratorDetail[] | null;
+  mentions_detail?: PostCollaboratorDetail[] | null;
 }
 
 interface BasePost {
@@ -117,6 +157,7 @@ interface BasePost {
   hosted_owner_profile_pic_url?: string | null;
   hosted_tagged_profile_pics?: Record<string, string> | null;
   collaborators_detail?: PostCollaboratorDetail[] | null;
+  child_posts_data?: InstagramChildPostData[] | null;
 }
 
 interface InstagramPost extends BasePost {
@@ -278,6 +319,12 @@ interface PostDetailResponse {
   collaborators?: string[];
   hashtags?: string[];
   mentions?: string[];
+  tagged_users_detail?: PostCollaboratorDetail[] | null;
+  profile_tags_detail?: PostCollaboratorDetail[] | null;
+  mentions_detail?: PostCollaboratorDetail[] | null;
+  collaborators_detail?: PostCollaboratorDetail[] | null;
+  hosted_tagged_profile_pics?: Record<string, string> | null;
+  child_posts_data?: InstagramChildPostData[] | null;
   duration_seconds?: number | null;
   media_asset_meta?: {
     selection_policy?: string | null;
@@ -332,7 +379,7 @@ interface PostDetailResponse {
     detail_sync?: {
       detail?: { status?: string; error?: string | null } | null;
       comments?: { status?: string; is_complete?: boolean; reason?: string | null } | null;
-      media?: { status?: string; error?: string | null } | null;
+      media?: { status?: string; processed?: number | null; mirrored_assets?: number | null; error?: string | null } | null;
     } | null;
     warnings?: string[] | null;
     comment_gap?: {
@@ -451,6 +498,7 @@ type PlatformFilter = "all" | "instagram" | "tiktok" | "twitter" | "youtube" | "
 type SocialPlatform = Exclude<PlatformFilter, "all">;
 type SortField = "engagement" | "likes" | "views" | "comments_count" | "shares" | "retweets" | "posted_at";
 type SortDir = "desc" | "asc";
+type SummaryTokenKey = "collaborators" | "tags" | "mentions" | "hashtags";
 type SourceScope = "bravo" | "creator" | "community";
 type IngestMode = "posts_only" | "posts_and_comments" | "comments_only" | "details_refresh";
 type SocialMediaType = "image" | "video" | "embed";
@@ -470,6 +518,37 @@ interface SocialStatsItem {
   value: string;
 }
 
+interface InstagramTagMarker {
+  id: string;
+  xPct: number;
+  yPct: number;
+  label: string;
+}
+
+interface StageProgressSnapshot {
+  total: number;
+  completed: number;
+  failed: number;
+  active: number;
+  scraped: number;
+  saved: number;
+}
+
+interface HandleStageProgressSnapshot extends StageProgressSnapshot {
+  stage: string;
+}
+
+interface HandleJobProgressCard {
+  id: string;
+  platform: string;
+  platformLabel: string;
+  handle: string;
+  handleLabel: string;
+  runnerLanes: string[];
+  totals: StageProgressSnapshot;
+  stages: HandleStageProgressSnapshot[];
+}
+
 interface SocialMediaLightboxEntry {
   id: string;
   src: string;
@@ -487,6 +566,11 @@ interface PostDetailMediaFields {
   thumbnail_url?: string | null;
   source_thumbnail_url?: string | null;
   hosted_thumbnail_url?: string | null;
+}
+
+interface InstagramDrawerSlide {
+  index: number;
+  src: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -556,6 +640,14 @@ const PLATFORM_LABELS: Record<string, string> = {
   facebook: "Facebook",
   threads: "Threads",
 };
+const VERIFIED_BADGE_URL_BY_PLATFORM: Record<string, string> = {
+  instagram: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/instagram-threads-verified.png",
+  threads: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/instagram-threads-verified.png",
+  tiktok: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/tiktok-verified.svg",
+  twitter: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/x-twitter-verified.png",
+};
+const getSyncActionPlatformLabel = (platform: Exclude<PlatformFilter, "all">): string =>
+  platform === "twitter" ? "X" : (PLATFORM_LABELS[platform] ?? platform);
 const PLATFORM_HANDLE_FALLBACK: Record<string, string> = {
   youtube: "Bravo",
   facebook: "Bravo",
@@ -570,9 +662,129 @@ const STAT_LABELS: Record<string, string> = {
   shares: "Shares",
   saves: "Saves",
   retweets: "Reposts",
+  reposts: "Reposts",
   replies_count: "Replies",
   quotes: "Quotes",
   engagement: "Total Engagement",
+};
+
+/** Per-platform summary metric definition for the top-of-view containers. */
+interface PlatformSummaryMetric {
+  key: string;
+  label: string;
+  aggregate?: "twitter_reposts" | "comments_normalized";
+}
+
+interface PlatformSummaryTokenConfig {
+  key: SummaryTokenKey;
+  label: string;
+}
+
+interface PlatformSummaryConfig {
+  metrics: PlatformSummaryMetric[];
+  tokens: PlatformSummaryTokenConfig[];
+}
+
+const PLATFORM_SUMMARY_CONFIG: Record<PlatformFilter, PlatformSummaryConfig> = {
+  instagram: {
+    metrics: [
+      { key: "likes", label: "Likes" },
+      { key: "comments_count", label: "Comments" },
+      { key: "views", label: "Views" },
+    ],
+    tokens: [
+      { key: "collaborators", label: "Collaborators" },
+      { key: "tags", label: "Tags" },
+      { key: "mentions", label: "Mentions" },
+      { key: "hashtags", label: "Hashtags" },
+    ],
+  },
+  tiktok: {
+    metrics: [
+      { key: "likes", label: "Likes" },
+      { key: "comments_count", label: "Comments" },
+      { key: "shares", label: "Shares" },
+      { key: "saves", label: "Saves" },
+      { key: "views", label: "Views" },
+    ],
+    tokens: [
+      { key: "mentions", label: "Mentions" },
+      { key: "hashtags", label: "Hashtags" },
+    ],
+  },
+  twitter: {
+    metrics: [
+      { key: "likes", label: "Likes" },
+      { key: "views", label: "Views" },
+      { key: "reposts_computed", label: "Reposts", aggregate: "twitter_reposts" },
+      { key: "quotes", label: "Quotes" },
+      { key: "replies_count", label: "Replies" },
+    ],
+    tokens: [
+      { key: "hashtags", label: "Hashtags" },
+      { key: "mentions", label: "Mentions" },
+    ],
+  },
+  youtube: {
+    metrics: [
+      { key: "views", label: "Views" },
+      { key: "likes", label: "Likes" },
+      { key: "comments_count", label: "Comments" },
+    ],
+    tokens: [],
+  },
+  facebook: {
+    metrics: [
+      { key: "likes", label: "Likes" },
+      { key: "comments_count", label: "Comments" },
+      { key: "shares", label: "Shares" },
+      { key: "views", label: "Views" },
+    ],
+    tokens: [],
+  },
+  threads: {
+    metrics: [
+      { key: "likes", label: "Likes" },
+      { key: "replies_count", label: "Replies" },
+      { key: "reposts", label: "Reposts" },
+      { key: "quotes", label: "Quotes" },
+      { key: "views", label: "Views" },
+    ],
+    tokens: [],
+  },
+  all: {
+    metrics: [
+      { key: "comments_normalized", label: "Comments", aggregate: "comments_normalized" },
+      { key: "likes", label: "Likes" },
+      { key: "views", label: "Views" },
+    ],
+    tokens: [
+      { key: "collaborators", label: "Collaborators" },
+      { key: "tags", label: "Tags" },
+      { key: "mentions", label: "Mentions" },
+      { key: "hashtags", label: "Hashtags" },
+    ],
+  },
+};
+
+const SUMMARY_ROW1_GRID: Record<PlatformFilter, string> = {
+  instagram: "grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-5",
+  tiktok: "grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7",
+  twitter: "grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7",
+  youtube: "grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-5",
+  facebook: "grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-6",
+  threads: "grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7",
+  all: "grid grid-cols-2 gap-4 mb-6 sm:grid-cols-3 md:grid-cols-5",
+};
+
+const SUMMARY_ROW2_GRID: Record<PlatformFilter, string> = {
+  instagram: "mb-6 grid grid-cols-2 gap-3 md:grid-cols-4",
+  tiktok: "mb-6 grid grid-cols-2 gap-3",
+  twitter: "mb-6 grid grid-cols-2 gap-3",
+  youtube: "",
+  facebook: "",
+  threads: "",
+  all: "mb-6 grid grid-cols-2 gap-3 md:grid-cols-4",
 };
 
 const UUID_RE =
@@ -585,22 +797,46 @@ const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^\d{4}-\d{2}-\d{2}$/;
 const COMMENT_SYNC_MAX_PASSES = 8;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
+const SYNC_GALLERY_REFRESH_MS = 20_000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
 const WEEK_DETAIL_MAX_COMMENTS_PER_POST = 0;
 const WEEK_DETAIL_POST_LIMIT = 20;
+const WEEK_DETAIL_METRICS_PAGE_LIMIT = 100;
+const WEEK_DETAIL_METRICS_MAX_PAGES = 500;
 const REQUEST_TIMEOUT_MS = {
   weekDetail: 50_000,
+  weekDetailRefresh: 90_000,
   weekDetailYoutubeRefresh: 120_000,
-  ingestKickoff: 25_000,
-  syncRuns: 15_000,
-  syncJobs: 15_000,
+  ingestKickoff: 210_000,
+  syncRuns: 30_000,
+  syncJobs: 30_000,
   commentsCoverage: 35_000,
   mirrorCoverage: 35_000,
-  workerHealth: 12_000,
+  workerHealth: 20_000,
 } as const;
+const SYNC_KICKOFF_TIMEOUT_MESSAGE = "Sync kickoff request timed out";
+const SYNC_KICKOFF_MAX_ATTEMPTS = 1;
+const SYNC_KICKOFF_RECOVERY_LOOKBACK_MS = 5 * 60 * 1000;
+const SYNC_KICKOFF_RECOVERY_LIMIT = 25;
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
+const RHOSLC_INSTAGRAM_ACCOUNTS = ["bravotv", "bravowwhl"] as const;
+const RHOSLC_REQUIRED_HASHTAG = "RHOSLC";
+const TOKEN_HANDLE_DETAIL_KEYS = [
+  "tagged_users_detail",
+  "collaborators_detail",
+  "profile_tags_detail",
+  "mentions_detail",
+  "tagged_users",
+  "mentioned_users",
+  "tags_detail",
+] as const;
+const INSTAGRAM_TAG_MARKER_DETAIL_KEYS = [
+  "tagged_users_detail",
+  "profile_tags_detail",
+  "mentions_detail",
+] as const;
 const TRANSIENT_DEV_RESTART_PATTERNS = [
   "failed to fetch",
   "networkerror when attempting to fetch resource",
@@ -609,6 +845,7 @@ const TRANSIENT_DEV_RESTART_PATTERNS = [
   "invalid json",
   "load failed",
   "connection closed",
+  "could not reach trr-backend",
 ] as const;
 const SOCIAL_MEDIA_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|$)/i;
 const SOCIAL_MEDIA_VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|m3u8|mpd)(\?|$)/i;
@@ -638,9 +875,18 @@ const fetchWithTimeout = async (
   init: RequestInit,
   timeoutMs: number,
   timeoutMessage: string,
+  externalSignal?: AbortSignal,
 ): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timeoutId);
+      throw new DOMException("Aborted", "AbortError");
+    }
+    externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
   try {
     return await fetch(input, {
       ...init,
@@ -648,11 +894,17 @@ const fetchWithTimeout = async (
     });
   } catch (error) {
     if (isAbortError(error)) {
+      if (externalSignal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
       throw new Error(timeoutMessage);
     }
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
   }
 };
 
@@ -660,6 +912,13 @@ const isTransientDevRestartMessage = (message: string | null | undefined): boole
   const normalized = String(message ?? "").toLowerCase();
   if (!normalized) return false;
   return TRANSIENT_DEV_RESTART_PATTERNS.some((pattern) => normalized.includes(pattern));
+};
+
+const isRecoverableSyncKickoffMessage = (message: string | null | undefined): boolean => {
+  const normalized = String(message ?? "").toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes("timed out")) return true;
+  return isTransientDevRestartMessage(normalized);
 };
 
 const buildCanonicalRoute = (relativeUrl: string): string => {
@@ -789,6 +1048,7 @@ function getStr(post: AnyPost, key: string): string {
 
 const HASHTAG_TOKEN_RE = /#([A-Za-z0-9_]+)/g;
 const MENTION_TOKEN_RE = /@([A-Za-z0-9_.]+)/g;
+const TWITTER_TEXT_URL_RE = /https?:\/\/t\.co\/[A-Za-z0-9]+/gi;
 
 function dedupeCaseInsensitive(values: string[]): string[] {
   const seen = new Set<string>();
@@ -829,7 +1089,10 @@ function normalizeMentionTokens(values: string[]): string[] {
   );
 }
 
-function getPostHashtags(post: AnyPost): string[] {
+function getPostHashtags(platform: string, post: AnyPost): string[] {
+  if (platform === "youtube" || platform === "facebook") {
+    return parseHashtagsFromText(getStr(post, "text"));
+  }
   const stored = normalizeHashtagTokens(getStrArr(post, "hashtags"));
   if (stored.length > 0) return stored;
   return parseHashtagsFromText(getStr(post, "text"));
@@ -839,6 +1102,13 @@ function getPostMentions(post: AnyPost): string[] {
   const stored = normalizeMentionTokens(getStrArr(post, "mentions"));
   if (stored.length > 0) return stored;
   return parseMentionsFromText(getStr(post, "text"));
+}
+
+function normalizeCaptionPreviewText(platform: string, text: string | null | undefined): string {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return "";
+  if (platform !== "twitter") return raw;
+  return raw.replace(TWITTER_TEXT_URL_RE, "").replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
 }
 
 function getActualCommentsForPost(platform: string, post: AnyPost): number {
@@ -956,13 +1226,18 @@ function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
   }
   if (hostedThumbnail) return hostedThumbnail;
   if (platform === "youtube") return getStr(post, "thumbnail_url") || null;
-  if (platform === "instagram") {
+  if (platform === "instagram" || platform === "tiktok") {
     const thumbnail = getStr(post, "thumbnail_url");
-    if (thumbnail) return thumbnail;
     const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
-    if (hostedMediaUrls[0]) return hostedMediaUrls[0];
+    const sourceMediaUrls = getStrArr(post, "source_media_urls");
     const mediaUrls = getStrArr(post, "media_urls");
-    return mediaUrls[0] || null;
+    return selectInstagramTikTokThumbnailUrl({
+      hostedThumbnail,
+      thumbnail,
+      hostedMediaUrls,
+      mediaUrls,
+      sourceMediaUrls,
+    });
   }
   return getStr(post, "thumbnail_url") || getStrArr(post, "hosted_media_urls")[0] || null;
 }
@@ -1009,6 +1284,17 @@ function selectPreferredMediaUrlPair(sourceMediaUrlRaw: string | null, hostedMed
   const hostedMediaUrl = normalizeSocialMediaCandidateUrl(hostedMediaUrlRaw);
 
   if (sourceMediaUrl && hostedMediaUrl) {
+    const sourceMediaType = detectSocialMediaType(sourceMediaUrl);
+    const hostedMediaType = detectSocialMediaType(hostedMediaUrl);
+    const sourceIsPlayable = sourceMediaType === "video" || sourceMediaType === "embed";
+    const hostedIsThumbnailLike = hostedMediaType === "image" || isLikelyHtmlDocumentUrl(hostedMediaUrl);
+    if (sourceIsPlayable && hostedIsThumbnailLike) {
+      return {
+        src: sourceMediaUrl,
+        mirrored: false,
+        originalSrc: sourceMediaUrl,
+      };
+    }
     // When a mirrored URL exists, keep playback anchored to mirrored assets only.
     return {
       src: hostedMediaUrl,
@@ -1194,7 +1480,22 @@ function pickFirstUrl(urls: Array<string | null | undefined>): string | null {
 
 function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | null {
   const hostedMediaUrls = data.hosted_media_urls ?? [];
+  const sourceMediaUrls = (data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? []);
+
   if (hostedMediaUrls.length > 0) {
+    const pairCount = Math.max(sourceMediaUrls.length, hostedMediaUrls.length);
+    for (let index = 0; index < pairCount; index += 1) {
+      const sourceMediaUrl = normalizeSocialMediaCandidateUrl(sourceMediaUrls[index]);
+      const hostedMediaUrl = normalizeSocialMediaCandidateUrl(hostedMediaUrls[index]);
+      if (!sourceMediaUrl || !hostedMediaUrl) continue;
+      const sourceType = detectSocialMediaType(sourceMediaUrl);
+      const hostedType = detectSocialMediaType(hostedMediaUrl);
+      const hostedIsThumbnailLike = hostedType === "image" || isLikelyHtmlDocumentUrl(hostedMediaUrl);
+      if (sourceType === "video" && hostedIsThumbnailLike) {
+        return sourceMediaUrl;
+      }
+    }
+
     const hostedVideoCandidate = pickFirstVideoUrl(hostedMediaUrls);
     if (hostedVideoCandidate) return hostedVideoCandidate;
 
@@ -1208,13 +1509,12 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
     ]);
   }
 
-  const videoCandidate = pickFirstVideoUrl([...(data.source_media_urls ?? []), ...(data.media_urls ?? [])]);
+  const videoCandidate = pickFirstVideoUrl(sourceMediaUrls);
   if (videoCandidate) return videoCandidate;
-  const embedCandidate = pickFirstEmbeddableUrl([...(data.source_media_urls ?? []), ...(data.media_urls ?? [])]);
+  const embedCandidate = pickFirstEmbeddableUrl(sourceMediaUrls);
   if (embedCandidate) return embedCandidate;
   return pickFirstUrl([
-    ...(data.source_media_urls ?? []),
-    ...(data.media_urls ?? []),
+    ...sourceMediaUrls,
     data.hosted_thumbnail_url,
     data.thumbnail_url,
     data.source_thumbnail_url,
@@ -1222,7 +1522,7 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
 }
 
 function getPostDetailThumbnailUrl(data: PostDetailMediaFields): string | null {
-  return pickFirstNonVideoUrl([
+  const preferred = pickFirstNonVideoUrl([
     data.hosted_thumbnail_url,
     data.thumbnail_url,
     data.source_thumbnail_url,
@@ -1230,6 +1530,84 @@ function getPostDetailThumbnailUrl(data: PostDetailMediaFields): string | null {
     ...(data.media_urls ?? []),
     ...(data.source_media_urls ?? []),
   ]);
+  if (preferred) return preferred;
+  return pickFirstUrl([
+    data.hosted_thumbnail_url,
+    data.thumbnail_url,
+    data.source_thumbnail_url,
+    ...(data.hosted_media_urls ?? []),
+    ...(data.media_urls ?? []),
+    ...(data.source_media_urls ?? []),
+  ]);
+}
+
+function resolveInstagramChildPostMediaSrc(childPost: Record<string, unknown>): string | null {
+  const childMediaUrls = Array.isArray(childPost.media_urls)
+    ? childPost.media_urls.filter((value): value is string => typeof value === "string")
+    : [];
+  return (
+    pickFirstNonHtmlUrl([
+      ...childMediaUrls,
+      pickNonEmptyStringFromRecord(childPost, ["hosted_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["hosted_thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_thumbnail_url"]),
+    ]) ??
+    pickFirstUrl([
+      ...childMediaUrls,
+      pickNonEmptyStringFromRecord(childPost, ["hosted_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["media_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["hosted_thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["thumbnail_url"]),
+      pickNonEmptyStringFromRecord(childPost, ["source_thumbnail_url"]),
+    ])
+  );
+}
+
+function buildInstagramDrawerSlides(data: PostDetailResponse): InstagramDrawerSlide[] {
+  const sourceMediaUrls =
+    (data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? []);
+  const hostedMediaUrls = data.hosted_media_urls ?? [];
+  const mediaUrls = (data.media_urls ?? []).length > 0 ? (data.media_urls ?? []) : sourceMediaUrls;
+  const childPosts = getInstagramChildPostRecords(data);
+  const childPostsBySlide = new Map<number, Record<string, unknown>>();
+  for (const childPost of childPosts) {
+    if (!childPostsBySlide.has(childPost.slideIndex)) {
+      childPostsBySlide.set(childPost.slideIndex, childPost.record);
+    }
+  }
+
+  const totalSlides = Math.max(mediaUrls.length, sourceMediaUrls.length, hostedMediaUrls.length, childPosts.length);
+  const slides: InstagramDrawerSlide[] = [];
+
+  for (let index = 0; index < totalSlides; index += 1) {
+    const childPostRecord = childPostsBySlide.get(index) ?? childPosts[index]?.record ?? null;
+    const childMediaSrc = childPostRecord ? resolveInstagramChildPostMediaSrc(childPostRecord) : null;
+    const src =
+      pickFirstNonHtmlUrl([
+        hostedMediaUrls[index],
+        mediaUrls[index],
+        sourceMediaUrls[index],
+        childMediaSrc,
+      ]) ??
+      pickFirstUrl([
+        hostedMediaUrls[index],
+        mediaUrls[index],
+        sourceMediaUrls[index],
+        childMediaSrc,
+      ]);
+    if (!src) continue;
+    slides.push({ index, src });
+  }
+
+  if (slides.length > 0) return slides;
+
+  const fallbackSrc = getPostDetailThumbnailUrl(data);
+  if (!fallbackSrc) return [];
+  return [{ index: 0, src: fallbackSrc }];
 }
 
 function mergePostWithDetailMedia(post: AnyPost, detailMedia: PostDetailMediaFields | null | undefined): AnyPost {
@@ -1345,6 +1723,7 @@ function buildSocialPostMetadata({
   const isS3Mirrored = media.mirrored || isLikelyMirroredSocialUrl(media.src);
   const mirrorFileName = isS3Mirrored ? inferMirrorFileNameFromUrl(media.src) : null;
   const originalMediaUrl = media.originalSrc ?? (!isS3Mirrored ? media.src : null);
+  const sourcePostUrl = resolvePostExternalUrl(platform, post);
 
   const postNumber = computeDailyPostNumber(platform, post, allPlatformPosts);
   const displayName = buildPostDisplayName(showSlug, post.author, platform, postNumber);
@@ -1362,7 +1741,7 @@ function buildSocialPostMetadata({
     s3MirrorFileName: mirrorFileName,
     originalImageUrl: originalMediaUrl,
     originalSourceFileUrl: originalMediaUrl,
-    originalSourcePageUrl: post.url || null,
+    originalSourcePageUrl: sourcePostUrl,
     originalSourceLabel: sourceLabel,
     fileType,
     createdAt: validPostedDate,
@@ -1377,7 +1756,7 @@ function buildSocialPostMetadata({
     episodeLabel: weekLabel,
     sourceVariant: sourceScope.toUpperCase(),
     sourcePageTitle,
-    sourceUrl: post.url || media.src,
+    sourceUrl: sourcePostUrl || media.src,
     faceBoxes: [],
     peopleCount: null,
     caption,
@@ -1459,6 +1838,336 @@ function formatHandleLabel(handle: string | null | undefined): string {
   return normalized ? `@${normalized}` : "";
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function pickNonEmptyStringFromRecord(
+  record: Record<string, unknown> | null | undefined,
+  keys: readonly string[],
+): string | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value !== "string") continue;
+    const normalized = value.trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function pickObjectArrayFromRecord(record: Record<string, unknown> | null | undefined, key: string): Record<string, unknown>[] {
+  if (!record) return [];
+  const value = record[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => entry !== null);
+}
+
+function resolveDetailHandleValue(detail: Record<string, unknown>): string {
+  const directHandle = pickNonEmptyStringFromRecord(detail, [
+    "username",
+    "user_name",
+    "userName",
+    "screen_name",
+    "screenName",
+    "handle",
+    "tagged_username",
+    "mentioned_username",
+    "account_username",
+    "profile_username",
+    "author",
+    "source_account",
+  ]);
+  if (directHandle) return normalizeHandle(directHandle);
+  const userRecord = asRecord(detail.user);
+  const nestedHandle = pickNonEmptyStringFromRecord(userRecord, [
+    "username",
+    "user_name",
+    "userName",
+    "screen_name",
+    "screenName",
+    "handle",
+  ]);
+  return normalizeHandle(nestedHandle);
+}
+
+function resolveDetailDisplayNameValue(detail: Record<string, unknown>): string | null {
+  const directName = pickNonEmptyStringFromRecord(detail, [
+    "full_name",
+    "fullName",
+    "display_name",
+    "displayName",
+    "name",
+    "nickname",
+  ]);
+  if (directName) return directName;
+  const userRecord = asRecord(detail.user);
+  return pickNonEmptyStringFromRecord(userRecord, [
+    "full_name",
+    "fullName",
+    "display_name",
+    "displayName",
+    "name",
+    "nickname",
+  ]);
+}
+
+function resolveDetailAvatarValue(detail: Record<string, unknown>): string | null {
+  const directAvatar = pickNonEmptyStringFromRecord(detail, [
+    "profile_pic_url",
+    "profile_pic_url_hd",
+    "avatar_url",
+    "user_avatar_url",
+    "profile_image_url",
+    "profileImageUrl",
+    "profile_picture_url",
+    "photo_url",
+    "image_url",
+  ]);
+  if (directAvatar) return directAvatar;
+  const userRecord = asRecord(detail.user);
+  return pickNonEmptyStringFromRecord(userRecord, [
+    "profile_pic_url",
+    "profile_pic_url_hd",
+    "avatar_url",
+    "user_avatar_url",
+    "profile_image_url",
+    "profileImageUrl",
+    "profile_picture_url",
+    "photo_url",
+    "image_url",
+  ]);
+}
+
+function resolveDetailProfileUrlValue(detail: Record<string, unknown>): string | null {
+  const directUrl = pickNonEmptyStringFromRecord(detail, [
+    "url",
+    "profile_url",
+    "profileUrl",
+    "user_url",
+    "userUrl",
+    "account_url",
+    "accountUrl",
+  ]);
+  if (directUrl) return normalizeExternalUrl(directUrl);
+  const userRecord = asRecord(detail.user);
+  return normalizeExternalUrl(
+    pickNonEmptyStringFromRecord(userRecord, [
+      "url",
+      "profile_url",
+      "profileUrl",
+      "user_url",
+      "userUrl",
+      "account_url",
+      "accountUrl",
+    ]),
+  );
+}
+
+function readNormalizedTagCoord(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < 0 || value > 1) return null;
+  return Number(value.toFixed(4));
+}
+
+function normalizeSlideIndex(value: unknown, fallback: number): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.trunc(parsed));
+}
+
+function getInstagramChildPostRecords(post: unknown): Array<{ slideIndex: number; record: Record<string, unknown> }> {
+  const postRecord = asRecord(post);
+  if (!postRecord) return [];
+  return pickObjectArrayFromRecord(postRecord, "child_posts_data")
+    .map((record, index) => ({
+      slideIndex: normalizeSlideIndex(record.slide_index, index),
+      record,
+    }))
+    .sort((left, right) => left.slideIndex - right.slideIndex);
+}
+
+function buildInstagramTagMarkersFromRecord(record: Record<string, unknown> | null): InstagramTagMarker[] {
+  if (!record) return [];
+  const markers: InstagramTagMarker[] = [];
+  const seen = new Set<string>();
+
+  for (const key of INSTAGRAM_TAG_MARKER_DETAIL_KEYS) {
+    for (const detail of pickObjectArrayFromRecord(record, key)) {
+      const tagX = readNormalizedTagCoord(detail.tag_x);
+      const tagY = readNormalizedTagCoord(detail.tag_y);
+      if (tagX === null || tagY === null) continue;
+      const handle = resolveDetailHandleValue(detail);
+      const label = resolveDetailDisplayNameValue(detail) || formatHandleLabel(handle) || "Tagged";
+      const markerId = `${handle || "tagged"}|${tagX}|${tagY}`;
+      if (seen.has(markerId)) continue;
+      seen.add(markerId);
+      markers.push({
+        id: markerId,
+        xPct: tagX * 100,
+        yPct: tagY * 100,
+        label,
+      });
+    }
+  }
+
+  return markers;
+}
+
+function buildInstagramTagMarkers(post: unknown): InstagramTagMarker[] {
+  return buildInstagramTagMarkersFromRecord(asRecord(post));
+}
+
+function buildInstagramTagMarkersForSlide(post: unknown, slideIndex: number): InstagramTagMarker[] {
+  const childPosts = getInstagramChildPostRecords(post);
+  if (childPosts.length === 0) {
+    return slideIndex === 0 ? buildInstagramTagMarkers(post) : [];
+  }
+  const normalizedIndex = Math.max(0, Math.trunc(slideIndex));
+  const exactSlide = childPosts.find((entry) => entry.slideIndex === normalizedIndex);
+  if (exactSlide) return buildInstagramTagMarkersFromRecord(exactSlide.record);
+  const byOrder = childPosts[normalizedIndex];
+  return byOrder ? buildInstagramTagMarkersFromRecord(byOrder.record) : [];
+}
+
+function InstagramTagMarkersOverlay({
+  markers,
+  testId,
+}: {
+  markers: InstagramTagMarker[];
+  testId: string;
+}) {
+  if (markers.length === 0) return null;
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10" data-testid={testId}>
+      {markers.map((marker, index) => (
+        <div
+          key={marker.id}
+          data-testid={`${testId}-item-${index}`}
+          className="absolute -translate-x-1/2 -translate-y-1/2"
+          style={{ left: `${marker.xPct}%`, top: `${marker.yPct}%` }}
+        >
+          <span className="block h-2.5 w-2.5 rounded-full border border-white/90 bg-pink-500 shadow-sm" />
+          <span className="mt-1 inline-block rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
+            {marker.label}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function resolvePostAuthorHandle(post: AnyPost): string {
+  const userHandle = normalizeHandle(post.user?.username);
+  const authorHandle = normalizeHandle(post.author);
+  const authorLooksAbbreviated = /^[a-z]{1,3}$/.test(authorHandle);
+  if (userHandle && (!authorHandle || authorLooksAbbreviated)) return userHandle;
+  if (authorHandle) return authorHandle;
+  return userHandle;
+}
+
+function buildHandleProfileUrl(handle: string, platform: PlatformFilter): string {
+  const normalized = normalizeHandle(handle);
+  if (!normalized) return "#";
+  if (platform === "twitter") return `https://x.com/${normalized}`;
+  if (platform === "tiktok") return `https://www.tiktok.com/@${normalized}`;
+  if (platform === "threads") return `https://www.threads.com/@${normalized}`;
+  if (platform === "youtube") return `https://www.youtube.com/@${normalized}`;
+  if (platform === "facebook") return `https://www.facebook.com/${normalized}`;
+  return `https://www.instagram.com/${normalized}/`;
+}
+
+function isHandleTokenKey(key: SummaryTokenKey): boolean {
+  return key === "collaborators" || key === "mentions" || key === "tags";
+}
+
+function isRhoslcShowContext(showSlug: string | null | undefined, showName: string | null | undefined): boolean {
+  const normalizedSlug = String(showSlug ?? "").trim().toLowerCase();
+  if (normalizedSlug === "rhoslc") return true;
+  const normalizedName = String(showName ?? "").trim().toLowerCase();
+  if (!normalizedName) return false;
+  return normalizedName === "rhoslc" || normalizedName.includes("salt lake city");
+}
+
+function normalizeExternalUrl(raw: string | null | undefined): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeInstagramPermalinkPath(pathname: string): "p" | "reel" | "tv" | null {
+  const normalizedPath = pathname.toLowerCase();
+  if (normalizedPath.startsWith("/p/")) return "p";
+  if (normalizedPath.startsWith("/reel/")) return "reel";
+  if (normalizedPath.startsWith("/tv/")) return "tv";
+  return null;
+}
+
+function resolveInstagramPermalinkFromSource(
+  sourceId: string | null | undefined,
+  postFormat: string | null | undefined,
+  fallbackUrl: string | null,
+): string | null {
+  const shortcode = String(sourceId ?? "").trim();
+  if (!shortcode) return fallbackUrl;
+  let permalinkType: "p" | "reel" | "tv" = "p";
+  const normalizedFormat = String(postFormat ?? "").trim().toLowerCase();
+  const prefersReelPermalink = normalizedFormat === "reel";
+  if (normalizedFormat === "reel") {
+    permalinkType = "reel";
+  }
+  if (fallbackUrl) {
+    try {
+      const parsed = new URL(fallbackUrl);
+      const fromPath = normalizeInstagramPermalinkPath(parsed.pathname);
+      if (fromPath && !prefersReelPermalink) {
+        permalinkType = fromPath;
+      }
+    } catch {
+      // Keep default permalink type when fallback URL cannot be parsed.
+    }
+  }
+  return `https://www.instagram.com/${permalinkType}/${encodeURIComponent(shortcode)}/`;
+}
+
+function resolvePostExternalUrl(
+  platform: string,
+  post: {
+    url?: string | null;
+    source_id?: string | null;
+    post_format?: string | null;
+  },
+): string | null {
+  const normalizedUrl = normalizeExternalUrl(post.url);
+  if (platform !== "instagram") return normalizedUrl;
+  if (normalizedUrl) {
+    try {
+      const parsed = new URL(normalizedUrl);
+      const host = parsed.hostname.toLowerCase();
+      const permalinkType = normalizeInstagramPermalinkPath(parsed.pathname);
+      if (host.includes("instagram.com") && permalinkType) {
+        return resolveInstagramPermalinkFromSource(post.source_id, post.post_format, normalizedUrl);
+      }
+    } catch {
+      // Fallback to source_id permalink reconstruction below.
+    }
+  }
+  return resolveInstagramPermalinkFromSource(post.source_id, post.post_format, normalizedUrl);
+}
+
 type ProxyErrorPayload = {
   error?: string;
   trace_id?: string;
@@ -1483,21 +2192,15 @@ function getFallbackHandle(platform: string): string {
 
 function buildHeaderAccounts(platform: string, post: AnyPost, collaborators: string[]): string[] {
   const accounts: string[] = [];
-  const authorHandle = normalizeHandle(post.author);
+  const authorHandle = resolvePostAuthorHandle(post);
   if (authorHandle) {
     accounts.push(authorHandle);
-  } else {
-    accounts.push(REQUIRED_BRAVO_HANDLE);
   }
 
   for (const collaborator of collaborators) {
     const normalized = normalizeHandle(collaborator);
     if (!normalized) continue;
     accounts.push(normalized);
-  }
-
-  if (!accounts.includes(REQUIRED_BRAVO_HANDLE)) {
-    accounts.push(REQUIRED_BRAVO_HANDLE);
   }
 
   const deduped: string[] = [];
@@ -1518,6 +2221,175 @@ function formatHeaderHandleLine(handles: string[]): string {
   if (displayHandles.length === 1) return displayHandles[0];
   if (displayHandles.length === 2) return `${displayHandles[0]} and ${displayHandles[1]}`;
   return `${displayHandles.slice(0, -1).join(", ")}, and ${displayHandles[displayHandles.length - 1]}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readBoolish(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "verified") return true;
+  if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "unverified") return false;
+  return null;
+}
+
+function normalizeHandleCandidate(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = normalizeHandle(value);
+  if (!normalized) return "";
+  return /^[a-z0-9._-]{1,64}$/i.test(normalized) ? normalized : "";
+}
+
+function addVerifiedHandle(set: Set<string>, handle: unknown, verified: unknown): void {
+  if (readBoolish(verified) !== true) return;
+  const normalizedHandle = normalizeHandleCandidate(handle);
+  if (!normalizedHandle) return;
+  set.add(normalizedHandle);
+}
+
+function collectVerifiedHandlesFromUnknown(value: unknown, out: Set<string>): void {
+  const stack: Array<{ node: unknown; depth: number }> = [{ node: value, depth: 0 }];
+  let visited = 0;
+
+  while (stack.length > 0 && visited < 240) {
+    const current = stack.pop();
+    if (!current) continue;
+    visited += 1;
+    if (current.depth > 4) continue;
+
+    const node = current.node;
+    if (Array.isArray(node)) {
+      for (let index = Math.min(node.length, 30) - 1; index >= 0; index -= 1) {
+        stack.push({ node: node[index], depth: current.depth + 1 });
+      }
+      continue;
+    }
+    if (!isRecord(node)) continue;
+
+    const handleCandidate =
+      node.username ??
+      node.user_name ??
+      node.handle ??
+      node.screen_name ??
+      node.source_account ??
+      node.author;
+    const verifiedCandidate =
+      node.is_verified ??
+      node.verified ??
+      node.user_verified ??
+      node.owner_is_verified ??
+      node.author_is_verified ??
+      node.is_blue_verified ??
+      node.isVerified ??
+      node.verification_status;
+    addVerifiedHandle(out, handleCandidate, verifiedCandidate);
+
+    for (const nestedValue of Object.values(node)) {
+      if (Array.isArray(nestedValue) || isRecord(nestedValue)) {
+        stack.push({ node: nestedValue, depth: current.depth + 1 });
+      }
+    }
+  }
+}
+
+function resolveVerifiedHeaderHandles(platform: string, post: AnyPost, headerAccounts: string[]): Set<string> {
+  if (!VERIFIED_BADGE_URL_BY_PLATFORM[platform]) return new Set<string>();
+
+  const verifiedHandles = new Set<string>();
+  const postRecord = post as unknown as Record<string, unknown>;
+  const directAuthorVerification =
+    postRecord.owner_is_verified ??
+    postRecord.user_verified ??
+    postRecord.is_verified ??
+    postRecord.author_is_verified;
+  addVerifiedHandle(verifiedHandles, post.author, directAuthorVerification);
+
+  if (isRecord(post.user)) {
+    const userRecord = post.user as Record<string, unknown>;
+    addVerifiedHandle(
+      verifiedHandles,
+      userRecord.username,
+      userRecord.is_verified ?? userRecord.verified ?? userRecord.user_verified ?? userRecord.verification_status,
+    );
+  }
+
+  const collaboratorsDetail = postRecord.collaborators_detail;
+  if (Array.isArray(collaboratorsDetail)) {
+    for (const detail of collaboratorsDetail) {
+      if (!isRecord(detail)) continue;
+      addVerifiedHandle(verifiedHandles, detail.username, detail.is_verified ?? detail.verified ?? detail.isVerified);
+    }
+  }
+
+  collectVerifiedHandlesFromUnknown(postRecord.raw_data, verifiedHandles);
+
+  const headerSet = new Set<string>(
+    headerAccounts.map((account) => normalizeHandleCandidate(account)).filter((account) => account.length > 0),
+  );
+  const filtered = new Set<string>();
+  for (const handle of verifiedHandles) {
+    if (headerSet.has(handle)) filtered.add(handle);
+  }
+  return filtered;
+}
+
+function VerifiedAccountBadge({ platform, handle }: { platform: string; handle: string }) {
+  const src = VERIFIED_BADGE_URL_BY_PLATFORM[platform];
+  const normalized = normalizeHandle(handle);
+  if (!src || !normalized) return null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={`@${normalized} verified badge`}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      className="h-3.5 w-3.5 rounded-full"
+      data-testid={`verified-badge-${platform}-${normalized}`}
+    />
+  );
+}
+
+function HeaderHandleLine({
+  platform,
+  handles,
+  verifiedHandles,
+}: {
+  platform: string;
+  handles: string[];
+  verifiedHandles: Set<string>;
+}) {
+  const normalizedHandles = handles.map((handle) => normalizeHandle(handle)).filter((handle) => handle.length > 0);
+  if (normalizedHandles.length === 0) return <span>@unknown</span>;
+
+  return (
+    <>
+      {normalizedHandles.map((handle, index) => {
+        const separator =
+          index < normalizedHandles.length - 2
+            ? ", "
+            : index === normalizedHandles.length - 2
+              ? normalizedHandles.length > 2
+                ? ", and "
+                : " and "
+              : "";
+        return (
+          <span key={`header-handle-${platform}-${handle}-${index}`} className="inline">
+            <span className="inline-flex items-center gap-1">
+              <span>@{handle}</span>
+              {verifiedHandles.has(handle) ? <VerifiedAccountBadge platform={platform} handle={handle} /> : null}
+            </span>
+            {separator}
+          </span>
+        );
+      })}
+    </>
+  );
 }
 
 function initialsFromHandle(handle: string): string {
@@ -1560,16 +2432,176 @@ function resolveCaseInsensitiveRecordValue(
   return null;
 }
 
-function resolveCollaboratorAvatarFromDetail(post: AnyPost, handle: string): string | null {
-  const details = (post as { collaborators_detail?: PostCollaboratorDetail[] | null }).collaborators_detail;
-  if (!Array.isArray(details)) return null;
+type HandleProfile = {
+  displayName: string | null;
+  avatarUrl: string | null;
+  profileUrl: string | null;
+};
+
+const POST_HANDLE_PROFILE_CACHE = new WeakMap<object, Map<string, HandleProfile>>();
+const PROFILE_DETAIL_KEYS: readonly string[] = [
+  ...TOKEN_HANDLE_DETAIL_KEYS,
+  "tagged_users_detail",
+  "collaborators_detail",
+];
+
+function getPostDetailObjects(post: AnyPost): Record<string, unknown>[] {
+  const postRecord = asRecord(post);
+  const details: Record<string, unknown>[] = [];
+  for (const key of PROFILE_DETAIL_KEYS) {
+    details.push(...pickObjectArrayFromRecord(postRecord, key));
+  }
+  return details;
+}
+
+function resolveHandleAvatarFromDetail(post: AnyPost, handle: string): string | null {
   const normalizedHandle = normalizeHandle(handle);
-  for (const detail of details) {
-    if (normalizeHandle(detail?.username ?? null) !== normalizedHandle) continue;
-    const profilePicUrl = String(detail?.profile_pic_url || "").trim();
-    if (profilePicUrl) return profilePicUrl;
+  if (!normalizedHandle) return null;
+  for (const detail of getPostDetailObjects(post)) {
+    if (resolveDetailHandleValue(detail) !== normalizedHandle) continue;
+    const avatarUrl = resolveDetailAvatarValue(detail);
+    if (avatarUrl) return avatarUrl;
   }
   return null;
+}
+
+function setHandleProfile(
+  profileMap: Map<string, HandleProfile>,
+  handle: string | null | undefined,
+  displayName: string | null | undefined,
+  avatarUrl: string | null | undefined,
+  profileUrl: string | null | undefined,
+): void {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return;
+  const normalizedDisplayName = String(displayName ?? "").trim() || null;
+  const normalizedAvatarUrl = String(avatarUrl ?? "").trim() || null;
+  const normalizedProfileUrl = normalizeExternalUrl(profileUrl ?? null);
+  const existing = profileMap.get(normalizedHandle) ?? { displayName: null, avatarUrl: null, profileUrl: null };
+  profileMap.set(normalizedHandle, {
+    displayName: existing.displayName ?? normalizedDisplayName,
+    avatarUrl: existing.avatarUrl ?? normalizedAvatarUrl,
+    profileUrl: existing.profileUrl ?? normalizedProfileUrl,
+  });
+}
+
+function buildPostHandleProfileMap(post: AnyPost): Map<string, HandleProfile> {
+  const cached = POST_HANDLE_PROFILE_CACHE.get(post as unknown as object);
+  if (cached) return cached;
+
+  const profileMap = new Map<string, HandleProfile>();
+  const postRecord = asRecord(post);
+  const userRecord = asRecord(post.user);
+  const authorHandle = resolvePostAuthorHandle(post);
+  setHandleProfile(
+    profileMap,
+    authorHandle,
+    pickNonEmptyStringFromRecord(userRecord, ["full_name", "fullName", "display_name", "displayName", "name", "nickname"]) ??
+      pickNonEmptyStringFromRecord(postRecord, ["owner_full_name", "full_name", "fullName", "display_name", "displayName", "name", "nickname"]),
+    pickNonEmptyStringFromRecord(userRecord, ["avatar_url", "user_avatar_url"]) ??
+      (String(post.hosted_owner_profile_pic_url ?? "").trim() || String(post.owner_profile_pic_url ?? "").trim()),
+    pickNonEmptyStringFromRecord(userRecord, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]) ??
+      pickNonEmptyStringFromRecord(postRecord, ["user_profile_url", "profile_url", "profileUrl", "user_url", "userUrl"]),
+  );
+
+  for (const detail of getPostDetailObjects(post)) {
+    setHandleProfile(
+      profileMap,
+      resolveDetailHandleValue(detail),
+      resolveDetailDisplayNameValue(detail),
+      resolveDetailAvatarValue(detail),
+      resolveDetailProfileUrlValue(detail),
+    );
+  }
+
+  const commentStack = Array.isArray(postRecord?.comments) ? [...(postRecord?.comments as unknown[])] : [];
+  while (commentStack.length > 0) {
+    const comment = commentStack.pop();
+    const commentRecord = asRecord(comment);
+    if (!commentRecord) continue;
+    const commentUser = asRecord(commentRecord.user);
+    setHandleProfile(
+      profileMap,
+      pickNonEmptyStringFromRecord(commentUser, ["username", "user_name", "userName", "handle"]) ??
+        pickNonEmptyStringFromRecord(commentRecord, ["author", "username", "user_name", "userName"]),
+      pickNonEmptyStringFromRecord(commentUser, ["full_name", "fullName", "display_name", "displayName", "name", "nickname"]) ??
+        pickNonEmptyStringFromRecord(commentRecord, ["display_name", "displayName", "nickname", "name"]),
+      pickNonEmptyStringFromRecord(commentUser, ["avatar_url", "user_avatar_url", "profile_pic_url", "profile_pic_url_hd"]) ??
+        pickNonEmptyStringFromRecord(commentRecord, ["user_avatar_url", "avatar_url", "profile_pic_url", "profile_pic_url_hd"]),
+      pickNonEmptyStringFromRecord(commentUser, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]) ??
+        pickNonEmptyStringFromRecord(commentRecord, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]),
+    );
+    if (Array.isArray(commentRecord.replies)) {
+      commentStack.push(...commentRecord.replies);
+    }
+  }
+
+  const quoteRows = Array.isArray(postRecord?.quotes) ? (postRecord?.quotes as unknown[]) : [];
+  for (const quote of quoteRows) {
+    const quoteRecord = asRecord(quote);
+    if (!quoteRecord) continue;
+    const quoteUser = asRecord(quoteRecord.user);
+    setHandleProfile(
+      profileMap,
+      pickNonEmptyStringFromRecord(quoteUser, ["username", "user_name", "userName", "handle"]) ??
+        pickNonEmptyStringFromRecord(quoteRecord, ["author", "username", "user_name", "userName"]),
+      pickNonEmptyStringFromRecord(quoteUser, ["full_name", "fullName", "display_name", "displayName", "name", "nickname"]) ??
+        pickNonEmptyStringFromRecord(quoteRecord, ["display_name", "displayName", "nickname", "name"]),
+      pickNonEmptyStringFromRecord(quoteUser, ["avatar_url", "user_avatar_url", "profile_pic_url", "profile_pic_url_hd"]) ??
+        pickNonEmptyStringFromRecord(quoteRecord, ["user_avatar_url", "avatar_url", "profile_pic_url", "profile_pic_url_hd"]),
+      pickNonEmptyStringFromRecord(quoteUser, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]) ??
+        pickNonEmptyStringFromRecord(quoteRecord, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]),
+    );
+  }
+
+  const rawDataRecord = asRecord(postRecord?.raw_data);
+  const rawStack: Array<{ node: unknown; depth: number }> = rawDataRecord ? [{ node: rawDataRecord, depth: 0 }] : [];
+  let traversed = 0;
+  while (rawStack.length > 0 && traversed < 300) {
+    const current = rawStack.pop();
+    if (!current) continue;
+    traversed += 1;
+    if (current.depth > 5) continue;
+    if (Array.isArray(current.node)) {
+      for (let index = current.node.length - 1; index >= 0; index -= 1) {
+        rawStack.push({ node: current.node[index], depth: current.depth + 1 });
+      }
+      continue;
+    }
+    const record = asRecord(current.node);
+    if (!record) continue;
+    setHandleProfile(
+      profileMap,
+      resolveDetailHandleValue(record),
+      resolveDetailDisplayNameValue(record),
+      resolveDetailAvatarValue(record),
+      resolveDetailProfileUrlValue(record),
+    );
+    const nestedUser = asRecord(record.user);
+    if (nestedUser) {
+      setHandleProfile(
+        profileMap,
+        pickNonEmptyStringFromRecord(nestedUser, ["username", "user_name", "userName", "handle"]),
+        pickNonEmptyStringFromRecord(nestedUser, ["full_name", "fullName", "display_name", "displayName", "name", "nickname"]),
+        pickNonEmptyStringFromRecord(nestedUser, ["avatar_url", "user_avatar_url", "profile_pic_url", "profile_pic_url_hd"]),
+        pickNonEmptyStringFromRecord(nestedUser, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]),
+      );
+    }
+    for (const nested of Object.values(record)) {
+      if (Array.isArray(nested) || asRecord(nested) !== null) {
+        rawStack.push({ node: nested, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  POST_HANDLE_PROFILE_CACHE.set(post as unknown as object, profileMap);
+  return profileMap;
+}
+
+function resolveHandleProfile(post: AnyPost, handle: string): HandleProfile | null {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return null;
+  return buildPostHandleProfileMap(post).get(normalizedHandle) ?? null;
 }
 
 function resolveAccountAvatarUrl(post: AnyPost, handle: string, isAuthor: boolean): string | null {
@@ -1580,17 +2612,20 @@ function resolveAccountAvatarUrl(post: AnyPost, handle: string, isAuthor: boolea
     if (hostedOwnerAvatar) return hostedOwnerAvatar;
     const ownerAvatar = String(post.owner_profile_pic_url || "").trim();
     if (ownerAvatar) return ownerAvatar;
-    return null;
+    return resolveHandleProfile(post, handle)?.avatarUrl ?? null;
   }
   const hostedTagged = resolveCaseInsensitiveRecordValue(post.hosted_tagged_profile_pics, handle);
   if (hostedTagged) return hostedTagged;
-  return resolveCollaboratorAvatarFromDetail(post, handle);
+  const detailAvatar = resolveHandleAvatarFromDetail(post, handle);
+  if (detailAvatar) return detailAvatar;
+  return resolveHandleProfile(post, handle)?.avatarUrl ?? null;
 }
 
 function HeaderAccountAvatar({ handle, avatarUrl }: { handle: string; avatarUrl: string | null }) {
+  const [imgFailed, setImgFailed] = useState(false);
   const normalizedHandle = normalizeHandle(handle);
   const label = `@${normalizedHandle || "unknown"} avatar`;
-  if (avatarUrl) {
+  if (avatarUrl && !imgFailed) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -1599,6 +2634,7 @@ function HeaderAccountAvatar({ handle, avatarUrl }: { handle: string; avatarUrl:
         loading="lazy"
         referrerPolicy="no-referrer"
         className="h-6 w-6 rounded-full border border-white object-cover shadow-sm"
+        onError={() => setImgFailed(true)}
       />
     );
   }
@@ -1609,6 +2645,118 @@ function HeaderAccountAvatar({ handle, avatarUrl }: { handle: string; avatarUrl:
       className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-white text-[10px] font-semibold uppercase shadow-sm ${fallbackAvatarToneClass(handle)}`}
     >
       {initialsFromHandle(handle)}
+    </span>
+  );
+}
+
+function InlineCaptionText({
+  platform,
+  text,
+  post,
+}: {
+  platform: string;
+  text: string | null | undefined;
+  post?: AnyPost;
+}) {
+  const normalizedText = normalizeCaptionPreviewText(platform, text);
+  if (!normalizedText) return <span>(No caption)</span>;
+
+  const captionTokenRe = /#[A-Za-z0-9_]+|@[A-Za-z0-9_.]+/g;
+  const segments: React.ReactElement[] = [];
+  let cursor = 0;
+  let tokenIndex = 0;
+  const authorHandle = post ? resolvePostAuthorHandle(post) : "";
+
+  for (const match of normalizedText.matchAll(captionTokenRe)) {
+    const token = match[0] ?? "";
+    const index = match.index ?? -1;
+    if (!token || index < 0) continue;
+    if (index > cursor) {
+      segments.push(
+        <span key={`caption-text-${index}-${tokenIndex}`}>
+          {normalizedText.slice(cursor, index)}
+        </span>,
+      );
+    }
+    if (token.startsWith("#")) {
+      const hashtagLabel = `#${token.replace(/^#+/, "")}`;
+      segments.push(
+        <span key={`caption-tag-${index}-${tokenIndex}`} className="inline-flex rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700">
+          {hashtagLabel}
+        </span>,
+      );
+    } else if (token.startsWith("@")) {
+      const mentionHandle = normalizeHandle(token);
+      const mentionAvatar =
+        post && mentionHandle
+          ? resolveAccountAvatarUrl(post, mentionHandle, mentionHandle === authorHandle) ??
+            resolveHandleProfile(post, mentionHandle)?.avatarUrl ??
+            null
+          : null;
+      segments.push(
+        <span
+          key={`caption-mention-${index}-${tokenIndex}`}
+          className="inline-flex items-center gap-1 rounded bg-purple-50 px-1.5 py-0.5 text-xs text-purple-700"
+        >
+          {mentionAvatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={mentionAvatar}
+              alt={`@${mentionHandle || "unknown"} avatar`}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="h-3.5 w-3.5 rounded-full object-cover"
+            />
+          ) : null}
+          <span>@{mentionHandle || token.replace(/^@+/, "")}</span>
+        </span>,
+      );
+    } else {
+      segments.push(<span key={`caption-token-${index}-${tokenIndex}`}>{token}</span>);
+    }
+    cursor = index + token.length;
+    tokenIndex += 1;
+  }
+
+  if (cursor < normalizedText.length) {
+    segments.push(<span key={`caption-tail-${cursor}`}>{normalizedText.slice(cursor)}</span>);
+  }
+
+  return <>{segments}</>;
+}
+
+function HandleProfileChip({
+  post,
+  handle,
+  className,
+}: {
+  post: AnyPost;
+  handle: string;
+  className: string;
+}) {
+  const normalizedHandle = normalizeHandle(handle);
+  if (!normalizedHandle) return null;
+  const profile = resolveHandleProfile(post, normalizedHandle);
+  const avatarUrl =
+    resolveAccountAvatarUrl(post, normalizedHandle, normalizedHandle === resolvePostAuthorHandle(post)) ??
+    profile?.avatarUrl ??
+    null;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${className}`}
+      title={profile?.displayName ?? undefined}
+    >
+      {avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={avatarUrl}
+          alt={`@${normalizedHandle} avatar`}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="h-3.5 w-3.5 rounded-full object-cover"
+        />
+      ) : null}
+      <span>{formatHandleLabel(normalizedHandle)}</span>
     </span>
   );
 }
@@ -1671,6 +2819,72 @@ function getJobActivitySummary(job: SocialJob): string {
     parts.push(`${activity.matched_posts}match`);
   }
   return parts.join(" · ");
+}
+
+function getJobRunnerLane(job: SocialJob): "A" | "B" | null {
+  const fromConfig = typeof job.config?.runner_lane === "string" ? job.config.runner_lane : null;
+  const fromMetadata = typeof job.metadata?.runner_lane === "string" ? job.metadata.runner_lane : null;
+  const lane = String(fromConfig ?? fromMetadata ?? "")
+    .trim()
+    .toUpperCase();
+  if (lane === "A" || lane === "B") return lane;
+  return null;
+}
+
+function getJobAccountHandle(job: SocialJob): string {
+  const configRecord = asRecord(job.config);
+  const metadataRecord = asRecord(job.metadata);
+  const candidates = [
+    configRecord?.account,
+    configRecord?.account_handle,
+    metadataRecord?.account,
+    metadataRecord?.account_handle,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const normalized = normalizeHandle(candidate);
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function formatSyncStageLabel(stage: string): string {
+  const normalized = String(stage || "").trim().toLowerCase();
+  if (normalized === "posts") return "Posts";
+  if (normalized === "comments") return "Comments";
+  if (normalized === "media_mirror") return "Mirror";
+  if (!normalized) return "Stage";
+  return normalized
+    .split("_")
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getStageStatus(stage: StageProgressSnapshot): {
+  label: string;
+  toneClass: string;
+} {
+  if (stage.total <= 0) {
+    return {
+      label: stage.active > 0 ? "Running" : "Waiting",
+      toneClass: stage.active > 0 ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600",
+    };
+  }
+  const finished = stage.completed + stage.failed;
+  if (finished >= stage.total) {
+    if (stage.failed > 0 && stage.completed === 0) {
+      return { label: "Failed", toneClass: "bg-red-100 text-red-700" };
+    }
+    if (stage.failed > 0) {
+      return { label: `Done (${stage.failed} failed)`, toneClass: "bg-amber-100 text-amber-700" };
+    }
+    return { label: "Done", toneClass: "bg-emerald-100 text-emerald-700" };
+  }
+  if (stage.active > 0) {
+    return { label: "Running", toneClass: "bg-blue-100 text-blue-700" };
+  }
+  return { label: "Queued", toneClass: "bg-gray-100 text-gray-600" };
 }
 
 function formatRunStatus(status: SocialRun["status"]): string {
@@ -1841,7 +3055,9 @@ function PostStatsDrawer({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [hasRefreshed, setHasRefreshed] = useState(false);
   const [replyQuoteMode, setReplyQuoteMode] = useState<"replies" | "quotes">("replies");
+  const [instagramDrawerSlideIndex, setInstagramDrawerSlideIndex] = useState(0);
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
     const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
@@ -1900,15 +3116,17 @@ function PostStatsDrawer({
 
   useEffect(() => {
     setReplyQuoteMode("replies");
+    setInstagramDrawerSlideIndex(0);
   }, [platform, sourceId]);
 
   const handleRefreshComments = useCallback(async () => {
     try {
       setRefreshing(true);
       setRefreshError(null);
+      setHasRefreshed(false);
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
       const refreshTimeoutMs =
-        platform === "youtube" ? REQUEST_TIMEOUT_MS.weekDetailYoutubeRefresh : REQUEST_TIMEOUT_MS.weekDetail;
+        platform === "youtube" ? REQUEST_TIMEOUT_MS.weekDetailYoutubeRefresh : REQUEST_TIMEOUT_MS.weekDetailRefresh;
       const params = new URLSearchParams();
       if (seasonId) {
         params.set("season_id", seasonId);
@@ -1938,6 +3156,7 @@ function PostStatsDrawer({
         throw new Error((body as Record<string, string>).error || `HTTP ${res.status}`);
       }
       setData(await parseResponseJson<PostDetailResponse>(res, "Failed to refresh post"));
+      setHasRefreshed(true);
     } catch (err) {
       setRefreshError(err instanceof Error ? err.message : "Failed to refresh post");
     } finally {
@@ -1995,8 +3214,46 @@ function PostStatsDrawer({
   const quotesIncomplete = savedQuoteCount < reportedQuoteCount;
   const activeComments =
     supportsReplyQuoteSwitch && replyQuoteMode === "quotes" ? quoteCommentsAsThreaded : (data?.comments ?? []);
-  const drawerThumbnailUrl = data ? getPostDetailThumbnailUrl(data) : null;
-  const preferredDrawerMediaSrc = data ? getPreferredPostDetailMediaSrc(data) : null;
+  const instagramDrawerSlides = useMemo(() => {
+    if (!data || data.platform !== "instagram") return [];
+    return buildInstagramDrawerSlides(data);
+  }, [data]);
+  const boundedInstagramDrawerSlideIndex =
+    instagramDrawerSlides.length > 0
+      ? Math.min(instagramDrawerSlideIndex, instagramDrawerSlides.length - 1)
+      : 0;
+  const activeInstagramDrawerSlide =
+    instagramDrawerSlides[boundedInstagramDrawerSlideIndex] ?? null;
+  const hasInstagramDrawerSlideNavigation =
+    (data?.platform === "instagram" && data.post_format === "carousel") ||
+    (data?.platform === "instagram" && instagramDrawerSlides.length > 1);
+  const drawerThumbnailUrl = data
+    ? data.platform === "instagram"
+      ? activeInstagramDrawerSlide?.src ?? getPostDetailThumbnailUrl(data)
+      : getPostDetailThumbnailUrl(data)
+    : null;
+  const preferredDrawerMediaSrc = data
+    ? data.platform === "instagram"
+      ? activeInstagramDrawerSlide?.src ?? getPreferredPostDetailMediaSrc(data)
+      : getPreferredPostDetailMediaSrc(data)
+    : null;
+  const detailExternalUrl = data ? resolvePostExternalUrl(data.platform, data) : null;
+  const instagramTagMarkers =
+    data?.platform === "instagram"
+      ? buildInstagramTagMarkersForSlide(data, boundedInstagramDrawerSlideIndex)
+      : [];
+
+  useEffect(() => {
+    if (instagramDrawerSlides.length === 0) {
+      if (instagramDrawerSlideIndex !== 0) {
+        setInstagramDrawerSlideIndex(0);
+      }
+      return;
+    }
+    if (instagramDrawerSlideIndex > instagramDrawerSlides.length - 1) {
+      setInstagramDrawerSlideIndex(instagramDrawerSlides.length - 1);
+    }
+  }, [instagramDrawerSlideIndex, instagramDrawerSlides.length]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -2050,6 +3307,35 @@ function PostStatsDrawer({
               </ul>
             </div>
           )}
+          {hasRefreshed && !refreshing && data?.refresh?.detail_sync && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-green-800 text-sm mb-4">
+              <p className="font-semibold mb-1">Refresh complete:</p>
+              <ul className="list-disc pl-5 space-y-0.5">
+                <li>
+                  Detail sync:{" "}
+                  {data.refresh.detail_sync.detail?.status === "success"
+                    ? "scraped"
+                    : data.refresh.detail_sync.detail?.status === "failed"
+                      ? `failed${data.refresh.detail_sync.detail.error ? ` — ${data.refresh.detail_sync.detail.error}` : ""}`
+                      : (data.refresh.detail_sync.detail?.status ?? "unknown")}
+                </li>
+                <li>
+                  Media mirror:{" "}
+                  {data.refresh.detail_sync.media?.status === "failed"
+                    ? `failed${data.refresh.detail_sync.media.error ? ` — ${data.refresh.detail_sync.media.error}` : ""}`
+                    : typeof data.refresh.detail_sync.media?.mirrored_assets === "number"
+                      ? `${data.refresh.detail_sync.media.mirrored_assets} asset${data.refresh.detail_sync.media.mirrored_assets !== 1 ? "s" : ""} mirrored`
+                      : (data.refresh.detail_sync.media?.status ?? "unknown")}
+                </li>
+                <li>
+                  Comments:{" "}
+                  {data.refresh.detail_sync.comments?.is_complete
+                    ? "complete"
+                    : `incomplete${data.refresh.detail_sync.comments?.reason ? ` — ${data.refresh.detail_sync.comments.reason}` : ""}`}
+                </li>
+              </ul>
+            </div>
+          )}
 
           {data && !loading && (
             <>
@@ -2075,20 +3361,28 @@ function PostStatsDrawer({
                         className="block w-full"
                         aria-label="Open post media lightbox from details"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={drawerThumbnailUrl}
-                          alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                          onError={(event) => {
-                            event.currentTarget.style.display = "none";
-                          }}
-                          className="max-h-[360px] w-full object-contain bg-black/5"
-                        />
+                        <div className="relative inline-block max-w-full">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={drawerThumbnailUrl}
+                            alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                            className="block max-h-[360px] max-w-full h-auto w-auto object-contain bg-black/5"
+                          />
+                          {data.platform === "instagram" ? (
+                            <InstagramTagMarkersOverlay
+                              markers={instagramTagMarkers}
+                              testId={`instagram-tag-markers-drawer-${data.source_id}`}
+                            />
+                          ) : null}
+                        </div>
                       </button>
                     ) : (
-                      <>
+                      <div className="relative inline-block max-w-full">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={drawerThumbnailUrl}
@@ -2098,20 +3392,59 @@ function PostStatsDrawer({
                           onError={(event) => {
                             event.currentTarget.style.display = "none";
                           }}
-                          className="max-h-[360px] w-full object-contain bg-black/5"
+                          className="block max-h-[360px] max-w-full h-auto w-auto object-contain bg-black/5"
                         />
-                      </>
+                        {data.platform === "instagram" ? (
+                          <InstagramTagMarkersOverlay
+                            markers={instagramTagMarkers}
+                            testId={`instagram-tag-markers-drawer-${data.source_id}`}
+                          />
+                        ) : null}
+                      </div>
                     )}
+                    {data.platform === "instagram" && hasInstagramDrawerSlideNavigation ? (
+                      <div className="flex items-center justify-between border-t border-gray-200 bg-white px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => setInstagramDrawerSlideIndex((current) => Math.max(0, current - 1))}
+                          disabled={boundedInstagramDrawerSlideIndex <= 0}
+                          className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="Previous slide"
+                        >
+                          Prev
+                        </button>
+                        <span
+                          className="text-xs font-medium text-gray-600"
+                          data-testid={`instagram-drawer-slide-indicator-${data.source_id}`}
+                        >
+                          Slide {boundedInstagramDrawerSlideIndex + 1} of {Math.max(1, instagramDrawerSlides.length)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setInstagramDrawerSlideIndex((current) =>
+                              Math.min(Math.max(0, instagramDrawerSlides.length - 1), current + 1),
+                            )
+                          }
+                          disabled={boundedInstagramDrawerSlideIndex >= instagramDrawerSlides.length - 1}
+                          className="rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="Next slide"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
                 {data.title && (
                   <h3 className="text-sm font-semibold text-gray-900 mb-1">{data.title}</h3>
                 )}
-                {data.text && (
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap break-words mb-3">
-                    {data.text}
-                  </p>
-                )}
+                <p className="text-sm text-gray-700 whitespace-pre-wrap break-words mb-3">
+                  <InlineCaptionText
+                    platform={data.platform}
+                    text={normalizeCaptionPreviewText(data.platform, data.text)}
+                  />
+                </p>
                 {data.platform !== "instagram" && typeof data.duration_seconds === "number" && data.duration_seconds > 0 && (
                   <div className="mb-3">
                     <span className="text-xs rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
@@ -2165,25 +3498,11 @@ function PostStatsDrawer({
                         ))}
                       </div>
                     ) : null}
-                    {(data.hashtags?.length || data.mentions?.length) ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {(data.hashtags ?? []).map((tag) => (
-                          <span key={`hashtag-${tag}`} className="text-xs rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
-                            #{tag}
-                          </span>
-                        ))}
-                        {(data.mentions ?? []).map((mention) => (
-                          <span key={`mention-${mention}`} className="text-xs rounded bg-purple-50 px-1.5 py-0.5 text-purple-700">
-                            {mention}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
                   </div>
                 )}
-                {data.url && (
+                {detailExternalUrl && (
                   <a
-                    href={data.url}
+                    href={detailExternalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
@@ -2209,36 +3528,13 @@ function PostStatsDrawer({
                     )}
                   </div>
                 )}
-                {data.media_asset_meta && (
-                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-1">Media Asset Metadata</p>
-                    <p className="text-xs text-gray-600">
-                      Policy: {data.media_asset_meta.selection_policy || "best_per_asset"}
-                      {data.media_asset_meta.selected_source ? ` · Source: ${data.media_asset_meta.selected_source}` : ""}
-                    </p>
-                    {Array.isArray(data.media_asset_meta.source_assets) && data.media_asset_meta.source_assets.length > 0 && (
-                      <p className="text-xs text-gray-600 mt-1">
-                        Source: {data.media_asset_meta.source_assets
-                          .slice(0, 3)
-                          .map((asset) => asset.resolution || `${asset.width ?? "?"}x${asset.height ?? "?"}`)
-                          .join(", ")}
-                      </p>
-                    )}
-                    {Array.isArray(data.media_asset_meta.hosted_assets) && data.media_asset_meta.hosted_assets.length > 0 && (
-                      <p className="text-xs text-gray-600 mt-1">
-                        Hosted: {data.media_asset_meta.hosted_assets
-                          .slice(0, 3)
-                          .map((asset) => asset.resolution || `${asset.width ?? "?"}x${asset.height ?? "?"}`)
-                          .join(", ")}
-                      </p>
-                    )}
-                  </div>
-                )}
               </div>
 
               {/* Stats grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-                {Object.entries(data.stats).map(([key, value]) => (
+                {Object.entries(data.stats)
+                  .filter(([key]) => !(key === "reposts" && "retweets" in data.stats))
+                  .map(([key, value]) => (
                   <div
                     key={key}
                     className="bg-gray-50 rounded-lg p-3 text-center"
@@ -2298,7 +3594,7 @@ function PostStatsDrawer({
                 ) : (
                   <p className="text-xs text-gray-500 mb-3">
                 {commentsIncomplete
-                    ? `Saved in Supabase: ${detailMetricFormatter(savedCommentsCount)} of ${detailMetricFormatter(reportedCommentsCount)} platform-reported comments.${commentGapReason ? ` (${commentGapReason})` : ""} Run an Ingest in Week view (or open the row details for a post-level refresh) to backfill.`
+                    ? `Saved in Supabase: ${detailMetricFormatter(savedCommentsCount)} of ${detailMetricFormatter(reportedCommentsCount)} platform-reported comments.${commentGapReason ? ` (${commentGapReason})` : ""} Run a Sync in Week view (or open the row details for a post-level refresh) to backfill.`
                     : `${detailMetricFormatter(savedCommentsCount)} comments saved in Supabase.`}
                 </p>
                 )}
@@ -2437,8 +3733,7 @@ function PostCard({
   ) => void;
 }) {
   const [statsOpen, setStatsOpen] = useState(false);
-  const hashtags = getPostHashtags(post);
-  const mentions = getPostMentions(post);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const profileTags = getStrArr(post, "profile_tags");
   const collaborators = getStrArr(post, "collaborators");
   const postFormat = getStr(post, "post_format");
@@ -2451,6 +3746,10 @@ function PostCard({
   const headerAccounts = buildHeaderAccounts(platform, post, collaborators);
   const headerAuthorHandle = normalizeHandle(post.author);
   const headerHandleText = formatHeaderHandleLine(headerAccounts);
+  const verifiedHeaderHandles = resolveVerifiedHeaderHandles(platform, post, headerAccounts);
+  const externalPostUrl = resolvePostExternalUrl(platform, post);
+  const captionAuthorLabel = formatHandleLabel(post.author) || "@unknown";
+  const normalizedCaptionText = normalizeCaptionPreviewText(platform, post.text);
   const topic = platform === "threads" ? getStr(post, "topic") : "";
 
   return (
@@ -2482,19 +3781,32 @@ function PostCard({
                 );
               })}
             </div>
-            {post.url ? (
+            {externalPostUrl ? (
               <a
-                href={post.url}
+                href={externalPostUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-w-0 truncate text-sm font-medium text-gray-900 hover:underline"
+                className="min-w-0 text-sm font-medium leading-5 text-gray-900 break-words hover:underline"
                 data-testid={`post-header-handles-${post.source_id}`}
+                aria-label={headerHandleText}
               >
-                {headerHandleText}
+                <HeaderHandleLine
+                  platform={platform}
+                  handles={headerAccounts}
+                  verifiedHandles={verifiedHeaderHandles}
+                />
               </a>
             ) : (
-              <span className="min-w-0 truncate text-sm font-medium text-gray-900" data-testid={`post-header-handles-${post.source_id}`}>
-                {headerHandleText}
+              <span
+                className="min-w-0 text-sm font-medium leading-5 text-gray-900 break-words"
+                data-testid={`post-header-handles-${post.source_id}`}
+                aria-label={headerHandleText}
+              >
+                <HeaderHandleLine
+                  platform={platform}
+                  handles={headerAccounts}
+                  verifiedHandles={verifiedHeaderHandles}
+                />
               </span>
             )}
           </div>
@@ -2523,26 +3835,74 @@ function PostCard({
               aria-label="Open post detail modal"
             >
               <div className="relative flex min-h-[10rem] max-h-72 items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={thumbnailUrl}
-                  alt={`${PLATFORM_LABELS[platform] ?? platform} post thumbnail`}
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  onError={(event) => {
-                    event.currentTarget.style.display = "none";
-                  }}
-                  className="max-h-72 w-full object-contain"
-                />
+                {thumbnailFailed ? (
+                  <div className="flex flex-col items-center justify-center gap-1 text-gray-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                    </svg>
+                    <span className="text-xs">Thumbnail unavailable</span>
+                  </div>
+                ) : (
+                  <div className="relative inline-block max-w-full">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={thumbnailUrl}
+                      alt={`${PLATFORM_LABELS[platform] ?? platform} post thumbnail`}
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      onError={() => setThumbnailFailed(true)}
+                      className="block max-h-72 max-w-full h-auto w-auto object-contain"
+                    />
+                  </div>
+                )}
               </div>
             </button>
           </div>
         )}
 
         {/* Post text */}
-        {post.text && (
+        {platform === "instagram" ? (
+          <div className="mb-3 space-y-2">
+            <p className="text-sm text-gray-700 whitespace-pre-wrap break-words line-clamp-6">
+              <span className="font-semibold text-gray-900">{captionAuthorLabel}</span>{" "}
+              <InlineCaptionText platform={platform} text={normalizedCaptionText} post={post} />
+            </p>
+            {(postFormat || durationSeconds > 0 || profileTags.length > 0 || collaborators.length > 0) && (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {postFormat && (
+                    <span className="text-xs rounded bg-pink-50 px-1.5 py-0.5 text-pink-700">
+                      {postFormat.toUpperCase()}
+                    </span>
+                  )}
+                  {durationSeconds > 0 && (
+                    <span className="text-xs rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
+                      {durationSeconds}s
+                    </span>
+                  )}
+                </div>
+                {profileTags.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-medium text-gray-500">Tagged:</span>
+                    {profileTags.map((tag) => (
+                      <HandleProfileChip key={`profile-${tag}`} post={post} handle={tag} className="bg-indigo-50 text-indigo-700" />
+                    ))}
+                  </div>
+                )}
+                {collaborators.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-medium text-gray-500">Collaborators:</span>
+                    {collaborators.map((collab) => (
+                      <HandleProfileChip key={`collab-${collab}`} post={post} handle={collab} className="bg-emerald-50 text-emerald-700" />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
           <p className="text-sm text-gray-700 whitespace-pre-wrap break-words mb-3 line-clamp-6">
-            {post.text}
+            <InlineCaptionText platform={platform} text={normalizedCaptionText} post={post} />
           </p>
         )}
         {platform === "threads" && (
@@ -2553,66 +3913,6 @@ function PostCard({
 
         {/* Engagement metrics */}
         <EngagementRow platform={platform} post={post} />
-
-        {/* Hashtags */}
-        {hashtags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            {hashtags.map((tag) => (
-              <span key={tag} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
-                #{tag}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Mentions / tagged accounts */}
-        {mentions.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            {mentions.map((m) => (
-              <span key={m} className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">
-                {m}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {platform === "instagram" &&
-          (postFormat || durationSeconds > 0 || profileTags.length > 0 || collaborators.length > 0) && (
-            <div className="mt-2 space-y-1.5">
-              <div className="flex flex-wrap gap-1.5">
-                {postFormat && (
-                  <span className="text-xs rounded bg-pink-50 px-1.5 py-0.5 text-pink-700">
-                    {postFormat.toUpperCase()}
-                  </span>
-                )}
-                {durationSeconds > 0 && (
-                  <span className="text-xs rounded bg-gray-100 px-1.5 py-0.5 text-gray-700">
-                    {durationSeconds}s
-                  </span>
-                )}
-              </div>
-              {profileTags.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-medium text-gray-500">Tagged:</span>
-                  {profileTags.map((tag) => (
-                    <span key={`profile-${tag}`} className="text-xs rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700">
-                      {formatHandleLabel(tag)}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {collaborators.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-medium text-gray-500">Collaborators:</span>
-                  {collaborators.map((collab) => (
-                    <span key={`collab-${collab}`} className="text-xs rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">
-                      {formatHandleLabel(collab)}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
 
         {/* Actions row */}
         <div className="flex items-center justify-end mt-3 pt-2 border-t border-gray-100">
@@ -2725,6 +4025,7 @@ export default function WeekDetailPage() {
   const [data, setData] = useState<WeekDetailResponse | null>(null);
   const [displayedPagination, setDisplayedPagination] = useState<WeekDetailResponse["pagination"] | null>(null);
   const [accumulatedPostsByPlatform, setAccumulatedPostsByPlatform] = useState<Record<string, AnyPost[]>>({});
+  const [metricsPostsByPlatform, setMetricsPostsByPlatform] = useState<Record<string, AnyPost[]> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
@@ -2734,7 +4035,7 @@ export default function WeekDetailPage() {
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>(socialPlatformFilterFromQuery);
   const [platformTotalsByPlatform, setPlatformTotalsByPlatform] = useState<Record<SocialPlatform, number> | null>(null);
   const [allPlatformsTotalPosts, setAllPlatformsTotalPosts] = useState<number | null>(null);
-  const [sortField, setSortField] = useState<SortField>("likes");
+  const [sortField, setSortField] = useState<SortField>("posted_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [searchText, setSearchText] = useState("");
   const [syncingComments, setSyncingComments] = useState(false);
@@ -2750,6 +4051,13 @@ export default function WeekDetailPage() {
   const [syncCoveragePreview, setSyncCoveragePreview] = useState<CommentsCoverageResponse | null>(null);
   const [syncMirrorCoveragePreview, setSyncMirrorCoveragePreview] = useState<MirrorCoverageResponse | null>(null);
   const [syncWorkerHealth, setSyncWorkerHealth] = useState<WorkerHealthPayload | null>(null);
+  const [syncElapsedDisplay, setSyncElapsedDisplay] = useState("");
+  const [lastJobsFetchedAt, setLastJobsFetchedAt] = useState<number | null>(null);
+  const [tokenSummaryModal, setTokenSummaryModal] = useState<{
+    key: SummaryTokenKey;
+    label: string;
+    values: string[];
+  } | null>(null);
   const [mediaLightbox, setMediaLightbox] = useState<{
     entries: SocialMediaLightboxEntry[];
     index: number;
@@ -2758,11 +4066,18 @@ export default function WeekDetailPage() {
   const syncPollFailureCountRef = useRef(0);
   const terminalCoverageFailureCountRef = useRef(0);
   const missingRunConsecutiveCountRef = useRef(0);
+  const syncPollAbortRef = useRef<AbortController | null>(null);
+  const syncStartTimeRef = useRef<number | null>(null);
   const syncSessionGenerationRef = useRef(0);
   const hasLoadedWeekDetailRef = useRef(false);
   const weekDetailRequestSeqRef = useRef(0);
   const weekDetailContextRef = useRef("");
   const weekSummaryRequestSeqRef = useRef(0);
+  const weekMetricsRequestSeqRef = useRef(0);
+  const weekMetricsContextRef = useRef("");
+  const weekDetailInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
+  const weekSummaryInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
+  const [weekOverviewLoadedKey, setWeekOverviewLoadedKey] = useState<string | null>(null);
   const syncSessionStateRef = useRef<{
     dateStart: string;
     dateEnd: string;
@@ -2802,16 +4117,20 @@ export default function WeekDetailPage() {
     }
     return seasonIdHint;
   }, [data, seasonIdHint]);
+  const isRhoslcSeason = useMemo(
+    () => isRhoslcShowContext(showSlugForRouting, data?.season?.show_name ?? null),
+    [data?.season?.show_name, showSlugForRouting],
+  );
   const syncButtonLabel = useMemo(() => {
     if (syncingComments) return "Syncing...";
     if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
       return platformFilter === "all"
-        ? "Full Ingest + Mirror"
-        : `Full Ingest ${PLATFORM_LABELS[platformFilter]} + Mirror`;
+        ? "Full Sync + Mirror"
+        : `Full Sync ${getSyncActionPlatformLabel(platformFilter)} + Mirror`;
     }
     return platformFilter === "all"
-      ? "Ingest Metrics"
-      : `Ingest ${PLATFORM_LABELS[platformFilter]} Metrics`;
+      ? "Sync All"
+      : `Sync ${getSyncActionPlatformLabel(platformFilter)}`;
   }, [platformFilter, syncingComments]);
 
   const displayData = useMemo(() => {
@@ -2845,6 +4164,12 @@ export default function WeekDetailPage() {
   useEffect(() => {
     hasLoadedWeekDetailRef.current = false;
     weekDetailContextRef.current = "";
+    weekMetricsRequestSeqRef.current += 1;
+    weekMetricsContextRef.current = "";
+    weekDetailInFlightRef.current.clear();
+    weekSummaryInFlightRef.current.clear();
+    setWeekOverviewLoadedKey(null);
+    setMetricsPostsByPlatform(null);
     setPlatformTotalsByPlatform(null);
     setAllPlatformsTotalPosts(null);
   }, [resolvedSeasonId, showIdForApi, sourceScope, seasonNumber, weekIndex]);
@@ -3102,6 +4427,13 @@ export default function WeekDetailPage() {
         resolvedSortField,
         resolvedSortDir,
       ].join("|");
+      const weekOverviewContextKey = [
+        showIdForApi,
+        seasonNumber,
+        weekIndex,
+        sourceScope,
+        resolvedSeasonId ?? "",
+      ].join("|");
       if (append && weekDetailContextRef.current && requestContextKey !== weekDetailContextRef.current) {
         return;
       }
@@ -3148,15 +4480,27 @@ export default function WeekDetailPage() {
           weekParams.set("season_id", resolvedSeasonId);
         }
         const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}?${weekParams.toString()}`;
-        const res = await fetchWithTimeout(
-          url,
-          {
-            headers,
-            cache: "no-store",
-          },
-          REQUEST_TIMEOUT_MS.weekDetail,
-          "Week detail request timed out",
-        );
+        const requestKey = `GET ${url}`;
+        let inFlight = weekDetailInFlightRef.current.get(requestKey);
+        if (!inFlight) {
+          inFlight = fetchWithTimeout(
+            url,
+            {
+              headers,
+              cache: "no-store",
+            },
+            REQUEST_TIMEOUT_MS.weekDetail,
+            "Week detail request timed out",
+          );
+          weekDetailInFlightRef.current.set(requestKey, inFlight);
+          void inFlight.finally(() => {
+            if (weekDetailInFlightRef.current.get(requestKey) === inFlight) {
+              weekDetailInFlightRef.current.delete(requestKey);
+            }
+          });
+        }
+        const rawRes = await inFlight;
+        const res = typeof rawRes.clone === "function" ? rawRes.clone() : rawRes;
         if (!res.ok) {
           throw new Error(await readApiErrorMessage(res, `HTTP ${res.status}`));
         }
@@ -3191,6 +4535,7 @@ export default function WeekDetailPage() {
         setDisplayedPagination(resolvedPagination);
         setPostOffset(nextOffset);
         setData(payload);
+        setWeekOverviewLoadedKey(weekOverviewContextKey);
         hasLoadedWeekDetailRef.current = true;
         setAccumulatedPostsByPlatform((previous) => {
           if (!append) return platformPostsMap;
@@ -3261,15 +4606,27 @@ export default function WeekDetailPage() {
         weekParams.set("season_id", resolvedSeasonId);
       }
       const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}/summary?${weekParams.toString()}`;
-      const res = await fetchWithTimeout(
-        url,
-        {
-          headers,
-          cache: "no-store",
-        },
-        20_000,
-        "Week detail summary request timed out",
-      );
+      const requestKey = `GET ${url}`;
+      let inFlight = weekSummaryInFlightRef.current.get(requestKey);
+      if (!inFlight) {
+        inFlight = fetchWithTimeout(
+          url,
+          {
+            headers,
+            cache: "no-store",
+          },
+          20_000,
+          "Week detail summary request timed out",
+        );
+        weekSummaryInFlightRef.current.set(requestKey, inFlight);
+        void inFlight.finally(() => {
+          if (weekSummaryInFlightRef.current.get(requestKey) === inFlight) {
+            weekSummaryInFlightRef.current.delete(requestKey);
+          }
+        });
+      }
+      const rawRes = await inFlight;
+      const res = typeof rawRes.clone === "function" ? rawRes.clone() : rawRes;
       if (!res.ok) {
         return;
       }
@@ -3302,9 +4659,142 @@ export default function WeekDetailPage() {
     weekIndex,
   ]);
 
+  const fetchWeekMetricsPosts = useCallback(async () => {
+    if (!showIdForApi || !seasonNumber || !weekIndex || !hasValidNumericPathParams || !isAdmin) return;
+    const requestContextKey = [
+      showIdForApi,
+      seasonNumber,
+      weekIndex,
+      sourceScope,
+      resolvedSeasonId ?? "",
+    ].join("|");
+    const requestId = weekMetricsRequestSeqRef.current + 1;
+    weekMetricsRequestSeqRef.current = requestId;
+    weekMetricsContextRef.current = requestContextKey;
+    const isStaleRequest = () =>
+      requestId !== weekMetricsRequestSeqRef.current || requestContextKey !== weekMetricsContextRef.current;
+    try {
+      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const nextPostsByPlatform: Record<string, AnyPost[]> = {};
+      const seenByPlatform: Record<string, Set<string>> = {};
+      for (const platform of PLATFORM_KEYS) {
+        nextPostsByPlatform[platform] = [];
+        seenByPlatform[platform] = new Set<string>();
+      }
+
+      let pageOffset = 0;
+      let hasMore = true;
+      let pageCount = 0;
+      while (hasMore && pageCount < WEEK_DETAIL_METRICS_MAX_PAGES) {
+        if (isStaleRequest()) return;
+        const weekParams = new URLSearchParams({
+          source_scope: sourceScope,
+          timezone: SOCIAL_TIME_ZONE,
+          max_comments_per_post: "0",
+          post_limit: String(WEEK_DETAIL_METRICS_PAGE_LIMIT),
+          post_offset: String(pageOffset),
+          sort_field: "posted_at",
+          sort_dir: "desc",
+        });
+        if (resolvedSeasonId) {
+          weekParams.set("season_id", resolvedSeasonId);
+        }
+        const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}?${weekParams.toString()}`;
+        const res = await fetchWithTimeout(
+          url,
+          {
+            headers,
+            cache: "no-store",
+          },
+          REQUEST_TIMEOUT_MS.weekDetail,
+          "Week metrics request timed out",
+        );
+        if (!res.ok) return;
+        const payload = await parseResponseJson<WeekDetailResponse>(res, "Failed to load week metrics");
+        if (isStaleRequest()) return;
+
+        for (const platform of PLATFORM_KEYS) {
+          const platformPosts = payload.platforms?.[platform]?.posts ?? [];
+          const seen = seenByPlatform[platform];
+          const aggregated = nextPostsByPlatform[platform];
+          if (!seen || !aggregated) continue;
+          for (const post of platformPosts) {
+            const sourceId = String(post.source_id ?? "");
+            if (!sourceId || seen.has(sourceId)) continue;
+            seen.add(sourceId);
+            aggregated.push(post);
+          }
+        }
+
+        const pagination = payload.pagination;
+        const returnedCount = Number(
+          pagination?.returned ??
+            PLATFORM_KEYS.reduce((sum, platform) => sum + (payload.platforms?.[platform]?.posts?.length ?? 0), 0),
+        );
+        hasMore = Boolean(pagination?.has_more) && returnedCount > 0;
+        const nextOffsetFromPagination =
+          pagination && Number.isFinite(Number(pagination.offset))
+            ? Number(pagination.offset) + returnedCount
+            : pageOffset + returnedCount;
+        pageOffset =
+          Number.isFinite(nextOffsetFromPagination) && nextOffsetFromPagination > pageOffset
+            ? nextOffsetFromPagination
+            : pageOffset + returnedCount;
+        pageCount += 1;
+      }
+
+      if (isStaleRequest()) return;
+      setMetricsPostsByPlatform(nextPostsByPlatform);
+    } catch {
+      // Non-fatal: summary cards fall back to initial payload posts.
+    }
+  }, [
+    hasValidNumericPathParams,
+    isAdmin,
+    resolvedSeasonId,
+    seasonNumber,
+    showIdForApi,
+    sourceScope,
+    weekIndex,
+  ]);
+
   useEffect(() => {
+    if (!weekOverviewLoadedKey) return;
     void fetchPlatformTotalsSummary();
-  }, [fetchPlatformTotalsSummary]);
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+    const triggerMetricsFetch = () => {
+      if (cancelled) return;
+      void fetchWeekMetricsPosts();
+    };
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (
+        callback: (deadline: { didTimeout: boolean; timeRemaining: () => number }) => void,
+        options?: { timeout?: number },
+      ) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      idleId = idleWindow.requestIdleCallback(() => {
+        triggerMetricsFetch();
+      }, { timeout: 1500 });
+    } else {
+      timeoutId = window.setTimeout(() => {
+        triggerMetricsFetch();
+      }, 1500);
+    }
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      if (idleId !== null && typeof idleWindow.cancelIdleCallback === "function") {
+        idleWindow.cancelIdleCallback(idleId);
+      }
+    };
+  }, [fetchPlatformTotalsSummary, fetchWeekMetricsPosts, weekOverviewLoadedKey]);
 
   useEffect(() => {
     if (!hasValidNumericPathParams) {
@@ -3334,17 +4824,35 @@ export default function WeekDetailPage() {
     });
   }, [fetchData, hasMorePosts, isLoadingMore, isRefreshingGallery, loading, platformFilter, postOffset, sortDir, sortField]);
 
+  const handleCancelSync = useCallback(async () => {
+    if (!syncRunId) return;
+    try {
+      await fetchWithTimeout(
+        `/api/admin/trr-api/social/ingest/stuck-jobs/cancel`,
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ run_id: syncRunId }) },
+        15_000,
+        "Cancel request timed out",
+      );
+      setSyncPollError("Sync cancelled by user.");
+    } catch (err) {
+      setSyncPollError(`Failed to cancel: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [syncRunId]);
+
   useEffect(() => {
     return () => {
       syncSessionGenerationRef.current += 1;
       syncSessionStateRef.current = null;
+      syncPollAbortRef.current?.abort();
+      syncPollAbortRef.current = null;
     };
   }, []);
 
   const fetchSyncProgress = useCallback(
     async (
       runId: string,
-      options?: { preserveLastGoodJobsIfEmpty?: boolean; preserveLastGoodRunIfMissing?: boolean },
+      options?: { preserveLastGoodJobsIfEmpty?: boolean; preserveLastGoodRunIfMissing?: boolean; signal?: AbortSignal },
     ) => {
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
@@ -3378,6 +4886,7 @@ export default function WeekDetailPage() {
             { headers, cache: "no-store" },
             REQUEST_TIMEOUT_MS.syncJobs,
             "Sync jobs request timed out",
+            options?.signal,
           );
           if (!jobsResponse.ok) {
             throw new Error(await readApiErrorMessage(jobsResponse, "Failed to load sync jobs"));
@@ -3385,6 +4894,7 @@ export default function WeekDetailPage() {
           const jobsPayload = await parseResponseJson<SocialJobsResponse>(jobsResponse, "Failed to load sync jobs");
           const jobsPage = jobsPayload.jobs ?? [];
           aggregated = [...aggregated, ...jobsPage].slice(0, jobsHardCap);
+          setSyncJobs([...aggregated]);
 
           const returned = jobsPage.length;
           const pageOffset = Number(jobsPayload.pagination?.offset ?? offset);
@@ -3402,6 +4912,7 @@ export default function WeekDetailPage() {
           { headers, cache: "no-store" },
           REQUEST_TIMEOUT_MS.syncRuns,
           "Sync runs request timed out",
+          options?.signal,
         ),
         fetchJobsPages(),
       ]);
@@ -3466,10 +4977,118 @@ export default function WeekDetailPage() {
           effectiveJobs = resolved;
           return resolved;
         });
+        setLastJobsFetchedAt(Date.now());
       }
       return { run: effectiveRun, jobs: effectiveJobs };
     },
     [hasValidNumericPathParams, invalidPathParamsError, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+  );
+
+  const recoverSyncRunAfterKickoffError = useCallback(
+    async ({
+      headers,
+      pass,
+      dateStart,
+      dateEnd,
+      platforms,
+      kickoffStartedAtMs,
+    }: {
+      headers: Record<string, string>;
+      pass: number;
+      dateStart: string;
+      dateEnd: string;
+      platforms: Array<Exclude<PlatformFilter, "all">> | null;
+      kickoffStartedAtMs: number;
+    }): Promise<{ runId: string; jobs: number } | null> => {
+      if (!hasValidNumericPathParams) return null;
+
+      const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
+      const expectedPlatforms = platforms && platforms.length > 0 ? [...platforms].sort() : null;
+      const runsParams = new URLSearchParams({
+        source_scope: sourceScope,
+        limit: String(SYNC_KICKOFF_RECOVERY_LIMIT),
+      });
+      if (resolvedSeasonId) {
+        runsParams.set("season_id", resolvedSeasonId);
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runsParams.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.syncRuns,
+        "Sync run recovery request timed out",
+      );
+      if (!response.ok) return null;
+      const runsPayload = await parseResponseJson<{ runs?: SocialRun[] }>(response, "Failed to load sync runs");
+      const runs = Array.isArray(runsPayload.runs) ? runsPayload.runs : [];
+
+      const toTimestamp = (value: unknown): number | null => {
+        if (typeof value !== "string" || !value.trim()) return null;
+        const parsed = Date.parse(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const normalizeRunPlatforms = (value: unknown): string[] | null => {
+        if (Array.isArray(value)) {
+          const normalized = value
+            .map((item) => String(item ?? "").trim().toLowerCase())
+            .filter((item) => item.length > 0)
+            .sort();
+          return normalized.length > 0 ? normalized : null;
+        }
+        if (typeof value === "string" && value.trim().toLowerCase() === "all") {
+          return null;
+        }
+        return null;
+      };
+      const windowsMatch = (candidate: unknown, expectedIso: string): boolean => {
+        if (typeof candidate !== "string" || !candidate.trim()) return true;
+        const candidateMs = Date.parse(candidate);
+        const expectedMs = Date.parse(expectedIso);
+        if (Number.isFinite(candidateMs) && Number.isFinite(expectedMs)) {
+          return candidateMs === expectedMs;
+        }
+        return candidate.trim() === expectedIso.trim();
+      };
+
+      const recoveredRun =
+        runs.find((run) => {
+          if (!run?.id) return false;
+          const config = isRecord(run.config) ? run.config : {};
+          const createdAtMs = toTimestamp(run.created_at);
+          if (
+            createdAtMs !== null &&
+            createdAtMs < kickoffStartedAtMs - SYNC_KICKOFF_RECOVERY_LOOKBACK_MS
+          ) {
+            return false;
+          }
+          const runScope =
+            (typeof run.source_scope === "string" && run.source_scope.trim().toLowerCase()) ||
+            (typeof config.source_scope === "string" && config.source_scope.trim().toLowerCase()) ||
+            "";
+          if (runScope && runScope !== sourceScope) return false;
+          const runMode =
+            typeof config.ingest_mode === "string" ? config.ingest_mode.trim().toLowerCase() : "";
+          if (runMode && runMode !== ingestMode) return false;
+          if (!windowsMatch(config.date_start, dateStart) || !windowsMatch(config.date_end, dateEnd)) {
+            return false;
+          }
+          const runPlatforms = normalizeRunPlatforms(config.platforms);
+          if (expectedPlatforms && expectedPlatforms.length > 0) {
+            if (!runPlatforms || runPlatforms.length !== expectedPlatforms.length) return false;
+            return expectedPlatforms.every((platform, index) => runPlatforms[index] === platform);
+          }
+          return runPlatforms === null;
+        }) ?? null;
+
+      if (!recoveredRun?.id) return null;
+      const summary = recoveredRun.summary ?? {};
+      const totalJobs = Number(summary.total_jobs ?? 0);
+      const completedJobs = Number(summary.completed_jobs ?? 0);
+      const failedJobs = Number(summary.failed_jobs ?? 0);
+      const activeJobs = Number(summary.active_jobs ?? 0);
+      const jobs = Math.max(0, totalJobs, completedJobs + failedJobs + activeJobs);
+      return { runId: recoveredRun.id, jobs };
+    },
+    [hasValidNumericPathParams, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
 
   const queueSyncPass = useCallback(
@@ -3484,6 +5103,7 @@ export default function WeekDetailPage() {
       dateEnd: string;
       platforms: Array<Exclude<PlatformFilter, "all">> | null;
     }) => {
+      const kickoffStartedAtMs = Date.now();
       const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
       const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
       const payload: {
@@ -3498,6 +5118,11 @@ export default function WeekDetailPage() {
         fetch_replies: boolean;
         ingest_mode: IngestMode;
         sync_strategy: "incremental";
+        runner_strategy: "adaptive_dual_runner";
+        runner_count: 2;
+        window_shard_hours: 2;
+        day_weight_profile: "rhoslc_default";
+        priority_mode: "episode_peak_weighted";
         allow_inline_dev_fallback: boolean;
         date_start: string;
         date_end: string;
@@ -3509,6 +5134,11 @@ export default function WeekDetailPage() {
         fetch_replies: true,
         ingest_mode: ingestMode,
         sync_strategy: "incremental",
+        runner_strategy: "adaptive_dual_runner",
+        runner_count: 2,
+        window_shard_hours: 2,
+        day_weight_profile: "rhoslc_default",
+        priority_mode: "episode_peak_weighted",
         allow_inline_dev_fallback: true,
         date_start: dateStart,
         date_end: dateEnd,
@@ -3516,26 +5146,97 @@ export default function WeekDetailPage() {
       if (platforms && platforms.length > 0) {
         payload.platforms = platforms;
       }
+      const isRhoslcInstagramSync =
+        sourceScope === "bravo" &&
+        isRhoslcSeason &&
+        Array.isArray(platforms) &&
+        platforms.length === 1 &&
+        platforms[0] === "instagram";
+      if (isRhoslcInstagramSync) {
+        payload.accounts_override = [...RHOSLC_INSTAGRAM_ACCOUNTS];
+        payload.hashtags_override = [RHOSLC_REQUIRED_HASHTAG];
+      }
 
       const ingestParams = new URLSearchParams();
       if (resolvedSeasonId) {
         ingestParams.set("season_id", resolvedSeasonId);
       }
-      const response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`,
-        {
-          method: "POST",
-          headers: {
-            ...headers,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
+      const kickoffUrl = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`;
+      const kickoffInit: RequestInit = {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
         },
-        REQUEST_TIMEOUT_MS.ingestKickoff,
-        "Ingest kickoff request timed out",
-      );
+        body: JSON.stringify(payload),
+      };
+      const adoptRun = (runId: string) => {
+        setSyncRunId(runId);
+        setSyncRun(null);
+        setSyncJobs([]);
+        syncPollFailureCountRef.current = 0;
+        terminalCoverageFailureCountRef.current = 0;
+        missingRunConsecutiveCountRef.current = 0;
+        if (!syncStartTimeRef.current) {
+          syncStartTimeRef.current = Date.now();
+        }
+        setSyncPass(pass);
+        void fetchSyncProgress(runId).catch(() => {});
+      };
+      let response: Response | null = null;
+      let kickoffRecoverableErrorMessage: string | null = null;
+      for (let attempt = 1; attempt <= SYNC_KICKOFF_MAX_ATTEMPTS; attempt += 1) {
+        try {
+          response = await fetchWithTimeout(
+            kickoffUrl,
+            kickoffInit,
+            REQUEST_TIMEOUT_MS.ingestKickoff,
+            SYNC_KICKOFF_TIMEOUT_MESSAGE,
+          );
+          break;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (!isRecoverableSyncKickoffMessage(errorMessage)) {
+            throw error;
+          }
+          kickoffRecoverableErrorMessage = errorMessage;
+          if (attempt >= SYNC_KICKOFF_MAX_ATTEMPTS) {
+            break;
+          }
+        }
+      }
+      if (!response) {
+        const recovered = await recoverSyncRunAfterKickoffError({
+          headers,
+          pass,
+          dateStart,
+          dateEnd,
+          platforms,
+          kickoffStartedAtMs,
+        }).catch(() => null);
+        if (recovered?.runId) {
+          adoptRun(recovered.runId);
+          return recovered;
+        }
+        throw new Error(kickoffRecoverableErrorMessage ?? `Failed to start sync pass ${pass}`);
+      }
       if (!response.ok) {
-        throw new Error(await readApiErrorMessage(response, `Failed to start sync pass ${pass}`));
+        const kickoffError = await readApiErrorMessage(response, `Failed to start sync pass ${pass}`);
+        if (isRecoverableSyncKickoffMessage(kickoffError)) {
+          const recovered = await recoverSyncRunAfterKickoffError({
+            headers,
+            pass,
+            dateStart,
+            dateEnd,
+            platforms,
+            kickoffStartedAtMs,
+          }).catch(() => null);
+          if (recovered?.runId) {
+            adoptRun(recovered.runId);
+            return recovered;
+          }
+        }
+        throw new Error(kickoffError);
       }
 
       const result = (await response.json().catch(() => ({}))) as {
@@ -3545,19 +5246,32 @@ export default function WeekDetailPage() {
       const runId = typeof result.run_id === "string" ? result.run_id : null;
       const jobs = Number(result.queued_or_started_jobs ?? 0);
       if (!runId) {
+        const recovered = await recoverSyncRunAfterKickoffError({
+          headers,
+          pass,
+          dateStart,
+          dateEnd,
+          platforms,
+          kickoffStartedAtMs,
+        }).catch(() => null);
+        if (recovered?.runId) {
+          adoptRun(recovered.runId);
+          return recovered;
+        }
         throw new Error(`Sync pass ${pass} started without a run id`);
       }
-      setSyncRunId(runId);
-      setSyncRun(null);
-      setSyncJobs([]);
-      syncPollFailureCountRef.current = 0;
-      terminalCoverageFailureCountRef.current = 0;
-      missingRunConsecutiveCountRef.current = 0;
-      setSyncPass(pass);
-      void fetchSyncProgress(runId).catch(() => {});
+      adoptRun(runId);
       return { runId, jobs };
     },
-    [fetchSyncProgress, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+    [
+      fetchSyncProgress,
+      isRhoslcSeason,
+      recoverSyncRunAfterKickoffError,
+      resolvedSeasonId,
+      seasonNumber,
+      showIdForApi,
+      sourceScope,
+    ],
   );
 
   const fetchCommentsCoverage = useCallback(
@@ -3755,20 +5469,29 @@ export default function WeekDetailPage() {
         platforms: selectedPlatforms,
       });
       if (generation !== syncSessionGenerationRef.current) return;
+      const isRhoslcInstagramSync =
+        sourceScope === "bravo" &&
+        isRhoslcSeason &&
+        Array.isArray(selectedPlatforms) &&
+        selectedPlatforms.length === 1 &&
+        selectedPlatforms[0] === "instagram";
+      const kickoffTargetHint = isRhoslcInstagramSync ? " · targets @bravotv + @bravowwhl · #RHOSLC" : "";
       setSyncMessage(
         `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${
-          SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "Full Ingest + Mirror started." : "Ingest Metrics started."
-        }`,
+          SOCIAL_FULL_SYNC_MIRROR_ENABLED
+            ? "Full Sync + Mirror started."
+            : `Sync ${platformFilter === "all" ? "Metrics" : getSyncActionPlatformLabel(platformFilter)} started.`
+        }${kickoffTargetHint}`,
       );
     } catch (err) {
       const rawMessage =
         err instanceof Error
           ? err.message
           : SOCIAL_FULL_SYNC_MIRROR_ENABLED
-            ? "Failed to run full ingest + mirror"
-            : "Failed to start ingest";
+            ? "Failed to run full sync + mirror"
+            : "Failed to start sync";
       const message =
-        rawMessage.toLowerCase().includes("timed out")
+        isRecoverableSyncKickoffMessage(rawMessage)
           ? `${rawMessage}. Retry in a minute; if it keeps failing, share the trace id with engineering.`
           : rawMessage;
       setSyncError(
@@ -3782,12 +5505,18 @@ export default function WeekDetailPage() {
     fetchSyncWorkerHealth,
     hasValidNumericPathParams,
     invalidPathParamsError,
+    isRhoslcSeason,
     platformFilter,
     queueSyncPass,
+    sourceScope,
   ]);
 
   useEffect(() => {
     if (!syncRunId || !syncingComments) return;
+
+    syncPollAbortRef.current?.abort();
+    const abortController = new AbortController();
+    syncPollAbortRef.current = abortController;
 
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -3804,6 +5533,7 @@ export default function WeekDetailPage() {
         const snapshot = await fetchSyncProgress(syncRunId, {
           preserveLastGoodJobsIfEmpty: true,
           preserveLastGoodRunIfMissing: true,
+          signal: abortController.signal,
         });
         if (cancelled || generation !== syncPollGenerationRef.current) return;
         syncPollFailureCountRef.current = 0;
@@ -3824,7 +5554,7 @@ export default function WeekDetailPage() {
               : currentRun.status === "failed"
                 ? "failed"
                 : "complete";
-          let terminalMessage = `Pass ${session?.pass ?? 1}/${session?.maxPasses ?? COMMENT_SYNC_MAX_PASSES} ingest ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
+          let terminalMessage = `Pass ${session?.pass ?? 1}/${session?.maxPasses ?? COMMENT_SYNC_MAX_PASSES} sync ${finalVerb}${elapsed}: ${completedJobs} job(s) finished`;
           if (totalJobs > 0) {
             terminalMessage += ` of ${totalJobs}`;
           }
@@ -3976,6 +5706,7 @@ export default function WeekDetailPage() {
         }
       } catch (err) {
         if (cancelled || generation !== syncPollGenerationRef.current) return;
+        if (isAbortError(err)) return;
         const message = err instanceof Error ? err.message : "Failed to refresh sync progress";
         if (message === "Run no longer available") {
           setSyncPollError(message);
@@ -4004,6 +5735,7 @@ export default function WeekDetailPage() {
     void poll();
     return () => {
       cancelled = true;
+      abortController.abort();
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [
@@ -4029,8 +5761,42 @@ export default function WeekDetailPage() {
   useEffect(() => {
     if (!syncingComments) {
       syncSessionStateRef.current = null;
+      syncStartTimeRef.current = null;
+      setSyncElapsedDisplay("");
     }
   }, [syncingComments]);
+
+  useEffect(() => {
+    if (!syncingComments || !syncStartTimeRef.current) {
+      setSyncElapsedDisplay("");
+      return;
+    }
+    const tick = () => {
+      if (!syncStartTimeRef.current) return;
+      const elapsed = Math.floor((Date.now() - syncStartTimeRef.current) / 1000);
+      const minutes = Math.floor(elapsed / 60);
+      const seconds = elapsed % 60;
+      setSyncElapsedDisplay(minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`);
+    };
+    tick();
+    const intervalId = setInterval(tick, 1000);
+    return () => clearInterval(intervalId);
+  }, [syncingComments]);
+
+  useEffect(() => {
+    if (!syncingComments || !hasValidNumericPathParams) return;
+    const intervalId = setInterval(() => {
+      void fetchData({
+        refreshGalleryOnly: true,
+        platformFilterValue: platformFilter,
+        sortFieldValue: sortField,
+        sortDirValue: sortDir,
+      });
+    }, SYNC_GALLERY_REFRESH_MS);
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [fetchData, hasValidNumericPathParams, platformFilter, sortDir, sortField, syncingComments]);
 
   const openPostMediaLightbox = useCallback(
     (platform: string, post: AnyPost, initialIndex = 0) => {
@@ -4159,6 +5925,256 @@ export default function WeekDetailPage() {
     return entries.map(({ platform, post }) => ({ platform, post }));
   }, [activeDayFilter, displayData, platformFilter, searchText]);
 
+  const summaryPostsByPlatform = useMemo(() => {
+    const nextPostsByPlatform: Record<string, AnyPost[]> = {};
+    for (const platform of PLATFORM_KEYS) {
+      nextPostsByPlatform[platform] = metricsPostsByPlatform?.[platform] ?? data?.platforms?.[platform]?.posts ?? [];
+    }
+    return nextPostsByPlatform;
+  }, [data, metricsPostsByPlatform]);
+
+  const summaryPosts = useMemo(() => {
+    const entries: { platform: string; post: AnyPost }[] = [];
+    const selectedPlatforms: SocialPlatform[] = platformFilter === "all" ? PLATFORM_KEYS : [platformFilter];
+    for (const platform of selectedPlatforms) {
+      for (const post of summaryPostsByPlatform[platform] ?? []) {
+        if (activeDayFilter) {
+          const postDayToken = toLocalDateToken(post.posted_at);
+          if (!postDayToken || postDayToken !== activeDayFilter) {
+            continue;
+          }
+        }
+        entries.push({ platform, post });
+      }
+    }
+    return entries;
+  }, [activeDayFilter, platformFilter, summaryPostsByPlatform]);
+
+  const uniquePostTokenSummary = useMemo(() => {
+    const collaborators = new Map<string, string>();
+    const tags = new Map<string, string>();
+    const mentions = new Map<string, string>();
+    const hashtags = new Map<string, string>();
+    for (const { platform, post } of summaryPosts) {
+      for (const value of getStrArr(post, "collaborators")) {
+        const label = formatHandleLabel(value);
+        if (!label) continue;
+        collaborators.set(label.toLowerCase(), label);
+      }
+      for (const value of getStrArr(post, "profile_tags")) {
+        const label = formatHandleLabel(value);
+        if (!label) continue;
+        tags.set(label.toLowerCase(), label);
+      }
+      for (const value of getPostMentions(post)) {
+        const normalizedMention = value.startsWith("@") ? value : formatHandleLabel(value);
+        if (!normalizedMention) continue;
+        mentions.set(normalizedMention.toLowerCase(), normalizedMention);
+      }
+      for (const value of getPostHashtags(platform, post)) {
+        const normalizedTag = `#${String(value || "").trim().replace(/^#+/, "")}`;
+        if (normalizedTag === "#") continue;
+        hashtags.set(normalizedTag.toLowerCase(), normalizedTag);
+      }
+    }
+    const sortTokens = (collection: Map<string, string>): string[] =>
+      [...collection.values()].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+    return {
+      collaborators: sortTokens(collaborators),
+      tags: sortTokens(tags),
+      mentions: sortTokens(mentions),
+      hashtags: sortTokens(hashtags),
+    };
+  }, [summaryPosts]);
+
+  const verifiedHandlesInView = useMemo(() => {
+    const verified = new Set<string>();
+    for (const { platform, post } of summaryPosts) {
+      const collaborators = getStrArr(post, "collaborators");
+      const headerAccounts = buildHeaderAccounts(platform, post, collaborators);
+      const postVerified = resolveVerifiedHeaderHandles(platform, post, headerAccounts);
+      for (const handle of postVerified) {
+        verified.add(normalizeHandle(handle));
+      }
+    }
+    return verified;
+  }, [summaryPosts]);
+
+  const tokenHandleDisplayNames = useMemo(() => {
+    const byHandle = new Map<string, { displayName: string; priority: 1 | 2 | 3 }>();
+    const setName = (handle: string, displayName: string | null, priority: 1 | 2 | 3) => {
+      const normalizedHandle = normalizeHandle(handle);
+      const normalizedDisplayName = String(displayName ?? "").trim();
+      if (!normalizedHandle || !normalizedDisplayName) return;
+      const existing = byHandle.get(normalizedHandle);
+      if (existing && existing.priority <= priority) return;
+      byHandle.set(normalizedHandle, { displayName: normalizedDisplayName, priority });
+    };
+
+    for (const { post } of summaryPosts) {
+      const postRecord = asRecord(post);
+      const authorHandle = resolvePostAuthorHandle(post);
+
+      for (const key of TOKEN_HANDLE_DETAIL_KEYS) {
+        for (const detail of pickObjectArrayFromRecord(postRecord, key)) {
+          const handle = resolveDetailHandleValue(detail);
+          if (!handle) continue;
+          setName(handle, resolveDetailDisplayNameValue(detail), 1);
+        }
+      }
+
+      const authorUserRecord = asRecord(post.user);
+      setName(authorHandle, pickNonEmptyStringFromRecord(authorUserRecord, ["full_name", "fullName", "display_name", "displayName", "name", "nickname"]), 2);
+      setName(authorHandle, pickNonEmptyStringFromRecord(postRecord, ["owner_full_name", "full_name", "fullName", "display_name", "displayName", "name", "nickname"]), 3);
+
+      const candidateHandles = new Set<string>();
+      for (const handle of getStrArr(post, "collaborators")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getStrArr(post, "profile_tags")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getPostMentions(post)) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of candidateHandles) {
+        setName(handle, resolveHandleProfile(post, handle)?.displayName ?? null, 2);
+      }
+    }
+
+    const resolved = new Map<string, string | null>();
+    for (const [handle, entry] of byHandle.entries()) {
+      resolved.set(handle, entry.displayName);
+    }
+    return resolved;
+  }, [summaryPosts]);
+
+  const tokenHandleAvatarUrls = useMemo(() => {
+    const byHandle = new Map<string, string>();
+    const setAvatar = (handle: string, avatarUrl: string | null) => {
+      const normalizedHandle = normalizeHandle(handle);
+      const normalizedAvatarUrl = String(avatarUrl ?? "").trim();
+      if (!normalizedHandle || !normalizedAvatarUrl) return;
+      if (byHandle.has(normalizedHandle)) return;
+      byHandle.set(normalizedHandle, normalizedAvatarUrl);
+    };
+
+    for (const { post } of summaryPosts) {
+      const authorHandle = resolvePostAuthorHandle(post);
+      setAvatar(authorHandle, resolveAccountAvatarUrl(post, authorHandle, true));
+
+      const candidateHandles = new Set<string>();
+      for (const handle of getStrArr(post, "collaborators")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getStrArr(post, "profile_tags")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getPostMentions(post)) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+
+      const postRecord = asRecord(post);
+      for (const key of TOKEN_HANDLE_DETAIL_KEYS) {
+        for (const detail of pickObjectArrayFromRecord(postRecord, key)) {
+          const normalized = resolveDetailHandleValue(detail);
+          if (normalized) candidateHandles.add(normalized);
+        }
+      }
+
+      for (const handle of candidateHandles) {
+        setAvatar(
+          handle,
+          resolveAccountAvatarUrl(post, handle, handle === authorHandle) ?? resolveHandleProfile(post, handle)?.avatarUrl ?? null,
+        );
+      }
+    }
+
+    return byHandle;
+  }, [summaryPosts]);
+
+  const tokenHandleProfileUrls = useMemo(() => {
+    const byHandle = new Map<string, string>();
+    const setProfileUrl = (handle: string, profileUrl: string | null) => {
+      const normalizedHandle = normalizeHandle(handle);
+      const normalizedProfileUrl = normalizeExternalUrl(profileUrl);
+      if (!normalizedHandle || !normalizedProfileUrl) return;
+      if (byHandle.has(normalizedHandle)) return;
+      byHandle.set(normalizedHandle, normalizedProfileUrl);
+    };
+
+    for (const { post } of summaryPosts) {
+      const authorHandle = resolvePostAuthorHandle(post);
+      setProfileUrl(authorHandle, resolveHandleProfile(post, authorHandle)?.profileUrl ?? null);
+
+      const candidateHandles = new Set<string>();
+      for (const handle of getStrArr(post, "collaborators")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getStrArr(post, "profile_tags")) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+      for (const handle of getPostMentions(post)) {
+        const normalized = normalizeHandle(handle);
+        if (normalized) candidateHandles.add(normalized);
+      }
+
+      const postRecord = asRecord(post);
+      for (const key of TOKEN_HANDLE_DETAIL_KEYS) {
+        for (const detail of pickObjectArrayFromRecord(postRecord, key)) {
+          const normalized = resolveDetailHandleValue(detail);
+          if (normalized) candidateHandles.add(normalized);
+        }
+      }
+
+      for (const handle of candidateHandles) {
+        setProfileUrl(handle, resolveHandleProfile(post, handle)?.profileUrl ?? null);
+      }
+    }
+
+    return byHandle;
+  }, [summaryPosts]);
+
+  const tokenModalRows = useMemo(() => {
+    if (!tokenSummaryModal || !isHandleTokenKey(tokenSummaryModal.key)) return [];
+    const preferredPlatform: PlatformFilter = platformFilter === "all" ? "instagram" : platformFilter;
+    return tokenSummaryModal.values
+      .map((value) => {
+        const handle = normalizeHandle(value);
+        if (!handle) return null;
+        return {
+          key: value,
+          handle,
+          handleLabel: `@${handle}`,
+          displayName: tokenHandleDisplayNames.get(handle) ?? null,
+          avatarUrl: tokenHandleAvatarUrls.get(handle) ?? null,
+          profileUrl: tokenHandleProfileUrls.get(handle) ?? buildHandleProfileUrl(handle, preferredPlatform),
+          isVerified: verifiedHandlesInView.has(handle),
+        };
+      })
+      .filter(
+        (
+          row,
+        ): row is {
+          key: string;
+          handle: string;
+          handleLabel: string;
+          displayName: string | null;
+          avatarUrl: string | null;
+          profileUrl: string;
+          isVerified: boolean;
+        } => row !== null,
+      );
+  }, [platformFilter, tokenHandleAvatarUrls, tokenHandleDisplayNames, tokenHandleProfileUrls, tokenSummaryModal, verifiedHandlesInView]);
+
   const tabTotals = useMemo(() => {
     const fallbackTotals: Record<SocialPlatform, number> = { ...EMPTY_PLATFORM_TOTALS };
     for (const platform of PLATFORM_KEYS) {
@@ -4192,11 +6208,23 @@ export default function WeekDetailPage() {
 
   // Filtered totals
   const filteredTotals = useMemo(() => {
-    if (!displayData) return { posts: 0, total_comments: 0, total_engagement: 0 };
+    const sumLikes = (posts: AnyPost[]): number => {
+      return posts.reduce((sum, post) => sum + Math.max(0, Number(getNum(post, "likes") || 0)), 0);
+    };
+    if (!displayData) return { posts: 0, total_comments: 0, total_likes: 0 };
+    if (metricsPostsByPlatform) {
+      const totalComments = summaryPosts.reduce((sum, { platform, post }) => sum + getActualCommentsForPost(platform, post), 0);
+      const totalLikes = summaryPosts.reduce((sum, { post }) => sum + Math.max(0, Number(getNum(post, "likes") || 0)), 0);
+      return {
+        posts: summaryPosts.length,
+        total_comments: totalComments,
+        total_likes: totalLikes,
+      };
+    }
     if (activeDayFilter) {
       let posts = 0;
       let totalComments = 0;
-      let totalEngagement = 0;
+      let totalLikes = 0;
       const platformEntries =
         platformFilter === "all"
           ? Object.entries(displayData.platforms)
@@ -4208,23 +6236,48 @@ export default function WeekDetailPage() {
           if (!postDayToken || postDayToken !== activeDayFilter) continue;
           posts += 1;
           totalComments += getActualCommentsForPost(platform, post);
-          totalEngagement += Number(post.engagement ?? 0);
+          totalLikes += Math.max(0, Number(getNum(post, "likes") || 0));
         }
       }
-      return { posts, total_comments: totalComments, total_engagement: totalEngagement };
+      return { posts, total_comments: totalComments, total_likes: totalLikes };
     }
     if (platformFilter === "all") {
+      const totalLikes = PLATFORM_KEYS.reduce((sum, platform) => {
+        const platformPosts = displayData.platforms[platform]?.posts ?? [];
+        return sum + sumLikes(platformPosts);
+      }, 0);
       return {
         posts: allTabTotalPosts,
         total_comments: displayData.totals.total_comments,
-        total_engagement: displayData.totals.total_engagement,
+        total_likes: totalLikes,
       };
     }
     const pd = displayData.platforms[platformFilter];
     return pd?.totals
-      ? { posts: pd.totals.posts, total_comments: pd.totals.total_comments, total_engagement: pd.totals.total_engagement }
-      : { posts: 0, total_comments: 0, total_engagement: 0 };
-  }, [activeDayFilter, allTabTotalPosts, displayData, platformFilter]);
+      ? { posts: pd.totals.posts, total_comments: pd.totals.total_comments, total_likes: sumLikes(pd.posts ?? []) }
+      : { posts: 0, total_comments: 0, total_likes: 0 };
+  }, [activeDayFilter, allTabTotalPosts, displayData, metricsPostsByPlatform, platformFilter, summaryPosts]);
+
+  const platformFilteredMetrics = useMemo(() => {
+    const config = PLATFORM_SUMMARY_CONFIG[platformFilter];
+    const sums: Record<string, number> = {};
+    for (const metric of config.metrics) {
+      if (metric.aggregate === "twitter_reposts") {
+        sums[metric.key] = summaryPosts.reduce((sum, { post }) => sum + getTwitterRepostCount(post), 0);
+      } else if (metric.aggregate === "comments_normalized") {
+        sums[metric.key] = summaryPosts.reduce(
+          (sum, { platform, post }) => sum + getActualCommentsForPost(platform, post),
+          0,
+        );
+      } else {
+        sums[metric.key] = summaryPosts.reduce(
+          (sum, { post }) => sum + Math.max(0, Number(getNum(post, metric.key) || 0)),
+          0,
+        );
+      }
+    }
+    return sums;
+  }, [platformFilter, summaryPosts]);
 
   const activeSortLabel = useMemo(() => {
     return SORT_OPTIONS.find((option) => option.key === sortField)?.label ?? "selected metric";
@@ -4232,6 +6285,17 @@ export default function WeekDetailPage() {
 
   const filteredCommentCoverage = useMemo(() => {
     if (!displayData) return { saved: 0, actual: 0, incomplete: false };
+    if (metricsPostsByPlatform) {
+      let effectiveSaved = 0;
+      let actual = 0;
+      for (const { platform, post } of summaryPosts) {
+        const savedCount = getSavedCommentsForPost(post);
+        const actualCount = getActualCommentsForPost(platform, post);
+        effectiveSaved += Math.min(savedCount, actualCount);
+        actual += actualCount;
+      }
+      return toEffectiveCommentCoverage(effectiveSaved, actual);
+    }
     let effectiveSaved = 0;
     let actual = 0;
     const platformEntries =
@@ -4252,7 +6316,7 @@ export default function WeekDetailPage() {
       }
     }
     return toEffectiveCommentCoverage(effectiveSaved, actual);
-  }, [activeDayFilter, displayData, platformFilter]);
+  }, [activeDayFilter, displayData, metricsPostsByPlatform, platformFilter, summaryPosts]);
 
   const syncFilteredCommentCoverage = useMemo(() => {
     if (!syncCoveragePreview) return null;
@@ -4388,6 +6452,122 @@ export default function WeekDetailPage() {
     return { posts, comments, mediaMirror };
   }, [syncJobs, syncRun?.summary?.stage_counts]);
 
+  const syncRunnerCount = useMemo(() => {
+    const runConfig = asRecord(syncRun?.config);
+    const parsed = Number(runConfig?.runner_count ?? 1);
+    if (!Number.isFinite(parsed) || parsed < 1) return 1;
+    return Math.floor(parsed);
+  }, [syncRun?.config]);
+
+  const syncHandleProgressCards = useMemo((): HandleJobProgressCard[] => {
+    const stageSortOrder: Record<string, number> = {
+      posts: 0,
+      comments: 1,
+      media_mirror: 2,
+    };
+    type MutableCard = {
+      platform: string;
+      handle: string;
+      runnerLanes: Set<string>;
+      totals: StageProgressSnapshot;
+      stages: Map<string, StageProgressSnapshot>;
+    };
+    const makeSnapshot = (): StageProgressSnapshot => ({
+      total: 0,
+      completed: 0,
+      failed: 0,
+      active: 0,
+      scraped: 0,
+      saved: 0,
+    });
+    const applyJobCounts = (snapshot: StageProgressSnapshot, job: SocialJob) => {
+      snapshot.total += 1;
+      if (job.status === "completed") snapshot.completed += 1;
+      else if (job.status === "failed") snapshot.failed += 1;
+      else if (ACTIVE_RUN_STATUSES.has(job.status)) snapshot.active += 1;
+    };
+    const cards = new Map<string, MutableCard>();
+    for (const job of syncJobs) {
+      const platform = String(job.platform || "")
+        .trim()
+        .toLowerCase();
+      if (!platform) continue;
+      const handle = getJobAccountHandle(job);
+      if (!handle) continue;
+      const cardId = `${platform}:${handle}`;
+      let card = cards.get(cardId);
+      if (!card) {
+        card = {
+          platform,
+          handle,
+          runnerLanes: new Set<string>(),
+          totals: makeSnapshot(),
+          stages: new Map<string, StageProgressSnapshot>(),
+        };
+        cards.set(cardId, card);
+      }
+
+      const stage = String(getJobStage(job) || "posts")
+        .trim()
+        .toLowerCase();
+      const stageKey = stage || "posts";
+      let stageSnapshot = card.stages.get(stageKey);
+      if (!stageSnapshot) {
+        stageSnapshot = makeSnapshot();
+        card.stages.set(stageKey, stageSnapshot);
+      }
+
+      applyJobCounts(card.totals, job);
+      applyJobCounts(stageSnapshot, job);
+
+      const stageCounters = getJobStageCounters(job);
+      const stageScraped = stageCounters ? stageCounters.posts + stageCounters.comments : Number(job.items_found ?? 0);
+      stageSnapshot.scraped += stageScraped;
+      card.totals.scraped += stageScraped;
+
+      const persistCounters = getJobPersistCounters(job);
+      if (persistCounters) {
+        const stageSaved = persistCounters.posts_upserted + persistCounters.comments_upserted;
+        stageSnapshot.saved += stageSaved;
+        card.totals.saved += stageSaved;
+      }
+
+      const runnerLane = getJobRunnerLane(job);
+      if (runnerLane) {
+        card.runnerLanes.add(runnerLane);
+      }
+    }
+
+    return [...cards.entries()]
+      .map(([id, card]) => {
+        const stageEntries: HandleStageProgressSnapshot[] = [...card.stages.entries()]
+          .sort(([left], [right]) => {
+            const leftOrder = stageSortOrder[left] ?? 99;
+            const rightOrder = stageSortOrder[right] ?? 99;
+            if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+            return left.localeCompare(right);
+          })
+          .map(([stage, snapshot]) => ({
+            stage,
+            ...snapshot,
+          }));
+        return {
+          id,
+          platform: card.platform,
+          platformLabel: PLATFORM_LABELS[card.platform] ?? card.platform,
+          handle: card.handle,
+          handleLabel: formatHandleLabel(card.handle),
+          runnerLanes: [...card.runnerLanes].sort(),
+          totals: card.totals,
+          stages: stageEntries,
+        };
+      })
+      .sort((left, right) => {
+        if (left.platform !== right.platform) return left.platform.localeCompare(right.platform);
+        return left.handle.localeCompare(right.handle);
+      });
+  }, [syncJobs]);
+
   const syncLogs = useMemo(() => {
     return [...syncJobs]
       .sort((a, b) => {
@@ -4435,6 +6615,116 @@ export default function WeekDetailPage() {
         };
       });
   }, [syncJobs]);
+
+  const displayedTotals = useMemo(() => {
+    if (!syncingComments) return filteredTotals;
+    return {
+      ...filteredTotals,
+      posts: Math.max(filteredTotals.posts, Number(syncStageProgress.posts.scraped || 0)),
+      total_comments: Math.max(filteredTotals.total_comments, Number(syncStageProgress.comments.scraped || 0)),
+    };
+  }, [filteredTotals, syncStageProgress.comments.scraped, syncStageProgress.posts.scraped, syncingComments]);
+
+  const syncAccountsByPlatform = useMemo(() => {
+    const byPlatform = new Map<string, Set<string>>();
+    for (const job of syncJobs) {
+      const platform = String(job.platform || "").trim().toLowerCase();
+      if (!platform) continue;
+      const account = typeof job.config?.account === "string" ? formatHandleLabel(job.config.account) : "";
+      if (!account) continue;
+      if (!byPlatform.has(platform)) byPlatform.set(platform, new Set<string>());
+      byPlatform.get(platform)?.add(account);
+    }
+    const chunks = [...byPlatform.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([platform, handles]) => {
+        const sortedHandles = [...handles].sort((left, right) => left.localeCompare(right));
+        return `${PLATFORM_LABELS[platform] ?? platform}: ${sortedHandles.join(", ")}`;
+      });
+    return chunks.join(" · ");
+  }, [syncJobs]);
+
+  const syncStageNarrative = useMemo(() => {
+    const done: string[] = [];
+    const running: string[] = [];
+    const waiting: string[] = [];
+
+    const postsFinished = syncStageProgress.posts.completed + syncStageProgress.posts.failed;
+    const commentsFinished = syncStageProgress.comments.completed + syncStageProgress.comments.failed;
+    const mirrorFinished = syncStageProgress.mediaMirror.completed + syncStageProgress.mediaMirror.failed;
+
+    if (syncStageProgress.posts.total > 0) {
+      if (postsFinished >= syncStageProgress.posts.total) {
+        done.push(`Posts ${postsFinished}/${syncStageProgress.posts.total} complete`);
+      } else if (syncStageProgress.posts.active > 0) {
+        running.push(`Posts running (${syncStageProgress.posts.active} active)`);
+      } else {
+        waiting.push("Posts queued");
+      }
+    } else {
+      waiting.push("Posts stage waiting for jobs");
+    }
+
+    if (syncStageProgress.comments.total > 0) {
+      if (commentsFinished >= syncStageProgress.comments.total) {
+        done.push(`Comments ${commentsFinished}/${syncStageProgress.comments.total} complete`);
+      } else if (syncStageProgress.comments.active > 0) {
+        running.push(`Comments running (${syncStageProgress.comments.active} active)`);
+      } else {
+        waiting.push("Comments queued");
+      }
+    } else if (syncStageProgress.posts.total > 0 && postsFinished < syncStageProgress.posts.total) {
+      waiting.push("Comments stage waiting on posts stage");
+    }
+
+    if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
+      if (syncStageProgress.mediaMirror.total > 0) {
+        if (mirrorFinished >= syncStageProgress.mediaMirror.total) {
+          done.push(`Mirror ${mirrorFinished}/${syncStageProgress.mediaMirror.total} complete`);
+        } else if (syncStageProgress.mediaMirror.active > 0) {
+          running.push(`Mirror running (${syncStageProgress.mediaMirror.active} active)`);
+        } else {
+          waiting.push("Mirror queued");
+        }
+      } else {
+        waiting.push("Mirror stage waiting for jobs");
+      }
+    }
+
+    const commentScanHint =
+      syncStageProgress.comments.active > 0 && syncStageProgress.comments.scraped === 0
+        ? "Comments worker is scanning matched posts. It can stay at 0 while it checks each thread for new comments."
+        : null;
+
+    return { done, running, waiting, commentScanHint };
+  }, [syncStageProgress]);
+
+  const syncStepStatus = useMemo(() => {
+    const queueStatus = (() => {
+      if (!syncRun) {
+        return { label: "Queued", toneClass: "bg-gray-100 text-gray-600" };
+      }
+      if (syncRun.status === "failed") {
+        return { label: "Failed", toneClass: "bg-red-100 text-red-700" };
+      }
+      if (syncRun.status === "cancelled") {
+        return { label: "Cancelled", toneClass: "bg-amber-100 text-amber-700" };
+      }
+      if (TERMINAL_RUN_STATUSES.has(syncRun.status)) {
+        return { label: "Done", toneClass: "bg-emerald-100 text-emerald-700" };
+      }
+      if (syncProgress.active > 0) {
+        return { label: "Running", toneClass: "bg-blue-100 text-blue-700" };
+      }
+      return { label: "Queued", toneClass: "bg-gray-100 text-gray-600" };
+    })();
+    return {
+      queue: queueStatus,
+      posts: getStageStatus(syncStageProgress.posts),
+      comments: getStageStatus(syncStageProgress.comments),
+      mediaMirror: getStageStatus(syncStageProgress.mediaMirror),
+    };
+  }, [syncProgress.active, syncRun, syncStageProgress.comments, syncStageProgress.mediaMirror, syncStageProgress.posts]);
 
   const buildSeasonTabHref = useCallback(
     (tabId: SeasonTabId): string => {
@@ -4696,6 +6986,7 @@ export default function WeekDetailPage() {
 
             <button
               type="button"
+              data-testid="week-sync-button"
               onClick={() => {
                 void syncAllCommentsForWeek();
               }}
@@ -4734,20 +7025,35 @@ export default function WeekDetailPage() {
                           syncRun ? formatRunStatus(syncRun.status) : syncingComments ? "Running" : "Unknown"
                         }`
                       : "Preparing run"}
+                    {syncElapsedDisplay && syncingComments && (
+                      <span className="ml-2 tabular-nums text-gray-400">{syncElapsedDisplay}</span>
+                    )}
                   </p>
                   {syncWorkerHealth && (
                     <p className="mt-1 text-xs text-gray-500">
                       Workers:{" "}
                       {syncWorkerHealth.queue_enabled
                         ? `${syncWorkerHealth.healthy_workers ?? 0} healthy${syncWorkerHealth.reason ? ` (${syncWorkerHealth.reason})` : ""}`
-                        : "queue disabled"}
+                        : "queue disabled (inline fallback active; long comment scans may look idle before new comments are found)"}
                     </p>
                   )}
+                  {syncAccountsByPlatform && (
+                    <p className="mt-1 text-xs text-gray-500">Accounts: {syncAccountsByPlatform}</p>
+                  )}
                 </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold text-gray-900 tabular-nums">{syncProgress.pct}%</div>
-                  <div className="text-xs text-gray-500 tabular-nums">
-                    {syncProgress.finished}/{syncProgress.total || "?"} jobs · {fmtNum(syncProgress.items)} scraped
+                <div className="flex items-center gap-3">
+                  {syncRun && ACTIVE_RUN_STATUSES.has(syncRun.status) && (
+                    <button type="button"
+                      onClick={() => void handleCancelSync()}
+                      className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50">
+                      Cancel Sync
+                    </button>
+                  )}
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-gray-900 tabular-nums">{syncProgress.pct}%</div>
+                    <div className="text-xs text-gray-500 tabular-nums">
+                      {syncProgress.finished}/{syncProgress.total || "?"} jobs · {fmtNum(syncProgress.items)} scraped
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4767,7 +7073,12 @@ export default function WeekDetailPage() {
 
               <div className={`mt-3 grid gap-2 ${SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
                 <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
-                  <div className="font-medium text-gray-700">Step 1: Queue + Start</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-gray-700">Step 1: Queue + Start</div>
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.queue.toneClass}`}>
+                      {syncStepStatus.queue.label}
+                    </span>
+                  </div>
                   <div className="mt-1 text-gray-600">
                     {syncRun
                       ? `${formatRunStatus(syncRun.status)}${syncProgress.active > 0 ? ` · ${syncProgress.active} active` : ""}`
@@ -4775,7 +7086,12 @@ export default function WeekDetailPage() {
                   </div>
                 </div>
                 <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
-                  <div className="font-medium text-gray-700">Step 2: Posts Stage</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-gray-700">Step 2: Posts Stage</div>
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.posts.toneClass}`}>
+                      {syncStepStatus.posts.label}
+                    </span>
+                  </div>
                   <div className="mt-1 text-gray-600 tabular-nums">
                     {syncStageProgress.posts.completed + syncStageProgress.posts.failed}/
                     {syncStageProgress.posts.total || "?"} complete
@@ -4785,7 +7101,14 @@ export default function WeekDetailPage() {
                   </div>
                 </div>
                 <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
-                  <div className="font-medium text-gray-700">Step 3: Comments Stage</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-gray-700">Step 3: Comments Stage</div>
+                    <span
+                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.comments.toneClass}`}
+                    >
+                      {syncStepStatus.comments.label}
+                    </span>
+                  </div>
                   <div className="mt-1 text-gray-600 tabular-nums">
                     {syncStageProgress.comments.completed + syncStageProgress.comments.failed}/
                     {syncStageProgress.comments.total || "?"} complete
@@ -4796,13 +7119,41 @@ export default function WeekDetailPage() {
                 </div>
                 {SOCIAL_FULL_SYNC_MIRROR_ENABLED && (
                   <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
-                    <div className="font-medium text-gray-700">Step 4: Mirror Stage</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium text-gray-700">Step 4: Mirror Stage</div>
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.mediaMirror.toneClass}`}
+                      >
+                        {syncStepStatus.mediaMirror.label}
+                      </span>
+                    </div>
                     <div className="mt-1 text-gray-600 tabular-nums">
                       {syncStageProgress.mediaMirror.completed + syncStageProgress.mediaMirror.failed}/
                       {syncStageProgress.mediaMirror.total || "?"} complete
                       {syncStageProgress.mediaMirror.active > 0 ? ` · ${syncStageProgress.mediaMirror.active} active` : ""}
                     </div>
                   </div>
+                )}
+              </div>
+
+              <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                {syncStageNarrative.done.length > 0 && (
+                  <p>
+                    <span className="font-medium text-gray-800">Done:</span> {syncStageNarrative.done.join(" · ")}
+                  </p>
+                )}
+                {syncStageNarrative.running.length > 0 && (
+                  <p className={syncStageNarrative.done.length > 0 ? "mt-1" : ""}>
+                    <span className="font-medium text-gray-800">In progress:</span> {syncStageNarrative.running.join(" · ")}
+                  </p>
+                )}
+                {syncStageNarrative.waiting.length > 0 && (
+                  <p className={syncStageNarrative.done.length > 0 || syncStageNarrative.running.length > 0 ? "mt-1" : ""}>
+                    <span className="font-medium text-gray-800">Waiting:</span> {syncStageNarrative.waiting.join(" · ")}
+                  </p>
+                )}
+                {syncStageNarrative.commentScanHint && (
+                  <p className="mt-1 text-blue-700">{syncStageNarrative.commentScanHint}</p>
                 )}
               </div>
 
@@ -4824,13 +7175,34 @@ export default function WeekDetailPage() {
               )}
 
               {syncPollError && (
-                <p className="mt-3 text-xs text-amber-700">
-                  Progress refresh issue: {syncPollError}. Retrying automatically.
-                </p>
+                <div className="mt-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <span>Polling stopped: {syncPollError}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSyncPollError(null);
+                      syncPollFailureCountRef.current = 0;
+                      missingRunConsecutiveCountRef.current = 0;
+                      terminalCoverageFailureCountRef.current = 0;
+                      if (syncRunId) {
+                        void fetchSyncProgress(syncRunId).catch(() => {});
+                      }
+                    }}
+                    className="rounded border border-red-300 bg-white px-2 py-0.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                  >
+                    Retry
+                  </button>
+                </div>
               )}
               {syncingComments && syncLastSuccessAt && (
                 <p className="mt-1 text-xs text-gray-500">
                   Last successful progress refresh: {fmtDateTime(syncLastSuccessAt.toISOString())}
+                </p>
+              )}
+
+              {syncingComments && lastJobsFetchedAt && Date.now() - lastJobsFetchedAt > 30_000 && (
+                <p className="mt-2 text-xs text-amber-600">
+                  Job data may be stale (last updated {Math.round((Date.now() - lastJobsFetchedAt) / 1000)}s ago).
                 </p>
               )}
 
@@ -4849,26 +7221,87 @@ export default function WeekDetailPage() {
             </div>
           )}
 
-          {/* Summary bar */}
-          <div className="grid grid-cols-2 gap-4 mb-6 md:grid-cols-4">
+          {syncingComments && (
+            <div className="mb-5 rounded-lg border border-gray-200 bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">Per-Handle Job Progress</h3>
+                  <p className="text-xs text-gray-500">
+                    {syncRunnerCount >= 2
+                      ? `Dual-runner mode (${syncRunnerCount} workers) · grouped by platform and handle`
+                      : "Grouped by platform and handle"}
+                  </p>
+                </div>
+              </div>
+              {syncHandleProgressCards.length === 0 ? (
+                <p className="mt-3 text-xs text-gray-500">
+                  Waiting for platform/handle jobs to report progress...
+                </p>
+              ) : (
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {syncHandleProgressCards.map((card) => (
+                    <div key={card.id} className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            PLATFORM_COLORS[card.platform] ?? "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {card.platformLabel}
+                        </span>
+                        <span className="text-xs font-semibold text-gray-900">{card.handleLabel}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Runner lanes: {card.runnerLanes.length > 0 ? card.runnerLanes.join(", ") : "Pending"}
+                      </p>
+                      <p className="mt-1 text-[11px] tabular-nums text-gray-600">
+                        {card.totals.completed + card.totals.failed}/{card.totals.total || "?"} complete
+                        {card.totals.active > 0 ? ` · ${card.totals.active} active` : ""}
+                        {` · ${fmtNum(card.totals.scraped)} scraped`}
+                        {card.totals.saved > 0 ? ` · ${fmtNum(card.totals.saved)} saved` : ""}
+                      </p>
+                      <div className="mt-2 space-y-1.5">
+                        {card.stages.map((stage) => (
+                          <div key={`${card.id}-${stage.stage}`} className="rounded border border-gray-200 bg-white px-2 py-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-medium text-gray-700">
+                                {formatSyncStageLabel(stage.stage)}
+                              </span>
+                              <span className="text-[11px] tabular-nums text-gray-500">
+                                {stage.completed + stage.failed}/{stage.total || "?"}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-[11px] tabular-nums text-gray-500">
+                              {stage.active > 0 ? `${stage.active} active · ` : ""}
+                              {fmtNum(stage.scraped)} scraped
+                              {stage.saved > 0 ? ` · ${fmtNum(stage.saved)} saved` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Summary bar - Row 1: Numeric metrics (platform-specific) */}
+          <div className={SUMMARY_ROW1_GRID[platformFilter]}>
             <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
               <div className="text-2xl font-bold text-gray-900">
-                {fmtNum(filteredTotals.posts)}
+                {fmtNum(displayedTotals.posts)}
               </div>
               <div className="text-xs text-gray-500 mt-1">Posts</div>
             </div>
-            <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-gray-900">
-                {fmtNum(filteredTotals.total_comments)}
+            {PLATFORM_SUMMARY_CONFIG[platformFilter].metrics.map((metric) => (
+              <div key={metric.key} className="bg-white border border-gray-200 rounded-lg p-4 text-center">
+                <div className="text-2xl font-bold text-gray-900">
+                  {fmtNum(platformFilteredMetrics[metric.key] ?? 0)}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">{metric.label}</div>
               </div>
-              <div className="text-xs text-gray-500 mt-1">Comments</div>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-gray-900">
-                {fmtNum(filteredTotals.total_engagement)}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">Total Engagement</div>
-            </div>
+            ))}
             <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
               <div className="text-2xl font-bold text-gray-900">{commentsSavedPct.toFixed(1)}%</div>
               <div className="text-xs text-gray-500 mt-1">of Comments Saved</div>
@@ -4878,6 +7311,33 @@ export default function WeekDetailPage() {
               </div>
             </div>
           </div>
+          {/* Summary bar - Row 2: Token lists (platform-filtered) */}
+          {PLATFORM_SUMMARY_CONFIG[platformFilter].tokens.length > 0 && (
+            <div className={SUMMARY_ROW2_GRID[platformFilter]}>
+              {PLATFORM_SUMMARY_CONFIG[platformFilter].tokens.map((tokenConfig) => {
+                const values = uniquePostTokenSummary[tokenConfig.key];
+                return (
+                  <button
+                    key={tokenConfig.key}
+                    type="button"
+                    data-testid={`summary-token-${tokenConfig.key}`}
+                    onClick={() =>
+                      setTokenSummaryModal({
+                        key: tokenConfig.key,
+                        label: tokenConfig.label,
+                        values,
+                      })
+                    }
+                    className="bg-white border border-gray-200 rounded-lg p-3 text-center transition-colors hover:border-gray-300"
+                  >
+                    <div className="text-xl font-bold text-gray-900">{fmtNum(values.length)}</div>
+                    <div className="mt-1 text-xs text-gray-500">{tokenConfig.label}</div>
+                    <div className="mt-1 text-[11px] text-blue-600">{values.length > 0 ? "View list" : "No items"}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {displayedCommentCoverage.incomplete && (
             <p className="mb-5 -mt-3 text-xs text-gray-500">
               * Not all platform-reported comments are saved in Supabase yet.
@@ -4938,6 +7398,113 @@ export default function WeekDetailPage() {
         </>
       )}
       </main>
+
+      {tokenSummaryModal && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-6" data-testid="summary-token-modal">
+          <div className="absolute inset-0 bg-black/55" onClick={() => setTokenSummaryModal(null)} />
+          <div className="relative z-10 w-full max-w-[560px] overflow-hidden rounded-[24px] border border-zinc-200 bg-white shadow-2xl">
+            <div className="relative border-b border-zinc-200 px-5 py-4">
+              <h3
+                className="text-center text-[36px] leading-none text-zinc-900"
+                style={{ fontFamily: "var(--font-gloucester)" }}
+              >
+                {tokenSummaryModal.label}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setTokenSummaryModal(null)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-800 hover:text-black text-[40px] leading-none"
+                aria-label="Close token summary list"
+              >
+                ×
+              </button>
+            </div>
+            <div className="max-h-[60vh] overflow-y-auto">
+              {tokenSummaryModal.values.length === 0 ? (
+                <p className="px-5 py-5 text-sm text-zinc-500">
+                  No {tokenSummaryModal.label.toLowerCase()} found for the current filters.
+                </p>
+              ) : isHandleTokenKey(tokenSummaryModal.key) ? (
+                <div className="divide-y divide-zinc-200">
+                  {tokenModalRows.map((row) => (
+                    <div key={row.key} className="flex items-center gap-3 px-5 py-3">
+                      {row.avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={row.avatarUrl}
+                          alt={`${row.handleLabel} avatar`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          className="h-11 w-11 shrink-0 rounded-full border border-zinc-200 object-cover"
+                        />
+                      ) : (
+                        <span
+                          aria-label={`${row.handleLabel} avatar`}
+                          className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-sm font-semibold uppercase ${fallbackAvatarToneClass(row.handle)}`}
+                        >
+                          {initialsFromHandle(row.handle)}
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <p
+                            className="truncate text-[25px] leading-tight text-zinc-900"
+                            style={{ fontFamily: "var(--font-gloucester)", fontWeight: 400 }}
+                          >
+                            {row.handleLabel}
+                          </p>
+                          {row.isVerified && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={VERIFIED_BADGE_URL_BY_PLATFORM.instagram}
+                              alt={`${row.handleLabel} verified badge`}
+                              className="h-3.5 w-3.5 rounded-full"
+                            />
+                          )}
+                        </div>
+                        <p
+                          className="truncate text-black"
+                          style={{
+                            width: "fit-content",
+                            minHeight: "18px",
+                            fontFamily: "var(--font-plymouth-serial)",
+                            fontStyle: "normal",
+                            fontWeight: 700,
+                            fontSize: "14px",
+                            lineHeight: "18px",
+                            display: "flex",
+                            alignItems: "center",
+                          }}
+                          data-testid={`token-modal-name-${row.handle}`}
+                        >
+                          {row.displayName ?? ""}
+                        </p>
+                      </div>
+                      <a
+                        href={row.profileUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-8 min-w-[58px] items-center justify-center rounded-xl bg-zinc-100 px-4 text-zinc-900 transition-colors hover:bg-zinc-200"
+                        style={{ fontFamily: "var(--font-gloucester)", fontWeight: 400, fontSize: "16px", lineHeight: "1" }}
+                      >
+                        View
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 p-4">
+                  {tokenSummaryModal.values.map((value) => (
+                    <span key={value} className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">
+                      {value}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {mediaLightbox && mediaLightbox.entries[mediaLightbox.index] && (
         <ImageLightbox

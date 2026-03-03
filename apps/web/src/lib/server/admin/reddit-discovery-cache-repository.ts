@@ -190,7 +190,7 @@ export async function listCachedRedditDiscoveryPosts(input: {
   subreddit: string;
   periodStart?: string | null;
   periodEnd?: string | null;
-  forceFlares?: string[] | null;
+  forceFlairs?: string[] | null;
   limit?: number;
 }): Promise<RedditDiscoveryThread[]> {
   const result = await query<CachedDiscoveryPostRow>(
@@ -222,13 +222,13 @@ export async function listCachedRedditDiscoveryPosts(input: {
   );
 
   const cachedThreads = result.rows.map(toCachedThread);
-  const forceFlares = input.forceFlares ?? [];
-  if (forceFlares.length === 0) {
+  const forceFlairs = input.forceFlairs ?? [];
+  if (forceFlairs.length === 0) {
     return cachedThreads;
   }
 
   const trackedFlairKeys = new Set(
-    forceFlares
+    forceFlairs
       .map((flair) => normalizeRedditFlairLabel(input.subreddit, flair))
       .map((flair) => toCanonicalFlairKey(flair))
       .filter((key) => key.length > 0),

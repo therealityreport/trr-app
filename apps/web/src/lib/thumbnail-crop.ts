@@ -188,7 +188,7 @@ export function resolveThumbnailViewportRect(params: {
     if (typeof value === "number" && Number.isFinite(value) && value > 0) {
       return value;
     }
-    return 4 / 5;
+    return 3 / 4;
   })();
 
   const imageAspect = imageWidth / imageHeight;

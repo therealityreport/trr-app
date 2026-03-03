@@ -132,6 +132,9 @@ const METADATA_TRANSFER_KEYS = [
   "show_id",
   "episode_imdb_id",
   "imdb_title_type",
+  "imdb_title_id",
+  "imdb_title_url",
+  "imdb_credit_media_type",
   "imdb_image_type",
 ] as const;
 

@@ -8,7 +8,6 @@ import { AuthDebugger } from "@/lib/debug";
 import { auth } from "@/lib/firebase";
 import { useBravodleManager } from "@/lib/bravodle/manager";
 import {
-  BRAVODLE_BOARD_COLUMNS,
   type BravodleGameSnapshot,
   type BravodleGuess,
   type BravodleGuessField,
@@ -21,14 +20,13 @@ import { getBravodleDateKey } from "@/lib/bravodle/utils";
 import BravodleCompletedView, { buildShareText, type ShareStatus } from "./completed-view";
 import GameHeader from "@/components/GameHeader";
 import { getUserPreferences, updateUserPreferences } from "@/lib/preferences";
+import { addIdentityToken } from "@/lib/games/identity";
 
 const BOARD_ROWS = 8; // maximum guesses
 const BOARD_MIN_ROWS = 7; // initial visible rows
 const TILE_FLIP_DURATION_MS = 620;
 const BOARD_REVEAL_STAGGER_MS = 120;
 const COMPLETION_MODAL_BUFFER_MS = 180;
-const COMPLETION_MODAL_DELAY_MS =
-  TILE_FLIP_DURATION_MS + BOARD_REVEAL_STAGGER_MS * (BRAVODLE_BOARD_COLUMNS.length - 1) + COMPLETION_MODAL_BUFFER_MS;
 const BOARD_TILE_MIN_SIZE_PX = 55; // fixed tile size
 const BOARD_TILE_MAX_SIZE_PX = 55; // fixed tile size
 const BOARD_TILE_GAP_PX = 5;
@@ -56,6 +54,15 @@ const NONE_IN_COMMON_PATTERN = /^none\s+in\s+common$/i;
 
 const BRAVODLE_FEEDBACK_TARGET =
   process.env.NEXT_PUBLIC_BRAVODLE_FEEDBACK_URL ?? "mailto:feedback@example.com";
+const REPORT_DESCRIPTION_MAX_CHARS = 2000;
+
+function getCompletionModalDelayMs(columnCount: number): number {
+  return (
+    TILE_FLIP_DURATION_MS +
+    BOARD_REVEAL_STAGGER_MS * Math.max(0, columnCount - 1) +
+    COMPLETION_MODAL_BUFFER_MS
+  );
+}
 
 type HowToPlayTabKey = "gender" | "age" | "shows" | "episodes" | "wwhl";
 
@@ -348,6 +355,7 @@ export default function BravodleGamePage() {
   const previousGuessCountRef = useRef<number>(0);
   const hasInitializedGuessCountRef = useRef(false);
   const completionAnimationNeededRef = useRef(false);
+  const reportCloseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const puzzleDateKey = useMemo(() => getBravodleDateKey(), []);
   const userId = user?.uid ?? null;
@@ -417,10 +425,14 @@ export default function BravodleGamePage() {
     setIsCompletionOpen(true);
   }, []);
 
-  const handleSubmitReportProblem = useCallback(() => {
+  const handleSubmitReportProblem = useCallback(async () => {
     const trimmedDescription = reportDescription.trim();
     if (!trimmedDescription) {
       setReportError("Please describe the issue so we can look into it.");
+      return;
+    }
+    if (trimmedDescription.length > REPORT_DESCRIPTION_MAX_CHARS) {
+      setReportError(`Please keep your description under ${REPORT_DESCRIPTION_MAX_CHARS} characters.`);
       return;
     }
 
@@ -428,22 +440,41 @@ export default function BravodleGamePage() {
     setReportError(null);
 
     try {
-      AuthDebugger.log("Bravodle Game: Report problem", {
+      const response = await fetch("/api/games/report-problem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          game: "bravodle",
+          puzzleDate: gameSnapshot?.puzzleDate ?? puzzleDateKey,
+          category: reportCategory,
+          description: trimmedDescription,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Unable to send report.");
+      }
+
+      AuthDebugger.log("Bravodle Game: Report submitted", {
         category: reportCategory,
-        description: trimmedDescription,
-        userId,
+        puzzleDate: gameSnapshot?.puzzleDate ?? puzzleDateKey,
       });
       setReportSubmitted(true);
-      setTimeout(() => {
+      if (reportCloseTimeoutRef.current) {
+        clearTimeout(reportCloseTimeoutRef.current);
+      }
+      reportCloseTimeoutRef.current = setTimeout(() => {
         setIsReportProblemOpen(false);
         setReportSubmitting(false);
+        reportCloseTimeoutRef.current = null;
       }, 1200);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to send report.";
       setReportError(message);
       setReportSubmitting(false);
     }
-  }, [reportCategory, reportDescription, userId]);
+  }, [gameSnapshot?.puzzleDate, puzzleDateKey, reportCategory, reportDescription]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -640,7 +671,7 @@ export default function BravodleGamePage() {
     }
 
     const shouldDelay = isNewCompletion && completionAnimationNeededRef.current && !forceStatsRequested;
-    const delay = shouldDelay ? COMPLETION_MODAL_DELAY_MS : 0;
+    const delay = shouldDelay ? getCompletionModalDelayMs(activeColumns.length) : 0;
 
     completionShowTimeoutRef.current = setTimeout(() => {
       setIsCompletionOpen(true);
@@ -653,7 +684,7 @@ export default function BravodleGamePage() {
         completionShowTimeoutRef.current = null;
       }
     };
-  }, [gameSnapshot?.gameCompleted, gameSnapshot?.guessNumberSolved, gameSnapshot?.puzzleDate, puzzleDateKey, forceStatsRequested]);
+  }, [activeColumns.length, gameSnapshot?.gameCompleted, gameSnapshot?.guessNumberSolved, gameSnapshot?.puzzleDate, puzzleDateKey, forceStatsRequested]);
 
   useEffect(() => {
     if (!isCompletionOpen && completionShareStatus !== "idle") {
@@ -670,6 +701,10 @@ export default function BravodleGamePage() {
       if (completionShowTimeoutRef.current) {
         clearTimeout(completionShowTimeoutRef.current);
         completionShowTimeoutRef.current = null;
+      }
+      if (reportCloseTimeoutRef.current) {
+        clearTimeout(reportCloseTimeoutRef.current);
+        reportCloseTimeoutRef.current = null;
       }
     };
   }, []);
@@ -863,12 +898,17 @@ export default function BravodleGamePage() {
       return;
     }
 
+    const candidateTokens = new Set<string>();
+    [talentToSubmit.id, talentToSubmit.imdbId, talentToSubmit.name, ...(talentToSubmit.alternativeNames ?? [])]
+      .forEach((value) => addIdentityToken(candidateTokens, value));
+
     const existingGuess = gameSnapshot?.guesses?.some((guess) => {
-      const normalizedCastName = guess.castName?.trim().toLowerCase();
-      const normalizedTalentName = talentToSubmit.name.trim().toLowerCase();
-      if (normalizedCastName === normalizedTalentName) return true;
-      if (guess.derived?.castId && talentToSubmit.id) {
-        return guess.derived.castId === talentToSubmit.id;
+      const guessTokens = new Set<string>();
+      addIdentityToken(guessTokens, guess.castName);
+      addIdentityToken(guessTokens, guess.derived?.castId);
+
+      for (const token of candidateTokens) {
+        if (guessTokens.has(token)) return true;
       }
       return false;
     });
@@ -955,12 +995,7 @@ export default function BravodleGamePage() {
   const dailyClue = useMemo(() => {
     const clue = gameSnapshot?.answerKey?.clue;
     if (clue && clue.trim().length > 0) return clue.trim();
-    const metadata = gameSnapshot?.answerKey?.metadata ?? {};
-    const metadataClueRaw =
-      (metadata as Record<string, unknown>)["clue"] ??
-      (metadata as Record<string, unknown>)["dailyClue"] ??
-      (metadata as Record<string, unknown>)["daily_clue"];
-    return typeof metadataClueRaw === "string" && metadataClueRaw.trim().length > 0 ? metadataClueRaw.trim() : null;
+    return null;
   }, [gameSnapshot?.answerKey]);
 
   if (authLoading || (isBootstrapping && !gameSnapshot)) {
@@ -1058,6 +1093,7 @@ export default function BravodleGamePage() {
               gameSnapshot.guesses ?? [],
               BOARD_ROWS,
               gameSnapshot.guessNumberSolved ?? null,
+              activeColumns.filter((c) => c.key !== "guess"),
             );
             try {
               if (navigator.share) {
@@ -1098,6 +1134,11 @@ export default function BravodleGamePage() {
           onCategoryChange={setReportCategory}
           description={reportDescription}
           onDescriptionChange={setReportDescription}
+          descriptionLimit={REPORT_DESCRIPTION_MAX_CHARS}
+          submitDisabled={
+            reportDescription.trim().length === 0 ||
+            reportDescription.trim().length > REPORT_DESCRIPTION_MAX_CHARS
+          }
           error={reportError}
           submitted={reportSubmitted}
           gameTitle="Bravodle"
@@ -1163,6 +1204,8 @@ function ReportProblemModal({
   onCategoryChange,
   description,
   onDescriptionChange,
+  descriptionLimit,
+  submitDisabled,
   error,
   submitted,
   gameTitle,
@@ -1175,6 +1218,8 @@ function ReportProblemModal({
   onCategoryChange: (next: string) => void;
   description: string;
   onDescriptionChange: (next: string) => void;
+  descriptionLimit: number;
+  submitDisabled?: boolean;
   error: string | null;
   submitted: boolean;
   gameTitle: string;
@@ -1239,10 +1284,14 @@ function ReportProblemModal({
             <textarea
               value={description}
               onChange={(event) => onDescriptionChange(event.target.value)}
+              maxLength={descriptionLimit}
               rows={5}
               placeholder="What happened?"
               className="w-full resize-none rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-black focus:outline-none focus:ring-1 focus:ring-black"
             />
+            <p className="mt-1 text-right text-xs text-gray-500">
+              {description.length}/{descriptionLimit}
+            </p>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -1263,7 +1312,7 @@ function ReportProblemModal({
           <button
             type="button"
             onClick={onSubmit}
-            disabled={submitting}
+            disabled={submitting || submitDisabled}
             className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? "Sending…" : "Submit"}
@@ -1411,11 +1460,11 @@ function BravodleBoard({
       if (!element) return;
       // Width-constrained tile size
       const parentWidth = element.parentElement?.clientWidth ?? element.clientWidth;
-      const availableWidth = Math.max(parentWidth, BOARD_TILE_MIN_SIZE_PX * BRAVODLE_BOARD_COLUMNS.length);
-      const available = availableWidth - BOARD_TILE_GAP_PX * (BRAVODLE_BOARD_COLUMNS.length - 1);
+      const availableWidth = Math.max(parentWidth, BOARD_TILE_MIN_SIZE_PX * columns.length);
+      const available = availableWidth - BOARD_TILE_GAP_PX * (columns.length - 1);
       const widthConstrained = Math.max(
         BOARD_TILE_MIN_SIZE_PX,
-        Math.min(BOARD_TILE_MAX_SIZE_PX, available / BRAVODLE_BOARD_COLUMNS.length || BOARD_TILE_MIN_SIZE_PX),
+        Math.min(BOARD_TILE_MAX_SIZE_PX, available / columns.length || BOARD_TILE_MIN_SIZE_PX),
       );
 
       // Height-constrained tile size
@@ -1476,7 +1525,7 @@ function BravodleBoard({
   useEffect(() => {
     const validIds = new Set<string>();
     rows.forEach((_, rowIndex) => {
-      BRAVODLE_BOARD_COLUMNS.forEach(({ key }) => {
+      columns.forEach(({ key }) => {
         validIds.add(getCellId(rowIndex, key));
       });
     });
@@ -1504,7 +1553,7 @@ function BravodleBoard({
       revealedCellsRef.current = filtered;
       return filtered;
     });
-  }, [rows]);
+  }, [rows, columns]);
 
   useEffect(() => {
     const sortedGuesses = [...guesses]
@@ -1530,7 +1579,7 @@ function BravodleBoard({
       const rowIndex = rowIndexMap.get(guess.guessNumber);
       if (rowIndex == null) return;
 
-      BRAVODLE_BOARD_COLUMNS.forEach(({ key }) => {
+      columns.forEach(({ key }) => {
         const field = guess.fields.find((item) => item.key === key);
         if (!field) return;
         const { sanitizedVariants, sanitizedValue } = resolveFieldDisplay(field);
@@ -1613,7 +1662,7 @@ function BravodleBoard({
       timeouts.forEach((timeout) => clearTimeout(timeout));
       revealTimeoutsRef.current = revealTimeoutsRef.current.filter((timeout) => !timeouts.includes(timeout));
     };
-  }, [guesses, rows]);
+  }, [columns, guesses, rows]);
 
   const handleCycle = useCallback(
     (cellKey: string, variantLength: number) => {

@@ -54,12 +54,7 @@ export default function BravodleCover() {
   const dailyClue = useMemo(() => {
     const clue = gameSnapshot?.answerKey?.clue;
     if (clue && clue.trim().length > 0) return clue.trim();
-    const metadata = gameSnapshot?.answerKey?.metadata ?? {};
-    const metadataClueRaw =
-      (metadata as Record<string, unknown>)["clue"] ??
-      (metadata as Record<string, unknown>)["dailyClue"] ??
-      (metadata as Record<string, unknown>)["daily_clue"];
-    return typeof metadataClueRaw === "string" && metadataClueRaw.trim().length > 0 ? metadataClueRaw.trim() : null;
+    return null;
   }, [gameSnapshot?.answerKey]);
 
   const resolveCta = useCallback((snapshot: BravodleGameSnapshot | null): "start" | "continue" | "stats" => {

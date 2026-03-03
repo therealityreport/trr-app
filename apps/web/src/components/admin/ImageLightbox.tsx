@@ -172,6 +172,68 @@ const clampPercent = (value: number, min = 0, max = 100): number =>
   Math.min(max, Math.max(min, value));
 const clampZoom = (value: number): number =>
   Math.min(THUMBNAIL_CROP_LIMITS.zoomMax, Math.max(THUMBNAIL_CROP_LIMITS.zoomMin, value));
+const formatFaceMatchToken = (value: string | null | undefined): string => {
+  if (typeof value !== "string" || value.trim().length === 0) return "—";
+  return value.trim().toLowerCase().replace(/[_-]+/g, " ");
+};
+const formatFaceMatchCandidates = (
+  value:
+    | Array<{
+        person_name?: string;
+        person_id?: string;
+        similarity: number;
+      }>
+    | null
+    | undefined,
+): string | null => {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const summary = value
+    .slice(0, 3)
+    .map((candidate) => {
+      const name =
+        (typeof candidate.person_name === "string" && candidate.person_name.trim().length > 0
+          ? candidate.person_name.trim()
+          : typeof candidate.person_id === "string" && candidate.person_id.trim().length > 0
+            ? candidate.person_id.trim()
+            : "Unknown");
+      const similarity =
+        typeof candidate.similarity === "number" && Number.isFinite(candidate.similarity)
+          ? `${(candidate.similarity * 100).toFixed(1)}%`
+          : "—";
+      return `${name} ${similarity}`;
+    })
+    .join(" | ");
+  return summary.length > 0 ? summary : null;
+};
+
+const resolveTopCandidateName = (
+  value:
+    | Array<{
+        person_name?: string;
+        person_id?: string;
+        similarity: number;
+      }>
+    | null
+    | undefined,
+): string | null => {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const topCandidate = value
+    .filter(
+      (
+        candidate,
+      ): candidate is {
+        person_name?: string;
+        person_id?: string;
+        similarity: number;
+      } => typeof candidate?.similarity === "number" && Number.isFinite(candidate.similarity),
+    )
+    .sort((a, b) => b.similarity - a.similarity)[0];
+  if (!topCandidate) return null;
+  if (typeof topCandidate.person_name === "string" && topCandidate.person_name.trim().length > 0) {
+    return topCandidate.person_name.trim();
+  }
+  return null;
+};
 
 const copyTextToClipboard = async (value: string): Promise<boolean> => {
   if (!value) return false;
@@ -417,6 +479,10 @@ function MetadataPanel({
     typeof metadata.s3MirrorFileName === "string" && metadata.s3MirrorFileName.trim().length > 0
       ? metadata.s3MirrorFileName.trim()
       : null;
+  const mirrorHostedUrl =
+    typeof metadata.mirrorHostedUrl === "string" && metadata.mirrorHostedUrl.trim().length > 0
+      ? metadata.mirrorHostedUrl.trim()
+      : null;
   const hasS3MirrorDetails = Boolean(metadata.isS3Mirrored);
   const canEditContentType = Boolean(management?.canManage && management?.onUpdateContentType);
   const formatDateLabel = (value: Date | null | undefined): string =>
@@ -436,27 +502,113 @@ function MetadataPanel({
     };
     const crops = Array.isArray(metadata.faceCrops) ? metadata.faceCrops : [];
     const boxes = Array.isArray(metadata.faceBoxes) ? metadata.faceBoxes : [];
-    const fallbackPeople = Array.isArray(metadata.people) ? metadata.people : [];
     return crops
       .slice()
       .sort((a, b) => a.index - b.index)
       .map((crop) => {
         const matchingBox = boxes.find((box) => box.index === crop.index);
+        const labelSourceRaw =
+          typeof matchingBox?.label_source === "string" && matchingBox.label_source.trim().length > 0
+            ? matchingBox.label_source.trim().toLowerCase()
+            : null;
+        const matchStatusRaw =
+          typeof matchingBox?.match_status === "string" && matchingBox.match_status.trim().length > 0
+            ? matchingBox.match_status.trim().toLowerCase()
+            : null;
+        const canUseIdentityLabel =
+          matchStatusRaw === null ||
+          matchStatusRaw === "matched" ||
+          labelSourceRaw === "deterministic_tag_map" ||
+          labelSourceRaw === "best_effort_tag_map" ||
+          labelSourceRaw === "lead_override" ||
+          labelSourceRaw === "owner_similarity_seed";
         const rawLabel =
-          matchingBox?.person_name ||
-          matchingBox?.label ||
-          fallbackPeople[crop.index - 1] ||
+          (canUseIdentityLabel ? matchingBox?.person_name : null) ||
+          (canUseIdentityLabel ? resolveTopCandidateName(matchingBox?.match_candidates) : null) ||
+          (canUseIdentityLabel ? matchingBox?.label : null) ||
           `Face ${crop.index}`;
         const label = firstName(rawLabel);
         const url = typeof crop.variantUrl === "string" && crop.variantUrl.length > 0 ? crop.variantUrl : null;
+        const matchStatus = matchingBox?.match_status
+          ? formatFaceMatchToken(matchingBox.match_status)
+          : "unassigned";
+        const matchReason = matchingBox?.match_reason
+          ? formatFaceMatchToken(matchingBox.match_reason)
+          : "—";
+        const matchSimilarity =
+          typeof matchingBox?.match_similarity === "number" && Number.isFinite(matchingBox.match_similarity)
+            ? `${(matchingBox.match_similarity * 100).toFixed(1)}%`
+            : "—";
+        const detectConfidence =
+          typeof matchingBox?.confidence === "number" && Number.isFinite(matchingBox.confidence)
+            ? `${(matchingBox.confidence * 100).toFixed(1)}%`
+            : "—";
         return {
           index: crop.index,
           label,
           url,
+          diagnosticsLine: `Status ${matchStatus} | Sim ${matchSimilarity} | Detect ${detectConfidence}`,
+          reasonLine: `Reason ${matchReason}`,
+          candidatesLine: formatFaceMatchCandidates(matchingBox?.match_candidates),
         };
       });
-  }, [metadata.faceBoxes, metadata.faceCrops, metadata.people]);
-  const metadataCoverageRows: Array<{ label: string; value: string }> = [
+  }, [metadata.faceBoxes, metadata.faceCrops]);
+  const faceMatchDiagnostics = useMemo(() => {
+    const boxes = Array.isArray(metadata.faceBoxes) ? metadata.faceBoxes : [];
+    return boxes
+      .slice()
+      .sort((a, b) => a.index - b.index)
+      .map((box) => {
+        const labelSourceRaw =
+          typeof box.label_source === "string" && box.label_source.trim().length > 0
+            ? box.label_source.trim().toLowerCase()
+            : null;
+        const matchStatusRaw =
+          typeof box.match_status === "string" && box.match_status.trim().length > 0
+            ? box.match_status.trim().toLowerCase()
+            : null;
+        const canUseIdentityLabel =
+          matchStatusRaw === null ||
+          matchStatusRaw === "matched" ||
+          labelSourceRaw === "deterministic_tag_map" ||
+          labelSourceRaw === "best_effort_tag_map" ||
+          labelSourceRaw === "lead_override" ||
+          labelSourceRaw === "owner_similarity_seed";
+        const label = canUseIdentityLabel
+          ? box.person_name || resolveTopCandidateName(box.match_candidates) || box.label || `Face ${box.index}`
+          : `Face ${box.index}`;
+        const matchStatus = matchStatusRaw ? formatFaceMatchToken(matchStatusRaw) : "unassigned";
+        const matchReason = box.match_reason ? formatFaceMatchToken(box.match_reason) : "—";
+        const matchSimilarity =
+          typeof box.match_similarity === "number" && Number.isFinite(box.match_similarity)
+            ? `${(box.match_similarity * 100).toFixed(1)}%`
+            : "—";
+        const detectConfidence =
+          typeof box.confidence === "number" && Number.isFinite(box.confidence)
+            ? `${(box.confidence * 100).toFixed(1)}%`
+            : "—";
+        const labelSource =
+          typeof box.label_source === "string" && box.label_source.trim().length > 0
+            ? box.label_source.replace(/[_-]+/g, " ")
+            : "—";
+        const topCandidates = formatFaceMatchCandidates(box.match_candidates);
+        return {
+          index: box.index,
+          label,
+          matchStatus,
+          matchReason,
+          matchSimilarity,
+          detectConfidence,
+          labelSource,
+          topCandidates,
+        };
+      });
+  }, [metadata.faceBoxes]);
+  const titleImdbId = metadata.imdbTitleId ?? null;
+  const titleImdbUrl =
+    metadata.imdbTitleUrl ??
+    (titleImdbId ? `https://www.imdb.com/title/${titleImdbId}/` : null);
+  const metadataCoverageRows: Array<{ label: string; value: ReactNode }> = [
     { label: "Source", value: metadata.source || "—" },
     { label: "Original Source", value: sourceBadgeLabel || "—" },
     { label: "Original Source Page", value: sourcePageLabel ?? "—" },
@@ -469,7 +621,23 @@ function MetadataPanel({
       label: "Content Type",
       value: formatContentTypeLabel(metadata.contentType ?? metadata.sectionTag ?? "OTHER"),
     },
-    { label: "Credit Type", value: metadata.imdbCreditType ?? "—" },
+    { label: "Credit Media Type", value: metadata.imdbCreditMediaType ?? metadata.imdbCreditType ?? "—" },
+    {
+      label: "Title IMDb ID",
+      value:
+        titleImdbId && titleImdbUrl ? (
+          <a
+            href={titleImdbUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sky-300 underline decoration-sky-400/60 underline-offset-2 hover:text-sky-200"
+          >
+            {titleImdbId}
+          </a>
+        ) : (
+          "—"
+        ),
+    },
     {
       label: "Media Type",
       value:
@@ -582,7 +750,7 @@ function MetadataPanel({
     ? disabledReasons.sync ?? "Sync is unavailable for this image."
     : disabledReasons.sync ?? null;
   const countDisabledReason = !canCount
-    ? disabledReasons.count ?? "Count is unavailable for this image."
+    ? disabledReasons.count ?? "Tagging is unavailable for this image."
     : disabledReasons.count ?? null;
   const cropDisabledReason = !canCrop
     ? disabledReasons.crop ?? "Crop is unavailable for this image."
@@ -752,9 +920,21 @@ function MetadataPanel({
         </span>
         <div className="mt-1 flex items-center gap-2">
           {metadata.isS3Mirrored && (
-            <span className="inline-block rounded px-2 py-0.5 text-xs font-medium text-white bg-blue-500/80">
-              S3 MIRROR
-            </span>
+            mirrorHostedUrl ? (
+              <a
+                href={mirrorHostedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block rounded bg-blue-500/80 px-2 py-0.5 text-xs font-medium text-white underline decoration-white/50 underline-offset-2 hover:bg-blue-500"
+                title="Open mirrored S3 asset"
+              >
+                S3 MIRROR
+              </a>
+            ) : (
+              <span className="inline-block rounded px-2 py-0.5 text-xs font-medium text-white bg-blue-500/80">
+                S3 MIRROR
+              </span>
+            )
           )}
           {originalSourceFileUrl ? (
             <a
@@ -792,9 +972,21 @@ function MetadataPanel({
             <span className="tracking-widest text-[10px] uppercase text-white/50">
               S3 Mirror File
             </span>
-            <span className="inline-block rounded px-2 py-0.5 text-[10px] font-medium text-white bg-blue-500/80">
-              S3 MIRROR
-            </span>
+            {mirrorHostedUrl ? (
+              <a
+                href={mirrorHostedUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block rounded bg-blue-500/80 px-2 py-0.5 text-[10px] font-medium text-white underline decoration-white/50 underline-offset-2 hover:bg-blue-500"
+                title="Open mirrored S3 asset"
+              >
+                S3 MIRROR
+              </a>
+            ) : (
+              <span className="inline-block rounded px-2 py-0.5 text-[10px] font-medium text-white bg-blue-500/80">
+                S3 MIRROR
+              </span>
+            )}
           </div>
           <div className="mt-1 flex items-center gap-2">
             <code className="max-w-[70%] break-all rounded bg-white/10 px-2 py-1 text-xs text-white/90">
@@ -1076,26 +1268,66 @@ function MetadataPanel({
               {faceCropChips.map((chip) => (
                 <div
                   key={`face-crop-chip-${chip.index}`}
-                  className="relative h-20 w-20 overflow-hidden rounded-full border border-white/20 bg-white/10"
-                  title={chip.label}
+                  className="w-20"
+                  title={`${chip.label} | ${chip.diagnosticsLine}`}
                 >
-                  {chip.url ? (
-                    <Image
-                      src={chip.url}
-                      alt={chip.label}
-                      fill
-                      sizes="80px"
-                      className="object-cover"
-                      unoptimized
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-black/30 text-xs font-semibold text-white/80">
-                      {chip.label.slice(0, 1).toUpperCase()}
+                  <div className="relative h-20 w-20 overflow-hidden rounded-full border border-white/20 bg-white/10">
+                    {chip.url ? (
+                      <Image
+                        src={chip.url}
+                        alt={chip.label}
+                        fill
+                        sizes="80px"
+                        className="object-cover"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-black/30 text-xs font-semibold text-white/80">
+                        {chip.label.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                      {chip.label}
                     </div>
-                  )}
-                  <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
-                    {chip.label}
                   </div>
+                  <p className="mt-1 text-center text-[9px] leading-tight text-white/65">
+                    {chip.diagnosticsLine}
+                  </p>
+                  <p className="mt-0.5 text-center text-[9px] leading-tight text-white/55">
+                    {chip.reasonLine}
+                  </p>
+                  {chip.candidatesLine && (
+                    <p className="mt-0.5 text-center text-[9px] leading-tight text-white/50">
+                      Top {chip.candidatesLine}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {faceMatchDiagnostics.length > 0 && (
+          <div className="mb-4 rounded border border-white/10 bg-white/[0.03] p-3">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Face Match Diagnostics
+            </span>
+            <div className="mt-2 space-y-1.5">
+              {faceMatchDiagnostics.map((item) => (
+                <div
+                  key={`face-diagnostic-${item.index}`}
+                  className="rounded border border-white/10 bg-black/20 px-2 py-1.5"
+                >
+                  <p className="text-xs font-semibold text-white/90">{item.label}</p>
+                  <p className="text-[11px] text-white/70">
+                    Status {item.matchStatus} | Similarity {item.matchSimilarity} | Detect{" "}
+                    {item.detectConfidence}
+                  </p>
+                  <p className="text-[11px] text-white/60">Reason {item.matchReason}</p>
+                  <p className="text-[11px] text-white/55">Label Source {item.labelSource}</p>
+                  {item.topCandidates && (
+                    <p className="text-[11px] text-white/50">Top {item.topCandidates}</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -1169,7 +1401,7 @@ function MetadataPanel({
                   title={countDisabledReason ?? undefined}
                   className="rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
                 >
-                  {actionLoading === "count" ? "Counting..." : "Count"}
+                  {actionLoading === "count" ? "Tagging..." : "Tagging"}
                 </button>
                 <button
                   onClick={() => handleAction("crop", management.onCrop)}
@@ -1483,7 +1715,7 @@ export function ImageLightbox({
   const previewAspectRatio =
     thumbnailCropPreview?.aspectRatio && Number.isFinite(thumbnailCropPreview.aspectRatio)
       ? thumbnailCropPreview.aspectRatio
-      : 4 / 5;
+      : 3 / 4;
   const previewRect =
     thumbnailCropPreview
       ? resolveThumbnailViewportRect({
@@ -1816,13 +2048,27 @@ export function ImageLightbox({
                       box.person_name ||
                       box.label ||
                       `Face ${box.index ?? idx + 1}`;
+                    const matchStatus = box.match_status
+                      ? box.match_status.replace(/[_-]+/g, " ")
+                      : "unassigned";
+                    const similarityLabel =
+                      typeof box.match_similarity === "number" && Number.isFinite(box.match_similarity)
+                        ? `${(box.match_similarity * 100).toFixed(0)}%`
+                        : "—";
+                    const confidenceLabel =
+                      typeof box.confidence === "number" && Number.isFinite(box.confidence)
+                        ? `${(box.confidence * 100).toFixed(0)}%`
+                        : "—";
                     return (
                       <div
                         key={`${box.index ?? idx}-${box.x}-${box.y}`}
                         className="absolute border-2 border-emerald-300/90 bg-emerald-300/10"
                         style={{ left, top, width, height }}
                       >
-                        <span className="absolute -top-5 left-0 rounded bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white">
+                        <span
+                          className="absolute -top-5 left-0 rounded bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white"
+                          title={`Status: ${matchStatus} | Similarity: ${similarityLabel} | Detect: ${confidenceLabel}`}
+                        >
                           {label}
                         </span>
                       </div>
@@ -1942,12 +2188,12 @@ export function ImageLightbox({
                       <div className="px-1 py-0.5 text-[9px] uppercase tracking-wider text-cyan-100">
                         Actual Thumb
                       </div>
-                      <div className="relative aspect-[4/5] w-full overflow-hidden">
+                      <div className="relative aspect-[3/4] w-full overflow-hidden">
                         <Image
                           src={currentSrc}
                           alt=""
                           width={240}
-                          height={300}
+                          height={320}
                           unoptimized
                           className="absolute max-w-none select-none"
                           style={effectiveThumbnailPreviewStyle}

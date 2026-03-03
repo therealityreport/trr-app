@@ -16,6 +16,15 @@ export interface PhotoFaceBox {
   person_id?: string;
   person_name?: string;
   label?: string;
+  match_similarity?: number | null;
+  match_status?: string | null;
+  match_reason?: string | null;
+  match_candidates?: Array<{
+    person_id?: string;
+    person_name?: string;
+    similarity: number;
+  }> | null;
+  label_source?: string | null;
 }
 
 export interface PhotoFaceCrop {
@@ -35,6 +44,7 @@ export interface PhotoMetadata {
   s3Mirroring?: boolean;
   isS3Mirrored?: boolean;
   s3MirrorFileName?: string | null;
+  mirrorHostedUrl?: string | null;
   originalImageUrl?: string | null;
   originalSourceFileUrl?: string | null;
   originalSourcePageUrl?: string | null;
@@ -50,6 +60,9 @@ export interface PhotoMetadata {
   assetName?: string | null;
   imdbType?: string | null;
   imdbCreditType?: string | null;
+  imdbCreditMediaType?: string | null;
+  imdbTitleId?: string | null;
+  imdbTitleUrl?: string | null;
   mediaTypeLabel?: string | null;
   eventName?: string | null;
   episodeLabel?: string | null;
@@ -91,6 +104,7 @@ const CONTENT_TYPE_TO_EXT: Record<string, string> = {
   "video/webm": "webm",
   "image/svg+xml": "svg",
 };
+const IMDB_TITLE_ID_RE = /\btt\d+\b/i;
 
 const parseDateValue = (value: unknown): Date | null => {
   if (!value) return null;
@@ -367,6 +381,56 @@ const parseFaceBoxes = (value: unknown): PhotoFaceBox[] => {
       typeof candidate.label === "string" && candidate.label.trim().length > 0
         ? candidate.label.trim()
         : undefined;
+    const matchSimilarity =
+      typeof candidate.match_similarity === "number" && Number.isFinite(candidate.match_similarity)
+        ? clampFaceCoord(candidate.match_similarity)
+        : null;
+    const matchStatus =
+      typeof candidate.match_status === "string" && candidate.match_status.trim().length > 0
+        ? candidate.match_status.trim().toLowerCase()
+        : null;
+    const matchReason =
+      typeof candidate.match_reason === "string" && candidate.match_reason.trim().length > 0
+        ? candidate.match_reason.trim().toLowerCase()
+        : null;
+    const matchCandidates = Array.isArray(candidate.match_candidates)
+      ? candidate.match_candidates
+          .map((entry) => {
+            if (!entry || typeof entry !== "object") return null;
+            const item = entry as Record<string, unknown>;
+            const similarity =
+              typeof item.similarity === "number" && Number.isFinite(item.similarity)
+                ? clampFaceCoord(item.similarity)
+                : null;
+            if (similarity === null) return null;
+            const personId =
+              typeof item.person_id === "string" && item.person_id.trim().length > 0
+                ? item.person_id.trim()
+                : undefined;
+            const personName =
+              typeof item.person_name === "string" && item.person_name.trim().length > 0
+                ? item.person_name.trim()
+                : undefined;
+            return {
+              ...(personId ? { person_id: personId } : {}),
+              ...(personName ? { person_name: personName } : {}),
+              similarity,
+            };
+          })
+          .filter(
+            (
+              entry,
+            ): entry is {
+              person_id?: string;
+              person_name?: string;
+              similarity: number;
+            } => entry !== null,
+          )
+      : [];
+    const labelSource =
+      typeof candidate.label_source === "string" && candidate.label_source.trim().length > 0
+        ? candidate.label_source.trim()
+        : null;
 
     boxes.push({
       index,
@@ -379,6 +443,11 @@ const parseFaceBoxes = (value: unknown): PhotoFaceBox[] => {
       ...(personId ? { person_id: personId } : {}),
       ...(personName ? { person_name: personName } : {}),
       ...(label ? { label } : {}),
+      ...(matchSimilarity !== null ? { match_similarity: matchSimilarity } : {}),
+      ...(matchStatus ? { match_status: matchStatus } : {}),
+      ...(matchReason ? { match_reason: matchReason } : {}),
+      ...(matchCandidates.length > 0 ? { match_candidates: matchCandidates } : {}),
+      ...(labelSource ? { label_source: labelSource } : {}),
     });
   }
   return boxes;
@@ -746,6 +815,22 @@ const formatImdbImageType = (value: string | null): string | null => {
   return formatTitleTokens(normalized);
 };
 
+const normalizeImdbTitleId = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  const direct = raw.match(/^tt\d+$/i);
+  if (direct) return direct[0].toLowerCase();
+  const embedded = raw.match(IMDB_TITLE_ID_RE);
+  if (embedded) return embedded[0].toLowerCase();
+  return null;
+};
+
+const toImdbTitleUrl = (titleId: string | null): string | null => {
+  if (!titleId) return null;
+  return `https://www.imdb.com/title/${titleId}/`;
+};
+
 export function mapPhotoToMetadata(
   photo: TrrPersonPhoto,
   options?: { fallbackPeople?: string[] }
@@ -955,6 +1040,21 @@ export function mapPhotoToMetadata(
         })
         .filter((value): value is string => typeof value === "string")
     : [];
+  const titleIdsFromMetadata = Array.isArray(metadata.title_imdb_ids)
+    ? (metadata.title_imdb_ids as unknown[])
+        .map((value) => normalizeImdbTitleId(value))
+        .filter((value): value is string => typeof value === "string")
+    : [];
+  const titleIdsFromTags = Array.isArray(tags?.titles)
+    ? (tags.titles as unknown[])
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          return normalizeImdbTitleId(
+            (item as Record<string, unknown>).imdb_id ?? (item as Record<string, unknown>).id ?? null
+          );
+        })
+        .filter((value): value is string => typeof value === "string")
+    : [];
   const people = [
     ...new Set([
       ...peopleFromPhoto,
@@ -974,6 +1074,15 @@ export function mapPhotoToMetadata(
       ...captionEntities.titles,
     ]),
   ];
+  const imdbTitleId =
+    normalizeImdbTitleId(getMetadataString(metadata, "imdb_title_id", "imdbTitleId")) ??
+    normalizeImdbTitleId(getMetadataString(metadata, "imdb_title_url", "imdbTitleUrl")) ??
+    titleIdsFromMetadata[0] ??
+    titleIdsFromTags[0] ??
+    null;
+  const imdbTitleUrl =
+    toImdbTitleUrl(imdbTitleId) ??
+    toImdbTitleUrl(normalizeImdbTitleId(getMetadataString(metadata, "imdb_title_url", "imdbTitleUrl")));
   const peopleCount =
     toPeopleCount((photo as { people_count?: unknown }).people_count) ??
     toPeopleCount(metadata.people_count) ??
@@ -1043,7 +1152,12 @@ export function mapPhotoToMetadata(
     "show_context_source",
     "showContextSource"
   );
-  const imdbCreditType = formatImdbTitleType(imdbTitleTypeRaw);
+  const imdbCreditMediaType = getMetadataString(
+    metadata,
+    "imdb_credit_media_type",
+    "imdbCreditMediaType"
+  );
+  const imdbCreditType = imdbCreditMediaType ?? formatImdbTitleType(imdbTitleTypeRaw);
   const eventNameRaw = getMetadataString(
     metadata,
     "event_name",
@@ -1070,6 +1184,7 @@ export function mapPhotoToMetadata(
     s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
     isS3Mirrored,
     s3MirrorFileName,
+    mirrorHostedUrl: normalizedHostedUrl,
     originalImageUrl,
     originalSourceFileUrl,
     originalSourcePageUrl,
@@ -1085,6 +1200,9 @@ export function mapPhotoToMetadata(
     assetName,
     imdbType,
     imdbCreditType,
+    imdbCreditMediaType,
+    imdbTitleId,
+    imdbTitleUrl,
     mediaTypeLabel,
     eventName,
     episodeLabel,
@@ -1384,6 +1502,7 @@ export function mapSeasonAssetToMetadata(
     s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
     isS3Mirrored,
     s3MirrorFileName,
+    mirrorHostedUrl: normalizedHostedUrl,
     originalImageUrl,
     originalSourceFileUrl,
     originalSourcePageUrl,

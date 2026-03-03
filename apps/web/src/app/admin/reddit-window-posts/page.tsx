@@ -12,9 +12,12 @@ import {
   buildSeasonAdminUrl,
   buildShowAdminUrl,
   buildShowRedditCommunityUrl,
+  buildShowRedditCommunityWindowPostUrl,
   buildShowRedditCommunityWindowUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
+
+type PeriodPostMatchType = "flair" | "scan" | "all";
 
 interface DiscoveryThread {
   reddit_post_id: string;
@@ -31,6 +34,13 @@ interface DiscoveryThread {
   passes_flair_filter?: boolean;
   match_score?: number;
   flair_mode?: string | null;
+  match_type?: PeriodPostMatchType | null;
+  admin_approved?: boolean | null;
+  upvote_ratio?: number | null;
+  post_type?: string | null;
+  is_nsfw?: boolean | null;
+  is_spoiler?: boolean | null;
+  author_flair_text?: string | null;
 }
 
 interface DiscoveryPayload {
@@ -40,6 +50,8 @@ interface DiscoveryPayload {
     matched_rows: number;
     tracked_flair_rows: number;
   };
+  window_start?: string | null;
+  window_end?: string | null;
   threads: DiscoveryThread[];
 }
 
@@ -48,18 +60,13 @@ interface RedditCommunityListItem {
   trr_show_id: string;
   trr_show_name: string;
   subreddit: string;
+  is_show_focused?: boolean;
+  analysis_all_flairs?: string[];
 }
 
 interface ShowSeasonOption {
   id: string;
   season_number: number;
-}
-
-interface SocialWeeklyWindow {
-  week_index?: number;
-  label?: string;
-  start?: string | null;
-  end?: string | null;
 }
 
 interface WindowContext {
@@ -74,6 +81,8 @@ interface WindowContext {
   periodLabel: string;
   periodStart: string | null;
   periodEnd: string | null;
+  isShowFocused: boolean;
+  analysisAllFlairs: string[];
 }
 
 type ResolverStage =
@@ -139,6 +148,48 @@ const normalizeCommunitySlug = (value: string | null | undefined): string | null
   return cleaned || null;
 };
 
+/**
+ * Parse reddit window context from a show-scoped pathname.  Used as a fallback
+ * when the page is rendered from the s[seasonNumber] catch-all route where
+ * useParams() returns { showId, seasonNumber: "ocial", rest: [...] } instead
+ * of the expected { showId, communitySlug, seasonNumber, windowKey }.
+ */
+const parseRedditWindowFromPathname = (
+  pathname: string,
+): {
+  showId: string;
+  communitySlug: string;
+  seasonNumber: number | null;
+  windowKey: string;
+} | null => {
+  // /{showId}/social/reddit/{communitySlug}/s{season}/{windowKey}
+  const withSeason = pathname.match(
+    /^\/([^/]+)\/social\/reddit\/([^/]+)\/s(\d{1,3})\/([^/]+)$/,
+  );
+  if (withSeason) {
+    const season = Number.parseInt(withSeason[3] ?? "", 10);
+    return {
+      showId: decodeURIComponent(withSeason[1] ?? ""),
+      communitySlug: decodeURIComponent(withSeason[2] ?? ""),
+      seasonNumber: Number.isFinite(season) && season > 0 ? season : null,
+      windowKey: decodeURIComponent(withSeason[4] ?? ""),
+    };
+  }
+  // /{showId}/social/reddit/{communitySlug}/{windowKey}
+  const withoutSeason = pathname.match(
+    /^\/([^/]+)\/social\/reddit\/([^/]+)\/([^/]+)$/,
+  );
+  if (withoutSeason) {
+    return {
+      showId: decodeURIComponent(withoutSeason[1] ?? ""),
+      communitySlug: decodeURIComponent(withoutSeason[2] ?? ""),
+      seasonNumber: null,
+      windowKey: decodeURIComponent(withoutSeason[3] ?? ""),
+    };
+  }
+  return null;
+};
+
 const resolveContainerKeyFromWindowToken = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
@@ -160,43 +211,6 @@ const toCanonicalWindowToken = (containerKey: string): string => {
   const episode = containerKey.match(/^episode-(\d+)$/i);
   if (episode) return `e${episode[1]}`;
   return containerKey;
-};
-
-const parseEpisodeFromPeriodLabel = (label: string): number | null => {
-  const match = label.match(/\bepisode\s*(\d{1,3})\b/i);
-  if (!match) return null;
-  const value = Number.parseInt(match[1] ?? "", 10);
-  return Number.isFinite(value) ? value : null;
-};
-
-const isPreSeasonLabel = (label: string): boolean => /pre[-\s]?season/i.test(label);
-const isPostSeasonLabel = (label: string): boolean => /post[-\s]?season/i.test(label);
-
-const findWindowForContainer = (
-  weekly: SocialWeeklyWindow[],
-  containerKey: string,
-): { label: string; start: string | null; end: string | null } | null => {
-  for (const window of weekly) {
-    const label = (window.label ?? "").trim();
-    if (!label) continue;
-    const episodeNumber = parseEpisodeFromPeriodLabel(label);
-    if (episodeNumber !== null && containerKey === `episode-${episodeNumber}`) {
-      return { label: `Episode ${episodeNumber}`, start: window.start ?? null, end: window.end ?? null };
-    }
-    if (containerKey === "period-preseason" && isPreSeasonLabel(label)) {
-      return { label: "Pre-Season", start: window.start ?? null, end: window.end ?? null };
-    }
-    if (containerKey === "period-postseason" && isPostSeasonLabel(label)) {
-      return { label: "Post-Season", start: window.start ?? null, end: window.end ?? null };
-    }
-  }
-  return null;
-};
-
-const parseWeeklyPayload = (payload: unknown): SocialWeeklyWindow[] => {
-  if (!payload || typeof payload !== "object") return [];
-  const value = (payload as { weekly?: unknown }).weekly;
-  return Array.isArray(value) ? (value as SocialWeeklyWindow[]) : [];
 };
 
 const isAbortLikeError = (error: unknown): boolean => {
@@ -308,7 +322,7 @@ async function fetchAdminJsonWithTimeout<T>({
         method,
         signal: controller.signal,
       },
-      { preferredUser: preferredUser as never },
+      { preferredUser: preferredUser as never, allowDevAdminBypass: true },
     );
     const payload = (await response.json().catch(() => ({}))) as T & { error?: string; detail?: string };
     return { ok: response.ok, status: response.status, payload };
@@ -418,7 +432,12 @@ function AdminRedditWindowPostsPageContent() {
     setWarning(null);
 
     try {
-      const token = params.windowKey ?? queryWindowKey;
+      // Parse from pathname as fallback when rendered from the s[seasonNumber]
+      // catch-all route where useParams() returns { showId, seasonNumber: "ocial",
+      // rest: [...] } instead of { showId, communitySlug, seasonNumber, windowKey }.
+      const parsedFromPathname = parseRedditWindowFromPathname(pathname);
+
+      const token = params.windowKey ?? queryWindowKey ?? parsedFromPathname?.windowKey;
       const fallbackContainerKey = queryContainerKey;
       const containerKey =
         resolveContainerKeyFromWindowToken(fallbackContainerKey) ?? resolveContainerKeyFromWindowToken(token);
@@ -433,14 +452,16 @@ function AdminRedditWindowPostsPageContent() {
       const legacyPeriodStart = queryPeriodStart;
       const legacyPeriodEnd = queryPeriodEnd;
 
-      const pathCommunitySlug = normalizeCommunitySlug(params.communitySlug ?? params.communityId ?? null);
+      const pathCommunitySlug = normalizeCommunitySlug(
+        params.communitySlug ?? params.communityId ?? parsedFromPathname?.communitySlug ?? null,
+      );
       const queryCommunitySlugNormalized = normalizeCommunitySlug(queryCommunitySlug);
       const communitySlugCandidates = [pathCommunitySlug, queryCommunitySlugNormalized]
         .filter((value): value is string => Boolean(value))
         .map((value) => value.toLowerCase());
-      const pathShowSlug = (params.showId ?? "").trim() || null;
+      const pathShowSlug = (params.showId ?? "").trim() || parsedFromPathname?.showId || null;
       let showSlug = pathShowSlug ?? (queryShowSlug?.trim() || null);
-      let seasonNumber = toInt(params.seasonNumber ?? querySeason);
+      let seasonNumber = toInt(params.seasonNumber ?? querySeason) ?? parsedFromPathname?.seasonNumber ?? null;
 
       const communitiesResponse = await fetchAdminJsonWithTimeout<{
         communities?: RedditCommunityListItem[];
@@ -509,37 +530,14 @@ function AdminRedditWindowPostsPageContent() {
       seasonNumber = resolvedSeason.season_number;
 
       let resolvedLabel = legacyPeriodLabel?.trim() || "";
-      let resolvedStart = legacyPeriodStart?.trim() || "";
-      let resolvedEnd = legacyPeriodEnd?.trim() || "";
+      const resolvedStart = legacyPeriodStart?.trim() || "";
+      const resolvedEnd = legacyPeriodEnd?.trim() || "";
 
-      setResolverStage("loading_windows");
-      try {
-        const analyticsParams = new URLSearchParams({
-          source_scope: "bravo",
-          timeout_profile: "background",
-          season_id: resolvedSeason.id,
-        });
-        const analyticsResponse = await fetchAdminJsonWithTimeout<{
-          weekly?: SocialWeeklyWindow[];
-          error?: string;
-        }>({
-          url: `/api/admin/trr-api/shows/${selectedCommunity.trr_show_id}/seasons/${resolvedSeason.season_number}/social/analytics?${analyticsParams.toString()}`,
-          timeoutMs: 6_000,
-          preferredUser: user,
-          signal: resolveController.signal,
-        });
-        if (analyticsResponse.ok) {
-          const match = findWindowForContainer(parseWeeklyPayload(analyticsResponse.payload), containerKey);
-          if (match) {
-            resolvedLabel = match.label;
-            resolvedStart = match.start ?? "";
-            resolvedEnd = match.end ?? "";
-          }
-        }
-      } catch (analyticsError) {
-        if (isRequestCancelledError(analyticsError)) throw analyticsError;
-      }
-
+      // Analytics is deferred to avoid blocking the backend during discover.
+      // The analytics endpoint can take 15-20s on cold cache which blocks the
+      // single-worker backend, causing the discover call to 504.  Period dates
+      // are backfilled lazily from the discovery payload's window_start/window_end
+      // after posts load (see loadWindowPosts backfill logic).
       setResolverStage("finalizing");
       if (!resolvedLabel) {
         resolvedLabel = containerKey === "period-preseason"
@@ -548,12 +546,6 @@ function AdminRedditWindowPostsPageContent() {
             ? "Post-Season"
             : containerKey.replace("episode-", "Episode ");
       }
-      if (!resolvedStart || !resolvedEnd) {
-        setWarning(
-          "Season social period data is temporarily unavailable for this window; loading cached posts by container key.",
-        );
-      }
-
       setContext({
         communityId: selectedCommunity.id,
         seasonId: resolvedSeason.id,
@@ -566,6 +558,10 @@ function AdminRedditWindowPostsPageContent() {
         periodLabel: resolvedLabel,
         periodStart: resolvedStart || null,
         periodEnd: resolvedEnd || null,
+        isShowFocused: selectedCommunity.is_show_focused !== false,
+        analysisAllFlairs: Array.isArray(selectedCommunity.analysis_all_flairs)
+          ? selectedCommunity.analysis_all_flairs
+          : [],
       });
       lastResolvedSignatureRef.current = resolveSignature;
     } catch (resolveError) {
@@ -591,6 +587,7 @@ function AdminRedditWindowPostsPageContent() {
     params.seasonNumber,
     params.showId,
     params.windowKey,
+    pathname,
     queryCommunityId,
     queryCommunitySlug,
     queryContainerKey,
@@ -634,13 +631,16 @@ function AdminRedditWindowPostsPageContent() {
           paramsObj.set("period_end", context.periodEnd);
         }
         if (refresh) {
-          if (!context.periodStart || !context.periodEnd) {
+          const isPreOrPostSeason =
+            context.containerKey === "period-preseason" || context.containerKey === "period-postseason";
+          if (!isPreOrPostSeason && !context.periodStart && !context.periodEnd) {
             throw new Error(
-              "Window boundaries are unavailable right now. Open the community season view and refresh from the period card.",
+              "Window boundaries are unavailable right now. Open the community season view and sync from the period card.",
             );
           }
           paramsObj.set("refresh", "true");
           paramsObj.set("wait", "true");
+          paramsObj.set("mode", "sync_posts");
         }
 
         const response = await fetchAdminJsonWithTimeout<{
@@ -656,8 +656,26 @@ function AdminRedditWindowPostsPageContent() {
         if (!response.ok) {
           throw new Error(response.payload.error ?? "Failed to load window posts");
         }
-        setDiscovery(response.payload.discovery ?? null);
+        const discoveryPayload = response.payload.discovery ?? null;
+        setDiscovery(discoveryPayload);
         setWarning(response.payload.warning ?? null);
+
+        // Backfill period dates from discovery window when context has no dates.
+        if (discoveryPayload && (!context.periodStart || !context.periodEnd)) {
+          const backfilledStart = discoveryPayload.window_start ?? null;
+          const backfilledEnd = discoveryPayload.window_end ?? null;
+          if (backfilledStart || backfilledEnd) {
+            setContext((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    periodStart: prev.periodStart || backfilledStart,
+                    periodEnd: prev.periodEnd || backfilledEnd,
+                  }
+                : prev,
+            );
+          }
+        }
       } catch (loadError) {
         if (isRequestCancelledError(loadError)) return;
         if (isRequestTimeoutError(loadError)) {
@@ -676,6 +694,111 @@ function AdminRedditWindowPostsPageContent() {
       }
     },
     [context, hasAccess, user],
+  );
+
+  const [detailsSyncing, setDetailsSyncing] = useState(false);
+
+  const syncDetails = useCallback(
+    async () => {
+      if (!user || !hasAccess || !context) return;
+      const isPreOrPostSeason =
+        context.containerKey === "period-preseason" || context.containerKey === "period-postseason";
+      if (!isPreOrPostSeason && !context.periodStart && !context.periodEnd) {
+        setError("Window boundaries are unavailable. Open the community season view and sync from the period card.");
+        return;
+      }
+      setDetailsSyncing(true);
+      setError(null);
+      try {
+        const paramsObj = new URLSearchParams({
+          season_id: context.seasonId,
+          container_key: context.containerKey,
+          period_label: context.periodLabel,
+          refresh: "true",
+          wait: "true",
+          mode: "sync_details",
+        });
+        if (context.periodStart) {
+          paramsObj.set("period_start", context.periodStart);
+        }
+        if (context.periodEnd) {
+          paramsObj.set("period_end", context.periodEnd);
+        }
+        const response = await fetchAdminJsonWithTimeout<{
+          discovery?: DiscoveryPayload | null;
+          warning?: string;
+          error?: string;
+        }>({
+          url: `/api/admin/reddit/communities/${context.communityId}/discover?${paramsObj.toString()}`,
+          timeoutMs: 180_000,
+          preferredUser: user,
+        });
+        if (!response.ok) {
+          throw new Error(response.payload.error ?? "Failed to sync details");
+        }
+        if (response.payload.discovery) {
+          setDiscovery(response.payload.discovery);
+        }
+        if (response.payload.warning) {
+          setWarning(response.payload.warning);
+        }
+      } catch (syncError) {
+        if (isRequestCancelledError(syncError)) return;
+        setError(syncError instanceof Error ? syncError.message : "Failed to sync details");
+      } finally {
+        setDetailsSyncing(false);
+      }
+    },
+    [context, hasAccess, user],
+  );
+
+  const [approvingPostIds, setApprovingPostIds] = useState<Set<string>>(new Set());
+
+  const handleSetAdminApproved = useCallback(
+    async (redditPostId: string, approved: boolean | null) => {
+      if (!context || !user) return;
+      setApprovingPostIds((prev) => new Set(prev).add(redditPostId));
+      try {
+        const headers = await (async () => {
+          const token = await user.getIdToken();
+          return { Authorization: `Bearer ${token}` };
+        })();
+        const response = await fetch("/api/admin/reddit/post-matches", {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            community_id: context.communityId,
+            season_id: context.seasonId,
+            period_key: context.containerKey,
+            reddit_post_id: redditPostId,
+            admin_approved: approved,
+          }),
+        });
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? "Failed to update approval");
+        }
+        // Optimistic update on the discovery threads
+        setDiscovery((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            threads: prev.threads.map((t) =>
+              t.reddit_post_id === redditPostId ? { ...t, admin_approved: approved } : t,
+            ),
+          };
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update post approval");
+      } finally {
+        setApprovingPostIds((prev) => {
+          const next = new Set(prev);
+          next.delete(redditPostId);
+          return next;
+        });
+      }
+    },
+    [context, user],
   );
 
   useEffect(() => {
@@ -731,6 +854,25 @@ function AdminRedditWindowPostsPageContent() {
         seasonNumber: context.seasonNumber,
       })
     : redditHref;
+  const buildPostDetailsHref = useCallback(
+    (postId: string): string | null => {
+      if (!context) return null;
+      const normalizedPostId = postId.trim();
+      if (!normalizedPostId) return null;
+      const query = new URLSearchParams();
+      query.set("community_id", context.communityId);
+      query.set("season_id", context.seasonId);
+      return buildShowRedditCommunityWindowPostUrl({
+        showSlug: context.showSlug,
+        communitySlug: context.communitySlug,
+        seasonNumber: context.seasonNumber,
+        windowKey: toCanonicalWindowToken(context.containerKey),
+        postId: normalizedPostId,
+        query,
+      });
+    },
+    [context],
+  );
 
   const breadcrumbs = useMemo(
     () =>
@@ -866,18 +1008,38 @@ function AdminRedditWindowPostsPageContent() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-bold text-zinc-900">{context.periodLabel}</h2>
-                <p className="text-sm text-zinc-600">
-                  {fmtDateTime(context.periodStart)} to {fmtDateTime(context.periodEnd)}
-                </p>
+                {(context.periodStart || context.periodEnd) ? (
+                  <p className="text-sm text-zinc-600">
+                    {fmtDateTime(context.periodStart)} to {fmtDateTime(context.periodEnd)}
+                  </p>
+                ) : (
+                  <p className="text-sm text-zinc-400 italic">
+                    {context.containerKey === "period-preseason"
+                      ? "Before season premiere"
+                      : context.containerKey === "period-postseason"
+                        ? "After season finale"
+                        : "Date range not yet available"}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => void loadWindowPosts(true)}
-                  disabled={loading}
+                  disabled={loading || detailsSyncing}
                   className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
                 >
-                  {loading ? "Refreshing…" : "Refresh Posts"}
+                  {loading ? "Syncing…" : "Sync Posts"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void syncDetails()}
+                  disabled={loading || detailsSyncing}
+                  aria-label="Sync Details"
+                  title="Deep-scrape comment trees, media, and post details for this window"
+                  className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                >
+                  {detailsSyncing ? "Syncing Details…" : "Sync Details 🕷️"}
                 </button>
                 <a
                   href={communityHref}
@@ -917,9 +1079,257 @@ function AdminRedditWindowPostsPageContent() {
               <p className="text-sm text-zinc-500">Loading posts…</p>
             ) : !discovery || discovery.threads.length === 0 ? (
               <p className="text-sm text-zinc-500">No posts found for this window yet.</p>
+            ) : context && !context.isShowFocused ? (
+              (() => {
+                const showFlairSet = new Set(
+                  (context.analysisAllFlairs ?? []).map((f) => f.toLowerCase()),
+                );
+                // Posts with the show's flair (e.g., "Salt Lake City")
+                const showFlairPosts = showFlairSet.size > 0
+                  ? discovery.threads.filter(
+                      (t) => t.link_flair_text && showFlairSet.has(t.link_flair_text.toLowerCase()),
+                    )
+                  : [];
+                const showFlairPostIds = new Set(showFlairPosts.map((t) => t.reddit_post_id));
+                // Scan-matched posts (title/text keyword matches, need admin review)
+                const scanMatched = discovery.threads.filter(
+                  (t) => t.match_type === "scan" && !showFlairPostIds.has(t.reddit_post_id),
+                );
+                // Other flair-matched posts (matched by non-show flair or match_type=flair but not the show's flair)
+                const otherFlairMatched = discovery.threads.filter(
+                  (t) =>
+                    (t.match_type === "flair" || t.match_type === "all") &&
+                    !showFlairPostIds.has(t.reddit_post_id),
+                );
+                // Everything else (no match_type)
+                const untyped = discovery.threads.filter(
+                  (t) =>
+                    !showFlairPostIds.has(t.reddit_post_id) &&
+                    t.match_type !== "scan" &&
+                    t.match_type !== "flair" &&
+                    t.match_type !== "all",
+                );
+                const showFlairLabel =
+                  context.analysisAllFlairs.length === 1
+                    ? context.analysisAllFlairs[0]
+                    : context.analysisAllFlairs.join(" / ");
+                return (
+                  <div className="space-y-4">
+                    {showFlairPosts.length > 0 && (
+                      <div>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-indigo-600">
+                          {showFlairLabel} ({fmtNum(showFlairPosts.length)})
+                        </p>
+                        <div className="space-y-2">
+                          {showFlairPosts.map((thread) => {
+                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            return (
+                            <article key={thread.reddit_post_id} className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+                              <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-zinc-900 hover:underline">
+                                {thread.title}
+                              </a>
+                              <p className="mt-1 text-xs text-zinc-600">
+                                {fmtDateTime(thread.posted_at)} · {fmtNum(thread.score)} score · {fmtNum(thread.num_comments)} comments
+                                {thread.link_flair_text ? ` · flair: ${thread.link_flair_text}` : ""}
+                                {thread.upvote_ratio != null ? ` · ${Math.round(thread.upvote_ratio * 100)}% upvoted` : ""}
+                                {thread.post_type ? ` · ${thread.post_type}` : ""}
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {detailsHref && (
+                                  <a
+                                    href={detailsHref}
+                                    className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                                  >
+                                    View Details
+                                  </a>
+                                )}
+                                <a
+                                  href={thread.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                >
+                                  Open Post
+                                </a>
+                              </div>
+                              {thread.text && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-700">{thread.text}</p>}
+                            </article>
+                          );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {scanMatched.length > 0 && (
+                      <div>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                          Scan-Matched Posts ({fmtNum(scanMatched.length)})
+                        </p>
+                        <div className="space-y-2">
+                          {scanMatched.map((thread) => {
+                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            return (
+                            <article key={thread.reddit_post_id} className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-zinc-900 hover:underline">
+                                    {thread.title}
+                                  </a>
+                                  <p className="mt-1 text-xs text-zinc-600">
+                                    {fmtDateTime(thread.posted_at)} · {fmtNum(thread.score)} score · {fmtNum(thread.num_comments)} comments
+                                    {thread.link_flair_text ? ` · flair: ${thread.link_flair_text}` : ""}
+                                    {thread.upvote_ratio != null ? ` · ${Math.round(thread.upvote_ratio * 100)}% upvoted` : ""}
+                                    {thread.post_type ? ` · ${thread.post_type}` : ""}
+                                    {thread.author_flair_text ? ` · author flair: ${thread.author_flair_text}` : ""}
+                                  </p>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    {detailsHref && (
+                                      <a
+                                        href={detailsHref}
+                                        className="rounded border border-emerald-300 bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                                      >
+                                        View Details
+                                      </a>
+                                    )}
+                                    <a
+                                      href={thread.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                    >
+                                      Open Post
+                                    </a>
+                                  </div>
+                                  {thread.text && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-700">{thread.text}</p>}
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <button
+                                    type="button"
+                                    disabled={approvingPostIds.has(thread.reddit_post_id)}
+                                    onClick={() => void handleSetAdminApproved(thread.reddit_post_id, thread.admin_approved === true ? null : true)}
+                                    className={`rounded border px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-60 ${
+                                      thread.admin_approved === true
+                                        ? "border-green-400 bg-green-100 text-green-800"
+                                        : "border-zinc-300 bg-white text-zinc-600 hover:bg-green-50"
+                                    }`}
+                                    title={thread.admin_approved === true ? "Approved (click to reset)" : "Approve this post"}
+                                  >
+                                    {thread.admin_approved === true ? "Approved" : "Approve"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={approvingPostIds.has(thread.reddit_post_id)}
+                                    onClick={() => void handleSetAdminApproved(thread.reddit_post_id, thread.admin_approved === false ? null : false)}
+                                    className={`rounded border px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-60 ${
+                                      thread.admin_approved === false
+                                        ? "border-red-400 bg-red-100 text-red-800"
+                                        : "border-zinc-300 bg-white text-zinc-600 hover:bg-red-50"
+                                    }`}
+                                    title={thread.admin_approved === false ? "Rejected (click to reset)" : "Reject this post"}
+                                  >
+                                    {thread.admin_approved === false ? "Rejected" : "Reject"}
+                                  </button>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {otherFlairMatched.length > 0 && (
+                      <div>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                          Other Flair-Matched Posts ({fmtNum(otherFlairMatched.length)})
+                        </p>
+                        <div className="space-y-2">
+                          {otherFlairMatched.map((thread) => {
+                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            return (
+                            <article key={thread.reddit_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                              <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-zinc-900 hover:underline">
+                                {thread.title}
+                              </a>
+                              <p className="mt-1 text-xs text-zinc-600">
+                                {fmtDateTime(thread.posted_at)} · {fmtNum(thread.score)} score · {fmtNum(thread.num_comments)} comments
+                                {thread.link_flair_text ? ` · flair: ${thread.link_flair_text}` : ""}
+                                {thread.upvote_ratio != null ? ` · ${Math.round(thread.upvote_ratio * 100)}% upvoted` : ""}
+                                {thread.post_type ? ` · ${thread.post_type}` : ""}
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {detailsHref && (
+                                  <a
+                                    href={detailsHref}
+                                    className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                  >
+                                    View Details
+                                  </a>
+                                )}
+                                <a
+                                  href={thread.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                >
+                                  Open Post
+                                </a>
+                              </div>
+                              {thread.text && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-700">{thread.text}</p>}
+                            </article>
+                          );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {untyped.length > 0 && (
+                      <div>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                          Other Posts ({fmtNum(untyped.length)})
+                        </p>
+                        <div className="space-y-2">
+                          {untyped.map((thread) => {
+                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            return (
+                            <article key={thread.reddit_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                              <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-zinc-900 hover:underline">
+                                {thread.title}
+                              </a>
+                              <p className="mt-1 text-xs text-zinc-600">
+                                {fmtDateTime(thread.posted_at)} · {fmtNum(thread.score)} score · {fmtNum(thread.num_comments)} comments
+                                {thread.link_flair_text ? ` · flair: ${thread.link_flair_text}` : ""}
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                {detailsHref && (
+                                  <a
+                                    href={detailsHref}
+                                    className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                  >
+                                    View Details
+                                  </a>
+                                )}
+                                <a
+                                  href={thread.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                >
+                                  Open Post
+                                </a>
+                              </div>
+                              {thread.text && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-700">{thread.text}</p>}
+                            </article>
+                          );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
             ) : (
               <div className="space-y-2">
-                {discovery.threads.map((thread) => (
+                {discovery.threads.map((thread) => {
+                  const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                  return (
                   <article key={thread.reddit_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                     <a
                       href={thread.url}
@@ -933,10 +1343,31 @@ function AdminRedditWindowPostsPageContent() {
                       {fmtDateTime(thread.posted_at)} · {fmtNum(thread.score)} score · {" "}
                       {fmtNum(thread.num_comments)} comments
                       {thread.link_flair_text ? ` · flair: ${thread.link_flair_text}` : ""}
+                      {thread.upvote_ratio != null ? ` · ${Math.round(thread.upvote_ratio * 100)}% upvoted` : ""}
+                      {thread.post_type ? ` · ${thread.post_type}` : ""}
                     </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {detailsHref && (
+                        <a
+                          href={detailsHref}
+                          className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                        >
+                          View Details
+                        </a>
+                      )}
+                      <a
+                        href={thread.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                      >
+                        Open Post
+                      </a>
+                    </div>
                     {thread.text && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-700">{thread.text}</p>}
                   </article>
-                ))}
+                );
+                })}
               </div>
             )}
           </section>

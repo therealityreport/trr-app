@@ -59,36 +59,37 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       display_name?: unknown;
       notes?: unknown;
       is_active?: unknown;
-      analysis_flares?: unknown;
-      analysis_all_flares?: unknown;
+      analysis_flairs?: unknown;
+      analysis_all_flairs?: unknown;
       is_show_focused?: unknown;
       network_focus_targets?: unknown;
       franchise_focus_targets?: unknown;
       episode_title_patterns?: unknown;
+      post_flair_categories?: unknown;
     };
 
-    let analysisFlares: string[] | undefined;
-    if (body.analysis_flares !== undefined) {
-      if (!Array.isArray(body.analysis_flares)) {
-        return NextResponse.json({ error: "analysis_flares must be an array of strings" }, { status: 400 });
+    let analysisFlairs: string[] | undefined;
+    if (body.analysis_flairs !== undefined) {
+      if (!Array.isArray(body.analysis_flairs)) {
+        return NextResponse.json({ error: "analysis_flairs must be an array of strings" }, { status: 400 });
       }
-      const hasInvalidValue = body.analysis_flares.some((value) => typeof value !== "string");
+      const hasInvalidValue = body.analysis_flairs.some((value) => typeof value !== "string");
       if (hasInvalidValue) {
-        return NextResponse.json({ error: "analysis_flares must be an array of strings" }, { status: 400 });
+        return NextResponse.json({ error: "analysis_flairs must be an array of strings" }, { status: 400 });
       }
-      analysisFlares = body.analysis_flares as string[];
+      analysisFlairs = body.analysis_flairs as string[];
     }
 
-    let analysisAllFlares: string[] | undefined;
-    if (body.analysis_all_flares !== undefined) {
-      if (!Array.isArray(body.analysis_all_flares)) {
-        return NextResponse.json({ error: "analysis_all_flares must be an array of strings" }, { status: 400 });
+    let analysisAllFlairs: string[] | undefined;
+    if (body.analysis_all_flairs !== undefined) {
+      if (!Array.isArray(body.analysis_all_flairs)) {
+        return NextResponse.json({ error: "analysis_all_flairs must be an array of strings" }, { status: 400 });
       }
-      const hasInvalidValue = body.analysis_all_flares.some((value) => typeof value !== "string");
+      const hasInvalidValue = body.analysis_all_flairs.some((value) => typeof value !== "string");
       if (hasInvalidValue) {
-        return NextResponse.json({ error: "analysis_all_flares must be an array of strings" }, { status: 400 });
+        return NextResponse.json({ error: "analysis_all_flairs must be an array of strings" }, { status: 400 });
       }
-      analysisAllFlares = body.analysis_all_flares as string[];
+      analysisAllFlairs = body.analysis_all_flairs as string[];
     }
 
     let networkFocusTargets: string[] | undefined;
@@ -126,9 +127,29 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
       episodeTitlePatterns = body.episode_title_patterns as string[];
     }
-    if ("episode_required_flares" in body) {
+    let postFlairCategories: Record<string, string> | undefined;
+    if (body.post_flair_categories !== undefined) {
+      if (typeof body.post_flair_categories !== "object" || body.post_flair_categories === null || Array.isArray(body.post_flair_categories)) {
+        return NextResponse.json({ error: "post_flair_categories must be an object" }, { status: 400 });
+      }
+      const raw = body.post_flair_categories as Record<string, unknown>;
+      const validCategories = new Set(["cast", "season"]);
+      const validated: Record<string, string> = {};
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof value !== "string" || !validCategories.has(value)) {
+          return NextResponse.json(
+            { error: `Invalid flair category "${String(value)}" for "${key}". Must be "cast" or "season".` },
+            { status: 400 },
+          );
+        }
+        validated[key] = value;
+      }
+      postFlairCategories = validated;
+    }
+
+    if ("episode_required_flairs" in body) {
       return NextResponse.json(
-        { error: "episode_required_flares is no longer supported; use analysis_all_flares" },
+        { error: "episode_required_flairs is no longer supported; use analysis_all_flairs" },
         { status: 400 },
       );
     }
@@ -154,12 +175,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         typeof body.display_name === "string" ? body.display_name.trim() || null : undefined,
       notes: typeof body.notes === "string" ? body.notes.trim() || null : undefined,
       isActive: typeof body.is_active === "boolean" ? body.is_active : undefined,
-      analysisFlares,
-      analysisAllFlares,
+      analysisFlairs,
+      analysisAllFlairs,
       isShowFocused: typeof body.is_show_focused === "boolean" ? body.is_show_focused : undefined,
       networkFocusTargets,
       franchiseFocusTargets,
       episodeTitlePatterns,
+      postFlairCategories,
     });
 
     if (!community) {

@@ -14,7 +14,6 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
-  REALITEASE_BOARD_COLUMNS,
   REALITEASE_DEFAULT_USER_ANALYTICS,
   type RawRealiteaseGuess,
   type RealiteaseAnalyticsDoc,
@@ -32,6 +31,7 @@ import {
   type RealiteaseWwhlAppearance,
 } from "./types";
 import { getRealiteaseDateKey } from "./utils";
+import { addIdentityToken } from "@/lib/games/identity";
 
 const USER_ANALYTICS_COLLECTION = "user_analytics";
 const USER_STATS_SUBCOLLECTION = "realitease_userstats";
@@ -39,6 +39,16 @@ const GLOBAL_ANALYTICS_COLLECTION = "realitease_analytics";
 const TALENT_COLLECTION = "realitease_talent";
 const ANSWERKEY_COLLECTION = "realitease_answerkey";
 const MAX_GUESSES = 8;
+const REALITEASE_RUNTIME_COLUMNS: Array<{ key: RealiteaseBoardColumnKey; label: string }> = [
+  { key: "guess", label: "NAME" },
+  { key: "gender", label: "GENDER" },
+  { key: "age", label: "AGE" },
+  { key: "zodiac", label: "ZODIAC" },
+  { key: "network", label: "NETWORKS" },
+  { key: "streamers", label: "STREAMERS" },
+  { key: "shows", label: "SHOWS" },
+  { key: "wwhl", label: "WWHL" },
+];
 
 type AnswerContext = {
   talent: RealiteaseTalentRecord | null;
@@ -293,7 +303,7 @@ export class RealiteaseManager {
     }
 
     const talents = await this.getTalentIndex();
-    const normalizedCastId = answerKey.castId.toLowerCase();
+    const normalizedCastId = (answerKey.castId ?? "").toLowerCase();
     const normalizedName = answerKey.castName?.toLowerCase() ?? "";
 
     const talentMatch =
@@ -307,7 +317,7 @@ export class RealiteaseManager {
       castName:
         answerKey.castName && answerKey.castName.trim().length > 0
           ? answerKey.castName
-          : talentMatch?.name ?? answerKey.castId,
+          : talentMatch?.name ?? answerKey.castId ?? "",
       imageUrl: answerKey.imageUrl ?? talentMatch?.imageUrl,
     };
 
@@ -367,6 +377,8 @@ export class RealiteaseManager {
 
     const puzzleDate = gameDate;
     const dailyRef = this.getDailyDocRef(uid, puzzleDate);
+    const userAnalyticsRef = this.getUserAnalyticsDocRef(uid);
+    const globalAnalyticsRef = this.getGlobalAnalyticsDocRef(puzzleDate);
     const { answerKey, talent: answerTalent } = await this.getPuzzleContext(puzzleDate);
 
     await runTransaction(this.firestore, async (transaction) => {
@@ -427,6 +439,67 @@ export class RealiteaseManager {
           gameStartedAt: existingData?.gameStartedAt ?? serverTimestampValue,
           updatedAt: serverTimestampValue,
         });
+      }
+
+      if (completed) {
+        const userAnalyticsSnap = await transaction.get(userAnalyticsRef);
+        const userAnalytics = (userAnalyticsSnap.data() ?? {}) as Record<string, unknown>;
+        const prevAttempts = this.toFiniteNumber(userAnalytics.realitease_puzzlesAttempted);
+        const prevWins = this.toFiniteNumber(userAnalytics.realitease_puzzlesWon);
+        const prevCurrentStreak = this.toFiniteNumber(userAnalytics.realitease_currentStreak);
+        const prevLongestStreak = this.toFiniteNumber(userAnalytics.realitease_longestStreak);
+        const prevAverageGuesses = this.toFiniteNumber(userAnalytics.realitease_averageGuesses);
+        const prevTotalGuesses = prevAverageGuesses * prevAttempts;
+
+        const nextAttempts = prevAttempts + 1;
+        const nextWins = prevWins + (isCorrect ? 1 : 0);
+        const nextCurrentStreak = isCorrect ? prevCurrentStreak + 1 : 0;
+        const nextLongestStreak = Math.max(prevLongestStreak, nextCurrentStreak);
+        const nextAverageGuesses = nextAttempts > 0 ? Number(((prevTotalGuesses + nextGuessCount) / nextAttempts).toFixed(2)) : 0;
+
+        transaction.set(
+          userAnalyticsRef,
+          {
+            realitease_puzzlesAttempted: nextAttempts,
+            realitease_puzzlesWon: nextWins,
+            realitease_currentStreak: nextCurrentStreak,
+            realitease_longestStreak: nextLongestStreak,
+            realitease_averageGuesses: nextAverageGuesses,
+            updatedAt: serverTimestampValue,
+          },
+          { merge: true },
+        );
+
+        const globalAnalyticsSnap = await transaction.get(globalAnalyticsRef);
+        const globalAnalytics = (globalAnalyticsSnap.data() ?? {}) as Record<string, unknown>;
+        const globalAttempts = this.toFiniteNumber(globalAnalytics.totalAttempts);
+        const globalWins = this.toFiniteNumber(globalAnalytics.totalWins);
+        const globalAverageGuesses = this.toFiniteNumber(globalAnalytics.averageGuesses);
+        const globalTotalGuesses = globalAverageGuesses * globalAttempts;
+        const nextGlobalAttempts = globalAttempts + 1;
+        const nextGlobalWins = globalWins + (isCorrect ? 1 : 0);
+        const nextGlobalAverageGuesses =
+          nextGlobalAttempts > 0 ? Number(((globalTotalGuesses + nextGuessCount) / nextGlobalAttempts).toFixed(2)) : 0;
+        const nextGuessDistribution = this.normalizeDistribution(
+          (globalAnalytics.guessDistribution ?? {}) as Record<string, unknown>,
+        );
+        if (isCorrect) {
+          const bucket = String(guessNumber);
+          nextGuessDistribution[bucket] = (nextGuessDistribution[bucket] ?? 0) + 1;
+        }
+
+        transaction.set(
+          globalAnalyticsRef,
+          {
+            puzzleDate,
+            totalAttempts: nextGlobalAttempts,
+            totalWins: nextGlobalWins,
+            averageGuesses: nextGlobalAverageGuesses,
+            guessDistribution: nextGuessDistribution,
+            updatedAt: serverTimestampValue,
+          },
+          { merge: true },
+        );
       }
     });
   }
@@ -675,8 +748,17 @@ export class RealiteaseManager {
       guessNumberSolved: typeof data.guessNumberSolved === "number" ? data.guessNumberSolved : null,
       guesses,
       hasExistingDoc,
-      answerKey,
-      talent,
+      answerKey: this.toPublicAnswerKey(answerKey),
+      talent: null,
+    };
+  }
+
+  private toPublicAnswerKey(answerKey: RealiteaseAnswerKeyRecord | null): RealiteaseAnswerKeyRecord | null {
+    if (!answerKey) return null;
+    return {
+      id: answerKey.id,
+      clue: answerKey.clue,
+      imageUrl: answerKey.imageUrl,
     };
   }
 
@@ -711,7 +793,7 @@ export class RealiteaseManager {
       this.extractStringField(baseInfo?.CastName, baseInfo?.castName, baseInfo?.name, baseInfo?.Name) ??
       (typeof rawGuess.castName === "string" ? rawGuess.castName : "");
 
-    const fields: RealiteaseGuessField[] = REALITEASE_BOARD_COLUMNS.map(({ key, label }) =>
+    const fields: RealiteaseGuessField[] = REALITEASE_RUNTIME_COLUMNS.map(({ key, label }) =>
       this.buildFieldForColumn(key, label, guessName, derived, answerContext),
     );
 
@@ -745,8 +827,12 @@ export class RealiteaseManager {
         return this.evaluateGenderField(label, guessDerived, answerDerived);
       case "age":
         return this.evaluateAgeField(label, guessDerived, answerDerived);
+      case "zodiac":
+        return this.evaluateZodiacField(label, guessDerived, answerDerived);
       case "network":
         return this.evaluateNetworkField(label, guessDerived, answerContext);
+      case "streamers":
+        return this.evaluateStreamersField(label, guessDerived, answerContext);
       case "shows":
         return this.evaluateShowsField(label, guessDerived, answerContext);
       case "wwhl":
@@ -809,6 +895,79 @@ export class RealiteaseManager {
     }
 
     return { key: "age", label, value: String(roundedGuess), verdict: "incorrect" };
+  }
+
+  private evaluateZodiacField(
+    label: string,
+    guessDerived: RealiteaseGuessDerived,
+    answerDerived: RealiteaseGuessDerived | null,
+  ): RealiteaseGuessField {
+    const guessZodiac = this.normalizeZodiac(guessDerived.zodiac ?? null);
+    const answerZodiac = this.normalizeZodiac(answerDerived?.zodiac ?? null);
+    if (!guessZodiac) {
+      return { key: "zodiac", label, value: "—", verdict: "unknown" };
+    }
+    if (!answerZodiac) {
+      return { key: "zodiac", label, value: guessZodiac, verdict: "unknown" };
+    }
+    return {
+      key: "zodiac",
+      label,
+      value: guessZodiac,
+      verdict: guessZodiac === answerZodiac ? "correct" : "incorrect",
+    };
+  }
+
+  private evaluateStreamersField(
+    label: string,
+    guessDerived: RealiteaseGuessDerived,
+    answerContext: AnswerContext,
+  ): RealiteaseGuessField {
+    const guessMap = this.buildServiceMap(guessDerived.streamers ?? []);
+    const guessValues = Array.from(guessMap.values());
+    if (!guessValues.length) {
+      return { key: "streamers", label, value: "—", verdict: "unknown" };
+    }
+
+    const answerShows = answerContext.talent?.shows ?? answerContext.derived?.shows ?? [];
+    const answerStreamersRaw =
+      answerContext.derived?.streamers ?? this.collectStreamers({}, answerShows);
+    const answerMap = this.buildServiceMap(answerStreamersRaw);
+
+    if (answerMap.size === 0) {
+      const value = guessValues[0];
+      return {
+        key: "streamers",
+        label,
+        value,
+        verdict: "unknown",
+        variants: guessValues.length > 1 ? guessValues : undefined,
+      };
+    }
+
+    const overlaps: string[] = [];
+    guessMap.forEach((_, key) => {
+      if (answerMap.has(key)) {
+        overlaps.push(answerMap.get(key) ?? guessMap.get(key) ?? key);
+      }
+    });
+
+    if (!overlaps.length) {
+      return {
+        key: "streamers",
+        label,
+        value: "",
+        verdict: "incorrect",
+      };
+    }
+
+    return {
+      key: "streamers",
+      label,
+      value: overlaps[0],
+      variants: overlaps.length > 1 ? overlaps : undefined,
+      verdict: "correct",
+    };
   }
 
   private evaluateNetworkField(
@@ -1222,6 +1381,7 @@ export class RealiteaseManager {
     const showCount = baseShowCount ?? shows.length;
 
     const networks = this.collectNetworks(baseInfo, shows);
+    const streamers = this.collectStreamers(baseInfo, shows);
 
     const baseWwhl = this.normalizeWwhlFromGuess(baseInfo);
     const talentWwhl = talent?.wwhlAppearances ?? [];
@@ -1254,6 +1414,7 @@ export class RealiteaseManager {
       age,
       zodiac: normalizedZodiac ?? zodiac ?? undefined,
       networks,
+      streamers,
       shows,
       showCount,
       wwhlEpisodes,
@@ -1362,6 +1523,40 @@ export class RealiteaseManager {
     return networks;
   }
 
+  private collectStreamers(baseInfo: Record<string, unknown>, shows: RealiteaseTalentShow[]): string[] {
+    const streamers: string[] = [];
+    const seen = new Set<string>();
+
+    const register = (value: unknown) => {
+      if (typeof value !== "string") return;
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      const key = this.normalizeServiceName(trimmed);
+      if (seen.has(key)) return;
+      seen.add(key);
+      streamers.push(this.formatServiceLabel(trimmed));
+    };
+
+    shows.forEach((show) => {
+      if (show.streamer) register(show.streamer);
+    });
+
+    [
+      baseInfo.streamer,
+      baseInfo.Streamer,
+      baseInfo.streamers,
+      baseInfo.Streamers,
+      baseInfo.streamingService,
+      baseInfo.streamingServices,
+      baseInfo.platform,
+      baseInfo.platforms,
+    ].forEach((source) => {
+      this.normalizeStringArray(source).forEach(register);
+    });
+
+    return streamers;
+  }
+
   private normalizeNetworkName(value: string): string {
     return value.trim().toLowerCase();
   }
@@ -1391,6 +1586,42 @@ export class RealiteaseManager {
           .filter((value) => value.length > 0),
       ),
     );
+  }
+
+  private normalizeServiceName(value: string): string {
+    return value.trim().toLowerCase();
+  }
+
+  private formatServiceLabel(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return trimmed;
+    const alphanumericLength = trimmed.replace(/[^a-zA-Z0-9]/g, "").length;
+    if (alphanumericLength > 0 && alphanumericLength <= 4) {
+      return trimmed.toUpperCase();
+    }
+    if (trimmed === trimmed.toUpperCase()) {
+      return trimmed;
+    }
+    return trimmed
+      .toLowerCase()
+      .split(/\s+/)
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(" ");
+  }
+
+  private buildServiceMap(values: string[]): Map<string, string> {
+    const map = new Map<string, string>();
+    values.forEach((value) => {
+      if (typeof value !== "string") return;
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      const key = this.normalizeServiceName(trimmed);
+      if (!key) return;
+      if (!map.has(key)) {
+        map.set(key, this.formatServiceLabel(trimmed));
+      }
+    });
+    return map;
   }
 
   private buildNetworkMap(networks: string[]): Map<string, string> {
@@ -1722,14 +1953,7 @@ export class RealiteaseManager {
   }
 
   private collectToken(target: Set<string>, value: unknown): void {
-    if (typeof value === "string") {
-      const normalized = value.trim().toLowerCase();
-      if (normalized) target.add(normalized);
-      return;
-    }
-    if (typeof value === "number" && Number.isFinite(value)) {
-      target.add(String(value));
-    }
+    addIdentityToken(target, value);
   }
 
   private buildRawGuessPayload(params: {
@@ -1751,7 +1975,7 @@ export class RealiteaseManager {
       ? this.buildDerivedFromTalent(answerTalent, answerTalent.metadata ?? {}, answerTalent.id)
       : null;
 
-    const fields = REALITEASE_BOARD_COLUMNS.map(({ key, label }) =>
+    const fields = REALITEASE_RUNTIME_COLUMNS.map(({ key, label }) =>
       this.buildFieldForColumn(key, label, talent.name, derived, {
         talent: answerTalent,
         derived: answerDerived,
@@ -1771,6 +1995,7 @@ export class RealiteaseManager {
       Zodiac: derived.zodiac,
       zodiac: derived.zodiac,
       Networks: derived.networks,
+      Streamers: derived.streamers,
       Shows: showsPayload,
       ShowCount: derived.showCount ?? (Array.isArray(derived.shows) ? derived.shows.length : undefined),
       WWHLCount:
@@ -1943,7 +2168,7 @@ export class RealiteaseManager {
 
     const verdictMap: Partial<Record<RealiteaseBoardColumnKey, RealiteaseGuessVerdict>> = {};
 
-    REALITEASE_BOARD_COLUMNS.forEach(({ key }) => {
+    REALITEASE_RUNTIME_COLUMNS.forEach(({ key }) => {
       const rawVerdict = (source as Record<string, unknown>)[key];
       if (typeof rawVerdict === "string") {
         verdictMap[key] = this.normalizeVerdict(rawVerdict);
@@ -2071,6 +2296,7 @@ export class RealiteaseManager {
     const showName = this.extractStringField(record.showName, record.ShowName, record.name, record.Name);
     const nickname = this.extractStringField(record.showNickname, record.ShowNickname, record.nickname, record.ShowNickName);
     const network = this.extractStringField(record.network, record.Network);
+    const streamer = this.extractStringField(record.streamer, record.Streamer, record.streamingService, record.platform);
     const imdbSeriesId = this.extractStringField(record.imdbSeriesId, record.imdbSeriesID, record.imdbId, record.imdbID);
     const tmdbId = this.extractStringField(record.tmdbId, record.tmdbID);
     const seasons = this.toNumberArray(record.seasons);
@@ -2094,6 +2320,7 @@ export class RealiteaseManager {
       showName: showName ?? undefined,
       nickname: nickname ?? undefined,
       network: network ?? undefined,
+      streamer: streamer ?? undefined,
       imdbSeriesId: imdbSeriesId ?? undefined,
       tmdbId: tmdbId ?? undefined,
       seasons,
@@ -2108,6 +2335,7 @@ export class RealiteaseManager {
       showName: trimmed,
       nickname: trimmed,
       network: undefined,
+      streamer: undefined,
       imdbSeriesId: undefined,
       tmdbId: undefined,
       seasons: [],
@@ -2119,6 +2347,7 @@ export class RealiteaseManager {
     if (show.showName) payload.showName = show.showName;
     if (show.nickname) payload.showNickname = show.nickname;
     if (show.network) payload.network = show.network;
+    if (show.streamer) payload.streamer = show.streamer;
     if (show.imdbSeriesId) payload.imdbSeriesId = show.imdbSeriesId;
     if (show.tmdbId) payload.tmdbId = show.tmdbId;
     if (Array.isArray(show.seasons) && show.seasons.length) payload.seasons = show.seasons;
@@ -2219,6 +2448,30 @@ export class RealiteaseManager {
       }
     }
     return null;
+  }
+
+  private toFiniteNumber(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number.parseFloat(value.trim());
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return 0;
+  }
+
+  private normalizeDistribution(value: Record<string, unknown>): Record<string, number> {
+    const distribution: Record<string, number> = {};
+    Object.entries(value).forEach(([key, nested]) => {
+      const numeric = this.toFiniteNumber(nested);
+      if (numeric > 0) {
+        distribution[key] = numeric;
+      }
+    });
+    return distribution;
   }
 
   private extractAnswerRecord(

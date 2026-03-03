@@ -75,6 +75,7 @@ const weekPayload = {
           collaborators_detail: [
             { username: "collab_user", profile_pic_url: "https://images.test/collab-user-avatar-fallback.jpg" },
           ],
+          owner_is_verified: true,
           hashtags: ["RHOSLC"],
           mentions: ["@bravotv"],
           duration_seconds: 14,
@@ -98,6 +99,7 @@ const weekPayload = {
           comments_count: 12,
           shares: 7,
           views: 2000,
+          user_verified: true,
           hashtags: [],
           mentions: [],
           thumbnail_url: "https://images.test/tt-preview.jpg",
@@ -214,6 +216,7 @@ const crossPlatformCoveragePayload = {
           replies_count: 1386,
           quotes: 44,
           views: 120000,
+          user_verified: true,
           retweets: 10,
           media_urls: ["https://images.test/x-preview.jpg"],
         },
@@ -239,6 +242,14 @@ describe("WeekDetailPage thumbnails", () => {
     (auth as unknown as { currentUser?: { getIdToken: () => Promise<string> } }).currentUser = {
       getIdToken: vi.fn().mockResolvedValue("test-token"),
     };
+    vi.stubGlobal(
+      "requestIdleCallback",
+      ((callback: (deadline: { didTimeout: boolean; timeRemaining: () => number }) => void) => {
+        callback({ didTimeout: false, timeRemaining: () => 50 });
+        return 1;
+      }) as unknown as typeof requestIdleCallback,
+    );
+    vi.stubGlobal("cancelIdleCallback", vi.fn());
   });
 
   afterEach(() => {
@@ -269,7 +280,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByLabelText("Instagram platform")).toBeInTheDocument();
     expect(screen.getByLabelText("TikTok platform")).toBeInTheDocument();
     expect(screen.getByLabelText("YouTube platform")).toBeInTheDocument();
-    const youtubeHandleLink = screen.getByRole("link", { name: "@bravo and @bravotv" });
+    const youtubeHandleLink = screen.getByRole("link", { name: "@bravo" });
     expect(youtubeHandleLink).toHaveAttribute("href", "https://youtube.com/watch?v=abc");
     expect(screen.getByText("OFFICIAL ANALYTICS")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Back Home" })).toBeInTheDocument();
@@ -282,6 +293,7 @@ describe("WeekDetailPage thumbnails", () => {
       "src",
       "https://images.test/ig-preview.jpg",
     );
+    expect(screen.queryByTestId("instagram-tag-markers-card-ig-1")).not.toBeInTheDocument();
     expect(screen.getByAltText("TikTok post thumbnail")).toHaveAttribute(
       "src",
       "https://images.test/tt-preview.jpg",
@@ -302,7 +314,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("REEL")).toBeInTheDocument();
     expect(screen.getByText("14s")).toBeInTheDocument();
     expect(screen.getByText("@tagged_user")).toBeInTheDocument();
-    expect(screen.getByText("@collab_user")).toBeInTheDocument();
+    expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
     expect(screen.getByTestId("post-header-handles-ig-1")).toHaveTextContent("@bravotv and @collab_user");
     const instagramAvatars = screen.getByTestId("post-header-avatars-ig-1");
     expect(within(instagramAvatars).getByAltText("@bravotv avatar")).toHaveAttribute(
@@ -313,10 +325,498 @@ describe("WeekDetailPage thumbnails", () => {
       "src",
       "https://images.test/collab-user-avatar.jpg",
     );
+    expect(screen.getByTestId("verified-badge-instagram-bravotv")).toBeInTheDocument();
+    expect(screen.getByTestId("verified-badge-tiktok-bravotv")).toBeInTheDocument();
     const instagramIcon = screen.getByLabelText("Instagram platform");
     const instagramHandles = screen.getByTestId("post-header-handles-ig-1");
     expect(Boolean(instagramIcon.compareDocumentPosition(instagramAvatars) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(instagramAvatars.compareDocumentPosition(instagramHandles) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.getByTestId("summary-token-collaborators")).toHaveTextContent("1");
+    expect(screen.getByTestId("summary-token-tags")).toHaveTextContent("1");
+    expect(screen.getByTestId("summary-token-mentions")).toHaveTextContent("1");
+    expect(screen.getByTestId("summary-token-hashtags")).toHaveTextContent("1");
+  });
+
+  it("uses full-period metrics fetch for summary and token cards when initial gallery payload is truncated", async () => {
+    const previewPayload = {
+      ...weekPayload,
+      platforms: {
+        instagram: {
+          posts: [
+            {
+              source_id: "ig-preview-1",
+              author: "bravotv",
+              text: "Preview post #TagOne @mention_one",
+              url: "https://instagram.com/p/preview-1",
+              posted_at: "2026-01-01T00:00:00.000Z",
+              engagement: 100,
+              total_comments_available: 2,
+              comments: [],
+              likes: 11,
+              comments_count: 2,
+              views: 1000,
+              thumbnail_url: "https://images.test/preview-1.jpg",
+              profile_tags: ["tag_one"],
+              collaborators: ["collab_one"],
+              hashtags: ["TagOne"],
+              mentions: ["@mention_one"],
+            },
+          ],
+          totals: { posts: 3, total_comments: 12, total_engagement: 300 },
+        },
+        tiktok: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        youtube: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        twitter: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        facebook: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        threads: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+      },
+      totals: { posts: 3, total_comments: 12, total_engagement: 300 },
+      pagination: { limit: 20, offset: 0, returned: 1, total: 3, has_more: true },
+    };
+
+    const fullPeriodMetricsPayload = {
+      ...previewPayload,
+      platforms: {
+        ...previewPayload.platforms,
+        instagram: {
+          posts: [
+            previewPayload.platforms.instagram.posts[0],
+            {
+              source_id: "ig-metrics-2",
+              author: "bravotv",
+              text: "Metrics post 2 #TagTwo @mention_two",
+              url: "https://instagram.com/p/metrics-2",
+              posted_at: "2026-01-02T00:00:00.000Z",
+              engagement: 150,
+              total_comments_available: 4,
+              comments: [],
+              likes: 22,
+              comments_count: 4,
+              views: 1500,
+              thumbnail_url: "https://images.test/metrics-2.jpg",
+              profile_tags: ["tag_two"],
+              collaborators: ["collab_two"],
+              hashtags: ["TagTwo"],
+              mentions: ["@mention_two"],
+            },
+            {
+              source_id: "ig-metrics-3",
+              author: "bravotv",
+              text: "Metrics post 3 #TagThree @mention_three",
+              url: "https://instagram.com/p/metrics-3",
+              posted_at: "2026-01-03T00:00:00.000Z",
+              engagement: 200,
+              total_comments_available: 6,
+              comments: [],
+              likes: 33,
+              comments_count: 6,
+              views: 2000,
+              thumbnail_url: "https://images.test/metrics-3.jpg",
+              profile_tags: ["tag_three"],
+              collaborators: ["collab_three"],
+              hashtags: ["TagThree"],
+              mentions: ["@mention_three"],
+            },
+          ],
+          totals: { posts: 3, total_comments: 12, total_engagement: 450 },
+        },
+      },
+      totals: { posts: 3, total_comments: 12, total_engagement: 450 },
+      pagination: { limit: 100, offset: 0, returned: 2, total: 3, has_more: true },
+    };
+
+    const fullPeriodMetricsSecondPagePayload = {
+      ...previewPayload,
+      platforms: {
+        ...previewPayload.platforms,
+        instagram: {
+          posts: [fullPeriodMetricsPayload.platforms.instagram.posts[2]],
+          totals: { posts: 3, total_comments: 12, total_engagement: 450 },
+        },
+      },
+      totals: { posts: 3, total_comments: 12, total_engagement: 450 },
+      pagination: { limit: 100, offset: 2, returned: 1, total: 3, has_more: false },
+    };
+
+    const summaryPayload = {
+      week: previewPayload.week,
+      season: previewPayload.season,
+      source_scope: previewPayload.source_scope,
+      platforms: {
+        instagram: { total_posts: 3, totals: { posts: 3, total_comments: 12, total_engagement: 450 } },
+        tiktok: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        youtube: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        twitter: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        facebook: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        threads: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+      },
+      totals: { posts: 3, total_comments: 12, total_engagement: 450 },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => summaryPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        const query = new URLSearchParams(url.split("?")[1] ?? "");
+        if (query.get("post_limit") === "100") {
+          if (query.get("post_offset") === "2") {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => fullPeriodMetricsSecondPagePayload,
+            } as Response;
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => fullPeriodMetricsPayload,
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => previewPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("summary-token-collaborators")).toHaveTextContent("3");
+      expect(screen.getByTestId("summary-token-tags")).toHaveTextContent("3");
+      expect(screen.getByTestId("summary-token-mentions")).toHaveTextContent("3");
+      expect(screen.getByTestId("summary-token-hashtags")).toHaveTextContent("3");
+      expect(screen.getByText("66")).toBeInTheDocument();
+      expect(screen.getByText("12/12 Comments (Saved/Actual)")).toBeInTheDocument();
+    });
+  });
+
+  it("builds canonical instagram permalinks from source ids for reel posts", async () => {
+    const canonicalPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const instagramPost = canonicalPayload.platforms.instagram.posts[0];
+    instagramPost.source_id = "DRXO813kmfl";
+    instagramPost.post_format = "reel";
+    instagramPost.url = "https://www.instagram.com/p/old-shortcode/";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => canonicalPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const instagramHandleLink = screen.getByTestId("post-header-handles-DRXO813kmfl");
+    expect(instagramHandleLink).toHaveAttribute("href", "https://www.instagram.com/reel/DRXO813kmfl/");
+  });
+
+  it("renders the X/Twitter verified badge for verified authors", async () => {
+    const payload = JSON.parse(JSON.stringify(crossPlatformCoveragePayload)) as typeof crossPlatformCoveragePayload;
+    mockSearch.value = "source_scope=bravo&social_platform=twitter";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.getByTestId("verified-badge-twitter-bravotv")).toBeInTheDocument();
+  });
+
+  it("strips t.co URLs from Twitter caption previews and keeps inline hashtag pills", async () => {
+    const payload = JSON.parse(JSON.stringify(crossPlatformCoveragePayload)) as typeof crossPlatformCoveragePayload;
+    payload.platforms.twitter.posts[0].text =
+      "An emotional conversation between Bronwyn and Todd. #RHOSLC https://t.co/HkNiHXUsBI";
+    payload.platforms.twitter.posts[0].hashtags = ["RHOSLC"];
+    payload.platforms.twitter.posts[0].mentions = [];
+    mockSearch.value = "source_scope=bravo&social_platform=twitter";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.queryByText("https://t.co/HkNiHXUsBI")).not.toBeInTheDocument();
+    expect(screen.getByText("#RHOSLC")).toBeInTheDocument();
+    expect(screen.getAllByText("#RHOSLC")).toHaveLength(1);
+  });
+
+  it("opens summary token modal lists from the unique metadata counters", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => weekPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    fireEvent.click(screen.getByTestId("summary-token-collaborators"));
+    await waitFor(() => {
+      expect(screen.getByTestId("summary-token-modal")).toBeInTheDocument();
+    });
+    const modal = screen.getByTestId("summary-token-modal");
+    expect(within(modal).getByText("Collaborators")).toBeInTheDocument();
+    expect(within(modal).getByText("@collab_user")).toBeInTheDocument();
+    expect(within(modal).queryByText("instagram.com/collab_user/")).not.toBeInTheDocument();
+    expect(within(modal).queryByText("Collab User")).not.toBeInTheDocument();
+    expect(within(modal).getByTestId("token-modal-name-collab_user")).toHaveTextContent("");
+    expect(within(modal).getByRole("link", { name: /View/i })).toHaveAttribute(
+      "href",
+      "https://www.instagram.com/collab_user/",
+    );
+  });
+
+  it("renders popup real-name line from metadata detail fields when present", async () => {
+    const namedPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    namedPayload.platforms.instagram.posts[0].collaborators_detail = [
+      {
+        username: "collab_user",
+        profile_pic_url: "https://images.test/collab-user-avatar-fallback.jpg",
+        full_name: "Captain Kerry Titheradge",
+        profile_url: "https://www.instagram.com/collab_user/?hl=en",
+      },
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => namedPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    fireEvent.click(screen.getByTestId("summary-token-collaborators"));
+    await waitFor(() => {
+      expect(screen.getByTestId("summary-token-modal")).toBeInTheDocument();
+    });
+
+    const modal = screen.getByTestId("summary-token-modal");
+    expect(within(modal).getByText("@collab_user")).toBeInTheDocument();
+    expect(within(modal).getByText("Captain Kerry Titheradge")).toBeInTheDocument();
+    expect(within(modal).queryByText("instagram.com/collab_user/")).not.toBeInTheDocument();
+    expect(within(modal).getByRole("link", { name: /View/i })).toHaveAttribute(
+      "href",
+      "https://www.instagram.com/collab_user/?hl=en",
+    );
+  });
+
+  it("shows tag real-name and avatar from tagged user detail metadata", async () => {
+    const taggedPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const instagramPost = taggedPayload.platforms.instagram.posts[0] as (typeof weekPayload.platforms.instagram.posts)[number] & {
+      profile_tags_detail?: Array<{ username?: string; full_name?: string; profile_pic_url?: string }>;
+      tagged_users_detail?: Array<{ username?: string; full_name?: string; profile_pic_url?: string }>;
+      hosted_tagged_profile_pics?: Record<string, string>;
+    };
+    instagramPost.profile_tags = ["brittanibateman"];
+    instagramPost.tagged_users_detail = [
+      {
+        username: "brittanibateman",
+        full_name: "Britani Bateman",
+        profile_pic_url: "https://images.test/britani-avatar.jpg",
+      },
+    ];
+    instagramPost.profile_tags_detail = instagramPost.tagged_users_detail;
+    instagramPost.hosted_tagged_profile_pics = {
+      ...instagramPost.hosted_tagged_profile_pics,
+      brittanibateman: "https://images.test/britani-avatar-hosted.jpg",
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => taggedPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    fireEvent.click(screen.getByTestId("summary-token-tags"));
+    await waitFor(() => {
+      expect(screen.getByTestId("summary-token-modal")).toBeInTheDocument();
+    });
+
+    const modal = screen.getByTestId("summary-token-modal");
+    expect(within(modal).getByText("@brittanibateman")).toBeInTheDocument();
+    expect(within(modal).getByText("Britani Bateman")).toBeInTheDocument();
+    expect(within(modal).getByAltText("@brittanibateman avatar")).toHaveAttribute(
+      "src",
+      "https://images.test/britani-avatar-hosted.jpg",
+    );
+  });
+
+  it("renders instagram tag-location markers per carousel slide on card and post drawer images", async () => {
+    const taggedPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const instagramPost = taggedPayload.platforms.instagram.posts[0] as (typeof weekPayload.platforms.instagram.posts)[number] & {
+      tagged_users_detail?: Array<{ username?: string; full_name?: string; tag_x?: number; tag_y?: number }>;
+      profile_tags_detail?: Array<{ username?: string; full_name?: string; tag_x?: number; tag_y?: number }>;
+      post_format?: "carousel";
+      media_urls?: string[];
+      child_posts_data?: Array<{
+        slide_index?: number;
+        media_url?: string;
+        tagged_users_detail?: Array<{ username?: string; full_name?: string; tag_x?: number; tag_y?: number }>;
+      }>;
+    };
+    instagramPost.post_format = "carousel";
+    instagramPost.media_urls = ["https://images.test/ig-carousel-1.jpg", "https://images.test/ig-carousel-2.jpg"];
+    instagramPost.child_posts_data = [
+      {
+        slide_index: 0,
+        media_url: "https://images.test/ig-carousel-1.jpg",
+        tagged_users_detail: [
+          {
+            username: "brittanibateman",
+            full_name: "Britani Bateman",
+            tag_x: 0.42,
+            tag_y: 0.58,
+          },
+        ],
+      },
+      {
+        slide_index: 1,
+        media_url: "https://images.test/ig-carousel-2.jpg",
+        tagged_users_detail: [
+          {
+            username: "jesseltaank",
+            full_name: "Jessel Taank",
+            tag_x: 0.21,
+            tag_y: 0.33,
+          },
+        ],
+      },
+    ];
+    instagramPost.tagged_users_detail = instagramPost.child_posts_data[0].tagged_users_detail;
+    instagramPost.profile_tags_detail = instagramPost.tagged_users_detail;
+
+    const postDetailPayload = {
+      platform: "instagram",
+      source_id: "ig-1",
+      author: "bravotv",
+      text: "IG post",
+      url: "https://instagram.com/p/abc",
+      posted_at: "2026-01-01T00:00:00.000Z",
+      thumbnail_url: "https://images.test/ig-carousel-1.jpg",
+      post_format: "carousel",
+      media_urls: ["https://images.test/ig-carousel-1.jpg", "https://images.test/ig-carousel-2.jpg"],
+      profile_tags: ["brittanibateman"],
+      tagged_users_detail: instagramPost.tagged_users_detail,
+      profile_tags_detail: instagramPost.profile_tags_detail,
+      child_posts_data: instagramPost.child_posts_data,
+      stats: {
+        likes: 50,
+        comments_count: 10,
+        views: 1000,
+        engagement: 1060,
+      },
+      total_comments_in_db: 0,
+      comments: [],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => taggedPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => postDetailPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.queryByTestId("instagram-tag-markers-card-ig-1")).not.toBeInTheDocument();
+
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("instagram-drawer-slide-indicator-ig-1")).toHaveTextContent("Slide 1 of 2");
+    const drawerOverlay = screen.getByTestId("instagram-tag-markers-drawer-ig-1");
+    expect(drawerOverlay).toBeInTheDocument();
+    expect(within(drawerOverlay).getByText("Britani Bateman")).toBeInTheDocument();
+    expect(within(drawerOverlay).queryByText("Jessel Taank")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("instagram-drawer-slide-indicator-ig-1")).toHaveTextContent("Slide 2 of 2");
+    });
+    const secondDrawerOverlay = screen.getByTestId("instagram-tag-markers-drawer-ig-1");
+    expect(within(secondDrawerOverlay).getByText("Jessel Taank")).toBeInTheDocument();
+    expect(within(secondDrawerOverlay).queryByText("Britani Bateman")).not.toBeInTheDocument();
   });
 
   it("renders author-first header handles with bravotv dedupe and fallback avatars", async () => {
@@ -364,6 +864,44 @@ describe("WeekDetailPage thumbnails", () => {
     );
     const bravotvFallback = within(avatars).getByLabelText("@bravotv avatar");
     expect(bravotvFallback.tagName).toBe("SPAN");
+  });
+
+  it("uses author username and resolved profile avatar when raw author handle is abbreviated", async () => {
+    const abbreviatedAuthorPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const youtubePost = abbreviatedAuthorPayload.platforms.youtube.posts[0] as (typeof weekPayload.platforms.youtube.posts)[number] & {
+      user?: { username?: string; avatar_url?: string | null };
+      raw_data?: Record<string, unknown>;
+    };
+    youtubePost.author = "BR";
+    youtubePost.user = { username: "Bravo", avatar_url: null };
+    youtubePost.raw_data = {
+      user: {
+        username: "bravo",
+        avatar_url: "https://images.test/bravo-author-avatar.jpg",
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => abbreviatedAuthorPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.getByTestId("post-header-handles-yt-1")).toHaveTextContent("@bravo");
+    expect(within(screen.getByTestId("post-header-avatars-yt-1")).getByAltText("@bravo avatar")).toHaveAttribute(
+      "src",
+      "https://images.test/bravo-author-avatar.jpg",
+    );
   });
 
   it("normalizes tagged and collaborator chips to a single @ prefix", async () => {
@@ -654,7 +1192,7 @@ describe("WeekDetailPage thumbnails", () => {
     });
     expect(detailCalls).toHaveLength(1);
     const firstQuery = new URLSearchParams(detailCalls[0].split("?")[1] ?? "");
-    expect(firstQuery.get("sort_field")).toBe("likes");
+    expect(firstQuery.get("sort_field")).toBe("posted_at");
     expect(firstQuery.get("sort_dir")).toBe("desc");
     expect(firstQuery.get("post_offset")).toBe("0");
 
@@ -902,6 +1440,63 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("@th_handle")).toBeInTheDocument();
   });
 
+  it("uses caption hashtags (not metadata tag arrays) for youtube/facebook summary hashtag tokens", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as Record<string, any>;
+    payload.platforms.instagram.posts[0].hashtags = [];
+    payload.platforms.tiktok.posts[0].hashtags = [];
+    payload.platforms.youtube.posts[0].text = "YouTube caption with #CaptionOnly";
+    payload.platforms.youtube.posts[0].hashtags = ["CaptionOnly", "MetaOnly"];
+    payload.platforms.facebook = {
+      posts: [
+        {
+          source_id: "fb-caption-only-1",
+          author: "bravo",
+          text: "Facebook caption with #FBOnly",
+          url: "https://facebook.com/bravo/posts/fb-caption-only-1",
+          posted_at: "2026-01-01T00:00:00.000Z",
+          engagement: 150,
+          total_comments_available: 0,
+          comments: [],
+          likes: 40,
+          comments_count: 5,
+          shares: 3,
+          views: 1000,
+          hashtags: ["FBOnly", "FBMetaOnly"],
+          mentions: [],
+          thumbnail_url: "https://images.test/fb-caption-only-preview.jpg",
+        },
+      ],
+      totals: { posts: 1, total_comments: 5, total_engagement: 150 },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    fireEvent.click(screen.getByTestId("summary-token-hashtags"));
+    await waitFor(() => {
+      expect(screen.getByTestId("summary-token-modal")).toBeInTheDocument();
+    });
+
+    const modal = screen.getByTestId("summary-token-modal");
+    expect(within(modal).getByText("#CaptionOnly")).toBeInTheDocument();
+    expect(within(modal).getByText("#FBOnly")).toBeInTheDocument();
+    expect(within(modal).queryByText("#MetaOnly")).not.toBeInTheDocument();
+    expect(within(modal).queryByText("#FBMetaOnly")).not.toBeInTheDocument();
+  });
+
   it("uses combined Twitter reposts and replies+quotes comment coverage semantics", async () => {
     const twitterCoveragePayload = {
       ...weekPayload,
@@ -1131,6 +1726,196 @@ describe("WeekDetailPage thumbnails", () => {
       const video = document.querySelector("video[aria-label='TikTok media']");
       expect(video).not.toBeNull();
     });
+  });
+
+  it("prefers non-video TikTok thumbnail candidates when thumbnail_url is video-like", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).thumbnail_url = "https://video.test/tiktok-thumb.mp4";
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).hosted_media_urls = ["https://video.test/tiktok-hosted.mp4"];
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).source_media_urls = [
+      "https://video.test/tiktok-source.mp4",
+      "https://images.test/tiktok-still.jpg",
+    ];
+    payload.platforms.tiktok.posts[0].media_urls = ["https://video.test/tiktok-source.mp4"];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const tiktokThumb = screen.getByAltText("TikTok post thumbnail");
+    expect(tiktokThumb).toHaveAttribute("src", expect.stringContaining("https://images.test/tiktok-still.jpg"));
+  });
+
+  it("opens source TikTok video first when hosted media slot is thumbnail-like", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).source_media_urls = ["https://video.test/tiktok-source.mp4"];
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).hosted_media_urls = ["https://images.test/tiktok-hosted-thumb.jpg"];
+    payload.platforms.tiktok.posts[0].media_urls = ["https://video.test/tiktok-source.mp4"];
+    payload.platforms.tiktok.posts[0].thumbnail_url = "https://images.test/tiktok-hosted-thumb.jpg";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/tiktok/tt-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "tiktok",
+            source_id: "tt-1",
+            author: "bravotv",
+            text: "TikTok post",
+            url: "https://tiktok.com/@bravo/video/1",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: "https://images.test/tiktok-hosted-thumb.jpg",
+            source_media_urls: ["https://video.test/tiktok-source.mp4"],
+            hosted_media_urls: ["https://images.test/tiktok-hosted-thumb.jpg"],
+            stats: {
+              likes: 60,
+              comments_count: 12,
+              shares: 7,
+              saves: 471,
+              views: 2000,
+              engagement: 2079,
+            },
+            total_comments_in_db: 1,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /open post media lightbox from details/i,
+      }),
+    );
+    await waitFor(() => {
+      expect(document.querySelector("video[aria-label='TikTok media']")).not.toBeNull();
+    });
+  });
+
+  it("uses video poster fallback in details when no non-video thumbnail candidate exists", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    payload.platforms.tiktok.posts[0].thumbnail_url = null;
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).source_media_urls = ["https://video.test/tiktok-only-video.mp4"];
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).hosted_media_urls = [];
+    payload.platforms.tiktok.posts[0].media_urls = ["https://video.test/tiktok-only-video.mp4"];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/tiktok/tt-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "tiktok",
+            source_id: "tt-1",
+            author: "bravotv",
+            text: "TikTok post",
+            url: "https://tiktok.com/@bravo/video/1",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: null,
+            source_thumbnail_url: null,
+            hosted_thumbnail_url: null,
+            source_media_urls: ["https://video.test/tiktok-only-video.mp4"],
+            hosted_media_urls: [],
+            media_urls: ["https://video.test/tiktok-only-video.mp4"],
+            stats: {
+              likes: 60,
+              comments_count: 12,
+              shares: 7,
+              saves: 471,
+              views: 2000,
+              engagement: 2079,
+            },
+            total_comments_in_db: 1,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    const drawerThumb = screen.getAllByAltText("TikTok post thumbnail").at(-1);
+    expect(drawerThumb).toBeDefined();
+    expect(drawerThumb).toHaveAttribute("src", expect.stringContaining("https://video.test/tiktok-only-video.mp4"));
   });
 
   it("does not fall back to source embed when mirrored media URL is an HTML wrapper", async () => {
@@ -1385,6 +2170,27 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("506/1.4K* Comments (Saved/Actual)")).toBeInTheDocument();
   });
 
+  it("uses Sync X action label for twitter-scoped week detail", async () => {
+    mockSearch.value = "source_scope=bravo&social_platform=twitter";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => crossPlatformCoveragePayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.getByTestId("week-sync-button")).toHaveTextContent("Sync X");
+  });
+
   it("applies day and social platform query prefilters and can clear day filter", async () => {
     mockSearch.value = "source_scope=bravo&social_platform=youtube&day=2025-12-31";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1476,12 +2282,14 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText("14s").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@tagged_user").length).toBeGreaterThan(0);
     expect(screen.getAllByText("@collab_user").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("#RHOSLC").length).toBeGreaterThan(0);
+    expect(screen.queryByText("#RHOSLC")).not.toBeInTheDocument();
     expect(screen.getAllByText("@bravotv").length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(screen.getAllByText(/\(high\)/i).length).toBeGreaterThan(0);
     });
     expect(screen.getAllByText("IG post").length).toBeGreaterThan(1);
+    expect(screen.queryByText("Media Asset Metadata")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Policy:\s*best_per_asset/i)).not.toBeInTheDocument();
   });
 
   it("opens the source video entry first when only the thumbnail is mirrored", async () => {
@@ -2182,7 +2990,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     await waitForWeekDetailReady();
 
-    const syncButton = await screen.findByRole("button", { name: /Ingest/i });
+    const syncButton = await screen.findByTestId("week-sync-button");
     fireEvent.click(syncButton);
 
     await waitFor(() => {
@@ -2195,7 +3003,7 @@ describe("WeekDetailPage thumbnails", () => {
     await waitFor(() => {
       expect(screen.getByText("Sync Progress")).toBeInTheDocument();
       expect(
-        screen.getByText(/Pass 1\/8 ingest complete.*Coverage 36\/36 \(100\.0%\) · Up-to-Date\./),
+        screen.getByText(/Pass 1\/8 (sync|ingest) complete.*Coverage 36\/36 \(100\.0%\) · Up-to-Date\./i),
       ).toBeInTheDocument();
     });
     expect(screen.getByText(/10 scraped/i)).toBeInTheDocument();
@@ -2251,6 +3059,109 @@ describe("WeekDetailPage thumbnails", () => {
     await waitForWeekDetailReady();
 
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(true);
+  });
+
+  it("forces RHOSLC instagram sync payload to include BravoTV + BravoWWHL and #RHOSLC", async () => {
+    mockSearch.value = "source_scope=bravo&social_platform=instagram";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            week: weekPayload.week,
+            season: weekPayload.season,
+            source_scope: "bravo",
+            platforms: { instagram: { total_posts: 1, totals: { posts: 1, total_comments: 10, total_engagement: 100 } } },
+            totals: { posts: 1, total_comments: 10, total_engagement: 100 },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+      }
+      if (url.includes("/social/ingest") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            run_id: "bc2e23e7-213f-47f3-8855-92ce45c45095",
+            queued_or_started_jobs: 4,
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/runs?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            runs: [
+              {
+                id: "bc2e23e7-213f-47f3-8855-92ce45c45095",
+                status: "completed",
+                summary: {
+                  total_jobs: 4,
+                  completed_jobs: 4,
+                  failed_jobs: 0,
+                  active_jobs: 0,
+                  items_found_total: 10,
+                  stage_counts: {
+                    posts: { total: 2, completed: 2, failed: 0, active: 0 },
+                    comments: { total: 2, completed: 2, failed: 0, active: 0 },
+                  },
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/jobs?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ jobs: [] }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/comments-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_saved_comments: 10,
+            total_reported_comments: 10,
+            coverage_pct: 100,
+            up_to_date: true,
+            stale_posts_count: 0,
+            posts_scanned: 1,
+            by_platform: {},
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    fireEvent.click(await screen.findByTestId("week-sync-button"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/targets @bravotv \+ @bravowwhl · #RHOSLC/i),
+      ).toBeInTheDocument();
+    });
+
+    const ingestCall = fetchMock.mock.calls.find(
+      (call) => String(call[0]).includes("/social/ingest") && (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(ingestCall).toBeDefined();
+    const ingestInit = ingestCall?.[1] as RequestInit;
+    const body = JSON.parse(String(ingestInit.body ?? "{}")) as Record<string, unknown>;
+    expect(body.platforms).toEqual(["instagram"]);
+    expect(body.accounts_override).toEqual(["bravotv", "bravowwhl"]);
+    expect(body.hashtags_override).toEqual(["RHOSLC"]);
   });
 
   it("aggregates paginated jobs and normalizes sync log account handles", async () => {
@@ -2371,7 +3282,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
     await waitForWeekDetailReady();
-    fireEvent.click(await screen.findByRole("button", { name: /Ingest/i }));
+    fireEvent.click(await screen.findByTestId("week-sync-button"));
 
     await waitFor(() => {
       expect(screen.getByText(/Sync Progress/)).toBeInTheDocument();
@@ -2387,7 +3298,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getAllByText(/@bravotv comments completed/i).length).toBeGreaterThan(0);
   });
 
-  it("stops syncing with retry guidance when ingest kickoff times out", async () => {
+  it("stops syncing with retry guidance when kickoff times out and run recovery cannot attach", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/social/analytics/week/1/summary")) {
@@ -2407,7 +3318,7 @@ describe("WeekDetailPage thumbnails", () => {
         return { ok: true, status: 200, json: async () => weekPayload } as Response;
       }
       if (url.includes("/social/ingest") && init?.method === "POST") {
-        throw new Error("Ingest kickoff request timed out");
+        throw new Error("Sync kickoff request timed out");
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
@@ -2415,12 +3326,123 @@ describe("WeekDetailPage thumbnails", () => {
 
     render(<WeekDetailPage />);
     await waitForWeekDetailReady();
-    fireEvent.click(await screen.findByRole("button", { name: /Ingest/i }));
+    fireEvent.click(await screen.findByTestId("week-sync-button"));
 
     await waitFor(() => {
       expect(screen.getByText(/Retry in a minute/i)).toBeInTheDocument();
       expect(screen.queryByText(/Sync Progress/i)).not.toBeInTheDocument();
     });
+
+    const ingestCalls = fetchMock.mock.calls.filter((call) => {
+      const url = String(call[0]);
+      const init = call[1] as RequestInit | undefined;
+      return url.includes("/social/ingest") && init?.method === "POST";
+    });
+    expect(ingestCalls).toHaveLength(1);
+  });
+
+  it("attaches to the most recent matching run when kickoff times out", async () => {
+    const recoveredRunId = "15a2f45a-3d4d-49af-96e2-53f04e3951c1";
+    const recoveredRun = {
+      id: recoveredRunId,
+      status: "completed",
+      source_scope: "bravo",
+      config: {
+        ingest_mode: "posts_and_comments",
+        date_start: weekPayload.week.start,
+        date_end: weekPayload.week.end,
+        platforms: "all",
+      },
+      summary: {
+        total_jobs: 6,
+        completed_jobs: 6,
+        failed_jobs: 0,
+        active_jobs: 0,
+        items_found_total: 42,
+      },
+      created_at: new Date().toISOString(),
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            week: weekPayload.week,
+            season: weekPayload.season,
+            source_scope: "bravo",
+            platforms: {},
+            totals: { posts: 0, total_comments: 0, total_engagement: 0 },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+      }
+      if (url.includes("/social/ingest") && init?.method === "POST") {
+        throw new Error("Sync kickoff request timed out");
+      }
+      if (url.includes("/social/runs?")) {
+        const parsed = new URL(url, "http://localhost");
+        if (parsed.searchParams.get("run_id")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ runs: [recoveredRun] }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ runs: [recoveredRun] }),
+        } as Response;
+      }
+      if (url.includes("/social/jobs?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            jobs: [],
+            pagination: { limit: 250, offset: 0, returned: 0, has_more: false },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/comments-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_saved_comments: 36,
+            total_reported_comments: 36,
+            coverage_pct: 100,
+            up_to_date: true,
+            stale_posts_count: 0,
+            posts_scanned: 3,
+            by_platform: {},
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    fireEvent.click(await screen.findByTestId("week-sync-button"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sync Progress/i)).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(`Run ${recoveredRunId.slice(0, 8)}`, "i"))).toBeInTheDocument();
+      expect(screen.queryByText(/Retry in a minute/i)).not.toBeInTheDocument();
+    });
+
+    const ingestCalls = fetchMock.mock.calls.filter((call) => {
+      const url = String(call[0]);
+      const req = call[1] as RequestInit | undefined;
+      return url.includes("/social/ingest") && req?.method === "POST";
+    });
+    expect(ingestCalls).toHaveLength(1);
   });
 
   it("queues a full sync run even when selected posts are already up to date", async () => {
@@ -2504,7 +3526,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     await waitForWeekDetailReady();
 
-    const syncButton = await screen.findByRole("button", { name: /Ingest/i });
+    const syncButton = await screen.findByTestId("week-sync-button");
     fireEvent.click(syncButton);
 
     await waitFor(() => {

@@ -3,9 +3,9 @@ import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import {
   getRedditCommunityById,
-  updateRedditCommunityPostFlares,
+  updateRedditCommunityPostFlairs,
 } from "@/lib/server/admin/reddit-sources-repository";
-import { fetchSubredditPostFlares } from "@/lib/server/admin/reddit-flairs-service";
+import { fetchSubredditPostFlairs } from "@/lib/server/admin/reddit-flairs-service";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -32,12 +32,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Community not found" }, { status: 404 });
     }
 
-    const flaresResult = await fetchSubredditPostFlares(community.subreddit);
+    const flairsResult = await fetchSubredditPostFlairs(community.subreddit);
     const nowIso = new Date().toISOString();
-    const updatedCommunity = await updateRedditCommunityPostFlares(
+    const updatedCommunity = await updateRedditCommunityPostFlairs(
       authContext,
       communityId,
-      flaresResult.flares,
+      flairsResult.flairs,
       nowIso,
     );
 
@@ -48,14 +48,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(
       {
         community: updatedCommunity,
-        flares: flaresResult.flares,
-        source: flaresResult.source,
-        warning: flaresResult.warning,
+        flairs: flairsResult.flairs,
+        source: flairsResult.source,
+        warning: flairsResult.warning,
       },
       { status: 200 },
     );
   } catch (error) {
-    console.error("[api] Failed to refresh reddit post flares", error);
+    console.error("[api] Failed to refresh reddit post flairs", error);
     const message = error instanceof Error ? error.message : "failed";
     const status =
       message === "unauthorized"

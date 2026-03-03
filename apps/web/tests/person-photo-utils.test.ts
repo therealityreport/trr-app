@@ -138,7 +138,10 @@ describe("dedupePhotosByCanonicalKeysPreferMediaLinks", () => {
           show_context_source: "imdb_episode_unresolved",
           imdb_fallback_show_name: "Watch What Happens Live with Andy Cohen",
           episode_imdb_id: "tt39695338",
+          imdb_title_id: "tt39695338",
+          imdb_title_url: "https://www.imdb.com/title/tt39695338/",
           imdb_title_type: "TVEpisode",
+          imdb_credit_media_type: "TV Episode",
           imdb_image_type: "still_frame",
         },
       },
@@ -170,6 +173,9 @@ describe("dedupePhotosByCanonicalKeysPreferMediaLinks", () => {
     expect(deduped[0].face_crops).toEqual([{ index: 1, variant_url: "https://cdn.example.com/crops/1.jpg" }]);
     expect(deduped[0].metadata?.imdb_fallback_show_name).toBe("Watch What Happens Live with Andy Cohen");
     expect(deduped[0].metadata?.show_context_source).toBe("imdb_episode_unresolved");
+    expect(deduped[0].metadata?.imdb_title_id).toBe("tt39695338");
+    expect(deduped[0].metadata?.imdb_title_url).toBe("https://www.imdb.com/title/tt39695338/");
+    expect(deduped[0].metadata?.imdb_credit_media_type).toBe("TV Episode");
   });
 
   it("keeps media operational identifiers when tie-quality merge pulls metadata from cast row", () => {

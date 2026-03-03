@@ -991,6 +991,27 @@ export function buildShowRedditCommunityWindowUrl(input: {
   return appendQuery(`${communityHref}/${encodeURIComponent(token)}`, nextQuery);
 }
 
+export function buildShowRedditCommunityWindowPostUrl(input: {
+  showSlug: string;
+  communitySlug: string;
+  seasonNumber: number | string;
+  windowKey: string;
+  postId: string;
+  query?: URLSearchParams;
+}): string {
+  const windowHref = buildShowRedditCommunityWindowUrl({
+    showSlug: input.showSlug,
+    communitySlug: input.communitySlug,
+    seasonNumber: input.seasonNumber,
+    windowKey: input.windowKey,
+  });
+  const postId = input.postId.trim();
+  if (!postId) return windowHref;
+  const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+  nextQuery.delete("social_platform");
+  return appendQuery(`${windowHref}/post/${encodeURIComponent(postId)}`, nextQuery);
+}
+
 export function buildShowRedditCommunityAnalyticsUrl(input: {
   showSlug: string;
   communitySlug: string;

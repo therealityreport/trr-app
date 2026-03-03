@@ -44,3 +44,33 @@ export function selectTwitterThumbnailUrl(input: {
   if (input.mediaUrls?.[0]) return input.mediaUrls[0];
   return null;
 }
+
+export function selectInstagramTikTokThumbnailUrl(input: {
+  hostedThumbnail: string | null | undefined;
+  thumbnail: string | null | undefined;
+  hostedMediaUrls: string[];
+  mediaUrls: string[];
+  sourceMediaUrls?: string[];
+}): string | null {
+  const preferred = pickFirstNonVideoUrl([
+    input.hostedThumbnail,
+    input.thumbnail,
+    ...(input.hostedMediaUrls || []),
+    ...(input.sourceMediaUrls || []),
+    ...(input.mediaUrls || []),
+  ]);
+  if (preferred) return preferred;
+
+  const fallback = [
+    input.hostedThumbnail,
+    input.thumbnail,
+    ...(input.hostedMediaUrls || []),
+    ...(input.sourceMediaUrls || []),
+    ...(input.mediaUrls || []),
+  ];
+  for (const raw of fallback) {
+    const candidate = typeof raw === "string" ? raw.trim() : "";
+    if (candidate) return candidate;
+  }
+  return null;
+}

@@ -7,6 +7,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import BrandLogoOptionsModal from "@/components/admin/BrandLogoOptionsModal";
 import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
@@ -122,6 +123,15 @@ interface ErrorPayload {
   message: string;
 }
 
+type LogoPickerState = {
+  targetType: NetworksStreamingType;
+  targetKey: string;
+  targetLabel: string;
+  logoRole: "wordmark" | "icon";
+};
+
+const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
+
 const parseErrorPayload = async (response: Response): Promise<ErrorPayload> => {
   const fallback = `Request failed (${response.status})`;
   try {
@@ -209,6 +219,7 @@ export default function AdminNetworksPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<NetworksStreamingSyncResult | null>(null);
+  const [logoPickerState, setLogoPickerState] = useState<LogoPickerState | null>(null);
   const [showCompletionProgress, setShowCompletionProgress] = useState(false);
   const [showUnresolved, setShowUnresolved] = useState(false);
   const [refreshExternalSources, setRefreshExternalSources] = useState(false);
@@ -236,6 +247,7 @@ export default function AdminNetworksPage() {
     (input: RequestInfo | URL, init?: RequestInit) =>
       fetchAdminWithAuth(input, init, {
         preferredUser: user,
+        allowDevAdminBypass: true,
       }),
     [user],
   );
@@ -918,16 +930,46 @@ export default function AdminNetworksPage() {
                             <td className="px-3 py-2 text-right tabular-nums text-zinc-700">{row.available_show_count}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-zinc-700">{row.added_show_count}</td>
                             <td className="px-3 py-2">
-                              {row.hosted_logo_url ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={row.hosted_logo_url}
-                                  alt={`${row.name} logo`}
-                                  className="h-7 max-w-[120px] object-contain"
-                                />
-                              ) : (
-                                <span className="text-zinc-500">Missing</span>
-                              )}
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="relative h-8 w-[120px] overflow-hidden rounded border border-zinc-200 bg-zinc-50"
+                                  onClick={() =>
+                                    setLogoPickerState({
+                                      targetType: row.type,
+                                      targetKey: normalizeEntityKey(row.name),
+                                      targetLabel: row.name,
+                                      logoRole: "wordmark",
+                                    })
+                                  }
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={row.hosted_logo_url || PLACEHOLDER_ICON_PATH}
+                                    alt={`${row.name} wordmark`}
+                                    className="h-full w-full object-contain p-1"
+                                  />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="relative h-8 w-8 overflow-hidden rounded border border-zinc-200 bg-zinc-50"
+                                  onClick={() =>
+                                    setLogoPickerState({
+                                      targetType: row.type,
+                                      targetKey: normalizeEntityKey(row.name),
+                                      targetLabel: row.name,
+                                      logoRole: "icon",
+                                    })
+                                  }
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={row.hosted_logo_black_url || row.hosted_logo_white_url || PLACEHOLDER_ICON_PATH}
+                                    alt={`${row.name} icon`}
+                                    className="h-full w-full object-contain p-1"
+                                  />
+                                </button>
+                              </div>
                             </td>
                             <td className="px-3 py-2">
                               <div className="flex flex-wrap gap-1">
@@ -1144,6 +1186,21 @@ export default function AdminNetworksPage() {
             </div>
           </section>
         </main>
+        {logoPickerState ? (
+          <BrandLogoOptionsModal
+            isOpen={Boolean(logoPickerState)}
+            onClose={() => setLogoPickerState(null)}
+            preferredUser={user}
+            targetType={logoPickerState.targetType}
+            targetKey={logoPickerState.targetKey}
+            targetLabel={logoPickerState.targetLabel}
+            logoRole={logoPickerState.logoRole}
+            onSaved={async () => {
+              await loadNetworksStreamingSummary({ silent: false });
+              await loadOverrides();
+            }}
+          />
+        ) : null}
       </div>
     </ClientOnly>
   );

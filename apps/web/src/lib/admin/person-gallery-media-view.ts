@@ -204,6 +204,14 @@ export function computePersonPhotoShowBuckets(input: {
     metadataShowContextSource !== "request_context" &&
     metadataShowContextSource !== "request_context_rejected" &&
     hasImdbEpisodeEvidence(photo, metadata);
+  const episodeProvenThisShow = Boolean(
+    sourceNormalized === "imdb" &&
+      !isRejectedRequestContext &&
+      hasImdbEpisodeEvidence(photo, metadata) &&
+      (normalizedShowNamesMatch(rawMetaFallbackShowName, activeShowName) ||
+        (metadataShowContextSource !== "request_context" &&
+          normalizedShowNamesMatch(rawMetaShowName, activeShowName)))
+  );
   const matchesShowName = showNameNormalized ? normalizedTextIncludesShowName(textNormalized, activeShowName) : false;
   const matchesShowAcronym = showAcronym ? acronyms.has(showAcronym) : false;
   const metadataShowNameRaw = trustImdbMetadata
@@ -243,7 +251,8 @@ export function computePersonPhotoShowBuckets(input: {
     metaShowIdMatches ||
     matchesShowName ||
     matchesShowAcronym ||
-    metadataMatchesThisShow;
+    metadataMatchesThisShow ||
+    episodeProvenThisShow;
   const matchesOtherShowName = input.otherShowNameMatches.some((name) =>
     normalizedTextIncludesShowName(textNormalized, name)
   );

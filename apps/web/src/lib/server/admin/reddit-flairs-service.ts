@@ -6,8 +6,8 @@ import {
 
 export type RedditFlairSource = "api" | "listing_fallback" | "none";
 
-export interface RedditPostFlaresResult {
-  flares: string[];
+export interface RedditPostFlairsResult {
+  flairs: string[];
   source: RedditFlairSource;
   warning: string | null;
 }
@@ -105,12 +105,12 @@ const fetchJsonWithTimeout = async <T>(url: string): Promise<T> => {
   }
 };
 
-const rankAndCapFlares = (subreddit: string, rawFlares: string[], cap: number): string[] => {
+const rankAndCapFlairs = (subreddit: string, rawFlairs: string[], cap: number): string[] => {
   const firstSeenOrder = new Map<string, number>();
   const displayByKey = new Map<string, string>();
   const countByKey = new Map<string, number>();
 
-  for (const raw of rawFlares) {
+  for (const raw of rawFlairs) {
     const normalized = raw.trim().replace(/\s+/g, " ");
     if (!normalized) continue;
 
@@ -141,10 +141,10 @@ const fetchFromFlairApi = async (subreddit: string): Promise<string[]> => {
   );
 
   if (!Array.isArray(payload)) return [];
-  const flares = payload
+  const flairs = payload
     .map((entry) => (typeof entry?.text === "string" ? entry.text : ""))
     .filter((value) => value.trim().length > 0);
-  return rankAndCapFlares(subreddit, flares, getFlairCap());
+  return rankAndCapFlairs(subreddit, flairs, getFlairCap());
 };
 
 const fetchFromListingsFallback = async (subreddit: string): Promise<string[]> => {
@@ -162,30 +162,30 @@ const fetchFromListingsFallback = async (subreddit: string): Promise<string[]> =
     }),
   );
 
-  const rawFlares: string[] = [];
+  const rawFlairs: string[] = [];
   for (const rows of listingRows) {
     for (const row of rows) {
       const flair = row.data?.link_flair_text;
       if (typeof flair === "string" && flair.trim().length > 0) {
-        rawFlares.push(flair);
+        rawFlairs.push(flair);
       }
     }
   }
 
-  return rankAndCapFlares(subreddit, rawFlares, getFlairCap());
+  return rankAndCapFlairs(subreddit, rawFlairs, getFlairCap());
 };
 
-export async function fetchSubredditPostFlares(subredditInput: string): Promise<RedditPostFlaresResult> {
+export async function fetchSubredditPostFlairs(subredditInput: string): Promise<RedditPostFlairsResult> {
   const subreddit = normalizeSubreddit(subredditInput);
   if (!subreddit || !isValidSubreddit(subreddit)) {
     throw new Error("Invalid subreddit");
   }
 
   try {
-    const apiFlares = await fetchFromFlairApi(subreddit);
-    if (apiFlares.length > 0) {
+    const apiFlairs = await fetchFromFlairApi(subreddit);
+    if (apiFlairs.length > 0) {
       return {
-        flares: apiFlares,
+        flairs: apiFlairs,
         source: "api",
         warning: null,
       };
@@ -193,22 +193,22 @@ export async function fetchSubredditPostFlares(subredditInput: string): Promise<
   } catch (error) {
     const warning = toWarning(error);
     try {
-      const fallbackFlares = await fetchFromListingsFallback(subreddit);
-      if (fallbackFlares.length > 0) {
+      const fallbackFlairs = await fetchFromListingsFallback(subreddit);
+      if (fallbackFlairs.length > 0) {
         return {
-          flares: fallbackFlares,
+          flairs: fallbackFlairs,
           source: "listing_fallback",
           warning,
         };
       }
       return {
-        flares: [],
+        flairs: [],
         source: "none",
         warning,
       };
     } catch {
       return {
-        flares: [],
+        flairs: [],
         source: "none",
         warning,
       };
@@ -216,24 +216,24 @@ export async function fetchSubredditPostFlares(subredditInput: string): Promise<
   }
 
   try {
-    const fallbackFlares = await fetchFromListingsFallback(subreddit);
-    if (fallbackFlares.length > 0) {
+    const fallbackFlairs = await fetchFromListingsFallback(subreddit);
+    if (fallbackFlairs.length > 0) {
       return {
-        flares: fallbackFlares,
+        flairs: fallbackFlairs,
         source: "listing_fallback",
         warning: "Flair API returned no post flairs",
       };
     }
   } catch (error) {
     return {
-      flares: [],
+      flairs: [],
       source: "none",
       warning: toWarning(error),
     };
   }
 
   return {
-    flares: [],
+    flairs: [],
     source: "none",
     warning: null,
   };

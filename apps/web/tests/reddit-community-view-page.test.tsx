@@ -110,8 +110,8 @@ describe("reddit community view page", () => {
       resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/[[...rest]]/page.tsx"),
       "utf8",
     );
-    expect(rootSeasonAliasSource).toContain("resolveRedditWindowRedirectHref");
-    expect(rootSeasonAliasSource).toContain("/admin/reddit-window-posts?");
+    expect(rootSeasonAliasSource).toContain("resolveRedditPathContext");
+    expect(rootSeasonAliasSource).toContain("/social/reddit/");
   });
 
   it("loads focused community and honors return_to back link", () => {
