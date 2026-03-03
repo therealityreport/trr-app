@@ -25,6 +25,10 @@ type DiscoverCandidate = {
   source_url: string;
   source_provider?: string | null;
   discovered_from?: string | null;
+  hosted_logo_url?: string | null;
+  hosted_logo_black_url?: string | null;
+  hosted_logo_white_url?: string | null;
+  is_selected_for_role?: boolean;
   logo_role: BrandLogoRole;
   option_kind: "candidate";
 };
