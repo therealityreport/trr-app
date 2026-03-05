@@ -22,14 +22,22 @@ const SURVEY_COLLECTION = "surveyResults";
 
 class SurveyManager {
   private static instance: SurveyManager;
+  private firestore: Firestore | null = null;
 
-  private constructor(private readonly firestore: Firestore) {}
+  private constructor() {}
 
   static getInstance(): SurveyManager {
     if (!SurveyManager.instance) {
-      SurveyManager.instance = new SurveyManager(getDb());
+      SurveyManager.instance = new SurveyManager();
     }
     return SurveyManager.instance;
+  }
+
+  private getFirestore(): Firestore {
+    if (!this.firestore) {
+      this.firestore = getDb();
+    }
+    return this.firestore;
   }
 
   async getEpisodeMeta(ids: SurveyIdentifiers, defaults?: Partial<SurveyEpisodeMeta>): Promise<SurveyEpisodeMeta> {
@@ -155,7 +163,7 @@ class SurveyManager {
 
   private getEpisodeMetaRef(ids: SurveyIdentifiers) {
     return doc(
-      this.firestore,
+      this.getFirestore(),
       SURVEY_COLLECTION,
       ids.showId,
       "seasons",
@@ -169,7 +177,7 @@ class SurveyManager {
 
   private getResponseDocRef(ids: SurveyIdentifiers, uid: string) {
     return doc(
-      this.firestore,
+      this.getFirestore(),
       SURVEY_COLLECTION,
       ids.showId,
       "seasons",

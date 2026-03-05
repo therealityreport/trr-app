@@ -17,6 +17,8 @@ import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse } from "@/lib
 import { shows } from "@/lib/admin/shows/data";
 import "@/styles/realitease-fonts.css";
 
+export const dynamic = "force-dynamic";
+
 const IDENTIFIERS = {
   showId: RHOP_SHOW_ID,
   seasonId: RHOP_SEASON_ID,

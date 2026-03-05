@@ -21,6 +21,9 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 type NetworksStreamingType = "network" | "streaming" | "production";
 
+const isNetworksStreamingType = (value: unknown): value is NetworksStreamingType =>
+  value === "network" || value === "streaming" || value === "production";
+
 type CompletionStatus = "resolved" | "manual_required" | "failed";
 
 interface NetworksStreamingRow {
@@ -196,17 +199,14 @@ const toNetworksSyncResult = (
         column: typeof row.column === "string" ? row.column : "",
       } satisfies MissingColumn;
     })
-    .filter((item): item is MissingColumn => Boolean(item) && item.table.length > 0 && item.column.length > 0);
+    .filter((item): item is MissingColumn => item !== null && item.table.length > 0 && item.column.length > 0);
 
   const resumeCursorRecord = asRecord(record?.resume_cursor);
+  const resumeEntityType = resumeCursorRecord?.entity_type;
   const resumeCursor =
-    resumeCursorRecord &&
-    (resumeCursorRecord.entity_type === "network" ||
-      resumeCursorRecord.entity_type === "streaming" ||
-      resumeCursorRecord.entity_type === "production") &&
-    typeof resumeCursorRecord.entity_key === "string"
+    isNetworksStreamingType(resumeEntityType) && typeof resumeCursorRecord?.entity_key === "string"
       ? {
-          entity_type: resumeCursorRecord.entity_type,
+          entity_type: resumeEntityType,
           entity_key: resumeCursorRecord.entity_key,
         }
       : null;

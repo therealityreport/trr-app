@@ -536,9 +536,11 @@ function MetadataPanel({
         const matchReason = matchingBox?.match_reason
           ? formatFaceMatchToken(matchingBox.match_reason)
           : "—";
-        const hasNumericSimilarity =
-          typeof matchingBox?.match_similarity === "number" &&
-          Number.isFinite(matchingBox.match_similarity);
+        const numericMatchSimilarity =
+          typeof matchingBox?.match_similarity === "number" && Number.isFinite(matchingBox.match_similarity)
+            ? matchingBox.match_similarity
+            : null;
+        const hasNumericSimilarity = numericMatchSimilarity !== null;
         const fallbackSimilarityUnavailable =
           !hasNumericSimilarity &&
           matchStatusRaw === "matched" &&
@@ -547,7 +549,7 @@ function MetadataPanel({
             labelSourceRaw === "best_effort_tag_map");
         const matchSimilarity =
           hasNumericSimilarity
-            ? `${(matchingBox.match_similarity * 100).toFixed(1)}%`
+            ? `${(numericMatchSimilarity * 100).toFixed(1)}%`
             : fallbackSimilarityUnavailable
               ? "Similarity unavailable (fallback assignment)"
             : "—";
@@ -608,8 +610,11 @@ function MetadataPanel({
           : `Face ${box.index}`;
         const matchStatus = matchStatusRaw ? formatFaceMatchToken(matchStatusRaw) : "unassigned";
         const matchReason = box.match_reason ? formatFaceMatchToken(box.match_reason) : "—";
-        const hasNumericSimilarity =
-          typeof box.match_similarity === "number" && Number.isFinite(box.match_similarity);
+        const numericMatchSimilarity =
+          typeof box.match_similarity === "number" && Number.isFinite(box.match_similarity)
+            ? box.match_similarity
+            : null;
+        const hasNumericSimilarity = numericMatchSimilarity !== null;
         const fallbackSimilarityUnavailable =
           !hasNumericSimilarity &&
           matchStatusRaw === "matched" &&
@@ -618,7 +623,7 @@ function MetadataPanel({
             labelSourceRaw === "best_effort_tag_map");
         const matchSimilarity =
           hasNumericSimilarity
-            ? `${(box.match_similarity * 100).toFixed(1)}%`
+            ? `${(numericMatchSimilarity * 100).toFixed(1)}%`
             : fallbackSimilarityUnavailable
               ? "Similarity unavailable (fallback assignment)"
             : "—";
@@ -668,10 +673,13 @@ function MetadataPanel({
     const thresholds = metadata.faceFilterThresholds;
     const minSidePx = thresholds?.min_side_px;
     const minAreaRatio = thresholds?.min_area_ratio;
+    const minSidePxValue = typeof minSidePx === "number" && Number.isFinite(minSidePx) ? minSidePx : null;
+    const minAreaRatioValue =
+      typeof minAreaRatio === "number" && Number.isFinite(minAreaRatio) ? minAreaRatio : null;
     const thresholdSuffix =
-      Number.isFinite(minSidePx) || Number.isFinite(minAreaRatio)
-        ? ` (min side ${Number.isFinite(minSidePx) ? `${Math.round(minSidePx)}px` : "—"}, min area ${
-            Number.isFinite(minAreaRatio) ? `${(Number(minAreaRatio) * 100).toFixed(1)}%` : "—"
+      minSidePxValue !== null || minAreaRatioValue !== null
+        ? ` (min side ${minSidePxValue !== null ? `${Math.round(minSidePxValue)}px` : "—"}, min area ${
+            minAreaRatioValue !== null ? `${(minAreaRatioValue * 100).toFixed(1)}%` : "—"
           })`
         : "";
     return `Faces raw ${Number.isFinite(raw) ? String(raw) : "—"} -> usable ${
