@@ -12,7 +12,7 @@ import {
   type Firestore,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getDb } from "@/lib/firebase-db";
 import {
   REALITEASE_DEFAULT_USER_ANALYTICS,
   type RawRealiteaseGuess,
@@ -97,7 +97,7 @@ export class RealiteaseManager {
 
   static getInstance(): RealiteaseManager {
     if (!RealiteaseManager.instance) {
-      RealiteaseManager.instance = new RealiteaseManager(db);
+      RealiteaseManager.instance = new RealiteaseManager(getDb());
     }
     return RealiteaseManager.instance;
   }

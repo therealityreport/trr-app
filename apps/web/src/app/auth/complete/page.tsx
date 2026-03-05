@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserProfile } from "@/lib/db/users";
+import { getUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
 import type { User } from "firebase/auth";
 
 function OAuthCallbackRedirectContent() {
@@ -82,9 +82,14 @@ function OAuthCallbackRedirectContent() {
             }
           } catch (error) {
             console.error("Auth complete: Profile check failed with error:", error);
-            // Fallback to finish page if profile check fails
-            console.log("Auth complete: Profile check failed, redirecting to finish page");
-            router.replace("/auth/finish");
+            if (isFirestoreUnavailableError(error)) {
+              console.log("Auth complete: Firestore profile lookup unavailable, allowing hub fallback");
+              router.replace("/hub");
+            } else {
+              // Fallback to finish page for non-Firestore errors.
+              console.log("Auth complete: Profile check failed, redirecting to finish page");
+              router.replace("/auth/finish");
+            }
           }
         };
         
@@ -166,9 +171,14 @@ function OAuthCallbackRedirectContent() {
         }
       } catch (error) {
         console.error("Auth complete: Profile check failed with error:", error);
-        // Fallback to finish page if profile check fails
-        console.log("Auth complete: Profile check failed, redirecting to finish page");
-        router.replace("/auth/finish");
+        if (isFirestoreUnavailableError(error)) {
+          console.log("Auth complete: Firestore profile lookup unavailable, allowing hub fallback");
+          router.replace("/hub");
+        } else {
+          // Fallback to finish page for non-Firestore errors.
+          console.log("Auth complete: Profile check failed, redirecting to finish page");
+          router.replace("/auth/finish");
+        }
       }
     });
     return () => {

@@ -875,6 +875,125 @@ describe("RedditSourcesManager", () => {
     expect(screen.queryByRole("checkbox", { name: /Show matched only/i })).not.toBeInTheDocument();
   });
 
+  it("renders pending flair pills from stored Supabase counts without requiring window re-sync", async () => {
+    const communityWithPendingReviewFlairs = {
+      ...baseCommunity,
+      post_flairs: ["Salt Lake City", "WWHL", "Bravo"],
+      analysis_flairs: ["WWHL", "Bravo"],
+      analysis_all_flairs: ["Salt Lake City"],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/stored-post-counts")) {
+        return jsonResponse({
+          counts: { "episode-2": 24 },
+          total_posts: 861,
+          tracked_total_posts: 861,
+          tracked_flair_counts: [
+            {
+              flair_key: "salt-lake-city",
+              flair_label: "Salt Lake City",
+              post_count: 466,
+              container_counts: [{ container_key: "episode-2", post_count: 24 }],
+            },
+          ],
+          pending_tracked_flair_counts: [
+            {
+              container_key: "episode-2",
+              flair_key: "wwhl",
+              flair_label: "WWHL",
+              post_count: 5,
+            },
+            {
+              container_key: "episode-2",
+              flair_key: "bravo",
+              flair_label: "Bravo",
+              post_count: 2,
+            },
+            {
+              container_key: "episode-2",
+              flair_key: "salt-lake-city",
+              flair_label: "Salt Lake City",
+              post_count: 99,
+            },
+          ],
+        });
+      }
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse({
+          community: communityWithPendingReviewFlairs,
+          candidates: [],
+          episode_matrix: [
+            {
+              episode_number: 2,
+              live: {
+                post_count: 1,
+                total_comments: 2100,
+                total_upvotes: 140,
+                top_post_id: "episode-2-live",
+                top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-2-live/test/",
+              },
+              post: {
+                post_count: 1,
+                total_comments: 334,
+                total_upvotes: 90,
+                top_post_id: "episode-2-post",
+                top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-2-post/test/",
+              },
+              weekly: {
+                post_count: 1,
+                total_comments: 407,
+                total_upvotes: 110,
+                top_post_id: "episode-2-weekly",
+                top_post_url: "https://www.reddit.com/r/BravoRealHousewives/comments/episode-2-weekly/test/",
+              },
+              total_posts: 3,
+              total_comments: 2841,
+              total_upvotes: 340,
+            },
+          ],
+          meta: {
+            fetched_at: "2026-03-03T01:20:00.000Z",
+            total_found: 3,
+            season_context: { season_id: "season-1", season_number: 6 },
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithPendingReviewFlairs, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        seasonId="season-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: /Sync Posts/ }).length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: /Sync Posts/ })[0]);
+
+    const episodeCard = await screen.findByRole("button", { name: "Episode 2" });
+    const episodeArticle = episodeCard.closest("article");
+    expect(episodeArticle).not.toBeNull();
+    expect(within(episodeArticle as HTMLElement).getByText(/24 tracked flair posts in window · 7 unassigned tracked posts/i)).toBeInTheDocument();
+    expect(within(episodeArticle as HTMLElement).getByText("WWHL · 5")).toBeInTheDocument();
+    expect(within(episodeArticle as HTMLElement).getByText("Bravo · 2")).toBeInTheDocument();
+    expect(within(episodeArticle as HTMLElement).queryByText("Salt Lake City · 99")).not.toBeInTheDocument();
+  });
+
   it("persists analysis flair mode chip toggles per selected community", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -1898,6 +2017,31 @@ describe("RedditSourcesManager", () => {
       if (url.includes("/social/analytics")) {
         return jsonResponse(customAnalyticsPayload);
       }
+      if (url.includes("/stored-post-counts")) {
+        return jsonResponse({
+          counts: {
+            "period-preseason": 1,
+          },
+          total_posts: 1,
+          tracked_total_posts: 1,
+          tracked_flair_counts: [
+            {
+              flair_key: "salt-lake-city",
+              flair_label: "Salt Lake City",
+              post_count: 1,
+              container_counts: [{ container_key: "period-preseason", post_count: 1 }],
+            },
+          ],
+          pending_tracked_flair_counts: [
+            {
+              container_key: "period-preseason",
+              flair_key: "salt-lake-city",
+              flair_label: "Salt Lake City",
+              post_count: 1,
+            },
+          ],
+        });
+      }
       const contextResponse = maybeHandleSeasonPeriodRequests(url);
       if (contextResponse) return contextResponse;
       if (url.includes("/episode-discussions/refresh")) {
@@ -2353,13 +2497,17 @@ describe("RedditSourcesManager", () => {
       expect(screen.getByText(/partial coverage after 2 passes/i)).toBeInTheDocument();
       expect(screen.getByText(/listing incomplete/i)).toBeInTheDocument();
     });
-    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
     await waitFor(() => {
       expect(
-        within(preSeasonCard).getByText(/1 tracked flair posts · 0 unassigned tracked posts/i),
-      ).toBeInTheDocument();
+        fetchMock.mock.calls.some((call) =>
+          String(call[0]).includes("/stored-post-counts?season_id=season-1"),
+        ),
+      ).toBe(true);
     });
-    expect(within(preSeasonCard).queryByText("Salt Lake City · 1")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText(/0 tracked flair posts · 0 unassigned tracked posts/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Salt Lake City · 1")).not.toBeInTheDocument();
   });
 
   it("shows queued spinner and queue depth while backend refresh is pending", async () => {

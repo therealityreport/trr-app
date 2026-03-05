@@ -10,6 +10,12 @@ interface RouteParams {
 
 const BACKEND_TIMEOUT_MS = 60_000;
 
+const toOptionalHeaderValue = (value: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const formatFetchProxyError = (
   error: unknown,
   context: { backendUrl: string | null }
@@ -53,6 +59,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }
 
+    const requestId = toOptionalHeaderValue(request.headers.get("x-trr-request-id"));
+    const tabSessionId = toOptionalHeaderValue(request.headers.get("x-trr-tab-session-id"));
+    const flowKey = toOptionalHeaderValue(request.headers.get("x-trr-flow-key"));
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
 
@@ -61,6 +71,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       response = await fetch(backendUrl, {
         headers: {
           Authorization: `Bearer ${serviceRoleKey}`,
+          ...(requestId ? { "x-trr-request-id": requestId } : {}),
+          ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+          ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
         },
         cache: "no-store",
         signal: controller.signal,

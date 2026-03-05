@@ -8,7 +8,7 @@ import {
 } from "@/lib/server/sse-proxy";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 3600;
+export const maxDuration = 800;
 const DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS = 20_000;
 const DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS = 2_000;
 const DEFAULT_CONNECT_PREFLIGHT_TIMEOUT_MS = 3_000;
@@ -201,6 +201,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
     requestId = request.headers.get("x-trr-request-id")?.trim() || null;
+    const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || null;
+    const flowKey = request.headers.get("x-trr-flow-key")?.trim() || null;
 
     const { personId } = await params;
     if (!personId) {
@@ -343,6 +345,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               "Content-Type": "application/json",
               Authorization: `Bearer ${serviceRoleKey}`,
               ...(requestId ? { "x-trr-request-id": requestId } : {}),
+              ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+              ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
             },
             body: JSON.stringify(body ?? {}),
             signal: requestController.signal,

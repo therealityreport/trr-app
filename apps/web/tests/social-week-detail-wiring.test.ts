@@ -58,10 +58,10 @@ describe("social week detail wiring", () => {
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/social\/runs\?\$\{runParams\.toString\(\)\}/);
-    expect(contents).toMatch(/social\/jobs\?\$\{jobsParams\.toString\(\)\}/);
+    expect(contents).toMatch(/social\/runs\/\$\{runId\}\/progress\?\$\{progressParams\.toString\(\)\}/);
+    expect(contents).toMatch(/social\/analytics\/week\/\$\{weekIndex\}\/live-health\?\$\{params\.toString\(\)\}/);
     expect(contents).toMatch(/social\/ingest\$\{ingestParams\.toString\(\) \? `\?\$\{ingestParams\.toString\(\)\}` : ""\}/);
-    expect(contents).toMatch(/runParams = new URLSearchParams\(\{\s*source_scope:\s*sourceScope,\s*run_id:\s*runId,\s*limit:\s*"1"/s);
+    expect(contents).toMatch(/progressParams = new URLSearchParams\(\{\s*recent_log_limit:\s*"40"/s);
   });
 
   it("uses timeout-bounded fetches for week detail and sync polling", () => {
@@ -75,7 +75,8 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/const fetchWithTimeout = async/);
     expect(contents).toMatch(/Week detail request timed out/);
     expect(contents).toMatch(/Sync runs request timed out/);
-    expect(contents).toMatch(/Sync jobs request timed out/);
+    expect(contents).toMatch(/Sync run progress request timed out/);
+    expect(contents).toMatch(/Week live health request timed out/);
     expect(contents).toMatch(/ingestKickoff:\s*210_000/);
     expect(contents).toMatch(/Sync kickoff request timed out/);
     expect(contents).toMatch(/SYNC_KICKOFF_MAX_ATTEMPTS = 1/);
@@ -218,6 +219,8 @@ describe("social week detail wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(/Per-Handle Job Progress/);
+    expect(contents).toMatch(/Day View/);
+    expect(contents).toMatch(/Asset Health/);
     expect(contents).toMatch(/syncHandleProgressCards\.map\(\(card\) => \(/);
     expect(contents).toMatch(/Runner lanes:/);
     expect(contents).toMatch(/formatSyncStageLabel\(stage\.stage\)/);
@@ -225,6 +228,18 @@ describe("social week detail wiring", () => {
     const summaryIndex = contents.indexOf("/* Summary bar - Row 1");
     expect(handleProgressIndex).toBeGreaterThan(-1);
     expect(summaryIndex).toBeGreaterThan(handleProgressIndex);
+  });
+
+  it("removes the in-progress narrative container and keeps logs collapsible", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).not.toMatch(/In progress:/);
+    expect(contents).toMatch(/setSyncLogsExpanded/);
+    expect(contents).toMatch(/Recent Run Log/);
   });
 
   it("renders additive refresh diagnostics and youtube transcript metadata", () => {

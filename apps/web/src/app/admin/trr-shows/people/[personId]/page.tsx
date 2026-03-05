@@ -10,7 +10,17 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildPersonBreadcrumb, humanizeSlug } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
+import { AdminRequestError, adminMutation, adminStream } from "@/lib/admin/admin-fetch";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import {
+  canonicalizeOperationStatus,
+  isCanonicalTerminalStatus,
+  monitorKickoffHandle,
+  normalizeKickoffHandle,
+  type CanonicalOperationStatus,
+} from "@/lib/admin/async-handles";
+import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
 import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
@@ -41,6 +51,8 @@ import {
   THUMBNAIL_CROP_LIMITS,
   THUMBNAIL_DEFAULTS,
   parseThumbnailCrop,
+  resolveThumbnailViewportImageStyle,
+  resolveThumbnailViewportRect,
   resolveThumbnailPresentation,
   type ThumbnailCrop,
 } from "@/lib/thumbnail-crop";
@@ -462,6 +474,15 @@ interface UnifiedNewsFacets {
 type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom";
 type ReprocessStageKey = "all" | "tagging" | "crop" | "id_text" | "resize";
 type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery";
+type StageTargetScope = "filtered" | "full";
+type StageTargets = {
+  totalFiltered: number;
+  castCount: number;
+  mediaLinkCount: number;
+  targetCastPhotoIds: string[];
+  targetMediaLinkIds: string[];
+  sources: CanonicalScopedSource[];
+};
 
 const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
   "fandom",
@@ -478,6 +499,38 @@ const toCanonicalScopedSource = (value: string | null | undefined): CanonicalSco
   if (normalized === "fandom") return "fandom";
   if (normalized === "fandom-gallery") return "fandom-gallery";
   return null;
+};
+
+const buildStageTargetsFromPhotos = (photoList: TrrPersonPhoto[]): StageTargets => {
+  const castPhotoIds = new Set<string>();
+  const mediaLinkIds = new Set<string>();
+  const sourceSet = new Set<CanonicalScopedSource>();
+  for (const photo of photoList) {
+    const canonicalSource = toCanonicalScopedSource(photo.source);
+    if (canonicalSource) sourceSet.add(canonicalSource);
+    if (photo.origin === "cast_photos") {
+      const photoId = String(photo.id || "").trim();
+      if (photoId) castPhotoIds.add(photoId);
+      continue;
+    }
+    if (photo.origin === "media_links") {
+      const linkId = String(photo.link_id || photo.id || "").trim();
+      if (linkId) mediaLinkIds.add(linkId);
+    }
+  }
+  const sources = Array.from(sourceSet).sort(
+    (a, b) => CANONICAL_SCOPED_SOURCE_ORDER.indexOf(a) - CANONICAL_SCOPED_SOURCE_ORDER.indexOf(b)
+  );
+  const targetCastPhotoIds = Array.from(castPhotoIds).sort((a, b) => a.localeCompare(b));
+  const targetMediaLinkIds = Array.from(mediaLinkIds).sort((a, b) => a.localeCompare(b));
+  return {
+    totalFiltered: photoList.length,
+    castCount: targetCastPhotoIds.length,
+    mediaLinkCount: targetMediaLinkIds.length,
+    targetCastPhotoIds,
+    targetMediaLinkIds,
+    sources,
+  };
 };
 
 const parsePeopleCount = (value: unknown): number | null => {
@@ -770,6 +823,7 @@ const NEWS_LOAD_TIMEOUT_MS = 45_000;
 const NEWS_SYNC_TIMEOUT_MS = 60_000;
 const NEWS_SYNC_POLL_INTERVAL_MS = 1_500;
 const NEWS_SYNC_POLL_TIMEOUT_MS = 90_000;
+const NEWS_OPERATION_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000, 15_000] as const;
 const NEWS_PAGE_SIZE = 50;
 const MAX_PHOTO_FETCH_PAGES = 30;
 const TEXT_OVERLAY_DETECT_CONCURRENCY = 4;
@@ -818,31 +872,6 @@ const fetchWithTimeout = async (
     if (externalSignal) {
       externalSignal.removeEventListener("abort", onExternalAbort);
     }
-  }
-};
-
-const parseStreamErrorResponse = async (response: Response): Promise<string> => {
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    const payload = (await response.json().catch(() => ({}))) as {
-      error?: string;
-      detail?: string;
-    };
-    if (payload.error && payload.detail) return `${payload.error}: ${payload.detail}`;
-    return payload.error || payload.detail || "Request failed";
-  }
-
-  const bodyText = await response.text().catch(() => "");
-  if (!bodyText.trim()) return "Request failed";
-  const dataMatch = bodyText.match(/data:\s*(\{[\s\S]*\})/);
-  if (!dataMatch) return bodyText.trim();
-
-  try {
-    const payload = JSON.parse(dataMatch[1]) as { error?: string; detail?: string };
-    if (payload.error && payload.detail) return `${payload.error}: ${payload.detail}`;
-    return payload.error || payload.detail || bodyText.trim();
-  } catch {
-    return bodyText.trim();
   }
 };
 
@@ -1268,6 +1297,22 @@ function GalleryPhoto({
     const resolvedHeight = naturalDimensions?.height ?? parseDimensionValue(photo.height) ?? null;
     return { width: resolvedWidth, height: resolvedHeight };
   }, [photo.height, photo.width, naturalDimensions?.height, naturalDimensions?.width]);
+  const thumbnailViewportStyle = useMemo(() => {
+    const [xToken = "", yToken = ""] = presentation.objectPosition.split(/\s+/);
+    const focusX = Number.parseFloat(xToken);
+    const focusY = Number.parseFloat(yToken);
+    if (!Number.isFinite(focusX) || !Number.isFinite(focusY)) return null;
+    const viewportRect = resolveThumbnailViewportRect({
+      imageWidth: imageDimensions.width,
+      imageHeight: imageDimensions.height,
+      focusX,
+      focusY,
+      zoom: presentation.zoom,
+      aspectRatio: 3 / 4,
+    });
+    return resolveThumbnailViewportImageStyle(viewportRect);
+  }, [imageDimensions.height, imageDimensions.width, presentation.objectPosition, presentation.zoom]);
+  const useViewportStyle = Boolean(thumbnailViewportStyle);
 
   const handleError = () => {
     const nextCandidate = fallbackCandidates[fallbackIndex] ?? null;
@@ -1307,12 +1352,18 @@ function GalleryPhoto({
         alt={photo.caption || "Photo"}
         width={imageDimensions.width ?? 1200}
         height={imageDimensions.height ?? 1200}
-        className="absolute inset-0 h-full w-full cursor-zoom-in select-none object-cover transition-transform duration-200"
-        style={{
-          objectPosition: presentation.objectPosition,
-          transform: presentation.zoom === 1 ? undefined : `scale(${presentation.zoom})`,
-          transformOrigin: presentation.objectPosition,
-        }}
+        className={`absolute inset-0 cursor-zoom-in select-none transition-transform duration-200 ${
+          useViewportStyle ? "max-w-none" : "h-full w-full object-cover"
+        }`}
+        style={
+          useViewportStyle
+            ? thumbnailViewportStyle ?? undefined
+            : {
+                objectPosition: presentation.objectPosition,
+                transform: presentation.zoom === 1 ? undefined : `scale(${presentation.zoom})`,
+                transformOrigin: presentation.objectPosition,
+              }
+        }
         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 200px"
         unoptimized
         onClick={onClick}
@@ -2626,6 +2677,7 @@ export default function PersonProfilePage() {
       : "← Back to Show"
     : "← Back to Shows";
   const { user, checking, hasAccess } = useAdminGuard();
+  useAdminOperationUnloadGuard();
 
   const personRouteState = useMemo(
     () => parsePersonRouteState(pathname, new URLSearchParams(searchParams.toString())),
@@ -2749,6 +2801,7 @@ export default function PersonProfilePage() {
   const [photosError, setPhotosError] = useState<string | null>(null);
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
+  const [getImagesFollowUpPromptOpen, setGetImagesFollowUpPromptOpen] = useState(false);
   const refreshLogCounterRef = useRef(0);
   const personRefreshRequestCounterRef = useRef(0);
   const textOverlayDetectControllerRef = useRef<AbortController | null>(null);
@@ -3347,38 +3400,8 @@ export default function PersonProfilePage() {
     getPhotoSortDate,
   ]);
 
-  const scopedStageTargets = useMemo(() => {
-    const castPhotoIds = new Set<string>();
-    const mediaLinkIds = new Set<string>();
-    const sourceSet = new Set<CanonicalScopedSource>();
-    for (const photo of filteredPhotos) {
-      const canonicalSource = toCanonicalScopedSource(photo.source);
-      if (canonicalSource) sourceSet.add(canonicalSource);
-      if (photo.origin === "cast_photos") {
-        const photoId = String(photo.id || "").trim();
-        if (photoId) castPhotoIds.add(photoId);
-        continue;
-      }
-      if (photo.origin === "media_links") {
-        const linkId = String(photo.link_id || photo.id || "").trim();
-        if (linkId) mediaLinkIds.add(linkId);
-      }
-    }
-    const sources = Array.from(sourceSet).sort(
-      (a, b) =>
-        CANONICAL_SCOPED_SOURCE_ORDER.indexOf(a) - CANONICAL_SCOPED_SOURCE_ORDER.indexOf(b)
-    );
-    const targetCastPhotoIds = Array.from(castPhotoIds).sort((a, b) => a.localeCompare(b));
-    const targetMediaLinkIds = Array.from(mediaLinkIds).sort((a, b) => a.localeCompare(b));
-    return {
-      totalFiltered: filteredPhotos.length,
-      castCount: targetCastPhotoIds.length,
-      mediaLinkCount: targetMediaLinkIds.length,
-      targetCastPhotoIds,
-      targetMediaLinkIds,
-      sources,
-    };
-  }, [filteredPhotos]);
+  const scopedStageTargets = useMemo(() => buildStageTargetsFromPhotos(filteredPhotos), [filteredPhotos]);
+  const fullStageTargets = useMemo(() => buildStageTargetsFromPhotos(photos), [photos]);
 
   const gallerySections = useMemo(() => {
     const profilePictures: TrrPersonPhoto[] = [];
@@ -4171,38 +4194,36 @@ export default function PersonProfilePage() {
       const request = (async (): Promise<boolean> => {
         try {
           setNewsSyncing(true);
-          const headers = await getAuthHeaders();
-          const response = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${showIdForApi}/google-news/sync`,
-            {
-              method: "POST",
-              headers: { ...headers, "Content-Type": "application/json" },
-              body: JSON.stringify({ force, async: true }),
-            },
-            NEWS_SYNC_TIMEOUT_MS
-          );
-          const data = (await response.json().catch(() => ({}))) as {
-            error?: string;
-            job_id?: string;
+          const kickoffPath = `/api/admin/trr-api/shows/${showIdForApi}/google-news/sync`;
+          const flowScope = `POST:${kickoffPath}:google-news-sync`;
+          const flowKey = getOrCreateAdminFlowKey(flowScope);
+          const authHeaders = await getAuthHeaders();
+          const requestHeaders = {
+            ...authHeaders,
+            "Content-Type": "application/json",
+            "x-trr-flow-key": flowKey,
           };
-          if (!response.ok) {
-            if (response.status === 409) {
-              setNewsGoogleUrlMissing(true);
-              setNewsNotice(data.error || "Google News URL is not configured for this show.");
-              return false;
-            }
-            throw new Error(data.error || "Failed to sync Google News");
+          const kickoffPayload = await adminMutation<Record<string, unknown>>(kickoffPath, {
+            method: "POST",
+            headers: requestHeaders,
+            body: JSON.stringify({ force, async: true }),
+            timeoutMs: NEWS_SYNC_TIMEOUT_MS,
+          });
+          const kickoffHandle = normalizeKickoffHandle(kickoffPayload);
+          if (kickoffHandle.rawStatus) {
+            setNewsNotice(`Google News sync ${canonicalizeOperationStatus(kickoffHandle.rawStatus)}.`);
+          } else if (kickoffHandle.operationId || kickoffHandle.jobId) {
+            setNewsNotice("Google News sync queued.");
           }
 
-          const jobId = typeof data.job_id === "string" ? data.job_id.trim() : "";
-          if (jobId) {
-            const headers = await getAuthHeaders();
+          const waitForLegacyJobTerminal = async (): Promise<CanonicalOperationStatus> => {
+            if (!kickoffHandle.jobId) return kickoffHandle.canonicalStatus;
             const pollStartedAt = Date.now();
             while (Date.now() - pollStartedAt < NEWS_SYNC_POLL_TIMEOUT_MS) {
               const statusResponse = await fetchWithTimeout(
-                `/api/admin/trr-api/shows/${showIdForApi}/google-news/sync/${encodeURIComponent(jobId)}`,
-                { headers, cache: "no-store" },
-                NEWS_SYNC_TIMEOUT_MS
+                `/api/admin/trr-api/shows/${showIdForApi}/google-news/sync/${encodeURIComponent(kickoffHandle.jobId)}`,
+                { headers: requestHeaders, cache: "no-store" },
+                NEWS_SYNC_TIMEOUT_MS,
               );
               const statusData = (await statusResponse.json().catch(() => ({}))) as {
                 error?: string;
@@ -4212,28 +4233,56 @@ export default function PersonProfilePage() {
               if (!statusResponse.ok) {
                 throw new Error(statusData.error || "Failed to fetch Google News sync status");
               }
-              const status = String(statusData.status || "").trim().toLowerCase();
-              if (status === "completed") break;
-              if (status === "failed") {
-                throw new Error(
-                  (statusData.result && typeof statusData.result.error === "string" && statusData.result.error) ||
-                    statusData.error ||
-                    "Google News sync failed"
-                );
+              const status = canonicalizeOperationStatus(statusData.status, "running");
+              setNewsNotice(`Google News sync ${status}.`);
+              if (isCanonicalTerminalStatus(status)) {
+                if (status === "failed") {
+                  throw new Error(
+                    (statusData.result && typeof statusData.result.error === "string" && statusData.result.error) ||
+                      statusData.error ||
+                      "Google News sync failed",
+                  );
+                }
+                return status;
               }
               await new Promise((resolve) => setTimeout(resolve, NEWS_SYNC_POLL_INTERVAL_MS));
             }
-            if (Date.now() - pollStartedAt >= NEWS_SYNC_POLL_TIMEOUT_MS) {
-              throw new Error(
-                `Google News sync polling timed out after ${Math.round(NEWS_SYNC_POLL_TIMEOUT_MS / 1000)}s`
-              );
-            }
+            throw new Error(`Google News sync polling timed out after ${Math.round(NEWS_SYNC_POLL_TIMEOUT_MS / 1000)}s`);
+          };
+
+          const finalStatus = await monitorKickoffHandle({
+            handle: kickoffHandle,
+            operation: {
+              flowScope,
+              flowKey,
+              input: kickoffPath,
+              method: "POST",
+              requestHeaders,
+              streamTimeoutMs: NEWS_SYNC_TIMEOUT_MS,
+              statusTimeoutMs: NEWS_SYNC_TIMEOUT_MS,
+              reconnectBackoffMs: [...NEWS_OPERATION_RECONNECT_BACKOFF_MS],
+              onState: (state) => {
+                setNewsNotice(`Google News sync ${state.status}.`);
+              },
+            },
+            waitForLegacyTerminal: kickoffHandle.jobId ? waitForLegacyJobTerminal : undefined,
+          });
+          if (finalStatus === "failed") {
+            throw new Error("Google News sync failed");
+          }
+          if (finalStatus === "cancelled") {
+            throw new Error("Google News sync was cancelled");
           }
 
           setNewsGoogleUrlMissing(false);
           setNewsNotice(null);
           return true;
         } catch (error) {
+          if (error instanceof AdminRequestError && error.status === 409) {
+            setNewsGoogleUrlMissing(true);
+            setNewsNotice(error.message || "Google News URL is not configured for this show.");
+            return false;
+          }
           if (isAbortError(error)) {
             throw new Error(`Timed out syncing Google News after ${Math.round(NEWS_SYNC_TIMEOUT_MS / 1000)}s`);
           }
@@ -5133,6 +5182,9 @@ export default function PersonProfilePage() {
   const handleRefreshImages = useCallback(async (mode: "full" | "sync" = "full") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
+    if (mode === "full") {
+      setGetImagesFollowUpPromptOpen(false);
+    }
     if (mode === "sync" && scopedStageTargets.totalFiltered === 0) {
       const message = "No filtered images to sync.";
       setRefreshNotice(message);
@@ -5294,67 +5346,7 @@ export default function PersonProfilePage() {
           streamStartTimeout = null;
         };
         bumpStreamIdleTimeout();
-        let response: Response;
-        try {
-          response = await fetch(
-            `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
-            {
-              method: "POST",
-              headers: {
-                ...headers,
-                "Content-Type": "application/json",
-                "x-trr-request-id": requestId,
-              },
-              body: JSON.stringify(refreshBody),
-              signal: streamController.signal,
-            }
-          );
-        } catch (error) {
-          clearStreamIdleTimeout();
-          clearTimeout(streamTimeout);
-          if (streamAbortReason === "idle") {
-            throw createNamedError(
-              "StreamTimeoutError",
-              `No refresh updates received for ${Math.round(
-                PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS / 1000
-              )}s.`
-            );
-          }
-          if (streamAbortReason === "max_duration") {
-            throw createNamedError(
-              "StreamTimeoutError",
-              `Refresh stream reached max duration (${Math.round(
-                PERSON_PAGE_STREAM_MAX_DURATION_MS / 60000
-              )}m).`
-            );
-          }
-          if (streamAbortReason === "start_deadline") {
-            throw createNamedError(
-              "StreamTimeoutError",
-              `No refresh stream response received within ${Math.round(
-                PERSON_PAGE_STREAM_START_DEADLINE_MS / 1000
-              )}s.`
-            );
-          }
-          if (isAbortError(error) || isSignalAbortedWithoutReasonError(error)) {
-            throw createNamedError("StreamAbortError", "Refresh stream request was aborted.");
-          }
-          throw error;
-        }
-
-        if (!response.ok || !response.body) {
-          clearStreamIdleTimeout();
-          clearTimeout(streamTimeout);
-          const message = await parseStreamErrorResponse(response);
-          throw createNamedError("BackendError", `Stream request failed: ${message}`);
-        }
-        markStreamStarted();
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
         let sawComplete = false;
-        let shouldStopReading = false;
         let lastEventAt = Date.now();
         const staleInterval = setInterval(() => {
           const now = Date.now();
@@ -5377,46 +5369,25 @@ export default function PersonProfilePage() {
         }, 1000);
 
         try {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            lastEventAt = Date.now();
-            bumpStreamIdleTimeout();
-            if (value.length > 0) {
-              markStreamStarted();
-            }
-            buffer += decoder.decode(value, { stream: true });
-            // Normalize CRLF to LF so "\n\n" boundary splitting works in all runtimes.
-            buffer = buffer.replace(/\r\n/g, "\n");
-
-            let boundaryIndex = buffer.indexOf("\n\n");
-            while (boundaryIndex !== -1) {
-              const rawEvent = buffer.slice(0, boundaryIndex);
-              buffer = buffer.slice(boundaryIndex + 2);
-              if (!sawFirstEvent && rawEvent.trim().length > 0) {
-                markStreamStarted();
-              }
-
-              const lines = rawEvent.split("\n").filter(Boolean);
-              let eventType = "message";
-              const dataLines: string[] = [];
-              for (const line of lines) {
-                if (line.startsWith("event:")) {
-                  eventType = line.slice(6).trim();
-                } else if (line.startsWith("data:")) {
-                  dataLines.push(line.slice(5).trim());
+          await adminStream(
+            `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
+            {
+              method: "POST",
+              headers: {
+                ...headers,
+                "Content-Type": "application/json",
+                "x-trr-request-id": requestId,
+              },
+              body: JSON.stringify(refreshBody),
+              timeoutMs: PERSON_PAGE_STREAM_MAX_DURATION_MS,
+              externalSignal: streamController.signal,
+              onEvent: async ({ event: eventType, payload }) => {
+                lastEventAt = Date.now();
+                bumpStreamIdleTimeout();
+                if (!sawFirstEvent) {
+                  markStreamStarted();
                 }
-              }
-
-              const dataStr = dataLines.join("\n");
-              let payload: Record<string, unknown> | string = dataStr;
-              try {
-                payload = JSON.parse(dataStr) as Record<string, unknown>;
-              } catch {
-                payload = dataStr;
-              }
-
-              if (eventType === "progress" && payload && typeof payload === "object") {
+                if (eventType === "progress" && payload && typeof payload === "object") {
                 const rawStage =
                   typeof (payload as { stage?: unknown }).stage === "string"
                     ? ((payload as { stage: string }).stage)
@@ -5709,8 +5680,8 @@ export default function PersonProfilePage() {
                     runId: resolvedRunId,
                   });
                 }
-              } else if (eventType === "complete") {
-                sawComplete = true;
+                } else if (eventType === "complete") {
+                  sawComplete = true;
                 const payloadRequestId =
                   payload && typeof payload === "object" && typeof payload.request_id === "string"
                     ? payload.request_id
@@ -5766,9 +5737,8 @@ export default function PersonProfilePage() {
                   level: "success",
                   runId: payloadRequestId,
                 });
-                shouldStopReading = true;
-              } else if (eventType === "error") {
-                const errorPayload =
+                } else if (eventType === "error") {
+                  const errorPayload =
                   payload && typeof payload === "object"
                     ? (payload as {
                         stage?: string;
@@ -5784,30 +5754,30 @@ export default function PersonProfilePage() {
                         max_attempts?: number | string;
                       })
                     : null;
-                const stage = errorPayload?.stage ? `[${errorPayload.stage}] ` : "";
-                const payloadRequestId =
+                  const stage = errorPayload?.stage ? `[${errorPayload.stage}] ` : "";
+                  const payloadRequestId =
                   typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
-                const attemptUsedRaw = errorPayload?.attempts_used;
-                const maxAttemptsRaw = errorPayload?.max_attempts;
-                const attemptsUsed =
+                  const attemptUsedRaw = errorPayload?.attempts_used;
+                  const maxAttemptsRaw = errorPayload?.max_attempts;
+                  const attemptsUsed =
                   typeof attemptUsedRaw === "number"
                     ? attemptUsedRaw
                     : typeof attemptUsedRaw === "string"
                       ? Number.parseInt(attemptUsedRaw, 10)
                       : null;
-                const maxAttempts =
+                  const maxAttempts =
                   typeof maxAttemptsRaw === "number"
                     ? maxAttemptsRaw
                     : typeof maxAttemptsRaw === "string"
                       ? Number.parseInt(maxAttemptsRaw, 10)
                       : null;
-                const isTerminal = errorPayload?.is_terminal === true;
-                const terminalProxyConnectError =
+                  const isTerminal = errorPayload?.is_terminal === true;
+                  const terminalProxyConnectError =
                   isTerminal &&
                   errorPayload?.stage === "proxy_connecting" &&
                   (errorPayload?.checkpoint === "connect_exhausted" ||
                     errorPayload?.stream_state === "failed");
-                const formattedErrorText = terminalProxyConnectError
+                  const formattedErrorText = terminalProxyConnectError
                   ? buildProxyTerminalErrorMessage({
                       stage: errorPayload?.stage ?? null,
                       checkpoint: errorPayload?.checkpoint ?? null,
@@ -5827,20 +5797,20 @@ export default function PersonProfilePage() {
                   : errorPayload?.error && errorPayload?.detail
                     ? `${stage}${errorPayload.error}: ${errorPayload.detail}`
                     : `${stage}${errorPayload?.error || "Failed to get images"}`;
-                setRefreshPipelineSteps((prev) =>
+                  setRefreshPipelineSteps((prev) =>
                   updatePersonRefreshPipelineSteps(
                     prev ?? createPersonRefreshPipelineSteps(pipelineMode),
-                      {
-                        rawStage: errorPayload?.stage ?? null,
-                        message: errorPayload?.error ?? "Failed to get images",
-                        detail: errorPayload?.detail ?? null,
-                        current: null,
-                        total: null,
+                    {
+                      rawStage: errorPayload?.stage ?? null,
+                      message: errorPayload?.error ?? "Failed to get images",
+                      detail: errorPayload?.detail ?? null,
+                      current: null,
+                      total: null,
                       forceStatus: "failed",
                     },
                   ),
                 );
-                setRefreshProgress((prev) =>
+                  setRefreshProgress((prev) =>
                   prev
                     ? {
                         ...prev,
@@ -5867,10 +5837,10 @@ export default function PersonProfilePage() {
                       }
                     : prev,
                 );
-                // Mark as a backend error so the retry loop does NOT retry.
-                const backendErr = new Error(formattedErrorText);
-                backendErr.name = "BackendError";
-                appendRefreshLog({
+                  // Mark as a backend error so the retry loop does NOT retry.
+                  const backendErr = new Error(formattedErrorText);
+                  backendErr.name = "BackendError";
+                  appendRefreshLog({
                   source: "page_refresh",
                   stage: errorPayload?.stage ?? "error",
                   message: terminalProxyConnectError
@@ -5880,19 +5850,11 @@ export default function PersonProfilePage() {
                   level: "error",
                   runId: payloadRequestId,
                 });
-                throw backendErr;
-              }
-
-              if (shouldStopReading) {
-                break;
-              }
-              boundaryIndex = buffer.indexOf("\n\n");
-            }
-
-            if (shouldStopReading) {
-              break;
-            }
-          }
+                  throw backendErr;
+                }
+              },
+            },
+          );
         } catch (error) {
           if (streamAbortReason === "idle") {
             throw createNamedError(
@@ -5927,13 +5889,6 @@ export default function PersonProfilePage() {
           clearStreamIdleTimeout();
           clearStreamStartTimeout();
           clearTimeout(streamTimeout);
-          if (shouldStopReading) {
-            try {
-              await reader.cancel();
-            } catch {
-              // no-op
-            }
-          }
         }
 
         if (!sawComplete) {
@@ -6009,6 +5964,9 @@ export default function PersonProfilePage() {
         fetchPhotos(),
         fetchCoverPhoto(),
       ]);
+      if (mode === "full") {
+        setGetImagesFollowUpPromptOpen(true);
+      }
     } catch (err) {
       console.error("Failed to get images:", err);
       const baseErrorMessage = err instanceof Error ? err.message : "Failed to get images";
@@ -6070,11 +6028,14 @@ export default function PersonProfilePage() {
     scopedStageTargets,
   ]);
 
-  const handleReprocessImages = useCallback(async (stage: ReprocessStageKey = "all") => {
+  const handleReprocessImages = useCallback(
+    async (stage: ReprocessStageKey = "all", scope: StageTargetScope = "filtered") => {
+    const stageTargets = scope === "full" ? fullStageTargets : scopedStageTargets;
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
-    if (scopedStageTargets.totalFiltered === 0) {
-      const message = "No filtered images to reprocess.";
+    setGetImagesFollowUpPromptOpen(false);
+    if (stageTargets.totalFiltered === 0) {
+      const message = scope === "full" ? "No images to reprocess." : "No filtered images to reprocess.";
       setRefreshNotice(message);
       setRefreshError(null);
       appendRefreshLog({
@@ -6086,10 +6047,13 @@ export default function PersonProfilePage() {
       return;
     }
     if (
-      scopedStageTargets.targetCastPhotoIds.length === 0 &&
-      scopedStageTargets.targetMediaLinkIds.length === 0
+      stageTargets.targetCastPhotoIds.length === 0 &&
+      stageTargets.targetMediaLinkIds.length === 0
     ) {
-      const message = "No eligible filtered images to reprocess.";
+      const message =
+        scope === "full"
+          ? "No eligible gallery images to reprocess."
+          : "No eligible filtered images to reprocess.";
       setRefreshNotice(message);
       setRefreshError(null);
       appendRefreshLog({
@@ -6213,10 +6177,13 @@ export default function PersonProfilePage() {
     appendRefreshLog({
       source: "page_refresh",
       stage: "reprocess_start",
-      message: `Scoped run: ${scopedStageTargets.totalFiltered} filtered (${scopedStageTargets.castCount} cast, ${scopedStageTargets.mediaLinkCount} media links).`,
+      message:
+        scope === "full"
+          ? `Full-gallery run: ${stageTargets.totalFiltered} images (${stageTargets.castCount} cast, ${stageTargets.mediaLinkCount} media links).`
+          : `Scoped run: ${stageTargets.totalFiltered} filtered (${stageTargets.castCount} cast, ${stageTargets.mediaLinkCount} media links).`,
       detail:
-        scopedStageTargets.sources.length > 0
-          ? `sources: ${scopedStageTargets.sources.join(", ")}`
+        stageTargets.sources.length > 0
+          ? `sources: ${stageTargets.sources.join(", ")}`
           : "sources: all",
       level: "info",
       runId: requestId,
@@ -6224,7 +6191,23 @@ export default function PersonProfilePage() {
 
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(
+      const requestBody = JSON.stringify({
+        ...selectedStage.body,
+        execution_profile: "speed",
+        max_parallelism: { tagging: 8, crop: 8, mirror: 12, sync: 3 },
+        batch_size: { tagging: 32, crop: 64, mirror: 200 },
+        prefer_fast_pass: true,
+        async_job: true,
+        sources: stageTargets.sources.length > 0 ? stageTargets.sources : undefined,
+        target_cast_photo_ids: stageTargets.targetCastPhotoIds,
+        target_media_link_ids: stageTargets.targetMediaLinkIds,
+        show_id: showIdForApi ?? undefined,
+        show_name: activeShowName || undefined,
+      });
+      let hadError = false;
+      let sawComplete = false;
+
+      await adminStream(
         `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
         {
           method: "POST",
@@ -6233,63 +6216,10 @@ export default function PersonProfilePage() {
             "Content-Type": "application/json",
             "x-trr-request-id": requestId,
           },
-          body: JSON.stringify({
-            ...selectedStage.body,
-            execution_profile: "speed",
-            max_parallelism: { tagging: 8, crop: 8, mirror: 12, sync: 3 },
-            batch_size: { tagging: 32, crop: 64, mirror: 200 },
-            prefer_fast_pass: true,
-            async_job: true,
-            sources: scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined,
-            target_cast_photo_ids: scopedStageTargets.targetCastPhotoIds,
-            target_media_link_ids: scopedStageTargets.targetMediaLinkIds,
-            show_id: showIdForApi ?? undefined,
-            show_name: activeShowName || undefined,
-          }),
-        }
-      );
-
-      if (!response.ok || !response.body) {
-        throw new Error(await parseStreamErrorResponse(response));
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let hadError = false;
-      let sawComplete = false;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        buffer = buffer.replace(/\r\n/g, "\n");
-
-        let boundaryIndex = buffer.indexOf("\n\n");
-        while (boundaryIndex !== -1) {
-          const rawEvent = buffer.slice(0, boundaryIndex);
-          buffer = buffer.slice(boundaryIndex + 2);
-
-          const lines = rawEvent.split("\n").filter(Boolean);
-          let eventType = "message";
-          const dataLines: string[] = [];
-          for (const line of lines) {
-            if (line.startsWith("event:")) {
-              eventType = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-              dataLines.push(line.slice(5).trim());
-            }
-          }
-
-          const dataStr = dataLines.join("\n");
-          let payload: Record<string, unknown> | string = dataStr;
-          try {
-            payload = JSON.parse(dataStr) as Record<string, unknown>;
-          } catch {
-            payload = dataStr;
-          }
-
-          if (eventType === "progress" && payload && typeof payload === "object") {
+          body: requestBody,
+          timeoutMs: PERSON_PAGE_STREAM_MAX_DURATION_MS,
+          onEvent: async ({ event: eventType, payload }) => {
+            if (eventType === "progress" && payload && typeof payload === "object") {
             const rawPhase =
               typeof (payload as { stage?: unknown }).stage === "string"
                 ? ((payload as { stage: string }).stage)
@@ -6564,7 +6494,7 @@ export default function PersonProfilePage() {
               level: "info",
               runId: resolvedRunId,
             });
-          } else if (eventType === "complete") {
+            } else if (eventType === "complete") {
             sawComplete = true;
             const payloadRequestId =
               payload && typeof payload === "object" && typeof payload.request_id === "string"
@@ -6615,7 +6545,7 @@ export default function PersonProfilePage() {
               level: "success",
               runId: payloadRequestId,
             });
-          } else if (eventType === "error") {
+            } else if (eventType === "error") {
             hadError = true;
             const errorPayload =
               payload && typeof payload === "object"
@@ -6729,12 +6659,11 @@ export default function PersonProfilePage() {
             });
             const backendErr = new Error(errorText);
             backendErr.name = "BackendError";
-            throw backendErr;
-          }
-
-          boundaryIndex = buffer.indexOf("\n\n");
-        }
-      }
+              throw backendErr;
+            }
+          },
+        },
+      );
 
       if (!sawComplete && !hadError) {
         throw new Error("Reprocess stream ended before completion.");
@@ -6780,10 +6709,19 @@ export default function PersonProfilePage() {
     personId,
     refreshLiveCounts,
     buildPersonRefreshRequestId,
+    fullStageTargets,
     scopedStageTargets,
     showIdForApi,
     activeShowName,
   ]);
+
+  const handleGetImagesFollowUpSelection = useCallback(
+    (scope: StageTargetScope) => {
+      setGetImagesFollowUpPromptOpen(false);
+      void handleReprocessImages("all", scope);
+    },
+    [handleReprocessImages]
+  );
 
   // Initial load
   useEffect(() => {
@@ -7979,6 +7917,39 @@ export default function PersonProfilePage() {
                 )}
                 {refreshNotice && !refreshError && (
                   <p className="text-xs text-zinc-500">{refreshNotice}</p>
+                )}
+                {getImagesFollowUpPromptOpen && (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                    <p className="text-xs font-medium text-emerald-900">
+                      Get Images finished. Run full Refresh Details now?
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleGetImagesFollowUpSelection("filtered")}
+                        disabled={
+                          refreshingImages ||
+                          reprocessingImages ||
+                          scopedStageTargets.targetCastPhotoIds.length + scopedStageTargets.targetMediaLinkIds.length === 0
+                        }
+                        className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Run Refresh Details on filtered scope
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleGetImagesFollowUpSelection("full")}
+                        disabled={
+                          refreshingImages ||
+                          reprocessingImages ||
+                          fullStageTargets.targetCastPhotoIds.length + fullStageTargets.targetMediaLinkIds.length === 0
+                        }
+                        className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Run Refresh Details on full gallery
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
 

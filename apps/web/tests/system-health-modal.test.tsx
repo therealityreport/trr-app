@@ -29,6 +29,9 @@ describe("SystemHealthModal polling", () => {
     workers: {
       healthy: boolean;
       healthy_workers: number;
+      fresh_workers: number;
+      stale_workers: number;
+      stale_hidden_count: number;
       active_workers: number;
       total_workers: number;
       stale_after_seconds: number;
@@ -66,6 +69,9 @@ describe("SystemHealthModal polling", () => {
       workers: {
         healthy: true,
         healthy_workers: 1,
+        fresh_workers: 1,
+        stale_workers: 0,
+        stale_hidden_count: 0,
         active_workers: 1,
         total_workers: 1,
         stale_after_seconds: 60,
@@ -152,6 +158,22 @@ describe("SystemHealthModal polling", () => {
           },
         };
         return jsonResponse({ cancelled_jobs: 1, stuck_jobs_remaining: 0 });
+      }
+      if (url.includes("/api/admin/trr-api/social/ingest/active-jobs/cancel")) {
+        queueStatusPayload = {
+          ...queueStatusPayload,
+          queue: {
+            ...queueStatusPayload.queue,
+            by_status: {
+              ...queueStatusPayload.queue.by_status,
+              queued: 0,
+              pending: 0,
+              running: 0,
+              retrying: 0,
+            },
+          },
+        };
+        return jsonResponse({ cancelled_jobs: 4, active_jobs_remaining: 0 });
       }
       if (url.includes("/api/admin/trr-api/social/ingest/workers/") && url.endsWith("/detail")) {
         return jsonResponse(workerDetailPayload);
@@ -423,6 +445,9 @@ describe("SystemHealthModal polling", () => {
       workers: {
         ...queueStatusPayload.workers,
         healthy_workers: 1,
+        fresh_workers: 1,
+        stale_workers: 1,
+        stale_hidden_count: 1,
         total_workers: 2,
         stale_after_seconds: 180,
         workers: [
@@ -447,11 +472,39 @@ describe("SystemHealthModal polling", () => {
     render(<SystemHealthModal isOpen onClose={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Workers \(1\/2 healthy\)/)).toBeInTheDocument();
+      expect(screen.getByText(/Workers \(healthy\/fresh\/total: 1\/1\/2\)/)).toBeInTheDocument();
     });
 
     expect(screen.getByText(/1 stale worker heartbeat hidden/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show stale workers/i })).toBeInTheDocument();
     expect(screen.getByText(/social-worker:health/)).toBeInTheDocument();
     expect(screen.queryByText(/social-worker:stale/)).not.toBeInTheDocument();
+  });
+
+  it("shows bottom cancel-all-active button and triggers active cancellation", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        by_status: { running: 2, pending: 1, queued: 1, retrying: 0, failed: 0, cancelled: 0, completed: 0 },
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Cancel All Active Jobs" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel All Active Jobs" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/active-jobs/cancel"),
+        ),
+      ).toBe(true);
+      expect(screen.getByText(/Cancelled 4 active jobs/)).toBeInTheDocument();
+    });
   });
 });

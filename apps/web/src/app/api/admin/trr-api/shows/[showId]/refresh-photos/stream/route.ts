@@ -192,6 +192,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     await requireAdmin(request);
     requestId = request.headers.get("x-trr-request-id")?.trim() || null;
+    const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || null;
+    const flowKey = request.headers.get("x-trr-flow-key")?.trim() || null;
 
     const { showId } = await params;
     if (!showId) {
@@ -339,6 +341,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               "Content-Type": "application/json",
               Authorization: `Bearer ${serviceRoleKey}`,
               ...(requestId ? { "x-trr-request-id": requestId } : {}),
+              ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+              ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
             },
             body: JSON.stringify(normalizedBody),
             signal: requestController.signal,

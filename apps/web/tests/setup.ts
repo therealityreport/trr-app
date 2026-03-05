@@ -30,10 +30,13 @@ vi.mock('@/lib/firebase', () => ({
   auth: {
     onAuthStateChanged: vi.fn(() => () => {}),
   },
-  db: {},
   signInWithGoogle: vi.fn(),
   logout: vi.fn(),
   initAnalytics: vi.fn(),
+}));
+
+vi.mock('@/lib/firebase-db', () => ({
+  getDb: vi.fn(() => ({})),
 }));
 
 if (!window.matchMedia) {

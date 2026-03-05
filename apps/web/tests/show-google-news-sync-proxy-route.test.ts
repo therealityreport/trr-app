@@ -29,7 +29,7 @@ describe("show google-news sync proxy route", () => {
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 
-  it("forwards force + async sync payload to backend", async () => {
+  it("forwards force + async sync payload and ownership headers to backend", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ synced: true, count: 12 }), {
         status: 200,
@@ -41,7 +41,12 @@ describe("show google-news sync proxy route", () => {
     const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/google-news/sync", {
       method: "POST",
       body: JSON.stringify({ force: true, async: true }),
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "x-trr-request-id": "req-1",
+        "x-trr-tab-session-id": "tab-1",
+        "x-trr-flow-key": "flow-1",
+      },
     });
 
     const response = await POST(request, { params: Promise.resolve({ showId: "show-1" }) });
@@ -54,6 +59,11 @@ describe("show google-news sync proxy route", () => {
       expect.objectContaining({
         method: "POST",
         cache: "no-store",
+        headers: expect.objectContaining({
+          "x-trr-request-id": "req-1",
+          "x-trr-tab-session-id": "tab-1",
+          "x-trr-flow-key": "flow-1",
+        }),
       })
     );
     const fetchArgs = fetchMock.mock.calls[0]?.[1] as { body?: string };

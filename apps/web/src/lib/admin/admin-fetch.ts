@@ -1,3 +1,12 @@
+import {
+  clearAdminOperationSession,
+  getAutoResumableAdminOperationSession,
+  getOrCreateAdminFlowKey,
+  markAdminOperationSessionStatus,
+  pruneStaleAdminOperationSessions,
+  upsertAdminOperationSession,
+} from "@/lib/admin/operation-session";
+
 export type AdminFetchWithTimeoutInit = RequestInit & {
   timeoutMs: number;
   externalSignal?: AbortSignal;
@@ -161,7 +170,61 @@ export const adminStream = async (
 ): Promise<void> => {
   const { onEvent, ...requestInit } = init;
   try {
-    const response = await adminFetch(input, requestInit);
+    pruneStaleAdminOperationSessions();
+    const method = (requestInit.method || "GET").toUpperCase();
+    const bodyValue =
+      typeof requestInit.body === "string"
+        ? requestInit.body
+        : requestInit.body instanceof URLSearchParams
+          ? requestInit.body.toString()
+          : requestInit.body
+            ? String(requestInit.body)
+            : "";
+    const bodySignature = bodyValue.length > 0 ? String(bodyValue.length) : "0";
+    const targetPath =
+      input instanceof URL
+        ? `${input.pathname}${input.search}`
+        : typeof input === "string"
+          ? input
+          : String(input);
+    const flowScope = `${method}:${targetPath}:${bodySignature}`;
+    const flowKey = getOrCreateAdminFlowKey(flowScope);
+    const headers = requestInit.headers instanceof Headers ? new Headers(requestInit.headers) : new Headers(requestInit.headers ?? {});
+    headers.set("x-trr-flow-key", flowKey);
+    const requestWithFlow: AdminFetchWithTimeoutInit = {
+      ...requestInit,
+      headers,
+    };
+
+    const existingSession = getAutoResumableAdminOperationSession(flowScope);
+    upsertAdminOperationSession(flowScope, {
+      flowKey,
+      input: targetPath,
+      method,
+      status: "active",
+    });
+
+    let response: Response | null = null;
+    if (existingSession?.operationId && existingSession.status === "active") {
+      const afterSeq = Math.max(0, Number(existingSession.lastEventSeq || 0));
+      const resumeUrl = `/api/admin/trr-api/operations/${existingSession.operationId}/stream?after_seq=${afterSeq}`;
+      try {
+        response = await adminFetch(resumeUrl, {
+          ...requestWithFlow,
+          method: "GET",
+          body: undefined,
+        });
+      } catch (error) {
+        if (error instanceof AdminRequestError && error.status === 404) {
+          clearAdminOperationSession(flowScope);
+        }
+      }
+    }
+
+    if (!response) {
+      response = await adminFetch(input, requestWithFlow);
+    }
+
     if (!response.ok) {
       throw new AdminRequestError(await normalizeErrorPayload(response));
     }
@@ -204,6 +267,38 @@ export const adminStream = async (
           payload = JSON.parse(dataStr) as Record<string, unknown>;
         } catch {
           payload = dataStr || null;
+        }
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          const operationIdRaw = (payload as { operation_id?: unknown }).operation_id;
+          const operationId =
+            typeof operationIdRaw === "string" && operationIdRaw.trim().length > 0
+              ? operationIdRaw.trim()
+              : null;
+          const eventSeqRaw = (payload as { event_seq?: unknown }).event_seq;
+          const parsedEventSeq = typeof eventSeqRaw === "number" ? eventSeqRaw : Number.parseInt(String(eventSeqRaw ?? "0"), 10);
+          const eventSeq = Number.isFinite(parsedEventSeq) ? Math.max(0, parsedEventSeq) : 0;
+          upsertAdminOperationSession(flowScope, {
+            flowKey,
+            input: targetPath,
+            method,
+            ...(operationId ? { operationId } : {}),
+            ...(eventSeq > 0 ? { lastEventSeq: eventSeq } : {}),
+            status: "active",
+          });
+        }
+        if (eventType === "complete") {
+          markAdminOperationSessionStatus(flowScope, "completed");
+        } else if (eventType === "error") {
+          const statusRaw =
+            payload && typeof payload === "object" && !Array.isArray(payload)
+              ? (payload as { status?: unknown }).status
+              : null;
+          const status = typeof statusRaw === "string" ? statusRaw.trim().toLowerCase() : "";
+          if (status === "cancelled" || status === "canceled") {
+            markAdminOperationSessionStatus(flowScope, "cancelled");
+          } else {
+            markAdminOperationSessionStatus(flowScope, "failed");
+          }
         }
         await onEvent({ event: eventType, payload });
         boundaryIndex = buffer.indexOf("\n\n");

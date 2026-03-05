@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import Image from "next/image";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { adminStream } from "@/lib/admin/admin-fetch";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 
 function normalizePersonName(value: string): string {
@@ -1139,111 +1140,70 @@ export function ImageScrapeDrawer({
 
       const headers = await getAuthHeaders();
 
-      // Use streaming endpoint for progress updates
-      const response = await fetchWithAuth("/api/admin/scrape/import/stream", {
+      await adminStream("/api/admin/scrape/import/stream", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+        timeoutMs: 15 * 60 * 1000,
+        onEvent: async ({ payload: eventPayload }) => {
+          if (!eventPayload || typeof eventPayload !== "object" || Array.isArray(eventPayload)) {
+            return;
+          }
+          const data = eventPayload as Record<string, unknown>;
+          const status = typeof data.status === "string" ? data.status : null;
+          if (
+            status === "downloading" ||
+            status === "success" ||
+            status === "duplicate" ||
+            status === "excluded" ||
+            status === "error"
+          ) {
+            const mediaAssetId =
+              (typeof data.media_asset_id === "string" && data.media_asset_id) ||
+              (typeof data.asset_id === "string" && data.asset_id) ||
+              undefined;
+            setImportProgress({
+              current: Number(data.current ?? 0),
+              total: Number(data.total ?? 0),
+              url: typeof data.url === "string" ? data.url : "",
+              status,
+              error: typeof data.error === "string" ? data.error : undefined,
+              media_asset_id: mediaAssetId,
+            });
 
-      if (!response.ok) {
-        const text = await response.text();
-        try {
-          const data = JSON.parse(text);
-          setError(data.error || "Import failed");
-        } catch {
-          setError("Import failed");
-        }
-        return;
-      }
-
-      // Read SSE stream
-      const reader = response.body?.getReader();
-      if (!reader) {
-        setError("No response stream");
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete SSE messages
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-
-              if (
-                data.status === "downloading" ||
-                data.status === "success" ||
-                data.status === "duplicate" ||
-                data.status === "excluded" ||
-                data.status === "error"
-              ) {
-                const mediaAssetId =
-                  (typeof data.media_asset_id === "string" && data.media_asset_id) ||
-                  (typeof data.asset_id === "string" && data.asset_id) ||
-                  undefined;
-                setImportProgress({
-                  current: data.current,
-                  total: data.total,
-                  url: data.url,
-                  status: data.status,
-                  error: data.error,
+            if (status === "duplicate" && mediaAssetId) {
+              const duplicateKind = urlToKindMap.get(typeof data.url === "string" ? data.url : "") ?? "other";
+              setDuplicates((prev) => [
+                ...prev,
+                {
+                  url: typeof data.url === "string" ? data.url : "",
                   media_asset_id: mediaAssetId,
-                });
-
-                // Track duplicates that have asset IDs for potential linking
-                if (data.status === "duplicate" && mediaAssetId) {
-                  const duplicateKind =
-                    urlToKindMap.get(data.url) ?? "other";
-                  setDuplicates((prev) => [
-                    ...prev,
-                    {
-                      url: data.url,
-                      media_asset_id: mediaAssetId,
-                      kind: duplicateKind,
-                      linked: false,
-                      linking: false,
-                    },
-                  ]);
-                }
-              }
-
-              // Handle completion
-              if (data.imported !== undefined && data.assets !== undefined) {
-                const result: ImportResponse = {
-                  imported: data.imported,
-                  skipped_duplicates: data.skipped_duplicates,
-                  errors: data.errors || [],
-                  assets: data.assets,
-                };
-                setImportResult(result);
-
-                setPreviewData(null);
-                setSelectedImages(new Set());
-                onImportComplete?.(result);
-              }
-
-              // Handle error event
-              if (data.error && !data.current) {
-                setError(data.error);
-              }
-            } catch (e) {
-              console.error("Failed to parse SSE data:", line, e);
+                  kind: duplicateKind,
+                  linked: false,
+                  linking: false,
+                },
+              ]);
             }
           }
-        }
-      }
+
+          if (data.imported !== undefined && data.assets !== undefined) {
+            const result: ImportResponse = {
+              imported: Number(data.imported ?? 0),
+              skipped_duplicates: Number(data.skipped_duplicates ?? 0),
+              errors: Array.isArray(data.errors) ? data.errors.map((item) => String(item)) : [],
+              assets: Array.isArray(data.assets) ? (data.assets as ImportedAsset[]) : [],
+            };
+            setImportResult(result);
+            setPreviewData(null);
+            setSelectedImages(new Set());
+            onImportComplete?.(result);
+          }
+
+          if (typeof data.error === "string" && !data.current) {
+            setError(data.error);
+          }
+        },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed");
     } finally {

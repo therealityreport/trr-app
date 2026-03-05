@@ -10,6 +10,12 @@ interface RouteParams {
 
 const BACKEND_TIMEOUT_MS = 60_000;
 
+const toOptionalHeaderValue = (value: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const formatFetchProxyError = (
   error: unknown,
   context: { backendUrl: string | null }
@@ -55,6 +61,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const body = await request.json().catch(() => ({}));
+    const requestId = toOptionalHeaderValue(request.headers.get("x-trr-request-id"));
+    const tabSessionId = toOptionalHeaderValue(request.headers.get("x-trr-tab-session-id"));
+    const flowKey = toOptionalHeaderValue(request.headers.get("x-trr-flow-key"));
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
     let response: Response;
@@ -64,6 +73,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${serviceRoleKey}`,
+          ...(requestId ? { "x-trr-request-id": requestId } : {}),
+          ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+          ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
         },
         body: JSON.stringify(body),
         cache: "no-store",

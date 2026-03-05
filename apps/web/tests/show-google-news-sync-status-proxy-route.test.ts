@@ -29,7 +29,7 @@ describe("show google-news sync status proxy route", () => {
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 
-  it("forwards sync job status request to backend", async () => {
+  it("forwards sync job status request and ownership headers to backend", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "job-1", status: "completed" }), {
         status: 200,
@@ -38,7 +38,13 @@ describe("show google-news sync status proxy route", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/google-news/sync/job-1");
+    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/google-news/sync/job-1", {
+      headers: {
+        "x-trr-request-id": "req-1",
+        "x-trr-tab-session-id": "tab-1",
+        "x-trr-flow-key": "flow-1",
+      },
+    });
 
     const response = await GET(request, {
       params: Promise.resolve({ showId: "show-1", jobId: "job-1" }),
@@ -51,6 +57,11 @@ describe("show google-news sync status proxy route", () => {
       "https://backend.example.com/api/v1/admin/shows/show-1/google-news/sync/job-1",
       expect.objectContaining({
         cache: "no-store",
+        headers: expect.objectContaining({
+          "x-trr-request-id": "req-1",
+          "x-trr-tab-session-id": "tab-1",
+          "x-trr-flow-key": "flow-1",
+        }),
       })
     );
   });

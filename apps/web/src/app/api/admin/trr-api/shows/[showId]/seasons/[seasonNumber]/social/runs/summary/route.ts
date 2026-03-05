@@ -43,9 +43,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
     const seasonIdHint = seasonIdHintRaw ?? undefined;
     forwardedSearchParams.delete("season_id");
+    const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || "";
+    const flowKey = request.headers.get("x-trr-flow-key")?.trim() || "";
+    if (!forwardedSearchParams.get("client_session_id") && tabSessionId) {
+      forwardedSearchParams.set("client_session_id", tabSessionId);
+    }
     const data = await fetchSeasonBackendJson(showId, seasonNumber, "/ingest/runs/summary", {
       queryString: forwardedSearchParams.toString(),
       seasonIdHint,
+      headers: {
+        ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+        ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
+      },
       fallbackError: "Failed to fetch social run summaries",
       retries: 0,
       timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,

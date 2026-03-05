@@ -1,8 +1,8 @@
 {
   "packageManager": "pnpm@10.15.0",
   "dependencies": {
-    "firebase": "^12.1.0",
-    "firebase-admin": "^13.5.0"
+    "firebase": "^12.10.0",
+    "firebase-admin": "^13.7.0"
   },
   "scripts": {
     "dev": "lsof -i:8000 >/dev/null 2>&1 && echo 'API already running on :8000' && pnpm run web:dev || concurrently -k -n api,web -c yellow,green \"cd ../TRR-Backend && source .venv/bin/activate && uvicorn api.main:app --reload --port 8000\" \"pnpm run web:dev\"",
@@ -23,10 +23,10 @@
   },
   "private": true,
   "devDependencies": {
-    "concurrently": "^9.0.0",
-    "firebase-tools": "^13.16.1"
+    "concurrently": "^9.2.1",
+    "firebase-tools": "^13.35.1"
   },
   "engines": {
-    "node": ">=20"
+    "node": "24.x"
   }
 }

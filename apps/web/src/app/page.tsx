@@ -9,7 +9,7 @@ import Image from "next/image";
 import { onUser, signInWithGoogle, logout, initAnalytics } from "@/lib/firebase";
 import { logEvent } from "firebase/analytics";
 import type { User } from "firebase/auth";
-import { checkUserExists } from "@/lib/db/users";
+import { checkUserExists, isFirestoreUnavailableError } from "@/lib/db/users";
 import { AuthDebugger, EnvUtils } from "@/lib/debug";
 
 export default function Page() {
@@ -190,8 +190,14 @@ export default function Page() {
             }
           } catch (error) {
             console.error("Error checking user existence:", error);
-            // On error, default to register flow
-            router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
+            // If Firestore lookup is unavailable, default to login to avoid trapping
+            // existing users in the register/finish funnel.
+            if (isFirestoreUnavailableError(error)) {
+              router.push(`/login?email=${encodeURIComponent(email.trim())}`);
+            } else {
+              // On other errors, keep existing register fallback.
+              router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
+            }
           }
         }
       }} noValidate className="w-full max-w-md mx-auto mt-16 px-4">

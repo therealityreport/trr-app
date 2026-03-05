@@ -4,7 +4,20 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { Route } from "next";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { canonicalizeOperationStatus, type CanonicalOperationStatus } from "@/lib/admin/async-handles";
+import {
+  getAutoResumableAdminOperationSession,
+  markAdminOperationSessionStatus,
+  upsertAdminOperationSession,
+} from "@/lib/admin/operation-session";
+import {
+  getAutoResumableAdminRunSession,
+  getOrCreateAdminRunFlowKey,
+  markAdminRunSessionStatus,
+  upsertAdminRunSession,
+} from "@/lib/admin/run-session";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
@@ -145,6 +158,19 @@ interface PostContext {
 }
 
 type ResolverStage = "init" | "loading_communities" | "loading_seasons" | "finalizing";
+
+type RefreshRunStatus = "queued" | "running" | "cancelling" | "completed" | "partial" | "failed" | "cancelled";
+
+interface RefreshRunPayload {
+  run_id: string;
+  operation_id?: string | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  status: RefreshRunStatus;
+  error?: string | null;
+  queue_position?: number | null;
+  active_jobs?: number | null;
+}
 
 const SEASON_TABS: Array<{ tab: SeasonAdminTab; label: string }> = [
   { tab: "overview", label: "Home" },
@@ -333,18 +359,123 @@ const isRequestTimeoutError = (error: unknown): boolean =>
   error instanceof RequestTimeoutError ||
   (error instanceof Error && error.message.toLowerCase().includes("request timed out"));
 
+const ACTIVE_REFRESH_RUN_STATUSES = new Set<RefreshRunStatus>(["queued", "running", "cancelling"]);
+const TERMINAL_REFRESH_RUN_STATUSES = new Set<RefreshRunStatus>([
+  "completed",
+  "partial",
+  "failed",
+  "cancelled",
+]);
+const DETAIL_SYNC_POLL_INTERVAL_MS = 2_000;
+const DETAIL_SYNC_POLL_MAX_ATTEMPTS = 75;
+
+const sleep = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const isRefreshRunStatus = (value: unknown): value is RefreshRunStatus =>
+  value === "queued" ||
+  value === "running" ||
+  value === "cancelling" ||
+  value === "completed" ||
+  value === "partial" ||
+  value === "failed" ||
+  value === "cancelled";
+
+const parseRefreshRunPayload = (value: unknown): RefreshRunPayload | null => {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const runId = typeof record.run_id === "string" ? record.run_id.trim() : "";
+  if (!runId) return null;
+  if (!isRefreshRunStatus(record.status)) return null;
+  return {
+    run_id: runId,
+    operation_id: typeof record.operation_id === "string" ? record.operation_id : null,
+    execution_owner: typeof record.execution_owner === "string" ? record.execution_owner : null,
+    execution_mode_canonical:
+      typeof record.execution_mode_canonical === "string" ? record.execution_mode_canonical : null,
+    status: record.status,
+    error: typeof record.error === "string" ? record.error : null,
+    queue_position: typeof record.queue_position === "number" ? record.queue_position : null,
+    active_jobs: typeof record.active_jobs === "number" ? record.active_jobs : null,
+  };
+};
+
+const parseRefreshRunListPayload = (value: unknown): RefreshRunPayload[] => {
+  if (!value || typeof value !== "object") return [];
+  const runsRaw = (value as { runs?: unknown }).runs;
+  if (!Array.isArray(runsRaw)) return [];
+  return runsRaw
+    .map((entry) => parseRefreshRunPayload(entry))
+    .filter((entry): entry is RefreshRunPayload => entry !== null);
+};
+
+const shortRunId = (runId: string): string => runId.slice(0, 8);
+
+const buildExecutionSuffix = (run: RefreshRunPayload): string => {
+  const parts: string[] = [];
+  if (run.execution_owner) {
+    parts.push(run.execution_owner === "remote_worker" ? "remote worker" : run.execution_owner);
+  }
+  if (run.execution_mode_canonical) {
+    parts.push(`mode ${run.execution_mode_canonical}`);
+  }
+  if (run.operation_id) {
+    parts.push(`op ${shortRunId(run.operation_id)}`);
+  }
+  return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+};
+
+const containerLabelForDetails = (containerKey: string): string => {
+  if (containerKey === "period-preseason") return "Pre-Season";
+  if (containerKey === "period-postseason") return "Post-Season";
+  const episodeMatch = containerKey.match(/^episode-(\d+)$/i);
+  if (episodeMatch) return `Episode ${episodeMatch[1]}`;
+  return containerKey;
+};
+
+const buildDetailRunMessage = (containerLabel: string, run: RefreshRunPayload): string => {
+  const executionSuffix = buildExecutionSuffix(run);
+  if (run.status === "queued") {
+    const queuedAhead =
+      typeof run.queue_position === "number" && Number.isFinite(run.queue_position)
+        ? ` · queue +${run.queue_position}`
+        : "";
+    return `${containerLabel}: detail sync queued (run ${shortRunId(run.run_id)}${executionSuffix})${queuedAhead}; showing cached details while it updates.`;
+  }
+  if (run.status === "running") {
+    const activeJobs =
+      typeof run.active_jobs === "number" && Number.isFinite(run.active_jobs)
+        ? ` · ${run.active_jobs} active jobs`
+        : "";
+    return `${containerLabel}: detail sync running in backend (run ${shortRunId(run.run_id)}${executionSuffix})${activeJobs}; showing cached details while it updates.`;
+  }
+  if (run.status === "cancelling") {
+    return `${containerLabel}: detail sync cancelling (run ${shortRunId(run.run_id)}${executionSuffix}).`;
+  }
+  if (run.status === "partial") {
+    return `${containerLabel}: detail sync completed with partial coverage (run ${shortRunId(run.run_id)}${executionSuffix}).`;
+  }
+  if (run.status === "completed") {
+    return `${containerLabel}: detail sync completed (run ${shortRunId(run.run_id)}${executionSuffix}).`;
+  }
+  return `${containerLabel}: detail sync ${run.status} (run ${shortRunId(run.run_id)}${executionSuffix}).`;
+};
+
 async function fetchAdminJsonWithTimeout<T>({
   url,
   method = "GET",
   preferredUser,
   timeoutMs,
   signal,
+  headers,
 }: {
   url: string;
   method?: "GET" | "POST";
   preferredUser: unknown;
   timeoutMs: number;
   signal?: AbortSignal;
+  headers?: HeadersInit;
 }): Promise<{ ok: boolean; status: number; payload: T & { error?: string; detail?: string } }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
@@ -372,6 +503,7 @@ async function fetchAdminJsonWithTimeout<T>({
       url,
       {
         method,
+        headers,
         signal: controller.signal,
       },
       { preferredUser: preferredUser as never, allowDevAdminBypass: true },
@@ -417,9 +549,21 @@ function AdminRedditPostDetailsPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const detailRunFlowScope = useMemo(() => `reddit-post-details:${pathname}`, [pathname]);
+  const detailOperationFlowScope = useMemo(
+    () => `operation:${detailRunFlowScope}`,
+    [detailRunFlowScope],
+  );
+  const detailRunFlowKey = useMemo(
+    () => getOrCreateAdminRunFlowKey(detailRunFlowScope),
+    [detailRunFlowScope],
+  );
   const canonicalRedirectRef = useRef<string | null>(null);
   const activeResolveAbortRef = useRef<AbortController | null>(null);
   const activeLoadAbortRef = useRef<AbortController | null>(null);
+  const activeDetailsPollAbortRef = useRef<AbortController | null>(null);
+  const detailsPollTokenRef = useRef(0);
+  const detailsResumeAttemptRef = useRef<string | null>(null);
 
   const [context, setContext] = useState<PostContext | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
@@ -428,7 +572,18 @@ function AdminRedditPostDetailsPageContent() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [detailsSyncing, setDetailsSyncing] = useState(false);
   const [post, setPost] = useState<RedditPostDetailsPayload | null>(null);
+  const [detailRunId, setDetailRunId] = useState<string | null>(null);
+  const [detailResumeBanner, setDetailResumeBanner] = useState<string | null>(null);
+  const [manualAttachRuns, setManualAttachRuns] = useState<RefreshRunPayload[]>([]);
+  const [selectedManualAttachRunId, setSelectedManualAttachRunId] = useState("");
+  useAdminOperationUnloadGuard();
+  const detailRunHeaders = useMemo(
+    () => ({ "x-trr-flow-key": detailRunFlowKey }),
+    [detailRunFlowKey],
+  );
 
   const queryCommunityId = searchParams.get("community_id");
   const querySeasonId = searchParams.get("season_id");
@@ -447,6 +602,7 @@ function AdminRedditPostDetailsPageContent() {
     setContextLoading(true);
     setResolverStage("loading_communities");
     setContextError(null);
+    setWarning(null);
 
     try {
       const parsedFromPathname = parsePostRouteFromPathname(pathname);
@@ -622,10 +778,353 @@ function AdminRedditPostDetailsPageContent() {
     }
   }, [context, hasAccess, queryCommentsLimit, user]);
 
+  const fetchRefreshRunStatus = useCallback(
+    async (runId: string, signal?: AbortSignal): Promise<RefreshRunPayload> => {
+      const response = await fetchAdminJsonWithTimeout<Record<string, unknown>>({
+        url: `/api/admin/reddit/runs/${runId}`,
+        timeoutMs: 20_000,
+        preferredUser: user,
+        signal,
+        headers: detailRunHeaders,
+      });
+      if (!response.ok) {
+        throw new Error(response.payload.error ?? "Failed to fetch reddit refresh run status");
+      }
+      const run = parseRefreshRunPayload(response.payload);
+      if (!run) {
+        throw new Error("Invalid reddit refresh run status payload.");
+      }
+      return run;
+    },
+    [detailRunHeaders, user],
+  );
+
+  const fetchOperationStatus = useCallback(
+    async (
+      operationId: string,
+      signal?: AbortSignal,
+    ): Promise<{ status: CanonicalOperationStatus; error: string | null }> => {
+      const response = await fetchAdminJsonWithTimeout<Record<string, unknown>>({
+        url: `/api/admin/trr-api/operations/${encodeURIComponent(operationId)}`,
+        timeoutMs: 20_000,
+        preferredUser: user,
+        signal,
+        headers: detailRunHeaders,
+      });
+      if (!response.ok) {
+        throw new Error(response.payload.error ?? "Failed to fetch operation status");
+      }
+      const status = canonicalizeOperationStatus(response.payload.status, "running");
+      return {
+        status,
+        error: typeof response.payload.error === "string" ? response.payload.error : null,
+      };
+    },
+    [detailRunHeaders, user],
+  );
+
+  const fetchManualAttachRuns = useCallback(async () => {
+    if (!context || !hasAccess || !user) {
+      setManualAttachRuns([]);
+      setSelectedManualAttachRunId("");
+      return;
+    }
+    const params = new URLSearchParams({
+      community_id: context.communityId,
+      season_id: context.seasonId,
+      period_key: context.containerKey,
+      status: "queued,running,cancelling",
+      limit: "25",
+    });
+    try {
+      const response = await fetchAdminJsonWithTimeout<Record<string, unknown>>({
+        url: `/api/admin/reddit/runs?${params.toString()}`,
+        timeoutMs: 20_000,
+        preferredUser: user,
+        headers: detailRunHeaders,
+      });
+      if (!response.ok) {
+        setManualAttachRuns([]);
+        setSelectedManualAttachRunId("");
+        return;
+      }
+      const runs = parseRefreshRunListPayload(response.payload).filter((run) => run.run_id !== detailRunId);
+      setManualAttachRuns(runs);
+      setSelectedManualAttachRunId((currentSelected) => {
+        if (runs.length === 0) return "";
+        if (runs.some((run) => run.run_id === currentSelected)) return currentSelected;
+        return runs[0]?.run_id ?? "";
+      });
+    } catch {
+      setManualAttachRuns([]);
+      setSelectedManualAttachRunId("");
+    }
+  }, [context, detailRunHeaders, detailRunId, hasAccess, user]);
+
+  const pollDetailSyncRun = useCallback(
+    async (runId: string, containerLabel: string, operationId?: string | null) => {
+      upsertAdminRunSession(detailRunFlowScope, {
+        runId,
+        flowKey: detailRunFlowKey,
+        status: "active",
+      });
+      if (operationId) {
+        upsertAdminOperationSession(detailOperationFlowScope, {
+          flowKey: detailRunFlowKey,
+          input: "/api/admin/reddit/communities/[communityId]/discover",
+          method: "GET",
+          operationId,
+          runId,
+          status: "active",
+        });
+      }
+      setDetailRunId(runId);
+      setManualAttachRuns((current) => current.filter((run) => run.run_id !== runId));
+      setSelectedManualAttachRunId("");
+      detailsPollTokenRef.current += 1;
+      const token = detailsPollTokenRef.current;
+      activeDetailsPollAbortRef.current?.abort(new DOMException("Request cancelled", "AbortError"));
+      const pollController = new AbortController();
+      activeDetailsPollAbortRef.current = pollController;
+
+      try {
+        for (let attempt = 0; attempt < DETAIL_SYNC_POLL_MAX_ATTEMPTS; attempt += 1) {
+          if (detailsPollTokenRef.current !== token) return;
+          if (operationId) {
+            try {
+              const operation = await fetchOperationStatus(operationId, pollController.signal);
+              if (detailsPollTokenRef.current !== token) return;
+              if (operation.status === "queued" || operation.status === "running" || operation.status === "cancelling") {
+                setWarning(`${containerLabel}: detail sync ${operation.status} (operation ${operationId.slice(0, 8)}).`);
+                await sleep(DETAIL_SYNC_POLL_INTERVAL_MS);
+                continue;
+              }
+              if (operation.status === "failed" || operation.status === "cancelled") {
+                markAdminOperationSessionStatus(detailOperationFlowScope, operation.status === "failed" ? "failed" : "cancelled");
+                markAdminRunSessionStatus(
+                  detailRunFlowScope,
+                  operation.status === "cancelled" ? "cancelled" : "failed",
+                );
+                setDetailRunId(null);
+                throw new Error(operation.error || `Detail sync ${operation.status}.`);
+              }
+              markAdminOperationSessionStatus(detailOperationFlowScope, "completed");
+              markAdminRunSessionStatus(detailRunFlowScope, "completed");
+              setDetailRunId(null);
+              await loadPostDetails();
+              await fetchManualAttachRuns();
+              setWarning(`${containerLabel}: detail sync completed (operation ${operationId.slice(0, 8)}).`);
+              return;
+            } catch (operationError) {
+              if (isRequestCancelledError(operationError)) return;
+            }
+          }
+          const run = await fetchRefreshRunStatus(runId, pollController.signal);
+          if (detailsPollTokenRef.current !== token) return;
+          setWarning(buildDetailRunMessage(containerLabel, run));
+
+          if (!TERMINAL_REFRESH_RUN_STATUSES.has(run.status)) {
+            await sleep(DETAIL_SYNC_POLL_INTERVAL_MS);
+            continue;
+          }
+
+          if (run.status === "failed" || run.status === "cancelled") {
+            if (operationId) {
+              markAdminOperationSessionStatus(
+                detailOperationFlowScope,
+                run.status === "cancelled" ? "cancelled" : "failed",
+              );
+            }
+            markAdminRunSessionStatus(
+              detailRunFlowScope,
+              run.status === "cancelled" ? "cancelled" : "failed",
+            );
+            setDetailRunId(null);
+            throw new Error(run.error || `Detail sync ${run.status}.`);
+          }
+
+          if (operationId) {
+            markAdminOperationSessionStatus(detailOperationFlowScope, "completed");
+          }
+          markAdminRunSessionStatus(detailRunFlowScope, "completed");
+          setDetailRunId(null);
+          await loadPostDetails();
+          await fetchManualAttachRuns();
+          setWarning(buildDetailRunMessage(containerLabel, run));
+          return;
+        }
+
+        throw new Error(
+          `${containerLabel}: detail sync is still running. Keep this page open or check again shortly.`,
+        );
+      } catch (pollError) {
+        if (isRequestCancelledError(pollError)) return;
+        if (operationId) {
+          markAdminOperationSessionStatus(detailOperationFlowScope, "failed");
+        }
+        markAdminRunSessionStatus(detailRunFlowScope, "failed");
+        setDetailRunId(null);
+        setError(
+          pollError instanceof Error
+            ? pollError.message
+            : `Failed to monitor detail sync for ${containerLabel}.`,
+        );
+      } finally {
+        if (activeDetailsPollAbortRef.current === pollController) {
+          activeDetailsPollAbortRef.current = null;
+        }
+      }
+    },
+    [
+      detailOperationFlowScope,
+      detailRunFlowKey,
+      detailRunFlowScope,
+      fetchOperationStatus,
+      fetchManualAttachRuns,
+      fetchRefreshRunStatus,
+      loadPostDetails,
+    ],
+  );
+
+  const syncPostDetails = useCallback(async () => {
+    if (!user || !hasAccess || !context) return;
+    setDetailsSyncing(true);
+    setError(null);
+    setDetailResumeBanner(null);
+    try {
+      const paramsObj = new URLSearchParams({
+        season_id: context.seasonId,
+        container_key: context.containerKey,
+        period_label: containerLabelForDetails(context.containerKey),
+        refresh: "true",
+        wait: "false",
+        mode: "sync_details",
+      });
+      const response = await fetchAdminJsonWithTimeout<{
+        warning?: string;
+        run?: Record<string, unknown>;
+      }>({
+        url: `/api/admin/reddit/communities/${context.communityId}/discover?${paramsObj.toString()}`,
+        timeoutMs: 12_000,
+        preferredUser: user,
+        headers: detailRunHeaders,
+      });
+      if (!response.ok) {
+        throw new Error(response.payload.error ?? "Failed to sync details");
+      }
+      const run = parseRefreshRunPayload(response.payload.run);
+      if (response.payload.warning) {
+        setWarning(response.payload.warning);
+      }
+      const containerLabel = containerLabelForDetails(context.containerKey);
+      if (run) {
+        setWarning(buildDetailRunMessage(containerLabel, run));
+        if (ACTIVE_REFRESH_RUN_STATUSES.has(run.status)) {
+          upsertAdminRunSession(detailRunFlowScope, {
+            runId: run.run_id,
+            flowKey: detailRunFlowKey,
+            status: "active",
+          });
+          if (run.operation_id) {
+            upsertAdminOperationSession(detailOperationFlowScope, {
+              flowKey: detailRunFlowKey,
+              input: "/api/admin/reddit/communities/[communityId]/discover",
+              method: "GET",
+              operationId: run.operation_id,
+              runId: run.run_id,
+              status: "active",
+            });
+          }
+          setDetailRunId(run.run_id);
+          await fetchManualAttachRuns();
+          void pollDetailSyncRun(run.run_id, containerLabel, run.operation_id);
+          return;
+        }
+        if (run.status === "failed" || run.status === "cancelled") {
+          if (run.operation_id) {
+            markAdminOperationSessionStatus(
+              detailOperationFlowScope,
+              run.status === "cancelled" ? "cancelled" : "failed",
+            );
+          }
+          markAdminRunSessionStatus(
+            detailRunFlowScope,
+            run.status === "cancelled" ? "cancelled" : "failed",
+          );
+          setDetailRunId(null);
+          throw new Error(run.error || `Detail sync ${run.status}.`);
+        }
+        if (run.operation_id) {
+          markAdminOperationSessionStatus(detailOperationFlowScope, "completed");
+        }
+        markAdminRunSessionStatus(detailRunFlowScope, "completed");
+        setDetailRunId(null);
+        await loadPostDetails();
+        await fetchManualAttachRuns();
+        return;
+      }
+      await loadPostDetails();
+    } catch (syncError) {
+      if (isRequestCancelledError(syncError)) return;
+      markAdminOperationSessionStatus(detailOperationFlowScope, "failed");
+      markAdminRunSessionStatus(detailRunFlowScope, "failed");
+      setError(syncError instanceof Error ? syncError.message : "Failed to sync details.");
+    } finally {
+      setDetailsSyncing(false);
+    }
+  }, [
+    context,
+    detailOperationFlowScope,
+    detailRunFlowKey,
+    detailRunFlowScope,
+    detailRunHeaders,
+    fetchManualAttachRuns,
+    hasAccess,
+    loadPostDetails,
+    pollDetailSyncRun,
+    user,
+  ]);
+
+  const handleManualAttachRun = useCallback(async () => {
+    const runId = selectedManualAttachRunId.trim();
+    if (!runId || !context) return;
+    const selectedRun = manualAttachRuns.find((run) => run.run_id === runId) ?? null;
+    setError(null);
+    setDetailResumeBanner(`Attached to run ${runId.slice(0, 8)}.`);
+    await pollDetailSyncRun(runId, containerLabelForDetails(context.containerKey), selectedRun?.operation_id ?? undefined);
+  }, [context, manualAttachRuns, pollDetailSyncRun, selectedManualAttachRunId]);
+
+  useEffect(() => {
+    if (!context || !hasAccess || !user) return;
+    void fetchManualAttachRuns();
+  }, [context, fetchManualAttachRuns, hasAccess, user]);
+
+  useEffect(() => {
+    if (!context || !hasAccess || !user) return;
+    if (detailsResumeAttemptRef.current === detailRunFlowScope) return;
+    detailsResumeAttemptRef.current = detailRunFlowScope;
+    const resumableRun = getAutoResumableAdminRunSession(detailRunFlowScope);
+    const resumableOperation = getAutoResumableAdminOperationSession(detailOperationFlowScope);
+    const resumedRunId = resumableRun?.runId ?? resumableOperation?.runId ?? null;
+    if (!resumedRunId) return;
+    const containerLabel = containerLabelForDetails(context.containerKey);
+    setDetailResumeBanner(`Resumed same-tab run ${resumedRunId.slice(0, 8)}.`);
+    setWarning(`${containerLabel}: reconnecting to run ${resumedRunId.slice(0, 8)}.`);
+    void pollDetailSyncRun(resumedRunId, containerLabel, resumableOperation?.operationId ?? undefined);
+  }, [context, detailOperationFlowScope, detailRunFlowScope, hasAccess, pollDetailSyncRun, user]);
+
   useEffect(() => {
     if (checking || !user || !hasAccess) return;
     void resolveWindowContext();
   }, [checking, hasAccess, resolveWindowContext, user]);
+
+  useEffect(() => {
+    detailsResumeAttemptRef.current = null;
+    setDetailRunId(null);
+    setDetailResumeBanner(null);
+    setManualAttachRuns([]);
+    setSelectedManualAttachRunId("");
+  }, [detailRunFlowScope]);
 
   useEffect(
     () => () => {
@@ -633,6 +1132,9 @@ function AdminRedditPostDetailsPageContent() {
       activeResolveAbortRef.current = null;
       activeLoadAbortRef.current?.abort(new DOMException("Request cancelled", "AbortError"));
       activeLoadAbortRef.current = null;
+      activeDetailsPollAbortRef.current?.abort(new DOMException("Request cancelled", "AbortError"));
+      activeDetailsPollAbortRef.current = null;
+      detailsPollTokenRef.current += 1;
     },
     [],
   );
@@ -819,10 +1321,20 @@ function AdminRedditPostDetailsPageContent() {
                 <button
                   type="button"
                   onClick={() => void loadPostDetails()}
-                  disabled={loading}
+                  disabled={loading || detailsSyncing}
                   className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
                 >
                   {loading ? "Refreshing…" : "Refresh"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void syncPostDetails()}
+                  disabled={loading || detailsSyncing}
+                  aria-label="Sync Details"
+                  title="Deep-scrape comment trees, media, and post details for this window"
+                  className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                >
+                  {detailsSyncing ? "Starting…" : "Sync Details 🕷️"}
                 </button>
                 <a
                   href={windowHref}
@@ -833,11 +1345,69 @@ function AdminRedditPostDetailsPageContent() {
               </div>
             </div>
 
+            {warning && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {warning}
+              </div>
+            )}
             {error && (
               <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                 {error}
               </div>
             )}
+            {detailResumeBanner && (
+              <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                {detailResumeBanner}
+              </div>
+            )}
+            {detailRunId && (
+              <div className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+                Active detail sync run: <span className="font-semibold">{detailRunId.slice(0, 8)}</span>
+              </div>
+            )}
+            <div className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+              <p className="font-semibold text-zinc-800">Manual attach to existing run</p>
+              <p className="mt-1 text-zinc-600">
+                Auto-resume is limited to this tab. Active runs from other tabs are listed here for explicit attach.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <select
+                  value={selectedManualAttachRunId}
+                  onChange={(event) => setSelectedManualAttachRunId(event.target.value)}
+                  className="min-w-[220px] rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800"
+                >
+                  {manualAttachRuns.length === 0 ? (
+                    <option value="">No active runs found</option>
+                  ) : (
+                    manualAttachRuns.map((run) => (
+                      <option key={run.run_id} value={run.run_id}>
+                        {run.run_id.slice(0, 8)} · {run.status}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void fetchManualAttachRuns();
+                  }}
+                  disabled={detailsSyncing}
+                  className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Refresh runs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleManualAttachRun();
+                  }}
+                  disabled={!selectedManualAttachRunId.trim() || detailsSyncing}
+                  className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Attach
+                </button>
+              </div>
+            </div>
             {loading && !post ? (
               <p className="text-sm text-zinc-500">Loading post details…</p>
             ) : post ? (

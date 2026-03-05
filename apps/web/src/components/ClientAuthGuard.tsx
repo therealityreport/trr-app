@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserProfile } from "@/lib/db/users";
+import { getUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
 import { AuthDebugger, EnvUtils } from "@/lib/debug";
 
 interface ClientAuthGuardProps {
@@ -65,8 +65,12 @@ export default function ClientAuthGuard({ children, requireComplete = false }: C
           }
         } catch (error) {
           AuthDebugger.log("ClientAuthGuard: Error checking profile completeness", { error: error?.toString() });
-          router.replace("/auth/finish");
-          return;
+          if (isFirestoreUnavailableError(error)) {
+            AuthDebugger.log("ClientAuthGuard: Firestore lookup unavailable; allowing access");
+          } else {
+            router.replace("/auth/finish");
+            return;
+          }
         }
       }
 

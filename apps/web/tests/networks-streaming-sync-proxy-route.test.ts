@@ -16,10 +16,10 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 
 import { POST } from "@/app/api/admin/networks-streaming/sync/route";
 
-const makeRequest = (body: Record<string, unknown>) =>
+const makeRequest = (body: Record<string, unknown>, extraHeaders?: Record<string, string>) =>
   new NextRequest("http://localhost/api/admin/networks-streaming/sync", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(extraHeaders ?? {}) },
     body: JSON.stringify(body),
   });
 
@@ -89,6 +89,10 @@ describe("networks-streaming sync proxy route", () => {
         resume_run_id: "network-streaming-20260224T200000Z",
         entity_type: "production",
         entity_keys: ["Shed Media", " Big Head Productions "],
+      }, {
+        "x-trr-request-id": "req-1",
+        "x-trr-tab-session-id": "tab-1",
+        "x-trr-flow-key": "flow-1",
       }),
     );
     const payload = await response.json();
@@ -107,9 +111,13 @@ describe("networks-streaming sync proxy route", () => {
       headers: {
         Authorization: "Bearer service-role-secret",
         "Content-Type": "application/json",
+        "x-trr-request-id": "req-1",
+        "x-trr-tab-session-id": "tab-1",
+        "x-trr-flow-key": "flow-1",
       },
     });
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      async: true,
       force: true,
       skip_s3: false,
       dry_run: true,
@@ -132,7 +140,7 @@ describe("networks-streaming sync proxy route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(504);
-    expect(payload.error).toBe("Sync/Mirror timed out");
+    expect(payload.error).toBe("Sync/Mirror kickoff timed out");
   });
 
   it("returns actionable backend connectivity error when fetch fails", async () => {

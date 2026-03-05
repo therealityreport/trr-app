@@ -14,6 +14,13 @@ export interface ThumbnailViewportRect {
   heightPct: number;
 }
 
+export interface ThumbnailViewportImageStyle {
+  width: string;
+  height: string;
+  left: string;
+  top: string;
+}
+
 export const THUMBNAIL_DEFAULTS = Object.freeze({
   x: 50,
   y: 32,
@@ -218,5 +225,18 @@ export function resolveThumbnailViewportRect(params: {
     topPct: (top / imageHeight) * 100,
     widthPct: (visibleWidth / imageWidth) * 100,
     heightPct: (visibleHeight / imageHeight) * 100,
+  };
+}
+
+export function resolveThumbnailViewportImageStyle(
+  rect: ThumbnailViewportRect | null | undefined,
+): ThumbnailViewportImageStyle | null {
+  if (!rect) return null;
+  if (!(rect.widthPct > 0) || !(rect.heightPct > 0)) return null;
+  return {
+    width: `${(10000 / rect.widthPct).toFixed(4)}%`,
+    height: `${(10000 / rect.heightPct).toFixed(4)}%`,
+    left: `${(-(rect.leftPct / rect.widthPct) * 100).toFixed(4)}%`,
+    top: `${(-(rect.topPct / rect.heightPct) * 100).toFixed(4)}%`,
   };
 }

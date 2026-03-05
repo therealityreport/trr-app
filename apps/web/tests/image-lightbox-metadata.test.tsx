@@ -153,6 +153,30 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByText("The Traitors")).toBeInTheDocument();
   });
 
+  it("renders face filtering diagnostics row when raw/filtered counts are available", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          faceCountRaw: 4,
+          faceCountFiltered: 2,
+          faceFilterThresholds: {
+            min_side_px: 64,
+            min_area_ratio: 0.02,
+          },
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByText("Face Filtering")).toBeInTheDocument();
+    expect(screen.getByText("Faces raw 4 -> usable 2 (min side 64px, min area 2.0%)")).toBeInTheDocument();
+  });
+
   it("renders credit media type, title imdb link, and event metadata rows", () => {
     render(
       <ImageLightbox

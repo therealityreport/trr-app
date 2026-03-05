@@ -19,6 +19,9 @@ type WorkerEntry = {
 type WorkerHealth = {
   healthy: boolean;
   healthy_workers: number;
+  fresh_workers: number;
+  stale_workers: number;
+  stale_hidden_count: number;
   active_workers: number;
   total_workers: number;
   stale_after_seconds: number;
@@ -166,7 +169,7 @@ type SharedHealthSubscriber = {
   onUpdate: (snapshot: SharedHealthSnapshot) => void;
 };
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 5_000;
 const FOLLOWER_CHECK_INTERVAL_MS = 5_000;
 const FETCH_TIMEOUT_MS = 12_000;
 const STARTUP_JITTER_MIN_MS = 200;
@@ -176,6 +179,7 @@ const LEASE_DURATION_MS = 45_000;
 const HEALTH_DOT_URL = "/api/admin/trr-api/social/ingest/health-dot";
 const QUEUE_STATUS_URL = "/api/admin/trr-api/social/ingest/queue-status";
 const CANCEL_STUCK_JOBS_URL = "/api/admin/trr-api/social/ingest/stuck-jobs/cancel";
+const CANCEL_ACTIVE_JOBS_URL = "/api/admin/trr-api/social/ingest/active-jobs/cancel";
 const WORKER_DETAIL_URL_BASE = "/api/admin/trr-api/social/ingest/workers";
 const DEBUG_JOB_URL_BASE = "/api/admin/trr-api/social/ingest/jobs";
 
@@ -638,7 +642,7 @@ function useQueueStatusModal(options: { isOpen: boolean }) {
 
     try {
       const response = await fetchAdminWithAuth(
-        QUEUE_STATUS_URL,
+        `${QUEUE_STATUS_URL}?fresh=true`,
         { cache: "no-store", signal: controller.signal },
         { allowDevAdminBypass: true },
       );
@@ -777,6 +781,7 @@ function PlatformBreakdownTable({ byPlatform }: { byPlatform: Record<string, Rec
 function WorkersList({
   workers,
   staleAfterSeconds,
+  staleHiddenCount,
   selectedWorkerId,
   onInspectWorker,
   onDebugJob,
@@ -784,11 +789,13 @@ function WorkersList({
 }: {
   workers: WorkerEntry[];
   staleAfterSeconds: number;
+  staleHiddenCount: number;
   selectedWorkerId: string | null;
   onInspectWorker: (worker: WorkerEntry) => void;
   onDebugJob: (jobId: string) => void;
   debugJobLoadingId: string | null;
 }) {
+  const [showStaleWorkers, setShowStaleWorkers] = useState(false);
   const now = Date.now();
   const freshWorkers = workers.filter((worker) => {
     if (worker.is_healthy) return true;
@@ -797,19 +804,32 @@ function WorkersList({
     if (!Number.isFinite(lastSeenMs)) return false;
     return now - lastSeenMs <= staleAfterSeconds * 1000;
   });
-  const hiddenStaleCount = Math.max(0, workers.length - freshWorkers.length);
+  const hiddenStaleCount = Math.max(
+    0,
+    Number.isFinite(staleHiddenCount) ? staleHiddenCount : workers.length - freshWorkers.length,
+  );
+  const visibleWorkers = showStaleWorkers ? workers : freshWorkers;
 
-  if (freshWorkers.length === 0) return <p className="text-sm text-zinc-400">No active workers</p>;
+  if (visibleWorkers.length === 0) return <p className="text-sm text-zinc-400">No active workers</p>;
 
   return (
     <div className="space-y-1.5">
       {hiddenStaleCount > 0 && (
-        <p className="text-xs text-zinc-400">
-          {hiddenStaleCount.toLocaleString()} stale worker heartbeat
-          {hiddenStaleCount === 1 ? "" : "s"} hidden
-        </p>
+        <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+          <p>
+            {hiddenStaleCount.toLocaleString()} stale worker heartbeat
+            {hiddenStaleCount === 1 ? "" : "s"} hidden
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowStaleWorkers((current) => !current)}
+            className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50"
+          >
+            {showStaleWorkers ? "Hide stale workers" : "Show stale workers"}
+          </button>
+        </div>
       )}
-      {freshWorkers.map((worker) => (
+      {visibleWorkers.map((worker) => (
         <div key={worker.worker_id} className="flex items-center gap-2 text-sm">
           <span className={`inline-block h-2 w-2 rounded-full ${worker.is_healthy ? "bg-emerald-500" : "bg-red-400"}`} />
           <button
@@ -822,7 +842,7 @@ function WorkersList({
                 : "cursor-default border-transparent text-zinc-500"
             } ${selectedWorkerId === worker.worker_id ? "bg-zinc-100" : ""}`}
           >
-            {worker.worker_id.slice(0, 20)}
+            {worker.worker_id}
           </button>
           <span className="text-zinc-400">{worker.stage}</span>
           {worker.run_id && <span className="font-mono text-xs text-zinc-500">run {truncate(worker.run_id, 8)}</span>}
@@ -922,7 +942,7 @@ function StuckJobs({
                   {job.worker_id && (
                     <>
                       <span>·</span>
-                      <span className="font-mono">{truncate(job.worker_id, 20)}</span>
+                      <span className="max-w-[20rem] break-all font-mono">{job.worker_id}</span>
                     </>
                   )}
                 </div>
@@ -1084,6 +1104,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const queueStatus = useQueueStatusModal({ isOpen });
   const [cancelingJobIds, setCancelingJobIds] = useState<Set<string>>(new Set());
   const [clearingAll, setClearingAll] = useState(false);
+  const [cancelingActiveJobs, setCancelingActiveJobs] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
@@ -1253,6 +1274,44 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     }
   }, [cancelStuckJobs]);
 
+  const cancelAllActiveJobs = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setCancelingActiveJobs(true);
+    try {
+      const response = await fetchAdminWithAuth(
+        CANCEL_ACTIVE_JOBS_URL,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        cancelled_jobs?: number;
+        active_jobs_remaining?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      const cancelledJobs = Number(payload.cancelled_jobs ?? 0);
+      const remaining = Number(payload.active_jobs_remaining ?? 0);
+      if (cancelledJobs > 0) {
+        setActionNotice(`Cancelled ${cancelledJobs} active jobs.${remaining > 0 ? ` ${remaining} still active.` : ""}`);
+      } else {
+        setActionNotice("No active jobs needed cancellation.");
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to cancel active jobs");
+    } finally {
+      setCancelingActiveJobs(false);
+    }
+  }, [healthDot, queueStatus]);
+
   return (
     <AdminModal
       isOpen={isOpen}
@@ -1306,11 +1365,13 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           <div className="space-y-6">
             <section>
             <SectionHeader>
-              Workers ({queueStatus.data.workers.healthy_workers}/{queueStatus.data.workers.total_workers} healthy)
+              Workers (healthy/fresh/total: {queueStatus.data.workers.healthy_workers ?? 0}/
+              {queueStatus.data.workers.fresh_workers ?? 0}/{queueStatus.data.workers.total_workers ?? 0})
             </SectionHeader>
             <WorkersList
               workers={queueStatus.data.workers.workers}
               staleAfterSeconds={queueStatus.data.workers.stale_after_seconds}
+              staleHiddenCount={queueStatus.data.workers.stale_hidden_count}
               selectedWorkerId={selectedWorkerId}
               onInspectWorker={(worker) => {
                 void fetchWorkerDetail(worker.worker_id);
@@ -1376,6 +1437,23 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           </div>
         )}
       </div>
+      {queueStatus.data && (
+        <div className="mt-4 border-t border-zinc-100 pt-4">
+          <button
+            type="button"
+            onClick={() => {
+              void cancelAllActiveJobs();
+            }}
+            disabled={cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
+            className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel All Active Jobs"}
+          </button>
+          <p className="mt-1 text-xs text-zinc-500">
+            Cancels queued, pending, retrying, and running jobs across all runs.
+          </p>
+        </div>
+      )}
     </AdminModal>
   );
 }

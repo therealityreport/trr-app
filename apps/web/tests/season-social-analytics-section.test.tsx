@@ -3511,7 +3511,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       expect(capturedPayloads.length).toBeGreaterThan(0);
     });
     expect(capturedPayloads[0]?.sync_strategy).toBe("incremental");
-    expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(true);
+    expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(false);
     expect(ingestUrls[0]).toContain("season_id=season-1");
   });
 
@@ -3658,7 +3658,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       expect(capturedPayloads.length).toBeGreaterThan(0);
     });
     expect(capturedPayloads[0]?.sync_strategy).toBe("full_refresh");
-    expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(true);
+    expect(capturedPayloads[0]?.allow_inline_dev_fallback).toBe(false);
   });
 
   it("uses Sync X label when twitter platform filter is active", async () => {
@@ -3788,6 +3788,23 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     expect(message).toContain("Start the social worker and retry");
     expect(message).toContain("no_healthy_workers");
+  });
+
+  it("formats remote-worker-required proxy detail into AWS guidance", () => {
+    const message = formatIngestErrorMessage({
+      error: "Failed to run social ingest (SOCIAL_REMOTE_WORKER_REQUIRED)",
+      code: "UPSTREAM_ERROR",
+      upstream_status: 503,
+      upstream_detail_code: "SOCIAL_REMOTE_WORKER_REQUIRED",
+      upstream_detail: {
+        code: "SOCIAL_REMOTE_WORKER_REQUIRED",
+        message: "Remote worker execution is required for platform(s): instagram",
+        required_platforms: ["instagram"],
+      },
+    });
+
+    expect(message).toContain("remote-only");
+    expect(message).toContain("AWS workers");
   });
 
   it("renders rich run labels in the run selector", async () => {

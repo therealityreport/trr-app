@@ -4,9 +4,10 @@ import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
 
-const SYNC_TIMEOUT_MS = 900_000;
+const KICKOFF_TIMEOUT_MS = 60_000;
 
 interface SyncRequestBody {
+  async?: boolean;
   force?: boolean;
   skip_s3?: boolean;
   dry_run?: boolean;
@@ -19,6 +20,12 @@ interface SyncRequestBody {
   entity_keys?: string[];
   limit?: number;
 }
+
+const toOptionalHeaderValue = (value: string | null): string | null => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
 
 const fetchJsonWithTimeout = async (
   url: string,
@@ -72,6 +79,7 @@ const sanitizeBody = (body: unknown): SyncRequestBody => {
     : undefined;
 
   return {
+    ...(typeof source.async === "boolean" ? { async: source.async } : {}),
     ...(typeof source.force === "boolean" ? { force: source.force } : {}),
     ...(typeof source.skip_s3 === "boolean" ? { skip_s3: source.skip_s3 } : {}),
     ...(typeof source.dry_run === "boolean" ? { dry_run: source.dry_run } : {}),
@@ -113,10 +121,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const requestId = toOptionalHeaderValue(request.headers.get("x-trr-request-id"));
+    const tabSessionId = toOptionalHeaderValue(request.headers.get("x-trr-tab-session-id"));
+    const flowKey = toOptionalHeaderValue(request.headers.get("x-trr-flow-key"));
+
     const body =
       request.headers.get("content-type")?.includes("application/json")
         ? sanitizeBody(await request.json().catch(() => ({})))
         : {};
+    const kickoffBody: SyncRequestBody = {
+      async: true,
+      ...body,
+    };
 
     let backendResponse: Response;
     let data: Record<string, unknown> = {};
@@ -128,10 +144,13 @@ export async function POST(request: NextRequest) {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${serviceRoleKey}`,
+            ...(requestId ? { "x-trr-request-id": requestId } : {}),
+            ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+            ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify(kickoffBody),
         },
-        SYNC_TIMEOUT_MS,
+        KICKOFF_TIMEOUT_MS,
       );
       backendResponse = out.response;
       data = out.data;
@@ -139,8 +158,8 @@ export async function POST(request: NextRequest) {
       if (error instanceof Error && error.name === "AbortError") {
         return NextResponse.json(
           {
-            error: "Sync/Mirror timed out",
-            detail: "Timed out waiting for backend networks/streaming sync response (15m).",
+            error: "Sync/Mirror kickoff timed out",
+            detail: "Timed out waiting for backend networks/streaming kickoff response (60s).",
           },
           { status: 504 },
         );

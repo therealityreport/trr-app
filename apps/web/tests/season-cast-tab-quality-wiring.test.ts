@@ -30,7 +30,7 @@ describe("season cast tab quality wiring", () => {
   });
 
   it("surfaces detailed per-person stream errors", () => {
-    expect(contents).toMatch(/eventType === "error"/);
+    expect(contents).toMatch(/(eventType|event) === "error"/);
     expect(contents).toMatch(/errorPayload\?\./);
     expect(contents).toMatch(/detailText \? `\$\{errorText\}: \$\{detailText\}` : errorText/);
   });

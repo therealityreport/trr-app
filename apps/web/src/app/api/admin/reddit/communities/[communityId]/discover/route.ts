@@ -63,7 +63,10 @@ interface DiscoveryPayload {
 
 type RedditRunPayload = {
   run_id: string;
-  status: "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
+  operation_id?: string | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  status: "queued" | "running" | "cancelling" | "completed" | "partial" | "failed" | "cancelled";
   error?: string | null;
   totals?: {
     fetched_rows: number;
@@ -990,6 +993,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const effectiveMaxPages = (maxPages ?? 0) === 0 ? 10_000 : maxPages!;
     const fetchComments = true;
     const commentDeltaOnly = true;
+    const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || undefined;
+    const flowKey = request.headers.get("x-trr-flow-key")?.trim() || undefined;
     const runConfigHash = buildRunConfigHash({
       coverageMode,
       maxPages: effectiveMaxPages,
@@ -1032,12 +1037,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       fetch_comments: fetchComments,
       comment_delta_only: commentDeltaOnly,
       max_pages: effectiveMaxPages,
+      ...(tabSessionId ? { client_session_id: tabSessionId } : {}),
+      ...(flowKey ? { client_workflow_id: flowKey } : {}),
       ...(refreshMode ? { mode: refreshMode } : {}),
     };
 
     const started = await fetchSocialBackendJson("/reddit/runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+        ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
+      },
       body: JSON.stringify(runStartPayload),
       fallbackError: "Failed to start reddit refresh run",
       timeoutMs: 25_000,

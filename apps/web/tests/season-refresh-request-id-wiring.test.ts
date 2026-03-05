@@ -17,7 +17,9 @@ describe("season refresh request-id diagnostics wiring", () => {
 
   it("attaches x-trr-request-id to refresh-photos stream request headers", () => {
     expect(pageContents).toMatch(/"x-trr-request-id": requestId/);
-    expect(pageContents).toMatch(/fetch\(`\/api\/admin\/trr-api\/shows\/\$\{showId\}\/refresh-photos\/stream`/);
+    expect(pageContents).toMatch(
+      /(fetch|adminStream)\(`\/api\/admin\/trr-api\/shows\/\$\{showId\}\/refresh-photos\/stream`/
+    );
   });
 
   it("stamps request ids into activity log entries and renders prefixed log lines", () => {
