@@ -40,6 +40,11 @@ describe("social-admin-proxy", () => {
         ok: true,
         status: 200,
         json: async () => ({ ok: true }),
+      } as Response)
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
       } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 

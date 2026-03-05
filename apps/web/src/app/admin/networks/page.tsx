@@ -159,6 +159,7 @@ const asNumber = (value: unknown): number => {
 };
 
 const parseNetworksSyncStatus = (value: unknown): NetworksStreamingSyncResult["status"] => {
+  if (typeof value === "string" && value.trim().toLowerCase() === "stopped") return "stopped";
   const normalized = canonicalizeOperationStatus(value, "queued");
   if (normalized === "queued") return "queued";
   if (normalized === "running") return "running";

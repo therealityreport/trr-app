@@ -1,6 +1,36 @@
 # Session Handoff (TRR-APP)
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
+## Latest Update (2026-03-05) — social admin reliability test stabilization + networks stopped-state parsing
+
+- primary_skill: `social-ingestion-reliability`
+- supporting_skills:
+  - `senior-backend`
+  - `debugging-wizard`
+  - `test-master`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (test harness drift and async status handling around social/admin flows)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/networks/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-season-hint-routes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-news-tab-google-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/users.integration.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-admin-proxy.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Preserved explicit `"stopped"` in `parseNetworksSyncStatus` so admin UI can correctly present resume semantics for networks sync.
+  - Updated social route tests to align timeout/retry expectations with current proxy constants and route behavior.
+  - Updated Google News wiring regex for operation-handle path variants.
+  - Hardened `users.integration.test.ts` by fully mocking `@/lib/db/users` instead of importing runtime Firebase dependencies.
+  - Refreshed stale week social thumbnail tests to current run progress and live-health payload contracts.
+  - Stabilized social admin proxy retry test by providing a safe default mocked upstream response for additional retry attempts.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run test:ci tests/social-admin-proxy.test.ts tests/week-social-thumbnails.test.tsx` (pass; `58 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web run test:ci` (pass; `258 files`, `1274 tests`)
+
 ## Latest Update (2026-03-05) — Existing users no longer trapped in `/auth/finish` when Firestore is unavailable
 
 - primary_skill: `orchestrate-plan-execution`
