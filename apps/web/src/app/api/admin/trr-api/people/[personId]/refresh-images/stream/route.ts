@@ -8,7 +8,7 @@ import {
 } from "@/lib/server/sse-proxy";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 3600;
+export const maxDuration = 800;
 const DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS = 20_000;
 const DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS = 2_000;
 const DEFAULT_CONNECT_PREFLIGHT_TIMEOUT_MS = 3_000;
