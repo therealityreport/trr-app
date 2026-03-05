@@ -51,6 +51,48 @@ describe("mapPhotoToMetadata", () => {
     expect(result.people).toEqual(["John Doe", "Jane Doe"]);
   });
 
+  it("decodes IMDb episode entities and parses numeric-string season metadata", () => {
+    const result = mapPhotoToMetadata({
+      id: "imdb-entities-1",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/sample.jpg",
+      hosted_url: "https://d1fmdyqfafwim3.cloudfront.net/media/sample.jpg",
+      caption: "Alan Cumming and Milo Ventimiglia in Milo Ventimiglia &amp; Alan Cumming (2023)",
+      width: 1920,
+      height: 1080,
+      context_type: "episode_still",
+      season: null,
+      people_names: ["Alan Cumming", "Milo Ventimiglia"],
+      title_names: ["Milo Ventimiglia &amp; Alan Cumming"],
+      metadata: {
+        show_name: "Watch What Happens Live with Andy Cohen",
+        episode_title: "Milo Ventimiglia &amp; Alan Cumming",
+        episode_number: "37",
+        season_number: "20",
+        face_detection_diagnostics: {
+          raw: 4,
+          filtered: 2,
+          thresholds: {
+            min_side_px: 64,
+            min_area_ratio: 0.02,
+          },
+        },
+      },
+      fetched_at: null,
+    });
+
+    expect(result.season).toBe(20);
+    expect(result.episodeNumber).toBe(37);
+    expect(result.episodeTitle).toBe("Milo Ventimiglia & Alan Cumming");
+    expect(result.episodeLabel).toBe("Episode 37 - Milo Ventimiglia & Alan Cumming");
+    expect(result.titles).toContain("Milo Ventimiglia & Alan Cumming");
+    expect(result.caption).toContain("Milo Ventimiglia & Alan Cumming (2023)");
+    expect(result.faceCountRaw).toBe(4);
+    expect(result.faceCountFiltered).toBe(2);
+    expect(result.faceFilterThresholds).toEqual({ min_side_px: 64, min_area_ratio: 0.02 });
+  });
+
   it("deduplicates people and titles", () => {
     const result = mapPhotoToMetadata({
       id: "1",

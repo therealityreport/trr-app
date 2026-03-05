@@ -11,6 +11,12 @@ import BrandLogoOptionsModal from "@/components/admin/BrandLogoOptionsModal";
 import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
+import {
+  canonicalizeOperationStatus,
+  monitorKickoffHandle,
+  normalizeKickoffHandle,
+} from "@/lib/admin/async-handles";
+import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 type NetworksStreamingType = "network" | "streaming" | "production";
@@ -64,8 +70,11 @@ interface SyncResumeCursor {
 }
 
 interface NetworksStreamingSyncResult {
+  operation_id?: string | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
   run_id: string;
-  status: "completed" | "stopped" | "failed";
+  status: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "stopped" | "failed";
   resume_cursor: SyncResumeCursor | null;
   entities_synced: number;
   providers_synced: number;
@@ -131,6 +140,122 @@ type LogoPickerState = {
 };
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const asNumber = (value: unknown): number => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+};
+
+const parseNetworksSyncStatus = (value: unknown): NetworksStreamingSyncResult["status"] => {
+  const normalized = canonicalizeOperationStatus(value, "queued");
+  if (normalized === "queued") return "queued";
+  if (normalized === "running") return "running";
+  if (normalized === "cancelling") return "cancelling";
+  if (normalized === "cancelled") return "cancelled";
+  if (normalized === "failed") return "failed";
+  return "completed";
+};
+
+const toNetworksSyncResult = (
+  payload: unknown,
+  fallback?: { runId?: string; operationId?: string; status?: NetworksStreamingSyncResult["status"] },
+): NetworksStreamingSyncResult => {
+  const record = asRecord(payload);
+  const unresolvedLogosRaw = Array.isArray(record?.unresolved_logos) ? record?.unresolved_logos : [];
+  const unresolvedLogos = unresolvedLogosRaw
+    .map((item) => {
+      const row = asRecord(item);
+      if (!row) return null;
+      const type = row.type;
+      if (type !== "network" && type !== "streaming" && type !== "production") return null;
+      return {
+        type,
+        id: typeof row.id === "string" ? row.id : "",
+        name: typeof row.name === "string" ? row.name : "",
+        reason: typeof row.reason === "string" ? row.reason : "unknown",
+      } satisfies UnresolvedLogoItem;
+    })
+    .filter((item): item is UnresolvedLogoItem => Boolean(item));
+
+  const missingColumnsRaw = Array.isArray(record?.missing_columns) ? record?.missing_columns : [];
+  const missingColumns = missingColumnsRaw
+    .map((item) => {
+      const row = asRecord(item);
+      if (!row) return null;
+      return {
+        table: typeof row.table === "string" ? row.table : "",
+        column: typeof row.column === "string" ? row.column : "",
+      } satisfies MissingColumn;
+    })
+    .filter((item): item is MissingColumn => Boolean(item) && item.table.length > 0 && item.column.length > 0);
+
+  const resumeCursorRecord = asRecord(record?.resume_cursor);
+  const resumeCursor =
+    resumeCursorRecord &&
+    (resumeCursorRecord.entity_type === "network" ||
+      resumeCursorRecord.entity_type === "streaming" ||
+      resumeCursorRecord.entity_type === "production") &&
+    typeof resumeCursorRecord.entity_key === "string"
+      ? {
+          entity_type: resumeCursorRecord.entity_type,
+          entity_key: resumeCursorRecord.entity_key,
+        }
+      : null;
+
+  return {
+    operation_id: typeof record?.operation_id === "string" ? record.operation_id : fallback?.operationId ?? null,
+    execution_owner: typeof record?.execution_owner === "string" ? record.execution_owner : null,
+    execution_mode_canonical:
+      typeof record?.execution_mode_canonical === "string" ? record.execution_mode_canonical : null,
+    run_id:
+      (typeof record?.run_id === "string" && record.run_id.trim().length > 0
+        ? record.run_id
+        : fallback?.runId || fallback?.operationId || "pending"),
+    status:
+      typeof record?.status === "string"
+        ? parseNetworksSyncStatus(record.status)
+        : fallback?.status ?? "queued",
+    resume_cursor: resumeCursor,
+    entities_synced: asNumber(record?.entities_synced),
+    providers_synced: asNumber(record?.providers_synced),
+    links_enriched: asNumber(record?.links_enriched),
+    logos_mirrored: asNumber(record?.logos_mirrored),
+    variants_black_mirrored: asNumber(record?.variants_black_mirrored),
+    variants_white_mirrored: asNumber(record?.variants_white_mirrored),
+    logo_assets_discovered: asNumber(record?.logo_assets_discovered),
+    logo_assets_mirrored: asNumber(record?.logo_assets_mirrored),
+    logo_assets_skipped: asNumber(record?.logo_assets_skipped),
+    logo_assets_failed: asNumber(record?.logo_assets_failed),
+    completion_total: asNumber(record?.completion_total),
+    completion_resolved: asNumber(record?.completion_resolved),
+    completion_unresolved: asNumber(record?.completion_unresolved),
+    completion_unresolved_total: asNumber(record?.completion_unresolved_total),
+    completion_unresolved_network: asNumber(record?.completion_unresolved_network),
+    completion_unresolved_streaming: asNumber(record?.completion_unresolved_streaming),
+    completion_unresolved_production: asNumber(record?.completion_unresolved_production),
+    production_missing_logos: asNumber(record?.production_missing_logos),
+    production_missing_bw_variants: asNumber(record?.production_missing_bw_variants),
+    completion_percent: asNumber(record?.completion_percent),
+    completion_gate_passed: Boolean(record?.completion_gate_passed),
+    missing_columns: missingColumns,
+    unresolved_logos_count:
+      typeof record?.unresolved_logos_count === "number"
+        ? record.unresolved_logos_count
+        : unresolvedLogos.length,
+    unresolved_logos_truncated: Boolean(record?.unresolved_logos_truncated),
+    unresolved_logos: unresolvedLogos,
+    failures: asNumber(record?.failures),
+  };
+};
 
 const parseErrorPayload = async (response: Response): Promise<ErrorPayload> => {
   const fallback = `Request failed (${response.status})`;
@@ -363,10 +488,13 @@ export default function AdminNetworksPage() {
         setSyncResult(null);
       }
       try {
+        const flowScope = `POST:/api/admin/networks-streaming/sync:${unresolvedOnly ? "unresolved" : "full"}`;
+        const flowKey = getOrCreateAdminFlowKey(flowScope);
         const response = await fetchWithAuth("/api/admin/networks-streaming/sync", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "x-trr-flow-key": flowKey,
           },
           body: JSON.stringify({
             unresolved_only: unresolvedOnly,
@@ -388,11 +516,85 @@ export default function AdminNetworksPage() {
           return;
         }
 
-        const payload = (await response.json()) as NetworksStreamingSyncResult;
-        setSyncResult(payload);
-        setShowUnresolved(Boolean(payload.unresolved_logos_count));
+        const kickoffPayload = (await response.json()) as Record<string, unknown>;
+        const kickoffHandle = normalizeKickoffHandle(kickoffPayload);
+        const kickoffResult = toNetworksSyncResult(kickoffPayload, {
+          runId: kickoffHandle.runId,
+          operationId: kickoffHandle.operationId,
+          status: parseNetworksSyncStatus(kickoffHandle.rawStatus),
+        });
+        setSyncResult(kickoffResult);
+
+        const finalStatus = await monitorKickoffHandle({
+          handle: kickoffHandle,
+          operation: {
+            flowScope,
+            flowKey,
+            input: "/api/admin/networks-streaming/sync",
+            method: "POST",
+            requestHeaders: {
+              "x-trr-flow-key": flowKey,
+            },
+            streamTimeoutMs: 45_000,
+            statusTimeoutMs: 20_000,
+            reconnectBackoffMs: [2_000, 5_000, 10_000, 15_000],
+            onState: (state) => {
+              setSyncResult((current) =>
+                toNetworksSyncResult(current ?? kickoffPayload, {
+                  runId: kickoffHandle.runId,
+                  operationId: state.operationId,
+                  status: parseNetworksSyncStatus(state.status),
+                }),
+              );
+            },
+          },
+        });
+
+        if (kickoffHandle.operationId) {
+          try {
+            const operationResponse = await fetchWithAuth(
+              `/api/admin/trr-api/operations/${encodeURIComponent(kickoffHandle.operationId)}`,
+              {
+                method: "GET",
+                cache: "no-store",
+                headers: {
+                  "x-trr-flow-key": flowKey,
+                },
+              },
+            );
+            if (operationResponse.ok) {
+              const operationPayload = (await operationResponse.json().catch(() => ({}))) as Record<string, unknown>;
+              const resultPayload = asRecord(operationPayload.result) ?? operationPayload;
+              setSyncResult(
+                toNetworksSyncResult(resultPayload, {
+                  runId: kickoffHandle.runId,
+                  operationId: kickoffHandle.operationId,
+                  status: parseNetworksSyncStatus(finalStatus),
+                }),
+              );
+            }
+          } catch {
+            setSyncResult((current) =>
+              toNetworksSyncResult(current ?? kickoffPayload, {
+                runId: kickoffHandle.runId,
+                operationId: kickoffHandle.operationId,
+                status: parseNetworksSyncStatus(finalStatus),
+              }),
+            );
+          }
+        } else {
+          setSyncResult((current) =>
+            toNetworksSyncResult(current ?? kickoffPayload, {
+              runId: kickoffHandle.runId,
+              operationId: kickoffHandle.operationId,
+              status: parseNetworksSyncStatus(finalStatus),
+            }),
+          );
+        }
+
         await loadNetworksStreamingSummary();
         await loadOverrides();
+        setShowUnresolved(Boolean((kickoffResult.unresolved_logos_count ?? 0) > 0));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to trigger sync";
         setSyncError(message);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
+  getStoredPendingTrackedFlairCountsByCommunityAndSeason,
   getStoredPostCountsByCommunityAndSeason,
   getStoredPostTotalByCommunityAndSeason,
   getStoredTrackedPostFlairCountsByCommunityAndSeason,
@@ -26,17 +27,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "season_id must be a valid UUID" }, { status: 400 });
     }
 
-    const [counts, totalPosts, trackedTotalPosts, trackedFlairCounts] = await Promise.all([
+    const [counts, totalPosts, trackedTotalPosts, trackedFlairCounts, pendingTrackedFlairCounts] = await Promise.all([
       getStoredPostCountsByCommunityAndSeason(communityId, seasonId),
       getStoredPostTotalByCommunityAndSeason(communityId, seasonId),
       getStoredTrackedPostTotalByCommunityAndSeason(communityId, seasonId),
       getStoredTrackedPostFlairCountsByCommunityAndSeason(communityId, seasonId),
+      getStoredPendingTrackedFlairCountsByCommunityAndSeason(communityId, seasonId),
     ]);
     return NextResponse.json({
       counts,
       total_posts: totalPosts,
       tracked_total_posts: trackedTotalPosts,
       tracked_flair_counts: trackedFlairCounts,
+      pending_tracked_flair_counts: pendingTrackedFlairCounts,
       // Legacy alias for clients still reading the older shape.
       flair_counts: trackedFlairCounts.map((row) => ({
         flair: row.flair_label,

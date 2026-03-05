@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { adminFetch, adminMutation, adminStream, fetchWithTimeout } from "@/lib/admin/admin-fetch";
+import {
+  getAdminOperationSession,
+  upsertAdminOperationSession,
+} from "@/lib/admin/operation-session";
 
 const createAbortableNeverFetch = () =>
   vi.fn((_: RequestInfo | URL, init?: RequestInit) => {
@@ -19,6 +23,7 @@ const createAbortableNeverFetch = () =>
 describe("admin-fetch", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    window.sessionStorage.clear();
   });
 
   it("applies timeout and aborts stalled requests", async () => {
@@ -112,5 +117,83 @@ describe("admin-fetch", () => {
       retryable: true,
       message: "Request timed out",
     });
+  });
+
+  it("stores operation_id and event_seq from stream payloads", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: progress\ndata: {"operation_id":"op-1","event_seq":3,"stage":"start"}\n\n' +
+              'event: complete\ndata: {"operation_id":"op-1","event_seq":4,"attempted":1}\n\n'
+          )
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await adminStream("/api/test/stream", {
+      method: "POST",
+      body: JSON.stringify({ include: true }),
+      timeoutMs: 1000,
+      onEvent: vi.fn(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const fetchHeaders = new Headers((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.headers);
+    expect(fetchHeaders.get("x-trr-flow-key")).toEqual(expect.any(String));
+
+    const session = getAdminOperationSession("POST:/api/test/stream:16");
+    expect(session?.operationId).toBe("op-1");
+    expect(session?.lastEventSeq).toBe(4);
+    expect(session?.status).toBe("completed");
+  });
+
+  it("resumes active operation stream before starting a new stream request", async () => {
+    upsertAdminOperationSession("POST:/api/test/stream:14", {
+      flowKey: "flow-abc",
+      input: "/api/test/stream",
+      method: "POST",
+      status: "active",
+      operationId: "op-123",
+      lastEventSeq: 5,
+    });
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('event: complete\ndata: {"operation_id":"op-123","event_seq":6}\n\n')
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await adminStream("/api/test/stream", {
+      method: "POST",
+      body: JSON.stringify({ retry: true }),
+      timeoutMs: 1000,
+      onEvent: vi.fn(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/admin/trr-api/operations/op-123/stream?after_seq=5"
+    );
+    const requestInit = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined) ?? {};
+    expect(requestInit.method).toBe("GET");
   });
 });

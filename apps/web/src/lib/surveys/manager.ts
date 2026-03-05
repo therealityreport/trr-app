@@ -8,7 +8,8 @@ import {
   type Firestore,
   type Unsubscribe,
 } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
+import { getDb } from "@/lib/firebase-db";
 import type {
   SurveyEpisodeMeta,
   SurveyResponse,
@@ -26,7 +27,7 @@ class SurveyManager {
 
   static getInstance(): SurveyManager {
     if (!SurveyManager.instance) {
-      SurveyManager.instance = new SurveyManager(db);
+      SurveyManager.instance = new SurveyManager(getDb());
     }
     return SurveyManager.instance;
   }

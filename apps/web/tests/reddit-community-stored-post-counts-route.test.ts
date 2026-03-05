@@ -5,12 +5,14 @@ const {
   requireAdminMock,
   getStoredPostCountsByCommunityAndSeasonMock,
   getStoredPostTotalByCommunityAndSeasonMock,
+  getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock,
   getStoredTrackedPostFlairCountsByCommunityAndSeasonMock,
   getStoredTrackedPostTotalByCommunityAndSeasonMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getStoredPostCountsByCommunityAndSeasonMock: vi.fn(),
   getStoredPostTotalByCommunityAndSeasonMock: vi.fn(),
+  getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock: vi.fn(),
   getStoredTrackedPostFlairCountsByCommunityAndSeasonMock: vi.fn(),
   getStoredTrackedPostTotalByCommunityAndSeasonMock: vi.fn(),
 }));
@@ -22,6 +24,8 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   getStoredPostCountsByCommunityAndSeason: getStoredPostCountsByCommunityAndSeasonMock,
   getStoredPostTotalByCommunityAndSeason: getStoredPostTotalByCommunityAndSeasonMock,
+  getStoredPendingTrackedFlairCountsByCommunityAndSeason:
+    getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock,
   getStoredTrackedPostFlairCountsByCommunityAndSeason:
     getStoredTrackedPostFlairCountsByCommunityAndSeasonMock,
   getStoredTrackedPostTotalByCommunityAndSeason: getStoredTrackedPostTotalByCommunityAndSeasonMock,
@@ -37,6 +41,7 @@ describe("/api/admin/reddit/communities/[communityId]/stored-post-counts route",
     requireAdminMock.mockReset();
     getStoredPostCountsByCommunityAndSeasonMock.mockReset();
     getStoredPostTotalByCommunityAndSeasonMock.mockReset();
+    getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock.mockReset();
     getStoredTrackedPostFlairCountsByCommunityAndSeasonMock.mockReset();
     getStoredTrackedPostTotalByCommunityAndSeasonMock.mockReset();
 
@@ -51,6 +56,14 @@ describe("/api/admin/reddit/communities/[communityId]/stored-post-counts route",
     });
     getStoredPostTotalByCommunityAndSeasonMock.mockResolvedValue(861);
     getStoredTrackedPostTotalByCommunityAndSeasonMock.mockResolvedValue(660);
+    getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock.mockResolvedValue([
+      {
+        container_key: "episode-1",
+        flair_key: "wwhl",
+        flair_label: "WWHL",
+        post_count: 8,
+      },
+    ]);
     getStoredTrackedPostFlairCountsByCommunityAndSeasonMock.mockResolvedValue([
       {
         flair_key: "salt-lake-city",
@@ -97,6 +110,14 @@ describe("/api/admin/reddit/communities/[communityId]/stored-post-counts route",
           post_count: 121,
         }),
       ],
+      pending_tracked_flair_counts: [
+        {
+          container_key: "episode-1",
+          flair_key: "wwhl",
+          flair_label: "WWHL",
+          post_count: 8,
+        },
+      ],
       flair_counts: [
         { flair: "Salt Lake City", post_count: 466 },
         { flair: "WWHL", post_count: 121 },
@@ -111,6 +132,10 @@ describe("/api/admin/reddit/communities/[communityId]/stored-post-counts route",
       SEASON_ID,
     );
     expect(getStoredTrackedPostTotalByCommunityAndSeasonMock).toHaveBeenCalledWith(
+      COMMUNITY_ID,
+      SEASON_ID,
+    );
+    expect(getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock).toHaveBeenCalledWith(
       COMMUNITY_ID,
       SEASON_ID,
     );

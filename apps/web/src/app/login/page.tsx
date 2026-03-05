@@ -80,8 +80,9 @@ function LoginContent() {
           router.replace("/auth/finish");
         }
       } catch {
-        // If we can't get profile, assume incomplete and go to finish
-        router.replace("/auth/finish");
+        // When Firestore profile reads are temporarily unavailable, avoid trapping
+        // existing users in the finish flow.
+        router.replace("/hub");
       }
     } catch (err: unknown) {
       const message = getFriendlyError(err);

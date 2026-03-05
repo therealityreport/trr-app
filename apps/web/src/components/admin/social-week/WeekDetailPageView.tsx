@@ -14,8 +14,22 @@ import {
 } from "@/lib/admin/admin-breadcrumbs";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import { buildSeasonAdminUrl, buildSeasonSocialWeekUrl, buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { getClientAuthHeaders } from "@/lib/admin/client-auth";
+import {
+  clearAdminOperationSession,
+  getAutoResumableAdminOperationSession,
+  markAdminOperationSessionStatus,
+  upsertAdminOperationSession,
+} from "@/lib/admin/operation-session";
+import {
+  clearAdminRunSession,
+  getAutoResumableAdminRunSession,
+  getOrCreateAdminRunFlowKey,
+  markAdminRunSessionStatus,
+  upsertAdminRunSession,
+} from "@/lib/admin/run-session";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 import {
   pickFirstNonVideoUrl,
@@ -131,6 +145,34 @@ interface InstagramChildPostData {
   mentions_detail?: PostCollaboratorDetail[] | null;
 }
 
+interface MediaAssetMetaAsset {
+  url?: string | null;
+  type?: string | null;
+  width?: number | null;
+  height?: number | null;
+  resolution?: string | null;
+  fps?: number | null;
+  bitrate?: number | null;
+  duration_seconds?: number | null;
+}
+
+interface MediaAssetMetaThumbnail {
+  url?: string | null;
+  width?: number | null;
+  height?: number | null;
+  resolution?: string | null;
+}
+
+interface MediaAssetMeta {
+  selection_policy?: string | null;
+  selected_source?: string | null;
+  source_assets?: MediaAssetMetaAsset[] | null;
+  thumbnail_source?: MediaAssetMetaThumbnail | null;
+  hosted_assets?: MediaAssetMetaAsset[] | null;
+  thumbnail_hosted?: MediaAssetMetaThumbnail | null;
+  updated_at?: string | null;
+}
+
 interface BasePost {
   source_id: string;
   author: string;
@@ -148,6 +190,7 @@ interface BasePost {
   source_thumbnail_url?: string | null;
   hosted_media_urls?: string[] | null;
   hosted_thumbnail_url?: string | null;
+  media_asset_meta?: MediaAssetMeta | null;
   media_urls?: string[] | null;
   thumbnail_url?: string | null;
   cover_source?: string | null;
@@ -326,40 +369,7 @@ interface PostDetailResponse {
   hosted_tagged_profile_pics?: Record<string, string> | null;
   child_posts_data?: InstagramChildPostData[] | null;
   duration_seconds?: number | null;
-  media_asset_meta?: {
-    selection_policy?: string | null;
-    selected_source?: string | null;
-    source_assets?: Array<{
-      url?: string | null;
-      type?: string | null;
-      width?: number | null;
-      height?: number | null;
-      resolution?: string | null;
-      fps?: number | null;
-      bitrate?: number | null;
-      duration_seconds?: number | null;
-    }> | null;
-    thumbnail_source?: {
-      url?: string | null;
-      width?: number | null;
-      height?: number | null;
-      resolution?: string | null;
-    } | null;
-    hosted_assets?: Array<{
-      url?: string | null;
-      type?: string | null;
-      width?: number | null;
-      height?: number | null;
-      resolution?: string | null;
-    }> | null;
-    thumbnail_hosted?: {
-      url?: string | null;
-      width?: number | null;
-      height?: number | null;
-      resolution?: string | null;
-    } | null;
-    updated_at?: string | null;
-  } | null;
+  media_asset_meta?: MediaAssetMeta | null;
   transcript_text?: string | null;
   transcript_segments?: Array<{
     start_seconds?: number;
@@ -395,7 +405,7 @@ interface SocialJob {
   id: string;
   run_id?: string | null;
   platform: string;
-  status: "queued" | "pending" | "retrying" | "running" | "completed" | "failed" | "cancelled";
+  status: "queued" | "pending" | "retrying" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
   job_type?: string;
   items_found?: number;
   error_message?: string | null;
@@ -406,22 +416,31 @@ interface SocialJob {
   metadata?: Record<string, unknown>;
 }
 
-interface SocialJobsResponse {
-  jobs?: SocialJob[];
-  pagination?: {
-    limit?: number;
-    offset?: number;
-    returned?: number;
-    has_more?: boolean;
-  };
-}
-
 interface SocialRun {
   id: string;
-  status: "queued" | "pending" | "retrying" | "running" | "completed" | "failed" | "cancelled";
+  operation_id?: string | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  status: "queued" | "pending" | "retrying" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
   source_scope?: string;
   config?: Record<string, unknown>;
   summary?: {
+    total_jobs?: number;
+    completed_jobs?: number;
+    failed_jobs?: number;
+    active_jobs?: number;
+    items_found_total?: number;
+    stage_counts?: Record<
+      string,
+      {
+        total?: number;
+        completed?: number;
+        failed?: number;
+        active?: number;
+      }
+    >;
+  };
+  summary_normalized?: {
     total_jobs?: number;
     completed_jobs?: number;
     failed_jobs?: number;
@@ -492,6 +511,73 @@ interface WorkerHealthPayload {
   healthy?: boolean;
   healthy_workers?: number;
   reason?: string | null;
+}
+
+interface RunProgressStagePayload {
+  jobs_total: number;
+  jobs_completed: number;
+  jobs_failed: number;
+  jobs_active: number;
+  scraped_count: number;
+  saved_count: number;
+}
+
+interface RunProgressPerHandlePayload extends RunProgressStagePayload {
+  platform: string;
+  account_handle: string;
+  stage: string;
+}
+
+interface RunProgressLogEntry {
+  id: string;
+  timestamp: string | null;
+  platform: string;
+  account_handle: string;
+  stage: string;
+  status: string;
+  line: string;
+}
+
+interface RunProgressSnapshot {
+  season_id: string;
+  run_id: string;
+  run_status: SocialRun["status"];
+  source_scope: string;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  stages: Record<string, RunProgressStagePayload>;
+  per_handle: RunProgressPerHandlePayload[];
+  recent_log: RunProgressLogEntry[];
+  worker_runtime?: {
+    runner_strategy?: string | null;
+    scheduler_lanes?: string[];
+    active_workers_now?: number;
+    worker_ids_sample?: string[];
+  };
+  summary?: SocialRun["summary"];
+  updated_at?: string | null;
+}
+
+interface WeekLiveHealthDayRow {
+  day: string;
+  platform: string;
+  account: string;
+  posts: number;
+  comments: number;
+  likes: number;
+}
+
+interface WeekLiveHealthAssetRow {
+  asset: "images" | "videos" | "captions" | "profile_pictures";
+  scraped: number;
+  saved: number;
+}
+
+interface WeekLiveHealthSnapshot {
+  day_account_rows: WeekLiveHealthDayRow[];
+  asset_health: WeekLiveHealthAssetRow[];
+  updated_at?: string | null;
 }
 
 type PlatformFilter = "all" | "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
@@ -566,6 +652,7 @@ interface PostDetailMediaFields {
   thumbnail_url?: string | null;
   source_thumbnail_url?: string | null;
   hosted_thumbnail_url?: string | null;
+  media_asset_meta?: MediaAssetMeta | null;
 }
 
 interface InstagramDrawerSlide {
@@ -791,11 +878,11 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
-const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running"]);
+const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running", "cancelling"]);
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
 const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^\d{4}-\d{2}-\d{2}$/;
-const COMMENT_SYNC_MAX_PASSES = 8;
+const COMMENT_SYNC_MAX_PASSES = 1;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
 const SYNC_GALLERY_REFRESH_MS = 20_000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
@@ -812,6 +899,8 @@ const REQUEST_TIMEOUT_MS = {
   ingestKickoff: 210_000,
   syncRuns: 30_000,
   syncJobs: 30_000,
+  runProgress: 30_000,
+  weekLiveHealth: 20_000,
   commentsCoverage: 35_000,
   mirrorCoverage: 35_000,
   workerHealth: 20_000,
@@ -821,7 +910,7 @@ const SYNC_KICKOFF_MAX_ATTEMPTS = 1;
 const SYNC_KICKOFF_RECOVERY_LOOKBACK_MS = 5 * 60 * 1000;
 const SYNC_KICKOFF_RECOVERY_LIMIT = 25;
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
-const RHOSLC_INSTAGRAM_ACCOUNTS = ["bravotv", "bravowwhl"] as const;
+const SYNC_ACTIVE_POLL_INTERVAL_MS = 4_000;
 const RHOSLC_REQUIRED_HASHTAG = "RHOSLC";
 const TOKEN_HANDLE_DETAIL_KEYS = [
   "tagged_users_detail",
@@ -1275,6 +1364,46 @@ function normalizeSocialMediaCandidateUrl(url: string | null | undefined): strin
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function buildNormalizedMediaUrlList(urls: Array<string | null | undefined>): string[] {
+  const normalizedUrls: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of urls) {
+    const normalized = normalizeSocialMediaCandidateUrl(raw);
+    if (!normalized) continue;
+    const dedupeKey = normalizeSocialMediaUrlForCompare(normalized) || normalized.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    normalizedUrls.push(normalized);
+  }
+  return normalizedUrls;
+}
+
+function extractMediaAssetUrls(
+  mediaAssetMeta: MediaAssetMeta | null | undefined,
+): {
+  sourceMediaUrls: string[];
+  hostedMediaUrls: string[];
+  sourceThumbnailUrl: string | null;
+  hostedThumbnailUrl: string | null;
+} {
+  const sourceMediaUrls = buildNormalizedMediaUrlList(
+    Array.isArray(mediaAssetMeta?.source_assets)
+      ? mediaAssetMeta?.source_assets.map((asset) => asset?.url ?? null)
+      : [],
+  );
+  const hostedMediaUrls = buildNormalizedMediaUrlList(
+    Array.isArray(mediaAssetMeta?.hosted_assets)
+      ? mediaAssetMeta?.hosted_assets.map((asset) => asset?.url ?? null)
+      : [],
+  );
+  return {
+    sourceMediaUrls,
+    hostedMediaUrls,
+    sourceThumbnailUrl: normalizeSocialMediaCandidateUrl(mediaAssetMeta?.thumbnail_source?.url ?? null),
+    hostedThumbnailUrl: normalizeSocialMediaCandidateUrl(mediaAssetMeta?.thumbnail_hosted?.url ?? null),
+  };
+}
+
 function selectPreferredMediaUrlPair(sourceMediaUrlRaw: string | null, hostedMediaUrlRaw: string | null): {
   src: string | null;
   mirrored: boolean;
@@ -1286,9 +1415,8 @@ function selectPreferredMediaUrlPair(sourceMediaUrlRaw: string | null, hostedMed
   if (sourceMediaUrl && hostedMediaUrl) {
     const sourceMediaType = detectSocialMediaType(sourceMediaUrl);
     const hostedMediaType = detectSocialMediaType(hostedMediaUrl);
-    const sourceIsPlayable = sourceMediaType === "video" || sourceMediaType === "embed";
     const hostedIsThumbnailLike = hostedMediaType === "image" || isLikelyHtmlDocumentUrl(hostedMediaUrl);
-    if (sourceIsPlayable && hostedIsThumbnailLike) {
+    if (sourceMediaType === "video" && hostedIsThumbnailLike) {
       return {
         src: sourceMediaUrl,
         mirrored: false,
@@ -1393,13 +1521,27 @@ function buildMirrorScopeLabel(post: AnyPost): string {
 }
 
 function getPostMediaCandidates(platform: string, post: AnyPost): SocialMediaCandidate[] {
-  const sourceMediaUrls = getStrArr(post, "source_media_urls").length
-    ? getStrArr(post, "source_media_urls")
-    : getStrArr(post, "media_urls");
-  const hostedMediaUrls = getStrArr(post, "hosted_media_urls");
-  const sourceThumbnail = getStr(post, "source_thumbnail_url") || getStr(post, "thumbnail_url");
-  const hostedThumbnail = getStr(post, "hosted_thumbnail_url");
-  const thumbnail = getPostThumbnailUrl(platform, post);
+  const mediaAssetUrls = extractMediaAssetUrls(post.media_asset_meta);
+  const sourceMediaUrls = buildNormalizedMediaUrlList([
+    ...(getStrArr(post, "source_media_urls").length ? getStrArr(post, "source_media_urls") : getStrArr(post, "media_urls")),
+    ...mediaAssetUrls.sourceMediaUrls,
+  ]);
+  const hostedMediaUrls = buildNormalizedMediaUrlList([
+    ...getStrArr(post, "hosted_media_urls"),
+    ...mediaAssetUrls.hostedMediaUrls,
+  ]);
+  const sourceThumbnail =
+    getStr(post, "source_thumbnail_url") || mediaAssetUrls.sourceThumbnailUrl || getStr(post, "thumbnail_url");
+  const hostedThumbnail = getStr(post, "hosted_thumbnail_url") || mediaAssetUrls.hostedThumbnailUrl;
+  const thumbnail =
+    pickFirstNonVideoUrl([
+      hostedThumbnail,
+      getStr(post, "thumbnail_url"),
+      sourceThumbnail,
+      ...hostedMediaUrls,
+      ...sourceMediaUrls,
+    ]) ??
+    getPostThumbnailUrl(platform, post);
   const candidates: SocialMediaCandidate[] = [];
   const seen = new Set<string>();
 
@@ -1479,8 +1621,22 @@ function pickFirstUrl(urls: Array<string | null | undefined>): string | null {
 }
 
 function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | null {
-  const hostedMediaUrls = data.hosted_media_urls ?? [];
-  const sourceMediaUrls = (data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? []);
+  const mediaAssetUrls = extractMediaAssetUrls(data.media_asset_meta);
+  const sourceMediaUrls = buildNormalizedMediaUrlList([
+    ...((data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? [])),
+    ...mediaAssetUrls.sourceMediaUrls,
+  ]);
+  const hostedMediaUrls = buildNormalizedMediaUrlList([
+    ...(data.hosted_media_urls ?? []),
+    ...mediaAssetUrls.hostedMediaUrls,
+  ]);
+  const sourceThumbnailUrl = normalizeSocialMediaCandidateUrl(
+    data.source_thumbnail_url ?? mediaAssetUrls.sourceThumbnailUrl ?? null,
+  );
+  const hostedThumbnailUrl = normalizeSocialMediaCandidateUrl(
+    data.hosted_thumbnail_url ?? mediaAssetUrls.hostedThumbnailUrl ?? null,
+  );
+  const preferredThumbnailUrl = normalizeSocialMediaCandidateUrl(data.thumbnail_url);
 
   if (hostedMediaUrls.length > 0) {
     const pairCount = Math.max(sourceMediaUrls.length, hostedMediaUrls.length);
@@ -1503,9 +1659,9 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
     if (hostedNonHtmlCandidate) return hostedNonHtmlCandidate;
 
     return pickFirstUrl([
-      data.hosted_thumbnail_url,
-      data.thumbnail_url,
-      data.source_thumbnail_url,
+      hostedThumbnailUrl,
+      preferredThumbnailUrl,
+      sourceThumbnailUrl,
     ]);
   }
 
@@ -1515,9 +1671,9 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
   if (embedCandidate) return embedCandidate;
   return pickFirstUrl([
     ...sourceMediaUrls,
-    data.hosted_thumbnail_url,
-    data.thumbnail_url,
-    data.source_thumbnail_url,
+    hostedThumbnailUrl,
+    preferredThumbnailUrl,
+    sourceThumbnailUrl,
   ]);
 }
 
@@ -1568,10 +1724,19 @@ function resolveInstagramChildPostMediaSrc(childPost: Record<string, unknown>): 
 }
 
 function buildInstagramDrawerSlides(data: PostDetailResponse): InstagramDrawerSlide[] {
-  const sourceMediaUrls =
-    (data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? []);
-  const hostedMediaUrls = data.hosted_media_urls ?? [];
-  const mediaUrls = (data.media_urls ?? []).length > 0 ? (data.media_urls ?? []) : sourceMediaUrls;
+  const mediaAssetUrls = extractMediaAssetUrls(data.media_asset_meta);
+  const sourceMediaUrls = buildNormalizedMediaUrlList([
+    ...((data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? [])),
+    ...mediaAssetUrls.sourceMediaUrls,
+  ]);
+  const hostedMediaUrls = buildNormalizedMediaUrlList([
+    ...(data.hosted_media_urls ?? []),
+    ...mediaAssetUrls.hostedMediaUrls,
+  ]);
+  const mediaUrls = buildNormalizedMediaUrlList([
+    ...((data.media_urls ?? []).length > 0 ? (data.media_urls ?? []) : sourceMediaUrls),
+    ...sourceMediaUrls,
+  ]);
   const childPosts = getInstagramChildPostRecords(data);
   const childPostsBySlide = new Map<number, Record<string, unknown>>();
   for (const childPost of childPosts) {
@@ -1586,19 +1751,13 @@ function buildInstagramDrawerSlides(data: PostDetailResponse): InstagramDrawerSl
   for (let index = 0; index < totalSlides; index += 1) {
     const childPostRecord = childPostsBySlide.get(index) ?? childPosts[index]?.record ?? null;
     const childMediaSrc = childPostRecord ? resolveInstagramChildPostMediaSrc(childPostRecord) : null;
+    const preferredPair = selectPreferredMediaUrlPair(
+      pickFirstUrl([sourceMediaUrls[index], mediaUrls[index], childMediaSrc]),
+      hostedMediaUrls[index] ?? null,
+    );
     const src =
-      pickFirstNonHtmlUrl([
-        hostedMediaUrls[index],
-        mediaUrls[index],
-        sourceMediaUrls[index],
-        childMediaSrc,
-      ]) ??
-      pickFirstUrl([
-        hostedMediaUrls[index],
-        mediaUrls[index],
-        sourceMediaUrls[index],
-        childMediaSrc,
-      ]);
+      pickFirstNonHtmlUrl([preferredPair.src, mediaUrls[index], sourceMediaUrls[index], hostedMediaUrls[index], childMediaSrc]) ??
+      pickFirstUrl([preferredPair.src, mediaUrls[index], sourceMediaUrls[index], hostedMediaUrls[index], childMediaSrc]);
     if (!src) continue;
     slides.push({ index, src });
   }
@@ -1620,6 +1779,7 @@ function mergePostWithDetailMedia(post: AnyPost, detailMedia: PostDetailMediaFie
     thumbnail_url: detailMedia.thumbnail_url ?? post.thumbnail_url ?? null,
     source_thumbnail_url: detailMedia.source_thumbnail_url ?? post.source_thumbnail_url ?? null,
     hosted_thumbnail_url: detailMedia.hosted_thumbnail_url ?? post.hosted_thumbnail_url ?? null,
+    media_asset_meta: detailMedia.media_asset_meta ?? post.media_asset_meta ?? null,
   } as AnyPost;
 }
 
@@ -2498,8 +2658,9 @@ function buildPostHandleProfileMap(post: AnyPost): Map<string, HandleProfile> {
     authorHandle,
     pickNonEmptyStringFromRecord(userRecord, ["full_name", "fullName", "display_name", "displayName", "name", "nickname"]) ??
       pickNonEmptyStringFromRecord(postRecord, ["owner_full_name", "full_name", "fullName", "display_name", "displayName", "name", "nickname"]),
-    pickNonEmptyStringFromRecord(userRecord, ["avatar_url", "user_avatar_url"]) ??
-      (String(post.hosted_owner_profile_pic_url ?? "").trim() || String(post.owner_profile_pic_url ?? "").trim()),
+    (String(post.hosted_owner_profile_pic_url ?? "").trim() || null) ??
+      pickNonEmptyStringFromRecord(userRecord, ["avatar_url", "user_avatar_url"]) ??
+      (String(post.owner_profile_pic_url ?? "").trim() || null),
     pickNonEmptyStringFromRecord(userRecord, ["url", "profile_url", "profileUrl", "user_url", "userUrl"]) ??
       pickNonEmptyStringFromRecord(postRecord, ["user_profile_url", "profile_url", "profileUrl", "user_url", "userUrl"]),
   );
@@ -2605,20 +2766,25 @@ function resolveHandleProfile(post: AnyPost, handle: string): HandleProfile | nu
 }
 
 function resolveAccountAvatarUrl(post: AnyPost, handle: string, isAuthor: boolean): string | null {
+  const profileAvatar = resolveHandleProfile(post, handle)?.avatarUrl ?? null;
+  const hostedProfileAvatar = profileAvatar && isLikelyMirroredSocialUrl(profileAvatar) ? profileAvatar : null;
+
   if (isAuthor) {
-    const userAvatar = String(post.user?.avatar_url || "").trim();
-    if (userAvatar) return userAvatar;
     const hostedOwnerAvatar = String(post.hosted_owner_profile_pic_url || "").trim();
     if (hostedOwnerAvatar) return hostedOwnerAvatar;
+    if (hostedProfileAvatar) return hostedProfileAvatar;
+    const userAvatar = String(post.user?.avatar_url || "").trim();
+    if (userAvatar) return userAvatar;
     const ownerAvatar = String(post.owner_profile_pic_url || "").trim();
     if (ownerAvatar) return ownerAvatar;
-    return resolveHandleProfile(post, handle)?.avatarUrl ?? null;
+    return profileAvatar;
   }
   const hostedTagged = resolveCaseInsensitiveRecordValue(post.hosted_tagged_profile_pics, handle);
   if (hostedTagged) return hostedTagged;
+  if (hostedProfileAvatar) return hostedProfileAvatar;
   const detailAvatar = resolveHandleAvatarFromDetail(post, handle);
   if (detailAvatar) return detailAvatar;
-  return resolveHandleProfile(post, handle)?.avatarUrl ?? null;
+  return profileAvatar;
 }
 
 function HeaderAccountAvatar({ handle, avatarUrl }: { handle: string; avatarUrl: string | null }) {
@@ -2794,65 +2960,14 @@ function getJobPersistCounters(job: SocialJob): { posts_upserted: number; commen
   };
 }
 
-function getJobActivity(job: SocialJob): Record<string, unknown> | null {
-  const activity = (job.metadata as Record<string, unknown> | undefined)?.activity as
-    | Record<string, unknown>
-    | undefined;
-  if (!activity || typeof activity !== "object") return null;
-  return activity;
-}
-
-function getJobActivitySummary(job: SocialJob): string {
-  const activity = getJobActivity(job);
-  if (!activity) return "";
-  const parts: string[] = [];
-  if (typeof activity.phase === "string" && activity.phase.trim()) {
-    parts.push(activity.phase.replaceAll("_", " "));
-  }
-  if (typeof activity.pages_scanned === "number") {
-    parts.push(`${activity.pages_scanned}pg`);
-  }
-  if (typeof activity.posts_checked === "number") {
-    parts.push(`${activity.posts_checked}chk`);
-  }
-  if (typeof activity.matched_posts === "number") {
-    parts.push(`${activity.matched_posts}match`);
-  }
-  return parts.join(" · ");
-}
-
-function getJobRunnerLane(job: SocialJob): "A" | "B" | null {
-  const fromConfig = typeof job.config?.runner_lane === "string" ? job.config.runner_lane : null;
-  const fromMetadata = typeof job.metadata?.runner_lane === "string" ? job.metadata.runner_lane : null;
-  const lane = String(fromConfig ?? fromMetadata ?? "")
-    .trim()
-    .toUpperCase();
-  if (lane === "A" || lane === "B") return lane;
-  return null;
-}
-
-function getJobAccountHandle(job: SocialJob): string {
-  const configRecord = asRecord(job.config);
-  const metadataRecord = asRecord(job.metadata);
-  const candidates = [
-    configRecord?.account,
-    configRecord?.account_handle,
-    metadataRecord?.account,
-    metadataRecord?.account_handle,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string") continue;
-    const normalized = normalizeHandle(candidate);
-    if (normalized) return normalized;
-  }
-  return "";
-}
-
 function formatSyncStageLabel(stage: string): string {
   const normalized = String(stage || "").trim().toLowerCase();
   if (normalized === "posts") return "Posts";
   if (normalized === "comments") return "Comments";
   if (normalized === "media_mirror") return "Mirror";
+  if (normalized === "comment_media_mirror") return "Comment Mirror";
+  if (normalized === "profile_pictures") return "Profile Pictures";
+  if (normalized === "other") return "Other";
   if (!normalized) return "Stage";
   return normalized
     .split("_")
@@ -4013,6 +4128,19 @@ export default function WeekDetailPage() {
     if (!raw || !looksLikeUuid(raw)) return null;
     return raw;
   })();
+  const syncRunFlowScope = useMemo(
+    () =>
+      `social-week-sync:${showIdForApi}:${seasonNumber}:${weekIndex}:${sourceScope}:${seasonIdHint ?? "none"}`,
+    [seasonIdHint, seasonNumber, showIdForApi, sourceScope, weekIndex],
+  );
+  const syncOperationFlowScope = useMemo(
+    () => `operation:${syncRunFlowScope}`,
+    [syncRunFlowScope],
+  );
+  const syncRunFlowKey = useMemo(
+    () => getOrCreateAdminRunFlowKey(syncRunFlowScope),
+    [syncRunFlowScope],
+  );
   const searchParamsString = searchParams.toString();
   const socialPlatformFromPath = parseSocialPlatform(platformFromPathParam);
   const socialPlatformFromQuery = parseSocialPlatform(searchParams.get("social_platform"));
@@ -4043,7 +4171,13 @@ export default function WeekDetailPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncRunId, setSyncRunId] = useState<string | null>(null);
   const [syncRun, setSyncRun] = useState<SocialRun | null>(null);
+  const [syncResumeBanner, setSyncResumeBanner] = useState<string | null>(null);
+  const [manualAttachRuns, setManualAttachRuns] = useState<SocialRun[]>([]);
+  const [selectedManualAttachRunId, setSelectedManualAttachRunId] = useState<string>("");
   const [syncJobs, setSyncJobs] = useState<SocialJob[]>([]);
+  const [syncRunProgress, setSyncRunProgress] = useState<RunProgressSnapshot | null>(null);
+  const [syncWeekLiveHealth, setSyncWeekLiveHealth] = useState<WeekLiveHealthSnapshot | null>(null);
+  const [syncLogsExpanded, setSyncLogsExpanded] = useState(false);
   const [syncPollError, setSyncPollError] = useState<string | null>(null);
   const [syncLastSuccessAt, setSyncLastSuccessAt] = useState<Date | null>(null);
   const [syncStartedAt, setSyncStartedAt] = useState<Date | null>(null);
@@ -4052,7 +4186,6 @@ export default function WeekDetailPage() {
   const [syncMirrorCoveragePreview, setSyncMirrorCoveragePreview] = useState<MirrorCoverageResponse | null>(null);
   const [syncWorkerHealth, setSyncWorkerHealth] = useState<WorkerHealthPayload | null>(null);
   const [syncElapsedDisplay, setSyncElapsedDisplay] = useState("");
-  const [lastJobsFetchedAt, setLastJobsFetchedAt] = useState<number | null>(null);
   const [tokenSummaryModal, setTokenSummaryModal] = useState<{
     key: SummaryTokenKey;
     label: string;
@@ -4087,6 +4220,7 @@ export default function WeekDetailPage() {
     startedAtMs: number;
     pass: number;
   } | null>(null);
+  const syncResumeAttemptedForScopeRef = useRef<string | null>(null);
   const legacyWeekPlatformRedirectRef = useRef<string | null>(null);
   const legacyWeekPathRedirectRef = useRef<string | null>(null);
   const legacyWeekSubTabRedirectRef = useRef<string | null>(null);
@@ -4132,6 +4266,15 @@ export default function WeekDetailPage() {
       ? "Sync All"
       : `Sync ${getSyncActionPlatformLabel(platformFilter)}`;
   }, [platformFilter, syncingComments]);
+  useAdminOperationUnloadGuard();
+
+  const getSyncRunRequestHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+    return {
+      ...headers,
+      "x-trr-flow-key": syncRunFlowKey,
+    };
+  }, [syncRunFlowKey]);
 
   const displayData = useMemo(() => {
     if (!data) return null;
@@ -4827,18 +4970,44 @@ export default function WeekDetailPage() {
   const handleCancelSync = useCallback(async () => {
     if (!syncRunId) return;
     try {
-      await fetchWithTimeout(
-        `/api/admin/trr-api/social/ingest/stuck-jobs/cancel`,
-        { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ run_id: syncRunId }) },
+      const headers = await getSyncRunRequestHeaders();
+      const cancelParams = new URLSearchParams();
+      if (resolvedSeasonId) {
+        cancelParams.set("season_id", resolvedSeasonId);
+      }
+      const cancelPath = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs/${syncRunId}/cancel`;
+      const cancelResponse = await fetchWithTimeout(
+        cancelParams.toString() ? `${cancelPath}?${cancelParams.toString()}` : cancelPath,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...headers,
+          },
+          body: JSON.stringify({}),
+        },
         15_000,
         "Cancel request timed out",
       );
+      if (!cancelResponse.ok) {
+        const message = await readApiErrorMessage(cancelResponse, "Failed to cancel sync run");
+        throw new Error(message);
+      }
+      markAdminOperationSessionStatus(syncOperationFlowScope, "cancelled");
+      markAdminRunSessionStatus(syncRunFlowScope, "cancelled");
       setSyncPollError("Sync cancelled by user.");
     } catch (err) {
       setSyncPollError(`Failed to cancel: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [syncRunId]);
+  }, [
+    getSyncRunRequestHeaders,
+    resolvedSeasonId,
+    seasonNumber,
+    showIdForApi,
+    syncOperationFlowScope,
+    syncRunFlowScope,
+    syncRunId,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -4857,131 +5026,64 @@ export default function WeekDetailPage() {
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
-      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
-      const runParams = new URLSearchParams({
-        source_scope: sourceScope,
-        run_id: runId,
-        limit: "1",
-      });
+      const headers = await getSyncRunRequestHeaders();
+      const progressParams = new URLSearchParams({ recent_log_limit: "40" });
       if (resolvedSeasonId) {
-        runParams.set("season_id", resolvedSeasonId);
+        progressParams.set("season_id", resolvedSeasonId);
       }
-      const jobsPageLimit = 250;
-      const jobsHardCap = 1000;
-
-      const fetchJobsPages = async (): Promise<SocialJob[]> => {
-        let offset = 0;
-        let aggregated: SocialJob[] = [];
-        while (aggregated.length < jobsHardCap) {
-          const jobsParams = new URLSearchParams({
-            run_id: runId,
-            limit: String(jobsPageLimit),
-            offset: String(offset),
-          });
-          if (resolvedSeasonId) {
-            jobsParams.set("season_id", resolvedSeasonId);
-          }
-          const jobsResponse = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/jobs?${jobsParams.toString()}`,
-            { headers, cache: "no-store" },
-            REQUEST_TIMEOUT_MS.syncJobs,
-            "Sync jobs request timed out",
-            options?.signal,
-          );
-          if (!jobsResponse.ok) {
-            throw new Error(await readApiErrorMessage(jobsResponse, "Failed to load sync jobs"));
-          }
-          const jobsPayload = await parseResponseJson<SocialJobsResponse>(jobsResponse, "Failed to load sync jobs");
-          const jobsPage = jobsPayload.jobs ?? [];
-          aggregated = [...aggregated, ...jobsPage].slice(0, jobsHardCap);
-          setSyncJobs([...aggregated]);
-
-          const returned = jobsPage.length;
-          const pageOffset = Number(jobsPayload.pagination?.offset ?? offset);
-          const hasMore = Boolean(jobsPayload.pagination?.has_more ?? returned >= jobsPageLimit);
-          if (!hasMore || returned < jobsPageLimit) break;
-          offset = pageOffset + returned;
-          if (offset < 0 || offset > 10_000) break;
+      const progressResponse = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs/${runId}/progress?${progressParams.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.runProgress,
+        "Sync run progress request timed out",
+        options?.signal,
+      );
+      if (!progressResponse.ok) {
+        const message = await readApiErrorMessage(progressResponse, "Failed to load sync run progress");
+        if (progressResponse.status === 404) {
+          throw new Error("Run no longer available");
         }
-        return aggregated;
+        throw new Error(message);
+      }
+      const progressPayload = await parseResponseJson<RunProgressSnapshot>(
+        progressResponse,
+        "Failed to load sync run progress",
+      );
+      setSyncRunProgress(progressPayload);
+      missingRunConsecutiveCountRef.current = 0;
+
+      const nextRun: SocialRun = {
+        id: progressPayload.run_id,
+        status: progressPayload.run_status,
+        source_scope: progressPayload.source_scope,
+        summary: progressPayload.summary ?? {},
+        summary_normalized: progressPayload.summary ?? {},
+        created_at: progressPayload.created_at ?? null,
+        started_at: progressPayload.started_at ?? null,
+        completed_at: progressPayload.completed_at ?? null,
       };
 
-      const [runsResult, jobsResult] = await Promise.allSettled([
-        fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runParams.toString()}`,
-          { headers, cache: "no-store" },
-          REQUEST_TIMEOUT_MS.syncRuns,
-          "Sync runs request timed out",
-          options?.signal,
-        ),
-        fetchJobsPages(),
-      ]);
-      let runsError: string | null = null;
-      let jobsError: string | null = null;
-      let nextRun: SocialRun | null = null;
-      let nextJobs: SocialJob[] = [];
-      let runsLoaded = false;
-      let jobsLoaded = false;
-
-      if (runsResult.status === "fulfilled") {
-        const runsResponse = runsResult.value;
-        if (!runsResponse.ok) {
-          runsError = await readApiErrorMessage(runsResponse, "Failed to load sync runs");
-        } else {
-          const runsPayload = await parseResponseJson<{ runs?: SocialRun[] }>(
-            runsResponse,
-            "Failed to load sync runs",
-          );
-          nextRun = (runsPayload.runs ?? []).find((run) => run.id === runId) ?? null;
-          if (nextRun) {
-            missingRunConsecutiveCountRef.current = 0;
-          } else {
-            missingRunConsecutiveCountRef.current += 1;
-          }
-          runsLoaded = true;
-        }
-      } else {
-        runsError = runsResult.reason instanceof Error ? runsResult.reason.message : "Failed to load sync runs";
-      }
-
-      if (jobsResult.status === "fulfilled") {
-        nextJobs = jobsResult.value;
-        jobsLoaded = true;
-      } else {
-        jobsError = jobsResult.reason instanceof Error ? jobsResult.reason.message : "Failed to load sync jobs";
-      }
-
-      if (!runsLoaded && !jobsLoaded) {
-        throw new Error(
-          runsError && jobsError ? `${runsError}; ${jobsError}` : runsError ?? jobsError ?? "Failed to load sync progress",
-        );
-      }
-      if (runsLoaded && !nextRun && missingRunConsecutiveCountRef.current >= 3) {
-        throw new Error("Run no longer available");
-      }
-
       let effectiveRun: SocialRun | null = nextRun;
-      let effectiveJobs = nextJobs;
-      if (runsLoaded) {
-        setSyncRun((current) => {
-          const resolved =
-            options?.preserveLastGoodRunIfMissing && !nextRun && current?.id === runId ? current : nextRun;
-          effectiveRun = resolved;
-          return resolved;
-        });
-      }
-      if (jobsLoaded) {
-        setSyncJobs((current) => {
-          const resolved =
-            options?.preserveLastGoodJobsIfEmpty && nextJobs.length === 0 && current.length > 0 ? current : nextJobs;
-          effectiveJobs = resolved;
-          return resolved;
-        });
-        setLastJobsFetchedAt(Date.now());
-      }
-      return { run: effectiveRun, jobs: effectiveJobs };
+      setSyncRun((current) => {
+        const resolved =
+          options?.preserveLastGoodRunIfMissing && !nextRun && current?.id === runId ? current : nextRun;
+        effectiveRun = resolved;
+        return resolved;
+      });
+
+      setSyncJobs((current) =>
+        options?.preserveLastGoodJobsIfEmpty && current.length > 0 ? current : [],
+      );
+      return { run: effectiveRun, jobs: [] };
     },
-    [hasValidNumericPathParams, invalidPathParamsError, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+    [
+      getSyncRunRequestHeaders,
+      hasValidNumericPathParams,
+      invalidPathParamsError,
+      resolvedSeasonId,
+      seasonNumber,
+      showIdForApi,
+    ],
   );
 
   const recoverSyncRunAfterKickoffError = useCallback(
@@ -5104,7 +5206,7 @@ export default function WeekDetailPage() {
       platforms: Array<Exclude<PlatformFilter, "all">> | null;
     }) => {
       const kickoffStartedAtMs = Date.now();
-      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const headers = await getSyncRunRequestHeaders();
       const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
       const payload: {
         source_scope: SourceScope;
@@ -5118,31 +5220,41 @@ export default function WeekDetailPage() {
         fetch_replies: boolean;
         ingest_mode: IngestMode;
         sync_strategy: "incremental";
-        runner_strategy: "adaptive_dual_runner";
-        runner_count: 2;
-        window_shard_hours: 2;
+        runner_strategy: "single_runner" | "adaptive_dual_runner";
+        runner_count: 1 | 2;
+        window_shard_hours: number;
         day_weight_profile: "rhoslc_default";
         priority_mode: "episode_peak_weighted";
         allow_inline_dev_fallback: boolean;
         date_start: string;
         date_end: string;
-      } = {
-        source_scope: sourceScope,
-        max_posts_per_target: 0,
-        max_comments_per_post: 100000,
-        max_replies_per_post: 100000,
-        fetch_replies: true,
-        ingest_mode: ingestMode,
-        sync_strategy: "incremental",
-        runner_strategy: "adaptive_dual_runner",
-        runner_count: 2,
-        window_shard_hours: 2,
-        day_weight_profile: "rhoslc_default",
-        priority_mode: "episode_peak_weighted",
-        allow_inline_dev_fallback: true,
-        date_start: dateStart,
-        date_end: dateEnd,
-      };
+      } = (() => {
+        const requestedPlatforms =
+          platforms && platforms.length > 0
+            ? platforms
+            : (["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"] as Array<
+                Exclude<PlatformFilter, "all">
+              >);
+        const igTikTokOnly = requestedPlatforms.every((platform) => platform === "instagram" || platform === "tiktok");
+        const shardOptimizedPass = pass === 1 && igTikTokOnly;
+        return {
+          source_scope: sourceScope,
+          max_posts_per_target: 0,
+          max_comments_per_post: igTikTokOnly ? 3000 : 10000,
+          max_replies_per_post: igTikTokOnly ? 500 : 2000,
+          fetch_replies: !igTikTokOnly,
+          ingest_mode: ingestMode,
+          sync_strategy: "incremental",
+          runner_strategy: shardOptimizedPass ? "single_runner" : "adaptive_dual_runner",
+          runner_count: shardOptimizedPass ? 1 : 2,
+          window_shard_hours: shardOptimizedPass ? 12 : 4,
+          day_weight_profile: "rhoslc_default",
+          priority_mode: "episode_peak_weighted",
+          allow_inline_dev_fallback: false,
+          date_start: dateStart,
+          date_end: dateEnd,
+        };
+      })();
       if (platforms && platforms.length > 0) {
         payload.platforms = platforms;
       }
@@ -5153,7 +5265,6 @@ export default function WeekDetailPage() {
         platforms.length === 1 &&
         platforms[0] === "instagram";
       if (isRhoslcInstagramSync) {
-        payload.accounts_override = [...RHOSLC_INSTAGRAM_ACCOUNTS];
         payload.hashtags_override = [RHOSLC_REQUIRED_HASHTAG];
       }
 
@@ -5170,10 +5281,30 @@ export default function WeekDetailPage() {
         },
         body: JSON.stringify(payload),
       };
-      const adoptRun = (runId: string) => {
+      const adoptRun = (runId: string, operationId?: string | null) => {
+        upsertAdminRunSession(syncRunFlowScope, {
+          runId,
+          flowKey: syncRunFlowKey,
+          status: "active",
+        });
+        if (operationId) {
+          upsertAdminOperationSession(syncOperationFlowScope, {
+            flowKey: syncRunFlowKey,
+            input: `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest`,
+            method: "POST",
+            operationId,
+            runId,
+            status: "active",
+          });
+        }
         setSyncRunId(runId);
         setSyncRun(null);
         setSyncJobs([]);
+        setSyncRunProgress(null);
+        setSyncWeekLiveHealth(null);
+        setSyncLogsExpanded(false);
+        setSelectedManualAttachRunId("");
+        setManualAttachRuns((current) => current.filter((run) => run.id !== runId));
         syncPollFailureCountRef.current = 0;
         terminalCoverageFailureCountRef.current = 0;
         missingRunConsecutiveCountRef.current = 0;
@@ -5241,9 +5372,11 @@ export default function WeekDetailPage() {
 
       const result = (await response.json().catch(() => ({}))) as {
         run_id?: string;
+        operation_id?: string;
         queued_or_started_jobs?: number;
       };
       const runId = typeof result.run_id === "string" ? result.run_id : null;
+      const operationId = typeof result.operation_id === "string" ? result.operation_id : null;
       const jobs = Number(result.queued_or_started_jobs ?? 0);
       if (!runId) {
         const recovered = await recoverSyncRunAfterKickoffError({
@@ -5260,11 +5393,15 @@ export default function WeekDetailPage() {
         }
         throw new Error(`Sync pass ${pass} started without a run id`);
       }
-      adoptRun(runId);
-      return { runId, jobs };
+      adoptRun(runId, operationId);
+      return { runId, jobs, operationId };
     },
     [
       fetchSyncProgress,
+      getSyncRunRequestHeaders,
+      syncOperationFlowScope,
+      syncRunFlowKey,
+      syncRunFlowScope,
       isRhoslcSeason,
       recoverSyncRunAfterKickoffError,
       resolvedSeasonId,
@@ -5273,6 +5410,105 @@ export default function WeekDetailPage() {
       sourceScope,
     ],
   );
+
+  const fetchManualAttachRunCandidates = useCallback(async () => {
+    if (!hasValidNumericPathParams || !showIdForApi || !seasonNumber || !isAdmin) {
+      setManualAttachRuns([]);
+      return;
+    }
+    try {
+      const headers = await getSyncRunRequestHeaders();
+      const runsParams = new URLSearchParams({
+        source_scope: sourceScope,
+        limit: "25",
+      });
+      if (resolvedSeasonId) {
+        runsParams.set("season_id", resolvedSeasonId);
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runsParams.toString()}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.syncRuns,
+        "Sync runs request timed out",
+      );
+      if (!response.ok) {
+        setManualAttachRuns([]);
+        return;
+      }
+      const runsPayload = await parseResponseJson<{ runs?: SocialRun[] }>(response, "Failed to load sync runs");
+      const activeRuns = (runsPayload.runs ?? []).filter(
+        (run) => ACTIVE_RUN_STATUSES.has(run.status) && run.id !== syncRunId,
+      );
+      setManualAttachRuns(activeRuns);
+      if (activeRuns.length === 0) {
+        setSelectedManualAttachRunId("");
+      } else if (!activeRuns.some((run) => run.id === selectedManualAttachRunId)) {
+        setSelectedManualAttachRunId(activeRuns[0]?.id ?? "");
+      }
+    } catch {
+      setManualAttachRuns([]);
+    }
+  }, [
+    getSyncRunRequestHeaders,
+    hasValidNumericPathParams,
+    isAdmin,
+    resolvedSeasonId,
+    seasonNumber,
+    selectedManualAttachRunId,
+    showIdForApi,
+    sourceScope,
+    syncRunId,
+  ]);
+
+  const handleManualAttachRun = useCallback(async () => {
+    const runId = selectedManualAttachRunId.trim();
+    if (!runId) return;
+    const selectedRun = manualAttachRuns.find((run) => run.id === runId) ?? null;
+    upsertAdminRunSession(syncRunFlowScope, {
+      runId,
+      flowKey: syncRunFlowKey,
+      status: "active",
+    });
+    if (selectedRun?.operation_id) {
+      upsertAdminOperationSession(syncOperationFlowScope, {
+        flowKey: syncRunFlowKey,
+        input: `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest`,
+        method: "POST",
+        operationId: selectedRun.operation_id,
+        runId,
+        status: "active",
+      });
+    }
+    setSyncResumeBanner(`Attached to run ${runId.slice(0, 8)} from another tab.`);
+    setSyncMessage(`Attached to run ${runId.slice(0, 8)}.`);
+    setSyncError(null);
+    setSyncPollError(null);
+    setSyncingComments(true);
+    setSyncRunId(runId);
+    setSyncRun(null);
+    setSyncJobs([]);
+    setSyncRunProgress(null);
+    setSyncWeekLiveHealth(null);
+    setSyncLogsExpanded(false);
+    syncPollFailureCountRef.current = 0;
+    terminalCoverageFailureCountRef.current = 0;
+    missingRunConsecutiveCountRef.current = 0;
+    syncStartTimeRef.current = Date.now();
+    setSyncStartedAt(new Date(syncStartTimeRef.current));
+    await fetchSyncProgress(runId, {
+      preserveLastGoodJobsIfEmpty: true,
+      preserveLastGoodRunIfMissing: true,
+    }).catch(() => undefined);
+  }, [
+    fetchSyncProgress,
+    manualAttachRuns,
+    selectedManualAttachRunId,
+    seasonNumber,
+    showIdForApi,
+    syncOperationFlowScope,
+    syncRunFlowKey,
+    syncRunFlowScope,
+  ]);
 
   const fetchCommentsCoverage = useCallback(
     async ({
@@ -5322,7 +5558,7 @@ export default function WeekDetailPage() {
       dateEnd: string;
       platforms: Array<Exclude<PlatformFilter, "all">> | null;
     }) => {
-      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const headers = await getSyncRunRequestHeaders();
       const coverageParams = new URLSearchParams({
         source_scope: sourceScope,
         timezone: SOCIAL_TIME_ZONE,
@@ -5347,7 +5583,7 @@ export default function WeekDetailPage() {
       }
       return await parseResponseJson<MirrorCoverageResponse>(response, "Failed to fetch mirror coverage");
     },
-    [resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+    [getSyncRunRequestHeaders, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
 
   const requeueMirrorJobs = useCallback(
@@ -5363,7 +5599,7 @@ export default function WeekDetailPage() {
       if (platforms.length === 0) {
         return { queuedJobs: 0, failed: 0 };
       }
-      const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+      const headers = await getSyncRunRequestHeaders();
       let queuedJobs = 0;
       let failed = 0;
       for (const platform of platforms) {
@@ -5399,11 +5635,11 @@ export default function WeekDetailPage() {
       }
       return { queuedJobs, failed };
     },
-    [resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+    [getSyncRunRequestHeaders, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
   );
 
   const fetchSyncWorkerHealth = useCallback(async () => {
-    const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
+    const headers = await getSyncRunRequestHeaders();
     const params = new URLSearchParams();
     if (resolvedSeasonId) {
       params.set("season_id", resolvedSeasonId);
@@ -5419,7 +5655,44 @@ export default function WeekDetailPage() {
       throw new Error(body.error ?? "Failed to fetch social worker health");
     }
     return await parseResponseJson<WorkerHealthPayload>(response, "Failed to fetch social worker health");
-  }, [resolvedSeasonId, seasonNumber, showIdForApi]);
+  }, [getSyncRunRequestHeaders, resolvedSeasonId, seasonNumber, showIdForApi]);
+
+  const fetchSyncWeekLiveHealth = useCallback(async () => {
+    if (!hasValidNumericPathParams) return null;
+    const headers = await getSyncRunRequestHeaders();
+    const params = new URLSearchParams({
+      source_scope: sourceScope,
+      timezone: SOCIAL_TIME_ZONE,
+    });
+    if (platformFilter !== "all") {
+      params.set("platforms", platformFilter);
+    }
+    if (resolvedSeasonId) {
+      params.set("season_id", resolvedSeasonId);
+    }
+    const response = await fetchWithTimeout(
+      `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}/live-health?${params.toString()}`,
+      { headers, cache: "no-store" },
+      REQUEST_TIMEOUT_MS.weekLiveHealth,
+      "Week live health request timed out",
+    );
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? "Failed to fetch week live health");
+    }
+    const payload = await parseResponseJson<WeekLiveHealthSnapshot>(response, "Failed to fetch week live health");
+    setSyncWeekLiveHealth(payload);
+    return payload;
+  }, [
+    getSyncRunRequestHeaders,
+    hasValidNumericPathParams,
+    platformFilter,
+    resolvedSeasonId,
+    seasonNumber,
+    showIdForApi,
+    sourceScope,
+    weekIndex,
+  ]);
 
   const syncAllCommentsForWeek = useCallback(async () => {
     if (!data) return;
@@ -5429,8 +5702,12 @@ export default function WeekDetailPage() {
       setSyncError(null);
       setSyncPollError(null);
       setSyncMessage(null);
+      setSyncResumeBanner(null);
       setSyncCoveragePreview(null);
       setSyncMirrorCoveragePreview(null);
+      setSyncWeekLiveHealth(null);
+      setSyncRunProgress(null);
+      setSyncLogsExpanded(false);
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
@@ -5475,7 +5752,7 @@ export default function WeekDetailPage() {
         Array.isArray(selectedPlatforms) &&
         selectedPlatforms.length === 1 &&
         selectedPlatforms[0] === "instagram";
-      const kickoffTargetHint = isRhoslcInstagramSync ? " · targets @bravotv + @bravowwhl · #RHOSLC" : "";
+      const kickoffTargetHint = isRhoslcInstagramSync ? " · #RHOSLC" : "";
       setSyncMessage(
         `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${
           SOCIAL_FULL_SYNC_MIRROR_ENABLED
@@ -5497,6 +5774,8 @@ export default function WeekDetailPage() {
       setSyncError(
         message,
       );
+      clearAdminOperationSession(syncOperationFlowScope);
+      clearAdminRunSession(syncRunFlowScope);
       setSyncingComments(false);
       syncSessionStateRef.current = null;
     }
@@ -5508,8 +5787,63 @@ export default function WeekDetailPage() {
     isRhoslcSeason,
     platformFilter,
     queueSyncPass,
+    syncOperationFlowScope,
+    syncRunFlowScope,
     sourceScope,
   ]);
+
+  useEffect(() => {
+    if (!hasValidNumericPathParams || !isAdmin) return;
+    if (!showIdForApi || !seasonNumber || !weekIndex) return;
+    if (syncingComments || syncRunId) return;
+    if (syncResumeAttemptedForScopeRef.current === syncRunFlowScope) return;
+    syncResumeAttemptedForScopeRef.current = syncRunFlowScope;
+    const resumableRun = getAutoResumableAdminRunSession(syncRunFlowScope);
+    const resumableOperation = getAutoResumableAdminOperationSession(syncOperationFlowScope);
+    const resumedRunId = resumableRun?.runId ?? resumableOperation?.runId ?? null;
+    if (!resumedRunId) return;
+    const resumedStartedAtMs = resumableRun?.startedAtMs ?? Date.now();
+    setSyncResumeBanner(`Resumed same-tab run ${resumedRunId.slice(0, 8)}.`);
+    setSyncMessage(`Reconnected to run ${resumedRunId.slice(0, 8)} from this tab.`);
+    setSyncError(null);
+    setSyncPollError(null);
+    setSyncingComments(true);
+    setSyncRunId(resumedRunId);
+    setSyncRun(null);
+    setSyncJobs([]);
+    setSyncRunProgress(null);
+    setSyncWeekLiveHealth(null);
+    setSyncLogsExpanded(false);
+    syncPollFailureCountRef.current = 0;
+    terminalCoverageFailureCountRef.current = 0;
+    missingRunConsecutiveCountRef.current = 0;
+    syncStartTimeRef.current = resumedStartedAtMs;
+    setSyncStartedAt(new Date(resumedStartedAtMs));
+    void fetchSyncProgress(resumedRunId, {
+      preserveLastGoodJobsIfEmpty: true,
+      preserveLastGoodRunIfMissing: true,
+    }).catch(() => undefined);
+  }, [
+    fetchSyncProgress,
+    hasValidNumericPathParams,
+    isAdmin,
+    seasonNumber,
+    showIdForApi,
+    syncOperationFlowScope,
+    syncRunFlowScope,
+    syncRunId,
+    syncingComments,
+    weekIndex,
+  ]);
+
+  useEffect(() => {
+    if (!hasValidNumericPathParams || !isAdmin) return;
+    void fetchManualAttachRunCandidates();
+    const intervalId = window.setInterval(() => {
+      void fetchManualAttachRunCandidates();
+    }, 20_000);
+    return () => window.clearInterval(intervalId);
+  }, [fetchManualAttachRunCandidates, hasValidNumericPathParams, isAdmin]);
 
   useEffect(() => {
     if (!syncRunId || !syncingComments) return;
@@ -5523,6 +5857,7 @@ export default function WeekDetailPage() {
     const generation = ++syncPollGenerationRef.current;
 
     const nextPollDelayMs = (failureCount: number): number => {
+      if (failureCount <= 0) return SYNC_ACTIVE_POLL_INTERVAL_MS;
       const index = Math.min(failureCount, SYNC_POLL_BACKOFF_MS.length - 1);
       return SYNC_POLL_BACKOFF_MS[index];
     };
@@ -5541,6 +5876,17 @@ export default function WeekDetailPage() {
         setSyncLastSuccessAt(new Date());
         const currentRun = snapshot.run;
         if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
+          const terminalSessionStatus =
+            currentRun.status === "cancelled"
+              ? "cancelled"
+              : currentRun.status === "failed"
+                ? "failed"
+                : "completed";
+          markAdminOperationSessionStatus(syncOperationFlowScope, terminalSessionStatus);
+          markAdminRunSessionStatus(
+            syncRunFlowScope,
+            terminalSessionStatus,
+          );
           const session = syncSessionStateRef.current;
           const summary = currentRun.summary ?? {};
           const completedJobs = Number(summary.completed_jobs ?? 0);
@@ -5709,6 +6055,8 @@ export default function WeekDetailPage() {
         if (isAbortError(err)) return;
         const message = err instanceof Error ? err.message : "Failed to refresh sync progress";
         if (message === "Run no longer available") {
+          markAdminOperationSessionStatus(syncOperationFlowScope, "failed");
+          markAdminRunSessionStatus(syncRunFlowScope, "failed");
           setSyncPollError(message);
           setSyncMessage(message);
           setSyncingComments(false);
@@ -5748,9 +6096,36 @@ export default function WeekDetailPage() {
     sortDir,
     sortField,
     syncRunId,
+    syncOperationFlowScope,
+    syncRunFlowScope,
     syncStartedAt,
     syncingComments,
   ]);
+
+  useEffect(() => {
+    if (!syncingComments || !hasValidNumericPathParams) return;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const pollLiveHealth = async () => {
+      if (cancelled) return;
+      try {
+        await fetchSyncWeekLiveHealth();
+      } catch {
+        // Keep sync polling resilient when live-health is temporarily unavailable.
+      }
+      if (cancelled) return;
+      timeoutId = setTimeout(() => {
+        void pollLiveHealth();
+      }, SYNC_ACTIVE_POLL_INTERVAL_MS);
+    };
+
+    void pollLiveHealth();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [fetchSyncWeekLiveHealth, hasValidNumericPathParams, syncingComments]);
 
   useEffect(() => {
     if (!syncingComments && syncPass !== 0) {
@@ -6365,20 +6740,115 @@ export default function WeekDetailPage() {
     return filteredCommentCoverage;
   }, [filteredCommentCoverage, syncFilteredCommentCoverage, syncingComments]);
 
+  const syncStageProgress = useMemo(() => {
+    const byStage: Record<string, StageProgressSnapshot> = {};
+    if (syncRunProgress?.stages && Object.keys(syncRunProgress.stages).length > 0) {
+      for (const [stage, bucket] of Object.entries(syncRunProgress.stages)) {
+        byStage[stage] = {
+          total: Number(bucket.jobs_total ?? 0),
+          completed: Number(bucket.jobs_completed ?? 0),
+          failed: Number(bucket.jobs_failed ?? 0),
+          active: Number(bucket.jobs_active ?? 0),
+          scraped: Number(bucket.scraped_count ?? 0),
+          saved: Number(bucket.saved_count ?? 0),
+        };
+      }
+    }
+
+    if (Object.keys(byStage).length === 0) {
+      const fallback: Record<string, StageProgressSnapshot> = {};
+      for (const job of syncJobs) {
+        const stage = String(getJobStage(job) || "posts").trim().toLowerCase() || "posts";
+        const current = fallback[stage] ?? {
+          total: 0,
+          completed: 0,
+          failed: 0,
+          active: 0,
+          scraped: 0,
+          saved: 0,
+        };
+        current.total += 1;
+        if (job.status === "completed") current.completed += 1;
+        else if (job.status === "failed") current.failed += 1;
+        else if (ACTIVE_RUN_STATUSES.has(job.status)) current.active += 1;
+        const stageCounters = getJobStageCounters(job);
+        current.scraped += stageCounters ? stageCounters.posts + stageCounters.comments : Number(job.items_found ?? 0);
+        const persistCounters = getJobPersistCounters(job);
+        if (persistCounters) {
+          current.saved += persistCounters.posts_upserted + persistCounters.comments_upserted;
+        }
+        fallback[stage] = current;
+      }
+      Object.assign(byStage, fallback);
+    }
+
+    for (const requiredStage of ["posts", "comments", "media_mirror", "comment_media_mirror", "other"]) {
+      if (!byStage[requiredStage]) {
+        byStage[requiredStage] = { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 };
+      }
+    }
+    return byStage;
+  }, [syncJobs, syncRunProgress?.stages]);
+
+  const syncStageEntries = useMemo(() => {
+    const stageOrder: Record<string, number> = {
+      posts: 0,
+      comments: 1,
+      media_mirror: 2,
+      comment_media_mirror: 3,
+      other: 99,
+    };
+    return Object.entries(syncStageProgress)
+      .filter(([stage, stats]) => {
+        if (stats.total > 0 || stats.active > 0 || stats.scraped > 0 || stats.saved > 0) return true;
+        return stage === "posts" || stage === "comments";
+      })
+      .sort(([left], [right]) => {
+        const leftOrder = stageOrder[left] ?? 50;
+        const rightOrder = stageOrder[right] ?? 50;
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+        return left.localeCompare(right);
+      });
+  }, [syncStageProgress]);
+
   const syncProgress = useMemo(() => {
-    const summary = syncRun?.summary ?? {};
+    const summary = syncRunProgress?.summary ?? syncRun?.summary_normalized ?? syncRun?.summary ?? {};
     const fallbackCompleted = syncJobs.filter((job) => job.status === "completed").length;
     const fallbackFailed = syncJobs.filter((job) => job.status === "failed").length;
     const fallbackActive = syncJobs.filter((job) => ACTIVE_RUN_STATUSES.has(job.status)).length;
     const fallbackTotal = syncJobs.length;
-    const fallbackItems = syncJobs.reduce((sum, job) => sum + Number(job.items_found ?? 0), 0);
-    const completed = Number(summary.completed_jobs ?? fallbackCompleted);
-    const failed = Number(summary.failed_jobs ?? fallbackFailed);
-    const total = Number(summary.total_jobs ?? fallbackTotal);
-    const active = Number(summary.active_jobs ?? fallbackActive);
-    const items = Number(summary.items_found_total ?? fallbackItems);
+    const stageStats = Object.values(syncStageProgress);
+    const stageActive = stageStats.reduce((sum, stage) => sum + stage.active, 0);
+    const stageItems = stageStats.reduce((sum, stage) => sum + stage.scraped, 0);
+    const stageTelemetry = stageStats.reduce((sum, stage) => sum + stage.scraped + stage.saved, 0);
+    const completedFromSummary = Number(summary.completed_jobs ?? Number.NaN);
+    const failedFromSummary = Number(summary.failed_jobs ?? Number.NaN);
+    const totalFromSummary = Number(summary.total_jobs ?? Number.NaN);
+    const activeFromSummary = Number(summary.active_jobs ?? Number.NaN);
+    const completed = Number.isFinite(completedFromSummary)
+      ? Math.max(0, Math.max(completedFromSummary, fallbackCompleted))
+      : Math.max(0, fallbackCompleted);
+    const failed = Number.isFinite(failedFromSummary)
+      ? Math.max(0, Math.max(failedFromSummary, fallbackFailed))
+      : Math.max(0, fallbackFailed);
+    const active = Number.isFinite(activeFromSummary) && activeFromSummary > 0
+      ? Math.max(0, activeFromSummary)
+      : Math.max(0, Math.max(fallbackActive, stageActive));
+    const totalBase = Number.isFinite(totalFromSummary) && totalFromSummary > 0 ? totalFromSummary : fallbackTotal;
+    const total = Math.max(totalBase, completed + failed + active);
+    const itemsFromSummary = Number(summary.items_found_total ?? Number.NaN);
+    const items = Number.isFinite(itemsFromSummary) ? Math.max(0, Math.max(itemsFromSummary, stageItems)) : stageItems;
     const finished = completed + failed;
-    const pct = total > 0 ? Math.round((finished / total) * 100) : syncingComments ? 5 : 100;
+    const basePct = total > 0 ? Math.round((finished / total) * 100) : syncingComments ? 1 : 100;
+    const liveBoost = active > 0 ? Math.min(35, Math.max(1, Math.round(Math.log10(stageTelemetry + 10) * 8))) : 0;
+    const pct =
+      total > 0
+        ? active > 0
+          ? Math.min(99, Math.max(basePct, basePct + liveBoost))
+          : Math.min(100, basePct)
+        : syncingComments
+          ? Math.min(99, 5 + liveBoost)
+          : 100;
     return {
       completed,
       failed,
@@ -6388,252 +6858,120 @@ export default function WeekDetailPage() {
       finished,
       pct: Math.max(0, Math.min(100, pct)),
     };
-  }, [syncJobs, syncRun, syncingComments]);
-
-  const syncStageProgress = useMemo(() => {
-    const fromSummary = syncRun?.summary?.stage_counts ?? {};
-    const parseStage = (stageName: string) => {
-      const stage = fromSummary[stageName] ?? {};
-      return {
-        total: Number(stage.total ?? 0),
-        completed: Number(stage.completed ?? 0),
-        failed: Number(stage.failed ?? 0),
-        active: Number(stage.active ?? 0),
-        scraped: 0,
-        saved: 0,
-      };
-    };
-    let posts = parseStage("posts");
-    let comments = parseStage("comments");
-    let mediaMirror = parseStage("media_mirror");
-    const fallback = {
-      posts: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
-      comments: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
-      mediaMirror: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
-    };
-    for (const job of syncJobs) {
-      const stageName = getJobStage(job);
-      const stage =
-        stageName === "comments"
-          ? "comments"
-          : stageName === "media_mirror"
-            ? "mediaMirror"
-            : "posts";
-      const current = fallback[stage];
-      current.total += 1;
-      if (job.status === "completed") current.completed += 1;
-      else if (job.status === "failed") current.failed += 1;
-      else if (ACTIVE_RUN_STATUSES.has(job.status)) current.active += 1;
-
-      const stageCounters = getJobStageCounters(job);
-      if (stageCounters) {
-        current.scraped += stageCounters.posts + stageCounters.comments;
-      } else {
-        current.scraped += Number(job.items_found ?? 0);
-      }
-
-      const persistCounters = getJobPersistCounters(job);
-      if (persistCounters) {
-        current.saved += persistCounters.posts_upserted + persistCounters.comments_upserted;
-      }
-    }
-    if (posts.total === 0 && comments.total === 0 && mediaMirror.total === 0) {
-      posts = fallback.posts;
-      comments = fallback.comments;
-      mediaMirror = fallback.mediaMirror;
-    } else {
-      posts.scraped = fallback.posts.scraped;
-      posts.saved = fallback.posts.saved;
-      comments.scraped = fallback.comments.scraped;
-      comments.saved = fallback.comments.saved;
-      mediaMirror.scraped = fallback.mediaMirror.scraped;
-      mediaMirror.saved = fallback.mediaMirror.saved;
-    }
-    return { posts, comments, mediaMirror };
-  }, [syncJobs, syncRun?.summary?.stage_counts]);
+  }, [syncJobs, syncRun, syncRunProgress?.summary, syncStageProgress, syncingComments]);
 
   const syncRunnerCount = useMemo(() => {
+    const lanes = syncRunProgress?.worker_runtime?.scheduler_lanes ?? [];
+    if (lanes.length > 0) return lanes.length;
     const runConfig = asRecord(syncRun?.config);
     const parsed = Number(runConfig?.runner_count ?? 1);
     if (!Number.isFinite(parsed) || parsed < 1) return 1;
     return Math.floor(parsed);
-  }, [syncRun?.config]);
+  }, [syncRun?.config, syncRunProgress?.worker_runtime?.scheduler_lanes]);
+
+  const syncRuntimeLanes = useMemo(() => {
+    const lanes = (syncRunProgress?.worker_runtime?.scheduler_lanes ?? [])
+      .map((lane) => String(lane || "").trim())
+      .filter((lane) => lane.length > 0);
+    if (lanes.length > 0) return lanes;
+    return syncRunnerCount >= 2 ? ["A", "B"] : ["A"];
+  }, [syncRunProgress?.worker_runtime?.scheduler_lanes, syncRunnerCount]);
+
+  const syncActiveWorkersNow = useMemo(() => {
+    return Number(syncRunProgress?.worker_runtime?.active_workers_now ?? 0);
+  }, [syncRunProgress?.worker_runtime?.active_workers_now]);
 
   const syncHandleProgressCards = useMemo((): HandleJobProgressCard[] => {
     const stageSortOrder: Record<string, number> = {
       posts: 0,
       comments: 1,
       media_mirror: 2,
+      comment_media_mirror: 3,
+      other: 99,
     };
-    type MutableCard = {
-      platform: string;
-      handle: string;
-      runnerLanes: Set<string>;
-      totals: StageProgressSnapshot;
-      stages: Map<string, StageProgressSnapshot>;
-    };
-    const makeSnapshot = (): StageProgressSnapshot => ({
-      total: 0,
-      completed: 0,
-      failed: 0,
-      active: 0,
-      scraped: 0,
-      saved: 0,
-    });
-    const applyJobCounts = (snapshot: StageProgressSnapshot, job: SocialJob) => {
-      snapshot.total += 1;
-      if (job.status === "completed") snapshot.completed += 1;
-      else if (job.status === "failed") snapshot.failed += 1;
-      else if (ACTIVE_RUN_STATUSES.has(job.status)) snapshot.active += 1;
-    };
-    const cards = new Map<string, MutableCard>();
-    for (const job of syncJobs) {
-      const platform = String(job.platform || "")
-        .trim()
-        .toLowerCase();
-      if (!platform) continue;
-      const handle = getJobAccountHandle(job);
-      if (!handle) continue;
-      const cardId = `${platform}:${handle}`;
-      let card = cards.get(cardId);
-      if (!card) {
-        card = {
+    if (syncRunProgress?.per_handle && syncRunProgress.per_handle.length > 0) {
+      const cards = new Map<string, HandleJobProgressCard>();
+      for (const entry of syncRunProgress.per_handle) {
+        const platform = String(entry.platform || "").trim().toLowerCase() || "unknown";
+        const handle = normalizeHandle(entry.account_handle || "unknown");
+        const cardId = `${platform}:${handle}`;
+        const existing = cards.get(cardId) ?? {
+          id: cardId,
           platform,
+          platformLabel: PLATFORM_LABELS[platform] ?? platform,
           handle,
-          runnerLanes: new Set<string>(),
-          totals: makeSnapshot(),
-          stages: new Map<string, StageProgressSnapshot>(),
+          handleLabel: formatHandleLabel(handle),
+          runnerLanes: [...syncRuntimeLanes],
+          totals: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
+          stages: [],
         };
-        cards.set(cardId, card);
+        const stageSnapshot: HandleStageProgressSnapshot = {
+          stage: entry.stage,
+          total: Number(entry.jobs_total ?? 0),
+          completed: Number(entry.jobs_completed ?? 0),
+          failed: Number(entry.jobs_failed ?? 0),
+          active: Number(entry.jobs_active ?? 0),
+          scraped: Number(entry.scraped_count ?? 0),
+          saved: Number(entry.saved_count ?? 0),
+        };
+        existing.totals.total += stageSnapshot.total;
+        existing.totals.completed += stageSnapshot.completed;
+        existing.totals.failed += stageSnapshot.failed;
+        existing.totals.active += stageSnapshot.active;
+        existing.totals.scraped += stageSnapshot.scraped;
+        existing.totals.saved += stageSnapshot.saved;
+        existing.stages.push(stageSnapshot);
+        cards.set(cardId, existing);
       }
-
-      const stage = String(getJobStage(job) || "posts")
-        .trim()
-        .toLowerCase();
-      const stageKey = stage || "posts";
-      let stageSnapshot = card.stages.get(stageKey);
-      if (!stageSnapshot) {
-        stageSnapshot = makeSnapshot();
-        card.stages.set(stageKey, stageSnapshot);
-      }
-
-      applyJobCounts(card.totals, job);
-      applyJobCounts(stageSnapshot, job);
-
-      const stageCounters = getJobStageCounters(job);
-      const stageScraped = stageCounters ? stageCounters.posts + stageCounters.comments : Number(job.items_found ?? 0);
-      stageSnapshot.scraped += stageScraped;
-      card.totals.scraped += stageScraped;
-
-      const persistCounters = getJobPersistCounters(job);
-      if (persistCounters) {
-        const stageSaved = persistCounters.posts_upserted + persistCounters.comments_upserted;
-        stageSnapshot.saved += stageSaved;
-        card.totals.saved += stageSaved;
-      }
-
-      const runnerLane = getJobRunnerLane(job);
-      if (runnerLane) {
-        card.runnerLanes.add(runnerLane);
-      }
+      return [...cards.values()]
+        .map((card) => ({
+          ...card,
+          stages: [...card.stages].sort((left, right) => {
+            const leftOrder = stageSortOrder[left.stage] ?? 50;
+            const rightOrder = stageSortOrder[right.stage] ?? 50;
+            if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+            return left.stage.localeCompare(right.stage);
+          }),
+        }))
+        .sort((left, right) => {
+          if (left.platform !== right.platform) return left.platform.localeCompare(right.platform);
+          return left.handle.localeCompare(right.handle);
+        });
     }
 
-    return [...cards.entries()]
-      .map(([id, card]) => {
-        const stageEntries: HandleStageProgressSnapshot[] = [...card.stages.entries()]
-          .sort(([left], [right]) => {
-            const leftOrder = stageSortOrder[left] ?? 99;
-            const rightOrder = stageSortOrder[right] ?? 99;
-            if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-            return left.localeCompare(right);
-          })
-          .map(([stage, snapshot]) => ({
-            stage,
-            ...snapshot,
-          }));
-        return {
-          id,
-          platform: card.platform,
-          platformLabel: PLATFORM_LABELS[card.platform] ?? card.platform,
-          handle: card.handle,
-          handleLabel: formatHandleLabel(card.handle),
-          runnerLanes: [...card.runnerLanes].sort(),
-          totals: card.totals,
-          stages: stageEntries,
-        };
-      })
-      .sort((left, right) => {
-        if (left.platform !== right.platform) return left.platform.localeCompare(right.platform);
-        return left.handle.localeCompare(right.handle);
-      });
-  }, [syncJobs]);
+    return [];
+  }, [syncRunProgress?.per_handle, syncRuntimeLanes]);
 
   const syncLogs = useMemo(() => {
-    return [...syncJobs]
-      .sort((a, b) => {
-        const aTs = Date.parse(a.completed_at ?? a.started_at ?? a.created_at ?? "");
-        const bTs = Date.parse(b.completed_at ?? b.started_at ?? b.created_at ?? "");
-        return (Number.isNaN(bTs) ? 0 : bTs) - (Number.isNaN(aTs) ? 0 : aTs);
-      })
-      .slice(0, 10)
-      .map((job) => {
-        const stageName = getJobStage(job);
-        const stage = stageName === "comments" ? "comments" : stageName === "media_mirror" ? "media_mirror" : "posts";
-        const platform = PLATFORM_LABELS[job.platform] ?? job.platform;
-        const accountHandle = typeof job.config?.account === "string" ? normalizeHandle(job.config.account) : "";
-        const account = accountHandle ? ` @${accountHandle}` : "";
-        const timestampRaw = job.completed_at ?? job.started_at ?? job.created_at ?? null;
-        const timestamp = timestampRaw
-          ? new Date(timestampRaw).toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-              hour12: true,
-              timeZone: SOCIAL_TIME_ZONE,
-            })
-          : "--:--";
-        const counters = getJobStageCounters(job);
-        const persistCounters = getJobPersistCounters(job);
-        const activitySummary = getJobActivitySummary(job);
-        const retrievalMeta = (job.metadata as Record<string, unknown> | undefined)?.retrieval_meta as
-          | Record<string, unknown>
-          | undefined;
-        const refreshDecisions = retrievalMeta?.comment_refresh_decisions as Record<string, unknown> | undefined;
-        const upToDateCount =
-          refreshDecisions && typeof refreshDecisions.up_to_date === "number" ? Number(refreshDecisions.up_to_date) : 0;
-        const countersLabel = counters ? ` · ${counters.posts}p/${counters.comments}c` : "";
-        const persistLabel = persistCounters
-          ? ` · saved ${persistCounters.posts_upserted}p/${persistCounters.comments_upserted}c`
-          : "";
-        const activityLabel = activitySummary ? ` · ${activitySummary}` : "";
-        const skippedLabel = upToDateCount > 0 ? ` · ${upToDateCount} up-to-date skipped` : "";
-        const itemsLabel =
-          !counters && typeof job.items_found === "number" ? ` · ${job.items_found.toLocaleString()} items` : "";
-        const errorLabel = job.status === "failed" && job.error_message ? ` · ${job.error_message}` : "";
-        return {
-          id: job.id,
-          line: `${timestamp} · ${platform}${account} ${stage} ${job.status}${countersLabel}${itemsLabel}${persistLabel}${activityLabel}${skippedLabel}${errorLabel}`,
-        };
-      });
-  }, [syncJobs]);
+    if (syncRunProgress?.recent_log && syncRunProgress.recent_log.length > 0) {
+      return syncRunProgress.recent_log
+        .slice(0, 20)
+        .map((entry) => {
+          const line = String(entry.line || "")
+            .replace(/ · 0p\/0c/g, "")
+            .replace(/ · saved 0p\/0c/g, "")
+            .trim();
+          return {
+            id: entry.id,
+            line,
+          };
+        })
+        .filter((entry) => entry.line.length > 0);
+    }
+    return [];
+  }, [syncRunProgress?.recent_log]);
 
-  const displayedTotals = useMemo(() => {
-    if (!syncingComments) return filteredTotals;
-    return {
-      ...filteredTotals,
-      posts: Math.max(filteredTotals.posts, Number(syncStageProgress.posts.scraped || 0)),
-      total_comments: Math.max(filteredTotals.total_comments, Number(syncStageProgress.comments.scraped || 0)),
-    };
-  }, [filteredTotals, syncStageProgress.comments.scraped, syncStageProgress.posts.scraped, syncingComments]);
+  const displayedTotals = filteredTotals;
 
   const syncAccountsByPlatform = useMemo(() => {
     const byPlatform = new Map<string, Set<string>>();
-    for (const job of syncJobs) {
-      const platform = String(job.platform || "").trim().toLowerCase();
-      if (!platform) continue;
-      const account = typeof job.config?.account === "string" ? formatHandleLabel(job.config.account) : "";
-      if (!account) continue;
+    const perHandleRows = syncRunProgress?.per_handle ?? [];
+    for (const row of perHandleRows) {
+      const platform = String(row.platform || "").trim().toLowerCase();
+      const handle = formatHandleLabel(row.account_handle || "");
+      if (!platform || !handle) continue;
       if (!byPlatform.has(platform)) byPlatform.set(platform, new Set<string>());
-      byPlatform.get(platform)?.add(account);
+      byPlatform.get(platform)?.add(handle);
     }
     const chunks = [...byPlatform.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
@@ -6642,62 +6980,29 @@ export default function WeekDetailPage() {
         return `${PLATFORM_LABELS[platform] ?? platform}: ${sortedHandles.join(", ")}`;
       });
     return chunks.join(" · ");
-  }, [syncJobs]);
+  }, [syncRunProgress?.per_handle]);
 
-  const syncStageNarrative = useMemo(() => {
-    const done: string[] = [];
-    const running: string[] = [];
-    const waiting: string[] = [];
+  const syncWeekDayAccountRows = useMemo(() => {
+    return [...(syncWeekLiveHealth?.day_account_rows ?? [])].sort((left, right) => {
+      if (left.day !== right.day) return left.day.localeCompare(right.day);
+      if (left.platform !== right.platform) return left.platform.localeCompare(right.platform);
+      return left.account.localeCompare(right.account);
+    });
+  }, [syncWeekLiveHealth?.day_account_rows]);
 
-    const postsFinished = syncStageProgress.posts.completed + syncStageProgress.posts.failed;
-    const commentsFinished = syncStageProgress.comments.completed + syncStageProgress.comments.failed;
-    const mirrorFinished = syncStageProgress.mediaMirror.completed + syncStageProgress.mediaMirror.failed;
-
-    if (syncStageProgress.posts.total > 0) {
-      if (postsFinished >= syncStageProgress.posts.total) {
-        done.push(`Posts ${postsFinished}/${syncStageProgress.posts.total} complete`);
-      } else if (syncStageProgress.posts.active > 0) {
-        running.push(`Posts running (${syncStageProgress.posts.active} active)`);
-      } else {
-        waiting.push("Posts queued");
-      }
-    } else {
-      waiting.push("Posts stage waiting for jobs");
-    }
-
-    if (syncStageProgress.comments.total > 0) {
-      if (commentsFinished >= syncStageProgress.comments.total) {
-        done.push(`Comments ${commentsFinished}/${syncStageProgress.comments.total} complete`);
-      } else if (syncStageProgress.comments.active > 0) {
-        running.push(`Comments running (${syncStageProgress.comments.active} active)`);
-      } else {
-        waiting.push("Comments queued");
-      }
-    } else if (syncStageProgress.posts.total > 0 && postsFinished < syncStageProgress.posts.total) {
-      waiting.push("Comments stage waiting on posts stage");
-    }
-
-    if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
-      if (syncStageProgress.mediaMirror.total > 0) {
-        if (mirrorFinished >= syncStageProgress.mediaMirror.total) {
-          done.push(`Mirror ${mirrorFinished}/${syncStageProgress.mediaMirror.total} complete`);
-        } else if (syncStageProgress.mediaMirror.active > 0) {
-          running.push(`Mirror running (${syncStageProgress.mediaMirror.active} active)`);
-        } else {
-          waiting.push("Mirror queued");
-        }
-      } else {
-        waiting.push("Mirror stage waiting for jobs");
-      }
-    }
-
-    const commentScanHint =
-      syncStageProgress.comments.active > 0 && syncStageProgress.comments.scraped === 0
-        ? "Comments worker is scanning matched posts. It can stay at 0 while it checks each thread for new comments."
-        : null;
-
-    return { done, running, waiting, commentScanHint };
-  }, [syncStageProgress]);
+  const syncWeekAssetRows = useMemo(() => {
+    const order: Record<string, number> = {
+      images: 0,
+      videos: 1,
+      captions: 2,
+      profile_pictures: 3,
+    };
+    return [...(syncWeekLiveHealth?.asset_health ?? [])].sort((left, right) => {
+      const leftOrder = order[left.asset] ?? 99;
+      const rightOrder = order[right.asset] ?? 99;
+      return leftOrder - rightOrder;
+    });
+  }, [syncWeekLiveHealth?.asset_health]);
 
   const syncStepStatus = useMemo(() => {
     const queueStatus = (() => {
@@ -6718,13 +7023,12 @@ export default function WeekDetailPage() {
       }
       return { label: "Queued", toneClass: "bg-gray-100 text-gray-600" };
     })();
-    return {
-      queue: queueStatus,
-      posts: getStageStatus(syncStageProgress.posts),
-      comments: getStageStatus(syncStageProgress.comments),
-      mediaMirror: getStageStatus(syncStageProgress.mediaMirror),
-    };
-  }, [syncProgress.active, syncRun, syncStageProgress.comments, syncStageProgress.mediaMirror, syncStageProgress.posts]);
+    const stages: Record<string, { label: string; toneClass: string }> = {};
+    for (const [stageKey, stage] of Object.entries(syncStageProgress)) {
+      stages[stageKey] = getStageStatus(stage);
+    }
+    return { queue: queueStatus, stages };
+  }, [syncProgress.active, syncRun, syncStageProgress]);
 
   const buildSeasonTabHref = useCallback(
     (tabId: SeasonTabId): string => {
@@ -7014,6 +7318,44 @@ export default function WeekDetailPage() {
             </div>
           )}
 
+          {syncResumeBanner && (
+            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+              {syncResumeBanner}
+            </div>
+          )}
+
+          {!syncingComments && manualAttachRuns.length > 0 && (
+            <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+              <p className="font-medium text-zinc-800">Manual attach available</p>
+              <p className="mt-1 text-xs text-zinc-600">
+                Active runs from other tabs are listed here. Auto-resume is restricted to this tab only.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <select
+                  value={selectedManualAttachRunId}
+                  onChange={(event) => setSelectedManualAttachRunId(event.target.value)}
+                  className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800"
+                >
+                  {manualAttachRuns.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {run.id.slice(0, 8)} · {formatRunStatus(run.status)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleManualAttachRun();
+                  }}
+                  disabled={!selectedManualAttachRunId}
+                  className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Attach to selected run
+                </button>
+              </div>
+            </div>
+          )}
+
           {(syncRun || syncingComments) && (
             <div className="mb-5 rounded-lg border border-gray-200 bg-white p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -7071,7 +7413,7 @@ export default function WeekDetailPage() {
                 />
               </div>
 
-              <div className={`mt-3 grid gap-2 ${SOCIAL_FULL_SYNC_MIRROR_ENABLED ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+              <div className={`mt-3 grid gap-2 ${syncStageEntries.length >= 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
                 <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
                   <div className="flex items-center justify-between gap-2">
                     <div className="font-medium text-gray-700">Step 1: Queue + Start</div>
@@ -7085,76 +7427,26 @@ export default function WeekDetailPage() {
                       : "Queued"}
                   </div>
                 </div>
-                <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-medium text-gray-700">Step 2: Posts Stage</div>
-                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.posts.toneClass}`}>
-                      {syncStepStatus.posts.label}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-gray-600 tabular-nums">
-                    {syncStageProgress.posts.completed + syncStageProgress.posts.failed}/
-                    {syncStageProgress.posts.total || "?"} complete
-                    {syncStageProgress.posts.active > 0 ? ` · ${syncStageProgress.posts.active} active` : ""}
-                    {` · ${fmtNum(syncStageProgress.posts.scraped)} scraped`}
-                    {syncStageProgress.posts.saved > 0 ? ` · saved ${fmtNum(syncStageProgress.posts.saved)}` : ""}
-                  </div>
-                </div>
-                <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-medium text-gray-700">Step 3: Comments Stage</div>
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.comments.toneClass}`}
-                    >
-                      {syncStepStatus.comments.label}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-gray-600 tabular-nums">
-                    {syncStageProgress.comments.completed + syncStageProgress.comments.failed}/
-                    {syncStageProgress.comments.total || "?"} complete
-                    {syncStageProgress.comments.active > 0 ? ` · ${syncStageProgress.comments.active} active` : ""}
-                    {` · ${fmtNum(syncStageProgress.comments.scraped)} scraped`}
-                    {syncStageProgress.comments.saved > 0 ? ` · saved ${fmtNum(syncStageProgress.comments.saved)}` : ""}
-                  </div>
-                </div>
-                {SOCIAL_FULL_SYNC_MIRROR_ENABLED && (
-                  <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+                {syncStageEntries.map(([stageKey, stage], stageIndex) => (
+                  <div key={`sync-stage-${stageKey}`} className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-gray-700">Step 4: Mirror Stage</div>
+                      <div className="font-medium text-gray-700">Step {stageIndex + 2}: {formatSyncStageLabel(stageKey)} Stage</div>
                       <span
-                        className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.mediaMirror.toneClass}`}
+                        className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${syncStepStatus.stages[stageKey]?.toneClass ?? "bg-gray-100 text-gray-600"}`}
                       >
-                        {syncStepStatus.mediaMirror.label}
+                        {syncStepStatus.stages[stageKey]?.label ?? "Queued"}
                       </span>
                     </div>
-                    <div className="mt-1 text-gray-600 tabular-nums">
-                      {syncStageProgress.mediaMirror.completed + syncStageProgress.mediaMirror.failed}/
-                      {syncStageProgress.mediaMirror.total || "?"} complete
-                      {syncStageProgress.mediaMirror.active > 0 ? ` · ${syncStageProgress.mediaMirror.active} active` : ""}
+                    <div className="mt-1 text-gray-700 tabular-nums">
+                      {fmtNum(stage.scraped)} scraped · {fmtNum(stage.saved)} saved
+                    </div>
+                    <div className="mt-0.5 text-gray-500 tabular-nums">
+                      {stage.completed + stage.failed}/{stage.total || "?"} jobs
+                      {stage.active > 0 ? ` · ${stage.active} active` : ""}
+                      {stage.failed > 0 ? ` · ${stage.failed} failed` : ""}
                     </div>
                   </div>
-                )}
-              </div>
-
-              <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                {syncStageNarrative.done.length > 0 && (
-                  <p>
-                    <span className="font-medium text-gray-800">Done:</span> {syncStageNarrative.done.join(" · ")}
-                  </p>
-                )}
-                {syncStageNarrative.running.length > 0 && (
-                  <p className={syncStageNarrative.done.length > 0 ? "mt-1" : ""}>
-                    <span className="font-medium text-gray-800">In progress:</span> {syncStageNarrative.running.join(" · ")}
-                  </p>
-                )}
-                {syncStageNarrative.waiting.length > 0 && (
-                  <p className={syncStageNarrative.done.length > 0 || syncStageNarrative.running.length > 0 ? "mt-1" : ""}>
-                    <span className="font-medium text-gray-800">Waiting:</span> {syncStageNarrative.waiting.join(" · ")}
-                  </p>
-                )}
-                {syncStageNarrative.commentScanHint && (
-                  <p className="mt-1 text-blue-700">{syncStageNarrative.commentScanHint}</p>
-                )}
+                ))}
               </div>
 
               {syncMirrorCoveragePreview && (
@@ -7200,36 +7492,94 @@ export default function WeekDetailPage() {
                 </p>
               )}
 
-              {syncingComments && lastJobsFetchedAt && Date.now() - lastJobsFetchedAt > 30_000 && (
-                <p className="mt-2 text-xs text-amber-600">
-                  Job data may be stale (last updated {Math.round((Date.now() - lastJobsFetchedAt) / 1000)}s ago).
-                </p>
-              )}
-
               {syncLogs.length > 0 && (
                 <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-                  <p className="text-xs font-medium text-gray-700">Recent Run Log</p>
-                  <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
-                    {syncLogs.map((entry) => (
-                      <p key={entry.id} className="text-xs text-gray-600">
-                        {entry.line}
-                      </p>
-                    ))}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSyncLogsExpanded((current) => !current)}
+                    className="flex w-full items-center justify-between text-left text-xs font-medium text-gray-700"
+                  >
+                    <span>Recent Run Log</span>
+                    <span className="text-[11px] text-gray-500">
+                      {syncLogsExpanded ? "Collapse" : `Show ${syncLogs.length}`}
+                    </span>
+                  </button>
+                  {syncLogsExpanded && (
+                    <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+                      {syncLogs.map((entry) => (
+                        <p key={entry.id} className="text-xs text-gray-600">
+                          {entry.line}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
 
           {syncingComments && (
-            <div className="mb-5 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="mb-5 space-y-3">
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <h3 className="text-sm font-semibold text-gray-900">Day View</h3>
+                <p className="text-xs text-gray-500">Live by day and account (posts, comments, likes)</p>
+                {syncWeekDayAccountRows.length === 0 ? (
+                  <p className="mt-3 text-xs text-gray-500">Waiting for day/account telemetry...</p>
+                ) : (
+                  <div className="mt-3 max-h-48 overflow-y-auto rounded-md border border-gray-200">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="sticky top-0 bg-gray-50 text-gray-500">
+                        <tr>
+                          <th className="px-2 py-1.5 font-medium">Day</th>
+                          <th className="px-2 py-1.5 font-medium">Platform</th>
+                          <th className="px-2 py-1.5 font-medium">Account</th>
+                          <th className="px-2 py-1.5 text-right font-medium">Posts</th>
+                          <th className="px-2 py-1.5 text-right font-medium">Comments</th>
+                          <th className="px-2 py-1.5 text-right font-medium">Likes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {syncWeekDayAccountRows.map((row, index) => (
+                          <tr key={`${row.day}-${row.platform}-${row.account}-${index}`} className="border-t border-gray-100">
+                            <td className="px-2 py-1.5 tabular-nums text-gray-700">{row.day}</td>
+                            <td className="px-2 py-1.5 text-gray-700">{PLATFORM_LABELS[row.platform] ?? row.platform}</td>
+                            <td className="px-2 py-1.5 text-gray-700">{formatHandleLabel(row.account)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{fmtNum(row.posts)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{fmtNum(row.comments)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{fmtNum(row.likes)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <h3 className="text-sm font-semibold text-gray-900">Asset Health</h3>
+                <p className="text-xs text-gray-500">Scraped vs saved media and metadata</p>
+                {syncWeekAssetRows.length === 0 ? (
+                  <p className="mt-3 text-xs text-gray-500">Waiting for asset telemetry...</p>
+                ) : (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {syncWeekAssetRows.map((row) => (
+                      <div key={row.asset} className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+                        <p className="font-medium text-gray-700">{formatSyncStageLabel(row.asset)}</p>
+                        <p className="mt-1 tabular-nums text-gray-600">{fmtNum(row.scraped)} scraped</p>
+                        <p className="tabular-nums text-gray-600">{fmtNum(row.saved)} saved</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900">Per-Handle Job Progress</h3>
                   <p className="text-xs text-gray-500">
-                    {syncRunnerCount >= 2
-                      ? `Dual-runner mode (${syncRunnerCount} workers) · grouped by platform and handle`
-                      : "Grouped by platform and handle"}
+                    {syncRunnerCount >= 2 ? `Dual-runner mode (${syncRunnerCount} workers)` : "Single-runner mode (1 worker)"} ·
+                    {" "}lanes {syncRuntimeLanes.join(", ")} · {fmtNum(syncActiveWorkersNow)} active workers now
                   </p>
                 </div>
               </div>
@@ -7283,6 +7633,7 @@ export default function WeekDetailPage() {
                   ))}
                 </div>
               )}
+            </div>
             </div>
           )}
 

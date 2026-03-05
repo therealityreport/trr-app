@@ -40,7 +40,7 @@ type SocialJob = {
   id: string;
   run_id?: string | null;
   platform: string;
-  status: "queued" | "pending" | "retrying" | "running" | "completed" | "failed" | "cancelled";
+  status: "queued" | "pending" | "retrying" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
   job_type?: string;
   items_found?: number;
   error_message?: string | null;
@@ -55,7 +55,10 @@ type SocialJob = {
 
 type SocialRun = {
   id: string;
-  status: "queued" | "pending" | "retrying" | "running" | "completed" | "failed" | "cancelled";
+  operation_id?: string | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  status: "queued" | "pending" | "retrying" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
   source_scope?: string;
   initiated_by?: string | null;
   config?: Record<string, unknown>;
@@ -556,7 +559,7 @@ const isPlatformTab = (value: string | null | undefined): value is PlatformTab =
 const platformFilterFromTab = (tab: PlatformTab): "all" | Platform =>
   tab === "overview" ? "all" : tab;
 
-const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running"]);
+const ACTIVE_RUN_STATUSES = new Set<SocialRun["status"]>(["queued", "pending", "retrying", "running", "cancelling"]);
 const TERMINAL_RUN_STATUSES = new Set<SocialRun["status"]>(["completed", "failed", "cancelled"]);
 const COMMENT_SYNC_MAX_PASSES = 8;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
@@ -1124,6 +1127,9 @@ export const formatIngestErrorMessage = (payload: IngestProxyErrorPayload): stri
         ? ` (${workerHealth.reason})`
         : "";
     return `${upstreamMessage}${healthReason}. Start the social worker and retry; inline fallback only works in local/dev backend runtime.`;
+  }
+  if (upstreamCode === "SOCIAL_REMOTE_WORKER_REQUIRED") {
+    return `${upstreamMessage}. This ingest is remote-only for Instagram/TikTok. Start remote AWS workers and retry.`;
   }
 
   return upstreamMessage;
@@ -3393,6 +3399,9 @@ export default function SeasonSocialAnalyticsSection({
           fetch_replies: boolean;
           ingest_mode: IngestMode;
           sync_strategy: "incremental";
+          runner_strategy?: "single_runner" | "adaptive_dual_runner";
+          runner_count?: number;
+          window_shard_hours?: number;
           comment_refresh_policy?: CommentRefreshPolicy;
           comment_anchor_source_ids?: Partial<Record<Platform, string[]>>;
           allow_inline_dev_fallback: boolean;
@@ -3401,12 +3410,15 @@ export default function SeasonSocialAnalyticsSection({
         } = {
           source_scope: scope,
           max_posts_per_target: 0,
-          max_comments_per_post: 100000,
-          max_replies_per_post: 100000,
-          fetch_replies: true,
+          max_comments_per_post: 5000,
+          max_replies_per_post: 1000,
+          fetch_replies: false,
           ingest_mode: nextIngestMode,
           sync_strategy: "incremental",
-          allow_inline_dev_fallback: true,
+          runner_strategy: "single_runner",
+          runner_count: 1,
+          window_shard_hours: 12,
+          allow_inline_dev_fallback: false,
         };
         const nextPlatforms = mergedStalePlatforms.length > 0
           ? mergedStalePlatforms
@@ -3736,6 +3748,9 @@ export default function SeasonSocialAnalyticsSection({
         fetch_replies: boolean;
         ingest_mode: IngestMode;
         sync_strategy: SyncStrategy;
+        runner_strategy?: "single_runner" | "adaptive_dual_runner";
+        runner_count?: number;
+        window_shard_hours?: number;
         comment_refresh_policy?: CommentRefreshPolicy;
         comment_anchor_source_ids?: Partial<Record<Platform, string[]>>;
         allow_inline_dev_fallback: boolean;
@@ -3744,12 +3759,21 @@ export default function SeasonSocialAnalyticsSection({
       } = {
         source_scope: scope,
         max_posts_per_target: 0,
-        max_comments_per_post: 100000,
-        max_replies_per_post: 100000,
-        fetch_replies: true,
+        max_comments_per_post: 5000,
+        max_replies_per_post: 1000,
+        fetch_replies: false,
         ingest_mode: effectiveIngestMode,
         sync_strategy: syncStrategy,
-        allow_inline_dev_fallback: true,
+        allow_inline_dev_fallback: false,
+      }
+      if (effectiveIngestMode === "comments_only") {
+        payload.runner_strategy = "single_runner";
+        payload.runner_count = 1;
+        payload.window_shard_hours = 12;
+      } else {
+        payload.runner_strategy = "adaptive_dual_runner";
+        payload.runner_count = 2;
+        payload.window_shard_hours = 6;
       }
       const label = effectiveDay
         ? formatDayScopeLabel(effectiveDay)
@@ -3837,6 +3861,9 @@ export default function SeasonSocialAnalyticsSection({
         status?: string;
         message?: string;
         run_id?: string;
+        operation_id?: string;
+        execution_owner?: string;
+        execution_mode_canonical?: string;
         stages?: string[];
         queued_or_started_jobs?: number;
       };
@@ -3844,6 +3871,21 @@ export default function SeasonSocialAnalyticsSection({
       if (!runId) {
         throw new Error(result.message ?? "Sync started without a run id");
       }
+      const executionMetaParts: string[] = [];
+      if (typeof result.execution_owner === "string" && result.execution_owner.trim()) {
+        executionMetaParts.push(
+          result.execution_owner.trim() === "remote_worker"
+            ? "remote worker"
+            : result.execution_owner.trim()
+        );
+      }
+      if (typeof result.execution_mode_canonical === "string" && result.execution_mode_canonical.trim()) {
+        executionMetaParts.push(`mode ${result.execution_mode_canonical.trim()}`);
+      }
+      if (typeof result.operation_id === "string" && result.operation_id.trim()) {
+        executionMetaParts.push(`op ${result.operation_id.trim().slice(0, 8)}`);
+      }
+      const executionMeta = executionMetaParts.length > 0 ? ` · ${executionMetaParts.join(" · ")}` : "";
 
       const autoContinueEnabled =
         effectiveIngestMode === "posts_and_comments" ||
@@ -3874,10 +3916,10 @@ export default function SeasonSocialAnalyticsSection({
       const jobCount = result.queued_or_started_jobs ?? 0;
       if (autoContinueEnabled) {
         setIngestMessage(
-          `Pass 1/${COMMENT_SYNC_MAX_PASSES} · ${label} · ${targetedPlatformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`,
+          `Pass 1/${COMMENT_SYNC_MAX_PASSES} · ${label} · ${targetedPlatformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages})${executionMeta}.`,
         );
       } else {
-        setIngestMessage(`${label} · ${targetedPlatformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages}).`);
+        setIngestMessage(`${label} · ${targetedPlatformLabel} · ${modeLabel} — run ${runId} queued (${jobCount} jobs, stages: ${stages})${executionMeta}.`);
       }
 
       // Immediately fetch jobs to pick up the newly created running jobs
@@ -5181,7 +5223,9 @@ export default function SeasonSocialAnalyticsSection({
                   .sort(([a], [b]) => (PLATFORM_LABELS[a] ?? a).localeCompare(PLATFORM_LABELS[b] ?? b))
                   .map(([platform, jobs]) => {
                     const label = PLATFORM_LABELS[platform] ?? platform;
-                    const runningJob = jobs.find((j) => j.status === "running" || j.status === "retrying");
+                    const runningJob = jobs.find(
+                      (j) => j.status === "running" || j.status === "retrying" || j.status === "cancelling",
+                    );
                     const doneCount = jobs.filter((j) => j.status === "completed").length;
                     const failCount = jobs.filter((j) => j.status === "failed").length;
                     const totalCount = jobs.length;
@@ -5322,7 +5366,9 @@ export default function SeasonSocialAnalyticsSection({
                   <div className="mt-4 space-y-4">
                     {stages.map((s) => {
                       const allDone = s.done === s.total;
-                      const hasActive = s.jobs.some((j) => j.status === "running" || j.status === "retrying");
+                      const hasActive = s.jobs.some(
+                        (j) => j.status === "running" || j.status === "retrying" || j.status === "cancelling",
+                      );
                       return (
                         <div key={s.stageKey}>
                           <div className="mb-1.5 flex items-center justify-between text-xs">
@@ -6860,7 +6906,8 @@ export default function SeasonSocialAnalyticsSection({
                       : job.started_at
                         ? `${Math.round((Date.now() - new Date(job.started_at).getTime()) / 1000)}s`
                         : null;
-                  const isActive = job.status === "running" || job.status === "retrying";
+                  const isActive =
+                    job.status === "running" || job.status === "retrying" || job.status === "cancelling";
                   return (
                     <div key={job.id} className={`rounded-lg border px-3 py-2 ${
                       isActive ? "border-blue-200 bg-blue-50" : job.status === "failed" ? "border-red-200 bg-red-50" : "border-zinc-200 bg-zinc-50"

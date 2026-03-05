@@ -12,7 +12,7 @@ import {
   type Firestore,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { getDb } from "@/lib/firebase-db";
 import {
   BRAVODLE_BOARD_COLUMNS,
   BRAVODLE_DEFAULT_USER_ANALYTICS,
@@ -88,7 +88,7 @@ export class BravodleManager {
 
   static getInstance(): BravodleManager {
     if (!BravodleManager.instance) {
-      BravodleManager.instance = new BravodleManager(db);
+      BravodleManager.instance = new BravodleManager(getDb());
     }
     return BravodleManager.instance;
   }

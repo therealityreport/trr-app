@@ -338,4 +338,86 @@ describe("admin reddit window posts page", () => {
     );
     expect(replaceMock).not.toHaveBeenCalled();
   });
+
+  it("kicks off Sync Details in background with wait=false and polls run status", async () => {
+    usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+    fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/reddit/runs?")) {
+        return jsonResponse({ runs: [] });
+      }
+      if (url.includes("/api/admin/reddit/runs/11111111-1111-1111-1111-111111111111")) {
+        return jsonResponse({
+          run_id: "11111111-1111-1111-1111-111111111111",
+          status: "completed",
+        });
+      }
+      if (url.includes("/discover?") && url.includes("mode=sync_details")) {
+        return jsonResponse({
+          run: {
+            run_id: "11111111-1111-1111-1111-111111111111",
+            status: "running",
+          },
+        });
+      }
+      if (url.includes("/discover?")) {
+        return jsonResponse({
+          discovery: {
+            fetched_at: "2026-03-01T00:00:00.000Z",
+            totals: { fetched_rows: 0, matched_rows: 0, tracked_flair_rows: 0 },
+            threads: [],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({
+          communities: [
+            {
+              id: "community-1",
+              trr_show_id: "show-1",
+              trr_show_name: "The Real Housewives of Salt Lake City",
+              subreddit: "BravoRealHousewives",
+            },
+          ],
+        });
+      }
+      if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
+        return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
+      }
+      return jsonResponse({ error: "unexpected" }, 500);
+    });
+
+    render(<AdminRedditWindowPostsPage />);
+    await screen.findByText("No posts found for this window yet.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync Details" }));
+
+    await waitFor(() => {
+      const syncDetailsCall = fetchAdminWithAuthMock.mock.calls.find((call) => {
+        const url = String(call[0]);
+        return url.includes("/discover?") && url.includes("mode=sync_details");
+      });
+      expect(syncDetailsCall).toBeTruthy();
+      const syncUrl = String(syncDetailsCall?.[0] ?? "");
+      expect(syncUrl).toContain("refresh=true");
+      expect(syncUrl).toContain("wait=false");
+      expect(syncUrl).toContain("mode=sync_details");
+    });
+
+    await waitFor(() => {
+      expect(fetchAdminWithAuthMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/admin/reddit/runs/11111111-1111-1111-1111-111111111111"),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    });
+
+    await waitFor(() => {
+      expect(fetchAdminWithAuthMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/admin/reddit/runs?"),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    });
+  });
 });

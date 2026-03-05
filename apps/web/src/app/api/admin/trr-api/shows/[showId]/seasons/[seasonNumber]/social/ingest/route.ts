@@ -40,11 +40,33 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
     const seasonIdHint = seasonIdHintRaw ?? undefined;
+    const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || "";
+    const flowKey = request.headers.get("x-trr-flow-key")?.trim() || "";
+    const requestText = await request.text();
+    let outboundBody = requestText;
+    if ((request.headers.get("content-type") || "").includes("application/json")) {
+      try {
+        const parsed = JSON.parse(requestText || "{}") as Record<string, unknown>;
+        if (tabSessionId && typeof parsed.client_session_id !== "string") {
+          parsed.client_session_id = tabSessionId;
+        }
+        if (flowKey && typeof parsed.client_workflow_id !== "string") {
+          parsed.client_workflow_id = flowKey;
+        }
+        outboundBody = JSON.stringify(parsed);
+      } catch {
+        outboundBody = requestText;
+      }
+    }
 
     const data = await fetchSeasonBackendJson(showId, seasonNumber, "/ingest", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: await request.text(),
+      headers: {
+        "Content-Type": "application/json",
+        ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+        ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
+      },
+      body: outboundBody,
       seasonIdHint,
       fallbackError: "Failed to run social ingest",
       retries: 0,

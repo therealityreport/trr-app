@@ -199,6 +199,13 @@ interface StoredSupabaseFlairCount {
   container_counts: StoredSupabaseFlairContainerCount[];
 }
 
+interface StoredSupabasePendingTrackedFlairCount {
+  container_key: string;
+  flair_key: string;
+  flair_label: string;
+  post_count: number;
+}
+
 interface LegacyStoredSupabaseFlairCount {
   flair?: string;
   post_count?: number;
@@ -364,7 +371,10 @@ interface DiscoveryFetchResult {
 
 interface RefreshRunStatus {
   run_id: string;
-  status: "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
+  operation_id?: string | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  status: "queued" | "running" | "cancelling" | "completed" | "partial" | "failed" | "cancelled";
   error?: string | null;
   discovered_flairs?: string[];
   totals?: {
@@ -570,6 +580,7 @@ const CONTAINER_RUN_POLL_MAX_ATTEMPTS = 80;
 const REFRESH_RUN_STATUSES: RefreshRunStatus["status"][] = [
   "queued",
   "running",
+  "cancelling",
   "completed",
   "partial",
   "failed",
@@ -601,7 +612,7 @@ const logRedditPerfTiming = (
 const isRefreshRunStatus = (value: unknown): value is RefreshRunStatus["status"] =>
   typeof value === "string" && REFRESH_RUN_STATUSES.includes(value as RefreshRunStatus["status"]);
 const isRefreshRunActiveStatus = (status: RefreshRunStatus["status"]): boolean =>
-  status === "queued" || status === "running";
+  status === "queued" || status === "running" || status === "cancelling";
 
 const parseOptionalNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -843,6 +854,9 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
         ? ` · ${fmtNum(otherRunning)} other running`
         : "";
     return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}${detailPostsText}${detailCommentsText}${mediaText}`;
+  }
+  if (run.status === "cancelling") {
+    return `${label}: refresh cancelling (run ${run.run_id.slice(0, 8)})${queuedHintText}${listingText}${searchText}`;
   }
   if (run.status === "completed" || run.status === "partial") {
     const tracked = run.totals?.tracked_flair_rows;
@@ -1378,6 +1392,11 @@ interface EpisodeWindowPostItem {
   discussionType?: SlotDiscussionType;
 }
 
+interface PendingFlairGroup {
+  flairLabel: string;
+  postCount: number;
+}
+
 const createEmptyEpisodeDiscussionCell = (): EpisodeDiscussionMatrixCell => ({
   post_count: 0,
   total_comments: 0,
@@ -1409,6 +1428,7 @@ const renderEpisodeMatrixCards = (
     totalTrackedFlairCountBySeasonBoundaryPeriod?: Map<string, number>;
     linkedPostsByContainer?: Map<string, EpisodeDiscussionCandidate[]>;
     pendingPostsByContainer?: Map<string, EpisodeWindowPostItem[]>;
+    pendingFlairGroupsByContainer?: Map<string, PendingFlairGroup[]>;
     pendingPrimaryFlairKey?: string | null;
     refreshProgressByContainer?: Record<string, ContainerRefreshProgress | undefined>;
     onOpenContainerPosts?: (containerKey: string) => void;
@@ -1468,7 +1488,8 @@ const renderEpisodeMatrixCards = (
     const containerPosts = options?.linkedPostsByContainer?.get(containerKey) ?? [];
     const progress = options?.refreshProgressByContainer?.[containerKey];
     const pendingPosts = options?.pendingPostsByContainer?.get(containerKey) ?? [];
-    const pendingFlairGroups = buildPendingFlairGroups(pendingPosts);
+    const pendingFlairGroups =
+      options?.pendingFlairGroupsByContainer?.get(containerKey) ?? buildPendingFlairGroups(pendingPosts);
     const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
     const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
     const viewAllCount =
@@ -1578,7 +1599,8 @@ const renderEpisodeMatrixCards = (
       const containerPosts = options?.linkedPostsByContainer?.get(containerKey) ?? [];
       const progress = options?.refreshProgressByContainer?.[containerKey];
       const pendingPosts = options?.pendingPostsByContainer?.get(containerKey) ?? [];
-      const pendingFlairGroups = buildPendingFlairGroups(pendingPosts);
+      const pendingFlairGroups =
+        options?.pendingFlairGroupsByContainer?.get(containerKey) ?? buildPendingFlairGroups(pendingPosts);
       const episodeWindow = options?.episodeWindowByContainer?.get(containerKey) ?? null;
       const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
       const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
@@ -2025,6 +2047,10 @@ export default function RedditSourcesManager({
   const [storedSupabaseFlairCounts, setStoredSupabaseFlairCounts] = useState<StoredSupabaseFlairCount[]>(
     [],
   );
+  const [storedPendingTrackedFlairCounts, setStoredPendingTrackedFlairCounts] = useState<
+    StoredSupabasePendingTrackedFlairCount[]
+  >([]);
+  const [storedCountsRefreshNonce, setStoredCountsRefreshNonce] = useState(0);
   const [selectedSupabaseFlairKeys, setSelectedSupabaseFlairKeys] = useState<Set<string>>(new Set());
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
   const [selectedNetworkTargetInput, setSelectedNetworkTargetInput] = useState("");
@@ -2434,6 +2460,7 @@ export default function RedditSourcesManager({
     setEpisodeMatrix([]);
     setStoredSupabasePostTotal(null);
     setStoredSupabaseFlairCounts([]);
+    setStoredPendingTrackedFlairCounts([]);
     setSelectedSupabaseFlairKeys(new Set());
     setAssignedThreadsExpanded(true);
     setShowCommunitySettingsModal(false);
@@ -2519,11 +2546,13 @@ export default function RedditSourcesManager({
     if (!storedCountsCommunityId || !episodeSeasonId) {
       setStoredSupabasePostTotal(null);
       setStoredSupabaseFlairCounts([]);
+      setStoredPendingTrackedFlairCounts([]);
       setSelectedSupabaseFlairKeys(new Set());
       return;
     }
     setStoredSupabasePostTotal(null);
     setStoredSupabaseFlairCounts([]);
+    setStoredPendingTrackedFlairCounts([]);
     setSelectedSupabaseFlairKeys(new Set());
     const controller = new AbortController();
     void (async () => {
@@ -2540,6 +2569,7 @@ export default function RedditSourcesManager({
             total_posts?: number;
             tracked_total_posts?: number;
             tracked_flair_counts?: StoredSupabaseFlairCount[];
+            pending_tracked_flair_counts?: StoredSupabasePendingTrackedFlairCount[];
             flair_counts?: LegacyStoredSupabaseFlairCount[];
           };
           if (!controller.signal.aborted) {
@@ -2588,15 +2618,33 @@ export default function RedditSourcesManager({
                         container_counts: [],
                       }))
                   : [];
+            const pendingTrackedFlairCounts = Array.isArray(data.pending_tracked_flair_counts)
+              ? data.pending_tracked_flair_counts
+                  .filter(
+                    (row): row is StoredSupabasePendingTrackedFlairCount =>
+                      typeof row?.container_key === "string" &&
+                      typeof row?.flair_key === "string" &&
+                      typeof row?.flair_label === "string" &&
+                      typeof row?.post_count === "number" &&
+                      Number.isFinite(row.post_count),
+                  )
+                  .map((row) => ({
+                    container_key: row.container_key,
+                    flair_key: row.flair_key,
+                    flair_label: row.flair_label,
+                    post_count: row.post_count,
+                  }))
+              : [];
             setStoredPostCountsByContainer(data.counts ?? {});
             setStoredSupabasePostTotal(
               typeof data.tracked_total_posts === "number" && Number.isFinite(data.tracked_total_posts)
                 ? data.tracked_total_posts
                 : typeof data.total_posts === "number" && Number.isFinite(data.total_posts)
                   ? data.total_posts
-                : null,
+                  : null,
             );
             setStoredSupabaseFlairCounts(legacyFlairCounts);
+            setStoredPendingTrackedFlairCounts(pendingTrackedFlairCounts);
           }
         }
       } catch {
@@ -2606,7 +2654,7 @@ export default function RedditSourcesManager({
     return () => {
       controller.abort();
     };
-  }, [storedCountsCommunityId, episodeSeasonId]);
+  }, [storedCountsCommunityId, episodeSeasonId, storedCountsRefreshNonce]);
 
   const selectedRelevantPostFlairs = useMemo(
     () => (selectedCommunity ? getRelevantPostFlairs(selectedCommunity) : []),
@@ -3167,22 +3215,6 @@ export default function RedditSourcesManager({
     return counts;
   }, [episodeCandidates, pendingReviewFlairKeys, seasonalBoundaryPeriods, syncCandidateResultByPostId]);
 
-  const savedRedditPostIds = useMemo(
-    () => new Set((selectedCommunity?.assigned_threads ?? []).map((thread) => thread.reddit_post_id)),
-    [selectedCommunity],
-  );
-
-  const linkedDiscussionPostIdsByContainer = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const [containerKey, posts] of linkedDiscussionPostsByContainer.entries()) {
-      map.set(
-        containerKey,
-        new Set(posts.map((post) => post.reddit_post_id)),
-      );
-    }
-    return map;
-  }, [linkedDiscussionPostsByContainer]);
-
   const availableSyncReasonCodes = useMemo(() => {
     const codes = new Set<SyncCandidateReasonCode>();
     for (const item of syncCandidateResults) {
@@ -3217,149 +3249,88 @@ export default function RedditSourcesManager({
     [episodeCandidates, syncCandidateResultByPostId, syncReasonCodeFilter, syncStatusFilter],
   );
 
-  const filterTrackedDiscoveryPostsForContainer = useCallback(
-    (threads: DiscoveryThread[], containerKey: string): EpisodeWindowPostItem[] => {
-      const bounds = episodeWindowBoundsByContainer.get(containerKey);
-      if (!bounds) return [];
-      const relevantFlairKeys = new Set(
-        selectedRelevantPostFlairs
-          .map((flair) => normalizeFlairKey(flair))
-          .filter((value) => value.length > 0),
-      );
-      const startMs = parseDateMs(bounds.start);
-      const endMs = parseDateMs(bounds.end);
-      const filtered: EpisodeWindowPostItem[] = [];
+  const pendingTrackedFlairGroupsByContainerWindow = useMemo(() => {
+    const byContainer = new Map<string, PendingFlairGroup[]>();
+    if (pendingReviewFlairKeys.size === 0) return byContainer;
 
-      for (const thread of threads) {
-        const postedMs = parseDateMs(thread.posted_at);
-        if (postedMs === null) continue;
-        if (startMs !== null && postedMs < startMs) continue;
-        if (endMs !== null && postedMs >= endMs) continue;
-
-        const flairKey = normalizeFlairKey(thread.link_flair_text);
-        if (relevantFlairKeys.size > 0 && !relevantFlairKeys.has(flairKey)) {
-          continue;
-        }
-        if (thread.passes_flair_filter === false) {
-          continue;
-        }
-
-        filtered.push({
-          redditPostId: thread.reddit_post_id,
-          title: thread.title,
-          text: thread.text,
-          url: thread.url,
-          score: thread.score,
-          numComments: thread.num_comments,
-          postedAt: thread.posted_at,
-          flair: thread.link_flair_text,
+    const grouped = new Map<string, Map<string, PendingFlairGroup>>();
+    for (const row of storedPendingTrackedFlairCounts) {
+      if (!episodeWindowBoundsByContainer.has(row.container_key)) continue;
+      const flairKey = normalizeFlairKey(row.flair_key || row.flair_label);
+      if (!pendingReviewFlairKeys.has(flairKey)) continue;
+      if (allPostsFlairKeys.has(flairKey)) continue;
+      if (!(row.post_count > 0)) continue;
+      if (!grouped.has(row.container_key)) {
+        grouped.set(row.container_key, new Map());
+      }
+      const bucket = grouped.get(row.container_key);
+      if (!bucket) continue;
+      const existing = bucket.get(flairKey);
+      if (existing) {
+        existing.postCount += row.post_count;
+      } else {
+        bucket.set(flairKey, {
+          flairLabel: displayFlair(row.flair_label) || "(No Flair)",
+          postCount: row.post_count,
         });
       }
-
-      filtered.sort((a, b) => {
-        const postedDiff = (parseDateMs(b.postedAt) ?? 0) - (parseDateMs(a.postedAt) ?? 0);
-        if (postedDiff !== 0) return postedDiff;
-        if (b.numComments !== a.numComments) return b.numComments - a.numComments;
-        return b.score - a.score;
-      });
-      return filtered;
-    },
-    [
-      episodeWindowBoundsByContainer,
-      selectedRelevantPostFlairs,
-    ],
-  );
-
-  const filterUnassignedDiscoveryPostsForContainer = useCallback(
-    (threads: DiscoveryThread[], containerKey: string): EpisodeWindowPostItem[] => {
-      if (pendingReviewFlairKeys.size === 0) return [];
-      const linkedIds = linkedDiscussionPostIdsByContainer.get(containerKey) ?? new Set<string>();
-      return filterTrackedDiscoveryPostsForContainer(threads, containerKey).filter((post) => {
-        const flairKey = normalizeFlairKey(post.flair);
-        if (!pendingReviewFlairKeys.has(flairKey)) return false;
-        if (allPostsFlairKeys.has(flairKey)) return false;
-        if (savedRedditPostIds.has(post.redditPostId)) return false;
-        if (linkedIds.has(post.redditPostId)) return false;
-        return true;
-      });
-    },
-    [
-      allPostsFlairKeys,
-      filterTrackedDiscoveryPostsForContainer,
-      linkedDiscussionPostIdsByContainer,
-      pendingReviewFlairKeys,
-      savedRedditPostIds,
-    ],
-  );
-
-  const seasonScopedDiscoveryThreads = useMemo(() => {
-    const directSeasonThreads = Array.isArray(discovery?.threads) ? discovery.threads : [];
-    if (directSeasonThreads.length > 0) return directSeasonThreads;
-    const syncDetailsSeasonThreads = Array.isArray(windowDiscoveryByContainer["sync-details-season"]?.threads)
-      ? windowDiscoveryByContainer["sync-details-season"]?.threads ?? []
-      : [];
-    return syncDetailsSeasonThreads;
-  }, [discovery?.threads, windowDiscoveryByContainer]);
-
-  const getDiscoveryThreadsForContainer = useCallback(
-    (containerKey: string): DiscoveryThread[] => {
-      const scopedThreads = windowDiscoveryByContainer[containerKey]?.threads ?? [];
-      if (scopedThreads.length > 0) return scopedThreads;
-      return seasonScopedDiscoveryThreads;
-    },
-    [seasonScopedDiscoveryThreads, windowDiscoveryByContainer],
-  );
-
-  const pendingTrackedPostsByContainerWindow = useMemo(() => {
-    const map = new Map<string, EpisodeWindowPostItem[]>();
-    for (const key of episodeWindowBoundsByContainer.keys()) {
-      const threads = getDiscoveryThreadsForContainer(key);
-      if (threads.length === 0) continue;
-      const pendingPosts = filterUnassignedDiscoveryPostsForContainer(threads, key);
-      if (pendingPosts.length === 0) continue;
-      map.set(key, pendingPosts);
     }
-    return map;
+
+    const primaryFlairKey = normalizeFlairKey(trackedUnassignedFlairLabel);
+    for (const [containerKey, flairMap] of grouped.entries()) {
+      const groups = [...flairMap.entries()]
+        .sort((a, b) => {
+          const aIsPrimary = primaryFlairKey.length > 0 && a[0] === primaryFlairKey;
+          const bIsPrimary = primaryFlairKey.length > 0 && b[0] === primaryFlairKey;
+          if (aIsPrimary && !bIsPrimary) return -1;
+          if (!aIsPrimary && bIsPrimary) return 1;
+          if (b[1].postCount !== a[1].postCount) return b[1].postCount - a[1].postCount;
+          return a[1].flairLabel.localeCompare(b[1].flairLabel);
+        })
+        .map(([, group]) => group);
+      if (groups.length > 0) {
+        byContainer.set(containerKey, groups);
+      }
+    }
+
+    return byContainer;
   }, [
+    allPostsFlairKeys,
     episodeWindowBoundsByContainer,
-    filterUnassignedDiscoveryPostsForContainer,
-    getDiscoveryThreadsForContainer,
+    pendingReviewFlairKeys,
+    storedPendingTrackedFlairCounts,
+    trackedUnassignedFlairLabel,
   ]);
 
   const trackedFlairTotalCountByContainerWindow = useMemo(() => {
     const map = new Map<string, number>();
-    // Seed with stored DB counts so values are visible before cache hydration
     for (const [key, count] of Object.entries(storedPostCountsByContainer)) {
       if (count > 0) {
         map.set(key, count);
       }
     }
-    // Override with discovery-derived counts (more accurate, includes filtering)
     for (const key of episodeWindowBoundsByContainer.keys()) {
-      const threads = getDiscoveryThreadsForContainer(key);
-      if (threads.length === 0) continue;
-      map.set(key, filterTrackedDiscoveryPostsForContainer(threads, key).length);
+      if (!map.has(key)) {
+        map.set(key, 0);
+      }
     }
     return map;
   }, [
     episodeWindowBoundsByContainer,
-    filterTrackedDiscoveryPostsForContainer,
-    getDiscoveryThreadsForContainer,
     storedPostCountsByContainer,
   ]);
 
   const unassignedFlairCountByContainerWindow = useMemo(() => {
     const map = new Map<string, number>();
-    for (const key of episodeWindowBoundsByContainer.keys()) {
-      const threads = getDiscoveryThreadsForContainer(key);
-      if (threads.length === 0) continue;
-      map.set(key, filterUnassignedDiscoveryPostsForContainer(threads, key).length);
+    for (const [containerKey, groups] of pendingTrackedFlairGroupsByContainerWindow.entries()) {
+      const total = groups.reduce((sum, group) => sum + group.postCount, 0);
+      if (total > 0) {
+        map.set(containerKey, total);
+      }
     }
     return map;
   }, [
-    episodeWindowBoundsByContainer,
-    filterUnassignedDiscoveryPostsForContainer,
-    getDiscoveryThreadsForContainer,
+    pendingTrackedFlairGroupsByContainerWindow,
   ]);
 
   const matrixUnassignedFlairCountBySlot = useMemo(() => {
@@ -3423,18 +3394,16 @@ export default function RedditSourcesManager({
   }, [seasonalBoundaryPeriods, trackedFlairTotalCountByContainerWindow]);
 
   const trackedFlairWindowPostCount = useMemo(() => {
-    if (episodeWindowBoundsByContainer.size === 0) return 0;
-    const postIds = new Set<string>();
-    for (const key of episodeWindowBoundsByContainer.keys()) {
-      const threads = getDiscoveryThreadsForContainer(key);
-      if (threads.length === 0) continue;
-      const posts = filterTrackedDiscoveryPostsForContainer(threads, key);
-      for (const post of posts) {
-        postIds.add(post.redditPostId);
-      }
+    if (typeof storedSupabasePostTotal === "number" && Number.isFinite(storedSupabasePostTotal)) {
+      return storedSupabasePostTotal;
     }
-    return postIds.size;
-  }, [episodeWindowBoundsByContainer, filterTrackedDiscoveryPostsForContainer, getDiscoveryThreadsForContainer]);
+    if (trackedFlairTotalCountByContainerWindow.size === 0) return 0;
+    let total = 0;
+    for (const count of trackedFlairTotalCountByContainerWindow.values()) {
+      total += count;
+    }
+    return total;
+  }, [storedSupabasePostTotal, trackedFlairTotalCountByContainerWindow]);
 
   useEffect(() => {
     if (syncStatusFilter === "no_sync_result" && syncReasonCodeFilter !== "all") {
@@ -3975,9 +3944,12 @@ export default function RedditSourcesManager({
       fallback: resolveShowLabel(community.trr_show_name ?? showName ?? "", null),
     });
     const normalizedInferredShowSlug = inferredShowSlug === "show" ? null : inferredShowSlug;
+    const preferredCommunityShowSlug =
+      selectedCommunityShowSlug && normalizedInferredShowSlug && selectedCommunityShowSlug !== normalizedInferredShowSlug
+        ? normalizedInferredShowSlug
+        : selectedCommunityShowSlug ?? normalizedInferredShowSlug;
     const fallbackShowSlug =
-      selectedCommunityShowSlug ??
-      normalizedInferredShowSlug ??
+      preferredCommunityShowSlug ??
       showSlug ??
       routeShowSlugFromPath ??
       routeRedditPathContext.showSlug;
@@ -4957,6 +4929,14 @@ export default function RedditSourcesManager({
             isRefreshRunStatus(runStatus)
               ? {
                   run_id: runPayload.run_id,
+                  operation_id:
+                    typeof runPayload.operation_id === "string" ? runPayload.operation_id : null,
+                  execution_owner:
+                    typeof runPayload.execution_owner === "string" ? runPayload.execution_owner : null,
+                  execution_mode_canonical:
+                    typeof runPayload.execution_mode_canonical === "string"
+                      ? runPayload.execution_mode_canonical
+                      : null,
                   status: runStatus,
                   error: typeof runPayload.error === "string" ? runPayload.error : null,
                   totals:
@@ -5027,6 +5007,12 @@ export default function RedditSourcesManager({
       }
       return {
         run_id: String(payload.run_id ?? runId),
+        operation_id: typeof payload.operation_id === "string" ? payload.operation_id : null,
+        execution_owner: typeof payload.execution_owner === "string" ? payload.execution_owner : null,
+        execution_mode_canonical:
+          typeof payload.execution_mode_canonical === "string"
+            ? payload.execution_mode_canonical
+            : null,
         status,
         error: typeof payload.error === "string" ? payload.error : null,
         discovered_flairs: Array.isArray(payload.discovered_flairs)
@@ -5448,6 +5434,7 @@ export default function RedditSourcesManager({
       const bounds = episodeWindowBoundsByContainer.get(containerKey);
       if (!bounds) return;
       let discovered: DiscoveryPayload | null = null;
+      let shouldRefreshStoredCounts = false;
       const coverageMode = containerKey === "period-preseason" ? "adaptive_deep" : "standard";
       const maxPagesForContainer = 0; // unlimited — scrape all posts in the time window
 
@@ -5486,10 +5473,7 @@ export default function RedditSourcesManager({
               message: buildContainerRunProgressMessage(bounds.label, run),
             });
           }
-          if (
-            run?.status === "queued" ||
-            run?.status === "running"
-          ) {
+          if (run && isRefreshRunActiveStatus(run.status)) {
           const polled = await pollContainerRefreshRun({
               communityId: selectedCommunity.id,
               containerKey,
@@ -5505,6 +5489,7 @@ export default function RedditSourcesManager({
             if (polled.run?.discovered_flairs) {
               void mergeDiscoveredFlairsIntoCommunity(selectedCommunity.id, polled.run.discovered_flairs);
             }
+            shouldRefreshStoredCounts = true;
             if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
             } else if (!discovered) {
@@ -5522,6 +5507,7 @@ export default function RedditSourcesManager({
           );
         }
         upsertWindowDiscovery(containerKey, discovered);
+        shouldRefreshStoredCounts = true;
         if (discoveryResult.run) {
           setContainerRefreshProgress(containerKey, {
             runId: discoveryResult.run.run_id,
@@ -5544,6 +5530,7 @@ export default function RedditSourcesManager({
             if (polled.run?.discovered_flairs) {
               void mergeDiscoveredFlairsIntoCommunity(selectedCommunity.id, polled.run.discovered_flairs);
             }
+            shouldRefreshStoredCounts = true;
             if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
             } else if (!discovered) {
@@ -5630,10 +5617,14 @@ export default function RedditSourcesManager({
           next.delete(containerKey);
           return next;
         });
+        if (shouldRefreshStoredCounts && episodeSeasonId) {
+          setStoredCountsRefreshNonce((current) => current + 1);
+        }
       }
     },
     [
       episodeWindowBoundsByContainer,
+      episodeSeasonId,
       fetchDiscoveryForCommunity,
       mergeDiscoveredFlairsIntoCommunity,
       pollContainerRefreshRun,
@@ -5679,7 +5670,7 @@ export default function RedditSourcesManager({
             status: run.status,
             message: buildContainerRunProgressMessage(bounds.label, run),
           });
-          if (run.status === "queued" || run.status === "running") {
+          if (isRefreshRunActiveStatus(run.status)) {
             const polled = await pollContainerRefreshRun({
               communityId: selectedCommunity.id,
               containerKey,
@@ -5754,7 +5745,7 @@ export default function RedditSourcesManager({
       const run = discoveryResult.run;
       if (run) {
         setBusyLabel(buildContainerRunProgressMessage(periodLabel, run));
-        if (run.status === "queued" || run.status === "running") {
+        if (isRefreshRunActiveStatus(run.status)) {
           const polled = await pollContainerRefreshRun({
             communityId: selectedCommunity.id,
             containerKey: "sync-details-season",
@@ -5839,13 +5830,14 @@ export default function RedditSourcesManager({
   const handleRefreshEpisodeDiscussions = useCallback(async () => {
     if (!selectedCommunity) return;
 
-      setEpisodeRefreshing(true);
-      setRefreshingContainerKeys(new Set());
-      setError(null);
-      setEpisodeContextWarning(null);
-      try {
-        const headers = await getAuthHeaders();
-        const params = new URLSearchParams();
+    let shouldRefreshStoredCounts = false;
+    setEpisodeRefreshing(true);
+    setRefreshingContainerKeys(new Set());
+    setError(null);
+    setEpisodeContextWarning(null);
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
       const requestedSeasonId = await resolveSeasonIdForRequests(selectedCommunity.id);
       if (requestedSeasonId) {
         params.set("season_id", requestedSeasonId);
@@ -5943,6 +5935,7 @@ export default function RedditSourcesManager({
               }
             }),
           );
+          shouldRefreshStoredCounts = true;
         }
       } catch (discoverErr) {
         const discoverMessage = toErrorMessage(
@@ -5952,12 +5945,16 @@ export default function RedditSourcesManager({
         setEpisodeContextWarning(discoverMessage);
       }
       if ((payload.meta?.sync_auto_saved_count ?? 0) > 0) {
+        shouldRefreshStoredCounts = true;
         await fetchCommunities();
       }
     } catch (err) {
       setError(toErrorMessage(err, "Failed to refresh episode discussions"));
     } finally {
       setEpisodeRefreshing(false);
+      if (shouldRefreshStoredCounts) {
+        setStoredCountsRefreshNonce((current) => current + 1);
+      }
     }
   }, [
     MAX_CONCURRENT_CONTAINER_SYNCS,
@@ -5975,6 +5972,7 @@ export default function RedditSourcesManager({
     selectedPeriod,
     selectedCommunity,
     resolveSeasonIdForRequests,
+    setStoredCountsRefreshNonce,
   ]);
 
   const handleEpisodeSeasonChange = useCallback(
@@ -6065,6 +6063,7 @@ export default function RedditSourcesManager({
         throw new Error(payload.error ?? "Failed to save selected episode discussions");
       }
       await fetchCommunities();
+      setStoredCountsRefreshNonce((current) => current + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save selected episode discussions");
     } finally {
@@ -6078,6 +6077,7 @@ export default function RedditSourcesManager({
     fetchWithTimeout,
     getAuthHeaders,
     selectedCommunity,
+    setStoredCountsRefreshNonce,
   ]);
 
   const handleExportSyncAuditCsv = useCallback(() => {
@@ -6557,7 +6557,7 @@ export default function RedditSourcesManager({
               totalTrackedFlairCountBySeasonBoundaryPeriod:
                 matrixTrackedFlairTotalCountBySeasonBoundaryPeriod,
               linkedPostsByContainer: linkedDiscussionPostsByContainer,
-              pendingPostsByContainer: pendingTrackedPostsByContainerWindow,
+              pendingFlairGroupsByContainer: pendingTrackedFlairGroupsByContainerWindow,
               pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
               refreshProgressByContainer: containerRefreshProgressByKey,
               onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
@@ -8126,7 +8126,7 @@ export default function RedditSourcesManager({
                           totalTrackedFlairCountBySeasonBoundaryPeriod:
                             matrixTrackedFlairTotalCountBySeasonBoundaryPeriod,
                           linkedPostsByContainer: linkedDiscussionPostsByContainer,
-                          pendingPostsByContainer: pendingTrackedPostsByContainerWindow,
+                          pendingFlairGroupsByContainer: pendingTrackedFlairGroupsByContainerWindow,
                           pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
                           refreshProgressByContainer: containerRefreshProgressByKey,
                           onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),

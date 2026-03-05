@@ -7,9 +7,9 @@ Build
 - Install: `pnpm install`
 - Build: `pnpm run build`
 - Output: `.next`
-- Node support: 20.x and 22.x
-- Local default: Node 20 (`TRR-APP/.nvmrc`)
-- Deploy recommendation: Node 22.x
+- Node support: 24.x (primary) and 22.x (compatibility lane)
+- Local default: Node 24 (`TRR-APP/.nvmrc`)
+- Deploy recommendation: Node 24.x
 
 Environment Variables (Preview + Production)
 - `NEXT_PUBLIC_FIREBASE_API_KEY`

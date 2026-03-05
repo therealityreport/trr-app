@@ -904,6 +904,32 @@ describe("WeekDetailPage thumbnails", () => {
     );
   });
 
+  it("prefers hosted post-author avatar over direct avatar URL", async () => {
+    const hostedAvatarPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const instagramPost = hostedAvatarPayload.platforms.instagram.posts[0] as (typeof weekPayload.platforms.instagram.posts)[number] & {
+      hosted_owner_profile_pic_url?: string | null;
+      user?: { username?: string; avatar_url?: string | null };
+    };
+    instagramPost.author = "bravotv";
+    instagramPost.user = { username: "bravotv", avatar_url: "https://images.test/direct-avatar.jpg" };
+    instagramPost.hosted_owner_profile_pic_url = "https://cdn.test/hosted/bravotv-avatar.jpg";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => hostedAvatarPayload } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const avatars = screen.getByTestId("post-header-avatars-ig-1");
+    expect(within(avatars).getByAltText("@bravotv avatar")).toHaveAttribute("src", "https://cdn.test/hosted/bravotv-avatar.jpg");
+  });
+
   it("normalizes tagged and collaborator chips to a single @ prefix", async () => {
     const taggedPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
     const instagramPost = taggedPayload.platforms.instagram.posts[0];
@@ -1846,6 +1872,89 @@ describe("WeekDetailPage thumbnails", () => {
     });
   });
 
+  it("prefers mirrored TikTok hosted video from media_asset_meta over source embeds", async () => {
+    const mirroredVideoUrl =
+      "https://d1fmdyqfafwim3.cloudfront.net/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.mp4";
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).source_media_urls = ["https://www.tiktok.com/@bravotv/video/7540327205503601933"];
+    (
+      payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+      }
+    ).hosted_media_urls = ["https://images.test/tiktok-hosted-thumb.jpg"];
+    payload.platforms.tiktok.posts[0].media_urls = ["https://www.tiktok.com/@bravotv/video/7540327205503601933"];
+    payload.platforms.tiktok.posts[0].thumbnail_url = "https://images.test/tiktok-hosted-thumb.jpg";
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/tiktok/tt-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "tiktok",
+            source_id: "tt-1",
+            author: "bravotv",
+            text: "TikTok post",
+            url: "https://tiktok.com/@bravo/video/1",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            thumbnail_url: "https://images.test/tiktok-hosted-thumb.jpg",
+            source_media_urls: ["https://www.tiktok.com/@bravotv/video/7540327205503601933"],
+            hosted_media_urls: ["https://images.test/tiktok-hosted-thumb.jpg"],
+            media_asset_meta: {
+              source_assets: [{ url: "https://www.tiktok.com/@bravotv/video/7540327205503601933", type: "video" }],
+              hosted_assets: [{ url: mirroredVideoUrl, type: "video" }],
+              thumbnail_hosted: { url: "https://images.test/tiktok-hosted-thumb.jpg", type: "thumbnail" },
+            },
+            stats: {
+              likes: 60,
+              comments_count: 12,
+              shares: 7,
+              saves: 471,
+              views: 2000,
+              engagement: 2079,
+            },
+            total_comments_in_db: 1,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    await clickPostDetailCardByThumbnailAlt("TikTok post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /open post media lightbox from details/i,
+      }),
+    );
+    await waitFor(() => {
+      const video = document.querySelector("video[aria-label='TikTok media']");
+      expect(video).not.toBeNull();
+      expect(video?.getAttribute("src")).toContain(mirroredVideoUrl);
+    });
+    expect(document.querySelector("iframe[title='TikTok media']")).toBeNull();
+  });
+
   it("uses video poster fallback in details when no non-video thumbnail candidate exists", async () => {
     const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
     payload.platforms.tiktok.posts[0].thumbnail_url = null;
@@ -2393,6 +2502,108 @@ describe("WeekDetailPage thumbnails", () => {
       name: /show metadata|hide metadata/i,
     });
     fireEvent.click(metadataToggle);
+    await waitFor(() => {
+      expect(document.querySelector("video[aria-label='Instagram media']")).not.toBeNull();
+    });
+  });
+
+  it("opens Instagram reel video first when hosted media slot contains only a still image", async () => {
+    const sourceVideoUrl = "https://instagram.fcdn.net/reel-video.mp4";
+    const hostedStillUrl = "https://d111111abcdef8.cloudfront.net/social/ig/reel-still.jpg";
+    const reelPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    reelPayload.platforms.instagram.posts[0].media_urls = [sourceVideoUrl];
+    (
+      reelPayload.platforms.instagram.posts[0] as typeof reelPayload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string;
+        thumbnail_url?: string | null;
+      }
+    ).source_media_urls = [sourceVideoUrl];
+    (
+      reelPayload.platforms.instagram.posts[0] as typeof reelPayload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string;
+        thumbnail_url?: string | null;
+      }
+    ).hosted_media_urls = [hostedStillUrl];
+    (
+      reelPayload.platforms.instagram.posts[0] as typeof reelPayload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string;
+        thumbnail_url?: string | null;
+      }
+    ).source_thumbnail_url = "https://instagram.fcdn.net/reel-thumb.jpg";
+    (
+      reelPayload.platforms.instagram.posts[0] as typeof reelPayload.platforms.instagram.posts[0] & {
+        source_media_urls?: string[];
+        hosted_media_urls?: string[];
+        source_thumbnail_url?: string;
+        hosted_thumbnail_url?: string;
+        thumbnail_url?: string | null;
+      }
+    ).hosted_thumbnail_url = hostedStillUrl;
+    reelPayload.platforms.instagram.posts[0].thumbnail_url = hostedStillUrl;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => reelPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "instagram",
+            source_id: "ig-1",
+            author: "bravotv",
+            text: "IG reel post",
+            url: "https://instagram.com/reel/abc",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            post_format: "reel",
+            thumbnail_url: hostedStillUrl,
+            source_media_urls: [sourceVideoUrl],
+            hosted_media_urls: [hostedStillUrl],
+            source_thumbnail_url: "https://instagram.fcdn.net/reel-thumb.jpg",
+            hosted_thumbnail_url: hostedStillUrl,
+            stats: {
+              likes: 50,
+              comments_count: 10,
+              views: 1000,
+              engagement: 1060,
+            },
+            total_comments_in_db: 0,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+
+    await waitForWeekDetailReady();
+    fireEvent.click(screen.getByLabelText("Instagram platform"));
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open post media lightbox from details",
+      }),
+    );
     await waitFor(() => {
       expect(document.querySelector("video[aria-label='Instagram media']")).not.toBeNull();
     });
@@ -3026,6 +3237,84 @@ describe("WeekDetailPage thumbnails", () => {
     expect(body.date_start).toBe(weekPayload.week.start);
     expect(body.date_end).toBe(weekPayload.week.end);
     expect(body.platforms).toBeUndefined();
+  });
+
+  it("uses summary_normalized for top sync progress counts", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+      }
+      if (url.includes("/social/ingest") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            run_id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+            queued_or_started_jobs: 8,
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/runs?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            runs: [
+              {
+                id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+                status: "running",
+                summary: {
+                  total_jobs: 8,
+                  completed_jobs: 0,
+                  failed_jobs: 1,
+                  active_jobs: 1,
+                  items_found_total: 12,
+                  stage_counts: {},
+                },
+                summary_normalized: {
+                  total_jobs: 8,
+                  completed_jobs: 6,
+                  failed_jobs: 1,
+                  active_jobs: 1,
+                  items_found_total: 12,
+                  stage_counts: {},
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/jobs?")) {
+        return { ok: true, status: 200, json: async () => ({ jobs: [] }) } as Response;
+      }
+      if (url.includes("/social/analytics/comments-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_saved_comments: 0,
+            total_reported_comments: 0,
+            coverage_pct: null,
+            up_to_date: true,
+            stale_posts_count: 0,
+            posts_scanned: 0,
+            by_platform: {},
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    fireEvent.click(await screen.findByTestId("week-sync-button"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/7\/8 jobs/i)).toBeInTheDocument();
+    });
   });
 
   it("loads platform totals from the dedicated week summary endpoint", async () => {

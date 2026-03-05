@@ -43,6 +43,25 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
+const expectAuthorizationHeader = (headers: Record<string, unknown>, token: string): void => {
+  expect(headers.Authorization).toBe(`Bearer ${token}`);
+  expect(headers["x-trr-tab-session-id"]).toEqual(expect.any(String));
+};
+
+const readHeaderValue = (headers: HeadersInit | undefined, key: string): string | null => {
+  if (!headers) return null;
+  if (headers instanceof Headers) return headers.get(key);
+  if (Array.isArray(headers)) {
+    const found = headers.find(([name]) => name.toLowerCase() === key.toLowerCase());
+    return found ? found[1] : null;
+  }
+  const record = headers as Record<string, string>;
+  const direct = record[key];
+  if (typeof direct === "string") return direct;
+  const insensitive = Object.entries(record).find(([name]) => name.toLowerCase() === key.toLowerCase());
+  return insensitive ? insensitive[1] : null;
+};
+
 describe("admin client auth helper", () => {
   beforeEach(() => {
     mocks.authStateReady.mockReset();
@@ -74,7 +93,7 @@ describe("admin client auth helper", () => {
     expect(getIdToken).not.toHaveBeenCalled();
 
     resolveReady?.();
-    await expect(pending).resolves.toEqual({ Authorization: "Bearer ready-token" });
+    await expect(pending).resolves.toMatchObject({ Authorization: "Bearer ready-token" });
   });
 
   it("continues after auth readiness timeout when token is available", async () => {
@@ -89,7 +108,7 @@ describe("admin client auth helper", () => {
     expect(getIdToken).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(pending).resolves.toEqual({ Authorization: "Bearer timeout-token" });
+    await expect(pending).resolves.toMatchObject({ Authorization: "Bearer timeout-token" });
   });
 
   it("returns Not authenticated quickly when auth readiness times out with no user", async () => {
@@ -119,7 +138,7 @@ describe("admin client auth helper", () => {
       forceRefreshOnFinalAttempt: false,
     });
 
-    expect(headers).toEqual({ Authorization: "Bearer recovered-token" });
+    expectAuthorizationHeader(headers, "recovered-token");
     expect(getIdToken).toHaveBeenCalledTimes(3);
     expect(getIdToken).toHaveBeenNthCalledWith(1, false);
     expect(getIdToken).toHaveBeenNthCalledWith(2, false);
@@ -139,7 +158,7 @@ describe("admin client auth helper", () => {
       tokenRetryDelaysMs: [0, 0, 0],
     });
 
-    expect(headers).toEqual({ Authorization: "Bearer fresh-token" });
+    expectAuthorizationHeader(headers, "fresh-token");
     expect(getIdToken).toHaveBeenCalledTimes(4);
     expect(getIdToken).toHaveBeenNthCalledWith(1, false);
     expect(getIdToken).toHaveBeenNthCalledWith(2, false);
@@ -164,6 +183,24 @@ describe("admin client auth helper", () => {
     expect(getIdToken).toHaveBeenNthCalledWith(2, true);
   });
 
+  it("adds x-trr-flow-key for admin requests", async () => {
+    const getIdToken = vi.fn().mockResolvedValue("token");
+    mocks.setCurrentUser({ getIdToken });
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true }, 200));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const response = await fetchAdminWithAuth("/api/admin/reddit/communities/abc/discover", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ force_refresh: true }),
+    });
+    expect(response.status).toBe(200);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, requestInit] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit];
+    expect(readHeaderValue(requestInit.headers, "x-trr-flow-key")).toEqual(expect.any(String));
+  });
+
   it("keeps dev bypass behavior", async () => {
     mocks.setCurrentUser(null);
     mocks.setBypassEnabled(true);
@@ -173,7 +210,7 @@ describe("admin client auth helper", () => {
       tokenRetryDelaysMs: [0, 0, 0],
     });
 
-    expect(headers).toEqual({ Authorization: "Bearer dev-admin-bypass" });
+    expectAuthorizationHeader(headers, "dev-admin-bypass");
     expect(mocks.authStateReady).not.toHaveBeenCalled();
   });
 
@@ -187,6 +224,6 @@ describe("admin client auth helper", () => {
       forceRefreshOnFinalAttempt: false,
     });
 
-    expect(headers).toEqual({ Authorization: "Bearer dev-admin-bypass" });
+    expectAuthorizationHeader(headers, "dev-admin-bypass");
   });
 });

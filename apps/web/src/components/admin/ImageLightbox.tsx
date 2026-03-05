@@ -17,6 +17,7 @@ import {
 } from "@/lib/media/content-type";
 import {
   THUMBNAIL_CROP_LIMITS,
+  resolveThumbnailViewportImageStyle,
   resolveThumbnailViewportRect,
 } from "@/lib/thumbnail-crop";
 import { LightboxShell } from "@/components/admin/image-lightbox/LightboxShell";
@@ -535,20 +536,48 @@ function MetadataPanel({
         const matchReason = matchingBox?.match_reason
           ? formatFaceMatchToken(matchingBox.match_reason)
           : "—";
+        const hasNumericSimilarity =
+          typeof matchingBox?.match_similarity === "number" &&
+          Number.isFinite(matchingBox.match_similarity);
+        const fallbackSimilarityUnavailable =
+          !hasNumericSimilarity &&
+          matchStatusRaw === "matched" &&
+          (labelSourceRaw === "owner_fallback_map" ||
+            labelSourceRaw === "deterministic_tag_map" ||
+            labelSourceRaw === "best_effort_tag_map");
         const matchSimilarity =
-          typeof matchingBox?.match_similarity === "number" && Number.isFinite(matchingBox.match_similarity)
+          hasNumericSimilarity
             ? `${(matchingBox.match_similarity * 100).toFixed(1)}%`
+            : fallbackSimilarityUnavailable
+              ? "Similarity unavailable (fallback assignment)"
             : "—";
         const detectConfidence =
           typeof matchingBox?.confidence === "number" && Number.isFinite(matchingBox.confidence)
             ? `${(matchingBox.confidence * 100).toFixed(1)}%`
             : "—";
+        const filterDecisionRaw =
+          typeof matchingBox?.filter_decision === "string" && matchingBox.filter_decision.trim().length > 0
+            ? matchingBox.filter_decision.trim()
+            : null;
+        const filterMetrics =
+          matchingBox?.filter_metrics && typeof matchingBox.filter_metrics === "object"
+            ? matchingBox.filter_metrics
+            : null;
+        const filterMetricsSuffix = filterMetrics
+          ? ` (${typeof filterMetrics.face_w === "number" ? `${Math.round(filterMetrics.face_w)}w` : "—w"}, ${
+              typeof filterMetrics.face_h === "number" ? `${Math.round(filterMetrics.face_h)}h` : "—h"
+            }, ${typeof filterMetrics.face_area_ratio === "number" ? `${(filterMetrics.face_area_ratio * 100).toFixed(2)}%` : "—"})`
+          : "";
+        const filterLine = filterDecisionRaw
+          ? `Filter ${formatFaceMatchToken(filterDecisionRaw)}${filterMetricsSuffix}`
+          : null;
         return {
           index: crop.index,
           label,
           url,
           diagnosticsLine: `Status ${matchStatus} | Sim ${matchSimilarity} | Detect ${detectConfidence}`,
           reasonLine: `Reason ${matchReason}`,
+          filterLine,
           candidatesLine: formatFaceMatchCandidates(matchingBox?.match_candidates),
         };
       });
@@ -579,9 +608,19 @@ function MetadataPanel({
           : `Face ${box.index}`;
         const matchStatus = matchStatusRaw ? formatFaceMatchToken(matchStatusRaw) : "unassigned";
         const matchReason = box.match_reason ? formatFaceMatchToken(box.match_reason) : "—";
+        const hasNumericSimilarity =
+          typeof box.match_similarity === "number" && Number.isFinite(box.match_similarity);
+        const fallbackSimilarityUnavailable =
+          !hasNumericSimilarity &&
+          matchStatusRaw === "matched" &&
+          (labelSourceRaw === "owner_fallback_map" ||
+            labelSourceRaw === "deterministic_tag_map" ||
+            labelSourceRaw === "best_effort_tag_map");
         const matchSimilarity =
-          typeof box.match_similarity === "number" && Number.isFinite(box.match_similarity)
+          hasNumericSimilarity
             ? `${(box.match_similarity * 100).toFixed(1)}%`
+            : fallbackSimilarityUnavailable
+              ? "Similarity unavailable (fallback assignment)"
             : "—";
         const detectConfidence =
           typeof box.confidence === "number" && Number.isFinite(box.confidence)
@@ -592,6 +631,19 @@ function MetadataPanel({
             ? box.label_source.replace(/[_-]+/g, " ")
             : "—";
         const topCandidates = formatFaceMatchCandidates(box.match_candidates);
+        const filterDecision =
+          typeof box.filter_decision === "string" && box.filter_decision.trim().length > 0
+            ? formatFaceMatchToken(box.filter_decision)
+            : null;
+        const filterMetrics =
+          box.filter_metrics && typeof box.filter_metrics === "object"
+            ? box.filter_metrics
+            : null;
+        const filterMetricsSuffix = filterMetrics
+          ? ` (${typeof filterMetrics.face_w === "number" ? `${Math.round(filterMetrics.face_w)}w` : "—w"}, ${
+              typeof filterMetrics.face_h === "number" ? `${Math.round(filterMetrics.face_h)}h` : "—h"
+            }, ${typeof filterMetrics.face_area_ratio === "number" ? `${(filterMetrics.face_area_ratio * 100).toFixed(2)}%` : "—"})`
+          : "";
         return {
           index: box.index,
           label,
@@ -600,6 +652,7 @@ function MetadataPanel({
           matchSimilarity,
           detectConfidence,
           labelSource,
+          filterLine: filterDecision ? `Filter ${filterDecision}${filterMetricsSuffix}` : null,
           topCandidates,
         };
       });
@@ -608,6 +661,23 @@ function MetadataPanel({
   const titleImdbUrl =
     metadata.imdbTitleUrl ??
     (titleImdbId ? `https://www.imdb.com/title/${titleImdbId}/` : null);
+  const faceFilteringSummary = (() => {
+    const raw = metadata.faceCountRaw;
+    const filtered = metadata.faceCountFiltered;
+    if (!Number.isFinite(raw) && !Number.isFinite(filtered)) return null;
+    const thresholds = metadata.faceFilterThresholds;
+    const minSidePx = thresholds?.min_side_px;
+    const minAreaRatio = thresholds?.min_area_ratio;
+    const thresholdSuffix =
+      Number.isFinite(minSidePx) || Number.isFinite(minAreaRatio)
+        ? ` (min side ${Number.isFinite(minSidePx) ? `${Math.round(minSidePx)}px` : "—"}, min area ${
+            Number.isFinite(minAreaRatio) ? `${(Number(minAreaRatio) * 100).toFixed(1)}%` : "—"
+          })`
+        : "";
+    return `Faces raw ${Number.isFinite(raw) ? String(raw) : "—"} -> usable ${
+      Number.isFinite(filtered) ? String(filtered) : "—"
+    }${thresholdSuffix}`;
+  })();
   const metadataCoverageRows: Array<{ label: string; value: ReactNode }> = [
     { label: "Source", value: metadata.source || "—" },
     { label: "Original Source", value: sourceBadgeLabel || "—" },
@@ -685,6 +755,10 @@ function MetadataPanel({
     {
       label: "Face Crops",
       value: faceCropChips.length > 0 ? String(faceCropChips.length) : "—",
+    },
+    {
+      label: "Face Filtering",
+      value: faceFilteringSummary ?? "—",
     },
     {
       label: "People",
@@ -1296,6 +1370,11 @@ function MetadataPanel({
                   <p className="mt-0.5 text-center text-[9px] leading-tight text-white/55">
                     {chip.reasonLine}
                   </p>
+                  {chip.filterLine && (
+                    <p className="mt-0.5 text-center text-[9px] leading-tight text-white/50">
+                      {chip.filterLine}
+                    </p>
+                  )}
                   {chip.candidatesLine && (
                     <p className="mt-0.5 text-center text-[9px] leading-tight text-white/50">
                       Top {chip.candidatesLine}
@@ -1325,6 +1404,9 @@ function MetadataPanel({
                   </p>
                   <p className="text-[11px] text-white/60">Reason {item.matchReason}</p>
                   <p className="text-[11px] text-white/55">Label Source {item.labelSource}</p>
+                  {item.filterLine && (
+                    <p className="text-[11px] text-white/55">{item.filterLine}</p>
+                  )}
                   {item.topCandidates && (
                     <p className="text-[11px] text-white/50">Top {item.topCandidates}</p>
                   )}
@@ -1892,15 +1974,7 @@ export function ImageLightbox({
           return { left, top, width: baseWidth, height: baseHeight };
         })()
       : null;
-  const effectiveThumbnailPreviewStyle =
-    effectivePreviewRect && effectivePreviewRect.widthPct > 0 && effectivePreviewRect.heightPct > 0
-      ? {
-          width: `${(10000 / effectivePreviewRect.widthPct).toFixed(4)}%`,
-          height: `${(10000 / effectivePreviewRect.heightPct).toFixed(4)}%`,
-          left: `${(-(effectivePreviewRect.leftPct / effectivePreviewRect.widthPct) * 100).toFixed(4)}%`,
-          top: `${(-(effectivePreviewRect.topPct / effectivePreviewRect.heightPct) * 100).toFixed(4)}%`,
-        }
-      : null;
+  const effectiveThumbnailPreviewStyle = resolveThumbnailViewportImageStyle(effectivePreviewRect);
 
   return (
     <LightboxShell modalRef={modalRef} alt={alt} onBackdropClick={onClose}>

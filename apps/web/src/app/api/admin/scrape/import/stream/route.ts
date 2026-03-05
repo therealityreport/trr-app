@@ -20,6 +20,9 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     await requireAdmin(request);
+    const requestId = request.headers.get("x-trr-request-id")?.trim() || "";
+    const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || "";
+    const flowKey = request.headers.get("x-trr-flow-key")?.trim() || "";
 
     const body = await request.json();
     const { entity_type, source_url, images } = body;
@@ -129,6 +132,9 @@ export async function POST(request: NextRequest) {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${serviceRoleKey}`,
+        ...(requestId ? { "x-trr-request-id": requestId } : {}),
+        ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+        ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
       },
       body: JSON.stringify(body),
     });

@@ -2,6 +2,8 @@
 
 import type { User } from "firebase/auth";
 import { isDevAdminBypassEnabledClient } from "@/lib/admin/dev-admin-bypass";
+import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
+import { getOrCreateAdminTabSessionId } from "@/lib/admin/tab-session";
 import { auth } from "@/lib/firebase";
 
 const DEFAULT_TOKEN_RETRY_DELAYS_MS = [150, 300, 600] as const;
@@ -41,6 +43,53 @@ function isClientLocalHostname(): boolean {
   return hostname.endsWith(".localhost");
 }
 
+function getTabSessionHeaderValue(): string | null {
+  const sessionId = getOrCreateAdminTabSessionId();
+  if (!sessionId || sessionId === "server" || sessionId === "unavailable") return null;
+  return sessionId;
+}
+
+function isAdminRequestPath(pathname: string): boolean {
+  return pathname.startsWith("/api/admin/");
+}
+
+function toRequestPath(input: RequestInfo | URL): string | null {
+  if (input instanceof URL) {
+    return `${input.pathname}${input.search}`;
+  }
+  const isRequest = typeof Request !== "undefined" && input instanceof Request;
+  const raw = typeof input === "string" ? input : isRequest ? input.url : String(input);
+  if (!raw) return null;
+  try {
+    const parsed = raw.startsWith("http://") || raw.startsWith("https://")
+      ? new URL(raw)
+      : new URL(raw, typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1");
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return raw.startsWith("/") ? raw : null;
+  }
+}
+
+function toBodySignature(body: BodyInit | null | undefined): string {
+  if (typeof body === "string") return String(body.length);
+  if (body instanceof URLSearchParams) return String(body.toString().length);
+  if (body == null) return "0";
+  if (typeof FormData !== "undefined" && body instanceof FormData) return "form-data";
+  if (typeof Blob !== "undefined" && body instanceof Blob) return `blob:${body.size}`;
+  return String(String(body).length);
+}
+
+function resolveFlowKeyForRequest(input: RequestInfo | URL, init?: RequestInit): string | null {
+  const path = toRequestPath(input);
+  if (!path || !isAdminRequestPath(path)) return null;
+  const isRequest = typeof Request !== "undefined" && input instanceof Request;
+  const method = String(init?.method || (isRequest ? input.method : "GET") || "GET").toUpperCase();
+  const body = init?.body ?? (isRequest ? input.body : undefined);
+  const flowScope = `${method}:${path}:${toBodySignature(body)}`;
+  const flowKey = getOrCreateAdminFlowKey(flowScope);
+  return flowKey && flowKey.trim().length > 0 ? flowKey : null;
+}
+
 async function waitForAuthStateReadyWithTimeout(): Promise<void> {
   if (typeof auth.authStateReady !== "function") return;
 
@@ -68,14 +117,23 @@ export interface ClientAuthOptions {
   forceRefreshOnFinalAttempt?: boolean;
 }
 
+export type ClientAuthHeaders = {
+  Authorization: string;
+  "x-trr-tab-session-id"?: string;
+};
+
 export async function getClientAuthHeaders(
   options?: ClientAuthOptions,
-): Promise<{ Authorization: string }> {
+): Promise<ClientAuthHeaders> {
+  const tabSessionId = getTabSessionHeaderValue();
   const bypassAllowed =
     Boolean(options?.allowDevAdminBypass) &&
     (process.env.NODE_ENV !== "production" || isDevAdminBypassEnabledClient() || isClientLocalHostname());
   if (bypassAllowed && !options?.preferredUser?.uid) {
-    return { Authorization: "Bearer dev-admin-bypass" };
+    return {
+      Authorization: "Bearer dev-admin-bypass",
+      ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+    };
   }
 
   const retryDelaysMs =
@@ -96,7 +154,10 @@ export async function getClientAuthHeaders(
       try {
         const token = await currentUser.getIdToken(forceRefresh);
         if (token) {
-          return { Authorization: `Bearer ${token}` };
+          return {
+            Authorization: `Bearer ${token}`,
+            ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+          };
         }
       } catch {
         // Treat transient token read failures the same as a missing token and keep retrying.
@@ -110,7 +171,10 @@ export async function getClientAuthHeaders(
   }
 
   if (bypassAllowed) {
-    return { Authorization: "Bearer dev-admin-bypass" };
+    return {
+      Authorization: "Bearer dev-admin-bypass",
+      ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+    };
   }
 
   throw new Error("Not authenticated");
@@ -134,7 +198,15 @@ export async function fetchAdminWithAuth(
       forceRefreshOnFinalAttempt: forceRefresh || options?.forceRefreshOnFinalAttempt,
     });
     const headers = toHeaders(init?.headers);
-    headers.set("Authorization", authHeaders.Authorization);
+    for (const [name, value] of Object.entries(authHeaders)) {
+      headers.set(name, value);
+    }
+    if (!headers.has("x-trr-flow-key")) {
+      const flowKey = resolveFlowKeyForRequest(input, init);
+      if (flowKey) {
+        headers.set("x-trr-flow-key", flowKey);
+      }
+    }
     return fetch(input, { ...init, headers });
   };
 

@@ -11,8 +11,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     await requireAdmin(request);
+    const forwardedSearchParams = new URLSearchParams(request.nextUrl.searchParams.toString());
 
     const data = await fetchSocialBackendJson("/ingest/queue-status", {
+      queryString: forwardedSearchParams.toString(),
       fallbackError: "Failed to fetch queue status",
       retries: 0,
       timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,

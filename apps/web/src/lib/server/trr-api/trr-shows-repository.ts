@@ -2210,6 +2210,19 @@ const parsePeopleCount = (value: unknown): number | null => {
   return null;
 };
 
+const parseOptionalInteger = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
 const parsePeopleCountSource = (value: unknown): "auto" | "manual" | null => {
   return value === "auto" || value === "manual" ? value : null;
 };
@@ -2903,6 +2916,20 @@ export async function getPhotosByPersonId(
         const metadataFaceCrops = toFaceCrops(
           (normalizedFandom.metadata as { face_crops?: unknown } | null)?.face_crops
         );
+        const contextSeason =
+          context && typeof context === "object"
+            ? parseOptionalInteger((context as { season?: unknown }).season)
+            : null;
+        const contextSeasonNumber =
+          context && typeof context === "object"
+            ? parseOptionalInteger((context as { season_number?: unknown }).season_number)
+            : null;
+        const metadataSeasonNumber =
+          normalizedFandom.metadata && typeof normalizedFandom.metadata === "object"
+            ? parseOptionalInteger(
+                (normalizedFandom.metadata as { season_number?: unknown }).season_number
+              )
+            : null;
 
         return {
           id: row.link_id,
@@ -2918,7 +2945,7 @@ export async function getPhotosByPersonId(
           height: row.height,
           context_section: (context as { context_section?: string | null } | null)?.context_section ?? null,
           context_type: (context as { context_type?: string | null } | null)?.context_type ?? null,
-          season: (context as { season?: number | null } | null)?.season ?? null,
+          season: contextSeason ?? contextSeasonNumber ?? metadataSeasonNumber ?? null,
           source_page_url: sourcePageUrl,
           people_names: peopleNames,
           people_ids: contextPeopleIds,

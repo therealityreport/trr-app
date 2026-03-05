@@ -12,6 +12,7 @@ import AdminModal from "@/components/admin/AdminModal";
 import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
 import { buildSeasonBreadcrumb, buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
@@ -21,7 +22,6 @@ import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import SeasonSocialAnalyticsSection, {
   type SocialAnalyticsView,
 } from "@/components/admin/season-social-analytics-section";
-import TikTokSeasonAnalyticsSection from "@/components/admin/tiktok-season-analytics-section";
 import SeasonSurveysTab from "@/components/admin/season-tabs/SeasonSurveysTab";
 import SeasonOverviewTab from "@/components/admin/season-tabs/SeasonOverviewTab";
 import SeasonEpisodesTab from "@/components/admin/season-tabs/SeasonEpisodesTab";
@@ -387,13 +387,7 @@ const SEASON_BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "tiktok-overview", label: "TIKTOK OVERVIEW" },
-  { id: "tiktok-cast", label: "TIKTOK CAST" },
-  { id: "tiktok-hashtags", label: "TIKTOK HASHTAGS" },
-  { id: "tiktok-sounds", label: "TIKTOK SOUNDS" },
-  { id: "tiktok-health", label: "TIKTOK CONTENT HEALTH" },
-  { id: "tiktok-sentiment", label: "TIKTOK SENTIMENT" },
-  { id: "bravo", label: "OFFICIAL ANALYTICS (LEGACY)" },
+  { id: "bravo", label: "OFFICIAL ANALYSIS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
@@ -414,7 +408,7 @@ const normalizeSocialAnalyticsViewInput = (value: string | null | undefined): st
 };
 
 const formatSocialAnalyticsViewLabel = (view: SocialAnalyticsView): string => {
-  if (view === "bravo") return "Official (Legacy)";
+  if (view === "bravo") return "Official";
   if (view === "tiktok-overview") return "TikTok Overview";
   if (view === "tiktok-cast") return "TikTok Cast";
   if (view === "tiktok-hashtags") return "TikTok Hashtags";
@@ -423,14 +417,6 @@ const formatSocialAnalyticsViewLabel = (view: SocialAnalyticsView): string => {
   if (view === "tiktok-sentiment") return "TikTok Sentiment";
   return `${view.charAt(0).toUpperCase()}${view.slice(1)}`;
 };
-
-const isTikTokAnalyticsView = (view: SocialAnalyticsView): view is
-  | "tiktok-overview"
-  | "tiktok-cast"
-  | "tiktok-hashtags"
-  | "tiktok-sounds"
-  | "tiktok-health"
-  | "tiktok-sentiment" => view.startsWith("tiktok-");
 
 const BATCH_JOB_OPERATION_LABELS = {
   count: "Count",
@@ -972,6 +958,7 @@ export default function SeasonDetailPage() {
     seasonLoadRequestIdRef,
   } = useSeasonCore<TrrShow, TrrSeason, TrrEpisode>(showRouteParam, seasonNumberParam);
   const { user, checking, hasAccess } = useAdminGuard();
+  useAdminOperationUnloadGuard();
   const isCurrentSeasonRequest = useCallback(
     (requestKey: string, requestId?: number) =>
       activeSeasonRequestKeyRef.current === requestKey &&
@@ -1396,7 +1383,7 @@ export default function SeasonDetailPage() {
     const queryValue = normalizeSocialAnalyticsViewInput(searchParams.get("social_view"));
     if (isSocialAnalyticsView(queryValue)) return queryValue;
     const pathValue = normalizeSocialAnalyticsViewInput(parseSocialAnalyticsViewFromPath(pathname));
-    return isSocialAnalyticsView(pathValue) ? pathValue : "tiktok-overview";
+    return isSocialAnalyticsView(pathValue) ? pathValue : "bravo";
   }, [pathname, searchParams]);
 
   const setSocialAnalyticsView = useCallback(
@@ -2493,10 +2480,8 @@ export default function SeasonDetailPage() {
           streamIdleTimeout = null;
         };
         bumpStreamIdleTimeout();
-        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-        let shouldStopReading = false;
         try {
-          const streamResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`, {
+          await adminStream(`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`, {
             method: "POST",
             headers: {
               ...headers,
@@ -2504,49 +2489,11 @@ export default function SeasonDetailPage() {
               "x-trr-request-id": requestId,
             },
             body: JSON.stringify({ skip_mirror: false, season_number: seasonNumber }),
-            signal: streamController.signal,
-          });
-
-          if (!streamResponse.ok || !streamResponse.body) {
-            throw new Error("Media refresh stream unavailable");
-          }
-
-          reader = streamResponse.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            bumpStreamIdleTimeout();
-            buffer += decoder.decode(value, { stream: true });
-            buffer = buffer.replace(/\r\n/g, "\n");
-
-            let boundaryIndex = buffer.indexOf("\n\n");
-            while (boundaryIndex !== -1) {
-              const rawEvent = buffer.slice(0, boundaryIndex);
-              buffer = buffer.slice(boundaryIndex + 2);
-
-              const lines = rawEvent.split("\n").filter(Boolean);
-              let eventType = "message";
-              const dataLines: string[] = [];
-              for (const line of lines) {
-                if (line.startsWith("event:")) {
-                  eventType = line.slice(6).trim();
-                } else if (line.startsWith("data:")) {
-                  dataLines.push(line.slice(5).trim());
-                }
-              }
-
-              const dataStr = dataLines.join("\n");
-              let payload: Record<string, unknown> | string = dataStr;
-              try {
-                payload = JSON.parse(dataStr) as Record<string, unknown>;
-              } catch {
-                payload = dataStr;
-              }
-
-              if (eventType === "progress" && payload && typeof payload === "object") {
+            timeoutMs: SEASON_STREAM_MAX_DURATION_MS,
+            externalSignal: streamController.signal,
+            onEvent: async ({ event, payload }) => {
+              bumpStreamIdleTimeout();
+              if (event === "progress" && payload && typeof payload === "object") {
                 const stageLabel = resolveStageLabel(
                   (payload as { stage?: unknown; step?: unknown }).stage ??
                     (payload as { stage?: unknown; step?: unknown }).step,
@@ -2627,19 +2574,25 @@ export default function SeasonDetailPage() {
                   });
                   lastProgressLogSignature = signature;
                 }
-              } else if (eventType === "complete") {
+                return;
+              }
+
+              if (event === "complete") {
+                const payloadObject = payload && typeof payload === "object"
+                  ? (payload as Record<string, unknown>)
+                  : {};
                 sawComplete = true;
-                const completeRequestId = typeof (payload as { request_id?: unknown }).request_id === "string"
-                  ? (payload as { request_id: string }).request_id
+                const completeRequestId = typeof (payloadObject as { request_id?: unknown }).request_id === "string"
+                  ? String((payloadObject as { request_id?: unknown }).request_id)
                   : requestId;
                 lastSeenRequestId = completeRequestId;
-                const completeLiveCounts = resolveJobLiveCounts(assetsRefreshLiveCounts, payload);
+                const completeLiveCounts = resolveJobLiveCounts(assetsRefreshLiveCounts, payloadObject);
                 setAssetsRefreshLiveCounts(completeLiveCounts);
                 completionLiveCounts = completeLiveCounts;
                 const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
                 completionSummary =
-                  summarizePhotoStreamCompletion(payload) ??
-                  summarizeRefreshTargetResult(payload, "photos");
+                  summarizePhotoStreamCompletion(payloadObject) ??
+                  summarizeRefreshTargetResult(payloadObject, "photos");
                 appendRefreshLog({
                   scope: "assets",
                   stage: "complete",
@@ -2648,8 +2601,10 @@ export default function SeasonDetailPage() {
                   response: [completionSummary, liveCountSuffix].filter(Boolean).join(" | "),
                   level: "success",
                 });
-                shouldStopReading = true;
-              } else if (eventType === "error") {
+                return;
+              }
+
+              if (event === "error") {
                 const errorPayload =
                   payload && typeof payload === "object"
                     ? (payload as { error?: unknown; detail?: unknown; request_id?: unknown })
@@ -2675,27 +2630,11 @@ export default function SeasonDetailPage() {
                 });
                 throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
               }
-
-              if (shouldStopReading) {
-                break;
-              }
-              boundaryIndex = buffer.indexOf("\n\n");
-            }
-
-            if (shouldStopReading) {
-              break;
-            }
-          }
+            },
+          });
         } finally {
           clearStreamIdleTimeout();
           clearTimeout(streamTimeout);
-          if (reader && shouldStopReading) {
-            try {
-              await reader.cancel();
-            } catch {
-              // no-op
-            }
-          }
         }
         if (!sawComplete) {
           appendRefreshLog({
@@ -2829,56 +2768,16 @@ export default function SeasonDetailPage() {
           streamIdleTimeout = null;
         };
         bumpStreamIdleTimeout();
-        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-        let shouldStopReading = false;
         try {
-          const refreshResponse = await fetch(`/api/admin/trr-api/shows/${showId}/refresh/stream`, {
+          await adminStream(`/api/admin/trr-api/shows/${showId}/refresh/stream`, {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({ targets: ["cast_credits"] }),
-            signal: streamController.signal,
-          });
-
-          if (!refreshResponse.ok || !refreshResponse.body) {
-            throw new Error("Cast refresh stream unavailable");
-          }
-
-          reader = refreshResponse.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            bumpStreamIdleTimeout();
-            buffer += decoder.decode(value, { stream: true });
-            buffer = buffer.replace(/\r\n/g, "\n");
-
-            let boundaryIndex = buffer.indexOf("\n\n");
-            while (boundaryIndex !== -1) {
-              const rawEvent = buffer.slice(0, boundaryIndex);
-              buffer = buffer.slice(boundaryIndex + 2);
-
-              const lines = rawEvent.split("\n").filter(Boolean);
-              let eventType = "message";
-              const dataLines: string[] = [];
-              for (const line of lines) {
-                if (line.startsWith("event:")) {
-                  eventType = line.slice(6).trim();
-                } else if (line.startsWith("data:")) {
-                  dataLines.push(line.slice(5).trim());
-                }
-              }
-
-              const dataStr = dataLines.join("\n");
-              let payload: Record<string, unknown> | string = dataStr;
-              try {
-                payload = JSON.parse(dataStr) as Record<string, unknown>;
-              } catch {
-                payload = dataStr;
-              }
-
-              if (eventType === "progress" && payload && typeof payload === "object") {
+            timeoutMs: SEASON_STREAM_MAX_DURATION_MS,
+            externalSignal: streamController.signal,
+            onEvent: async ({ event, payload }) => {
+              bumpStreamIdleTimeout();
+              if (event === "progress" && payload && typeof payload === "object") {
                 const stageLabel = resolveStageLabel(
                   (payload as { step?: unknown; stage?: unknown }).step ??
                     (payload as { step?: unknown; stage?: unknown }).stage,
@@ -2916,9 +2815,15 @@ export default function SeasonDetailPage() {
                   });
                   lastProgressLogSignature = signature;
                 }
-              } else if (eventType === "complete") {
+                return;
+              }
+
+              if (event === "complete") {
+                const payloadObject = payload && typeof payload === "object"
+                  ? (payload as Record<string, unknown>)
+                  : {};
                 sawComplete = true;
-                completionSummary = summarizeRefreshTargetResult(payload, "cast_credits");
+                completionSummary = summarizeRefreshTargetResult(payloadObject, "cast_credits");
                 appendRefreshLog({
                   scope: "cast",
                   stage: "complete",
@@ -2926,8 +2831,10 @@ export default function SeasonDetailPage() {
                   response: completionSummary,
                   level: "success",
                 });
-                shouldStopReading = true;
-              } else if (eventType === "error") {
+                return;
+              }
+
+              if (event === "error") {
                 const errorPayload =
                   payload && typeof payload === "object"
                     ? (payload as { error?: unknown; detail?: unknown })
@@ -2949,28 +2856,12 @@ export default function SeasonDetailPage() {
                 });
                 throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
               }
-
-              if (shouldStopReading) {
-                break;
-              }
-              boundaryIndex = buffer.indexOf("\n\n");
-            }
-
-            if (shouldStopReading) {
-              break;
-            }
-          }
+            },
+          });
         } finally {
           clearStreamIdleTimeout();
           clearTimeout(streamTimeout);
           runController.signal.removeEventListener("abort", forwardRunAbort);
-          if (reader && shouldStopReading) {
-            try {
-              await reader.cancel();
-            } catch {
-              // no-op
-            }
-          }
         }
         if (!sawComplete) {
           streamFailed = true;
@@ -3211,7 +3102,7 @@ export default function SeasonDetailPage() {
 
       bumpStreamIdleTimeout();
       try {
-        const streamResponse = await fetch(
+        await adminStream(
           `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
           {
             method: "POST",
@@ -3221,94 +3112,51 @@ export default function SeasonDetailPage() {
               show_id: showId,
               show_name: show?.name ?? undefined,
             }),
-            signal: streamController.signal,
+            timeoutMs: SEASON_PERSON_STREAM_MAX_DURATION_MS,
+            externalSignal: streamController.signal,
+            onEvent: async ({ event, payload }) => {
+              bumpStreamIdleTimeout();
+              if (event === "progress" && payload && typeof payload === "object") {
+                const stageLabel = resolveStageLabel(
+                  (payload as { stage?: unknown; step?: unknown }).stage ??
+                    (payload as { stage?: unknown; step?: unknown }).step,
+                  SEASON_REFRESH_STAGE_LABELS
+                );
+                onProgress?.({
+                  stage: stageLabel,
+                  message: buildProgressMessage(
+                    stageLabel,
+                    (payload as { message?: unknown }).message,
+                    "Refreshing cast member..."
+                  ),
+                  current: parseProgressNumber((payload as { current?: unknown }).current),
+                  total: parseProgressNumber((payload as { total?: unknown }).total),
+                });
+                return;
+              }
+
+              if (event === "complete") {
+                return;
+              }
+
+              if (event === "error") {
+                const errorPayload =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: unknown; detail?: unknown })
+                    : null;
+                const errorText =
+                  typeof errorPayload?.error === "string" && errorPayload.error
+                    ? errorPayload.error
+                    : "Failed to sync cast member profile/media";
+                const detailText =
+                  typeof errorPayload?.detail === "string" && errorPayload.detail
+                    ? errorPayload.detail
+                    : null;
+                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+              }
+            },
           }
         );
-
-        if (!streamResponse.ok || !streamResponse.body) {
-          throw new Error("Person refresh stream unavailable");
-        }
-
-        const reader = streamResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let shouldStopReading = false;
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          bumpStreamIdleTimeout();
-          buffer += decoder.decode(value, { stream: true });
-          buffer = buffer.replace(/\r\n/g, "\n");
-
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
-
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-              }
-            }
-
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
-
-            if (eventType === "progress" && payload && typeof payload === "object") {
-              const stageLabel = resolveStageLabel(
-                (payload as { stage?: unknown; step?: unknown }).stage ??
-                  (payload as { stage?: unknown; step?: unknown }).step,
-                SEASON_REFRESH_STAGE_LABELS
-              );
-              onProgress?.({
-                stage: stageLabel,
-                message: buildProgressMessage(
-                  stageLabel,
-                  (payload as { message?: unknown }).message,
-                  "Refreshing cast member..."
-                ),
-                current: parseProgressNumber((payload as { current?: unknown }).current),
-                total: parseProgressNumber((payload as { total?: unknown }).total),
-              });
-            } else if (eventType === "complete") {
-              shouldStopReading = true;
-            } else if (eventType === "error") {
-              const errorPayload =
-                payload && typeof payload === "object"
-                  ? (payload as { error?: unknown; detail?: unknown })
-                  : null;
-              const errorText =
-                typeof errorPayload?.error === "string" && errorPayload.error
-                  ? errorPayload.error
-                  : "Failed to sync cast member profile/media";
-              const detailText =
-                typeof errorPayload?.detail === "string" && errorPayload.detail
-                  ? errorPayload.detail
-                  : null;
-              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-            }
-
-            if (shouldStopReading) {
-              break;
-            }
-            boundaryIndex = buffer.indexOf("\n\n");
-          }
-
-          if (shouldStopReading) {
-            break;
-          }
-        }
       } catch (streamErr) {
         if (isAbortError(streamErr) && externalSignal?.aborted) {
           throw new Error("Season cast refresh canceled.");
@@ -3367,98 +3215,56 @@ export default function SeasonDetailPage() {
 
       bumpStreamIdleTimeout();
       try {
-        const streamResponse = await fetch(
+        await adminStream(
           `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
           {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
-            signal: streamController.signal,
+            timeoutMs: SEASON_PERSON_STREAM_MAX_DURATION_MS,
+            externalSignal: streamController.signal,
+            onEvent: async ({ event, payload }) => {
+              bumpStreamIdleTimeout();
+              if (event === "progress" && payload && typeof payload === "object") {
+                const stageLabel = resolveStageLabel(
+                  (payload as { stage?: unknown; step?: unknown }).stage ??
+                    (payload as { stage?: unknown; step?: unknown }).step,
+                  SEASON_REFRESH_STAGE_LABELS
+                );
+                onProgress?.({
+                  stage: stageLabel,
+                  message: buildProgressMessage(
+                    stageLabel,
+                    (payload as { message?: unknown }).message,
+                    "Enriching cast media..."
+                  ),
+                  current: parseProgressNumber((payload as { current?: unknown }).current),
+                  total: parseProgressNumber((payload as { total?: unknown }).total),
+                });
+                return;
+              }
+
+              if (event === "complete") {
+                return;
+              }
+
+              if (event === "error") {
+                const errorPayload =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: unknown; detail?: unknown })
+                    : null;
+                const errorText =
+                  typeof errorPayload?.error === "string" && errorPayload.error
+                    ? errorPayload.error
+                    : "Failed to enrich cast media";
+                const detailText =
+                  typeof errorPayload?.detail === "string" && errorPayload.detail
+                    ? errorPayload.detail
+                    : null;
+                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+              }
+            },
           }
         );
-
-        if (!streamResponse.ok || !streamResponse.body) {
-          throw new Error("Person reprocess stream unavailable");
-        }
-
-        const reader = streamResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let shouldStopReading = false;
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          bumpStreamIdleTimeout();
-          buffer += decoder.decode(value, { stream: true });
-          buffer = buffer.replace(/\r\n/g, "\n");
-
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
-
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-              }
-            }
-
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
-
-            if (eventType === "progress" && payload && typeof payload === "object") {
-              const stageLabel = resolveStageLabel(
-                (payload as { stage?: unknown; step?: unknown }).stage ??
-                  (payload as { stage?: unknown; step?: unknown }).step,
-                SEASON_REFRESH_STAGE_LABELS
-              );
-              onProgress?.({
-                stage: stageLabel,
-                message: buildProgressMessage(
-                  stageLabel,
-                  (payload as { message?: unknown }).message,
-                  "Enriching cast media..."
-                ),
-                current: parseProgressNumber((payload as { current?: unknown }).current),
-                total: parseProgressNumber((payload as { total?: unknown }).total),
-              });
-            } else if (eventType === "complete") {
-              shouldStopReading = true;
-            } else if (eventType === "error") {
-              const errorPayload =
-                payload && typeof payload === "object"
-                  ? (payload as { error?: unknown; detail?: unknown })
-                  : null;
-              const errorText =
-                typeof errorPayload?.error === "string" && errorPayload.error
-                  ? errorPayload.error
-                  : "Failed to enrich cast media";
-              const detailText =
-                typeof errorPayload?.detail === "string" && errorPayload.detail
-                  ? errorPayload.detail
-                  : null;
-              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-            }
-
-            if (shouldStopReading) {
-              break;
-            }
-            boundaryIndex = buffer.indexOf("\n\n");
-          }
-
-          if (shouldStopReading) {
-            break;
-          }
-        }
       } catch (streamErr) {
         if (isAbortError(streamErr) && externalSignal?.aborted) {
           throw new Error("Season cast media enrich canceled.");
@@ -6516,24 +6322,14 @@ export default function SeasonDetailPage() {
             <SeasonSocialTab
               seasonSupplementalWarning={seasonSupplementalWarning}
               analyticsSection={
-                isTikTokAnalyticsView(socialAnalyticsView) ? (
-                  <TikTokSeasonAnalyticsSection
-                    showId={showId}
-                    seasonNumber={season.season_number}
-                    seasonId={season.id}
-                    showName={show.name}
-                    analyticsView={socialAnalyticsView}
-                  />
-                ) : (
-                  <SeasonSocialAnalyticsSection
-                    showId={showId}
-                    showSlug={showSlugForRouting}
-                    seasonNumber={season.season_number}
-                    seasonId={season.id}
-                    showName={show.name}
-                    analyticsView={socialAnalyticsView}
-                  />
-                )
+                <SeasonSocialAnalyticsSection
+                  showId={showId}
+                  showSlug={showSlugForRouting}
+                  seasonNumber={season.season_number}
+                  seasonId={season.id}
+                  showName={show.name}
+                  analyticsView={socialAnalyticsView}
+                />
               }
             />
           )}

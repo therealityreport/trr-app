@@ -8,6 +8,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { adminStream } from "@/lib/admin/admin-fetch";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
 import {
@@ -765,87 +766,49 @@ export default function ScrapeImagesPage() {
               images: imagesToImport,
             };
 
-      // Use streaming endpoint for progress updates
-      const response = await fetchWithAuth("/api/admin/scrape/import/stream", {
+      await adminStream("/api/admin/scrape/import/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        timeoutMs: 15 * 60 * 1000,
+        onEvent: async ({ payload: eventPayload }) => {
+          if (!eventPayload || typeof eventPayload !== "object" || Array.isArray(eventPayload)) {
+            return;
+          }
+          const data = eventPayload as Record<string, unknown>;
+          const status = typeof data.status === "string" ? data.status : null;
+          if (
+            status === "downloading" ||
+            status === "success" ||
+            status === "duplicate" ||
+            status === "excluded" ||
+            status === "error"
+          ) {
+            setImportProgress({
+              current: Number(data.current ?? 0),
+              total: Number(data.total ?? 0),
+              url: typeof data.url === "string" ? data.url : "",
+              status,
+              error: typeof data.error === "string" ? data.error : undefined,
+            });
+          }
+
+          if (data.imported !== undefined && data.assets !== undefined) {
+            setImportResult({
+              imported: Number(data.imported ?? 0),
+              skipped_duplicates: Number(data.skipped_duplicates ?? 0),
+              errors: Array.isArray(data.errors) ? data.errors.map((item) => String(item)) : [],
+              assets: Array.isArray(data.assets) ? (data.assets as ImportedAsset[]) : [],
+            });
+            setPreviewData(null);
+            setSelectedImages(new Set());
+          }
+
+          if (typeof data.error === "string" && !data.current) {
+            setError(data.error);
+          }
+        },
       });
-
-      if (!response.ok) {
-        const text = await response.text();
-        try {
-          const data = JSON.parse(text);
-          setError(data.error || "Import failed");
-        } catch {
-          setError("Import failed");
-        }
-        return;
-      }
-
-      // Read SSE stream
-      const reader = response.body?.getReader();
-      if (!reader) {
-        setError("No response stream");
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete SSE messages
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            // Next line should be data
-            continue;
-          }
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-
-              // Handle different event types
-              if (data.status === "downloading" || data.status === "success" ||
-                  data.status === "duplicate" || data.status === "excluded" || data.status === "error") {
-                setImportProgress({
-                  current: data.current,
-                  total: data.total,
-                  url: data.url,
-                  status: data.status,
-                  error: data.error,
-                });
-              }
-
-              // Handle completion
-              if (data.imported !== undefined && data.assets !== undefined) {
-                setImportResult({
-                  imported: data.imported,
-                  skipped_duplicates: data.skipped_duplicates,
-                  errors: data.errors || [],
-                  assets: data.assets,
-                });
-                setPreviewData(null);
-                setSelectedImages(new Set());
-              }
-
-              // Handle error event
-              if (data.error && !data.current) {
-                setError(data.error);
-              }
-            } catch (e) {
-              console.error("Failed to parse SSE data:", line, e);
-            }
-          }
-        }
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed");
     } finally {

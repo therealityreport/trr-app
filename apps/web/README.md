@@ -2,7 +2,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-Recommended Node version: 20.x (matches CI). See `../../.nvmrc`.
+Recommended Node version: 24.x (primary CI lane). See `../../.nvmrc`.
 
 First, install dependencies and run the development server:
 

@@ -1,5 +1,4 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import {
   getAuth,
   connectAuthEmulator,
@@ -12,11 +11,12 @@ import {
 import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
 
 // Prefer environment variables for config; allow emulator project override
-const USE_EMULATORS = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
+export const FIREBASE_USE_EMULATORS =
+  (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "",
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "",
-  projectId: USE_EMULATORS
+  projectId: FIREBASE_USE_EMULATORS
     ? (process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_PROJECT_ID ?? process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "")
     : (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? ""),
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "",
@@ -26,20 +26,14 @@ const firebaseConfig = {
 };
 
 // Initialize (or reuse) the Firebase app once per runtime
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // Export singletons
-export const db = getFirestore(app);
 export const auth = getAuth(app);
 
 // Optional: connect to local emulators for development/testing
 if (typeof window !== "undefined") {
-  if (USE_EMULATORS) {
-    try {
-      connectFirestoreEmulator(db, "localhost", 8080);
-    } catch (err) {
-      console.log("Firestore emulator connection skipped:", (err as Error)?.message);
-    }
+  if (FIREBASE_USE_EMULATORS) {
     try {
       connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
     } catch (err) {

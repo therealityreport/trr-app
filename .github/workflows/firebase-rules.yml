@@ -18,12 +18,12 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: Install Firebase CLI
-        run: npm i -g firebase-tools@13
+        run: npm i -g firebase-tools@13.35.1
       - name: Ensure Java (for emulator)
         uses: actions/setup-java@v4
         with:
@@ -44,12 +44,12 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: Install Firebase CLI
-        run: npm i -g firebase-tools@13
+        run: npm i -g firebase-tools@13.35.1
       - name: Deploy Firestore rules
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

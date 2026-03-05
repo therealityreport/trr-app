@@ -4,6 +4,7 @@ import {
   clampThumbnailCrop,
   parseThumbnailCrop,
   resolveAutoThumbnailFocus,
+  resolveThumbnailViewportImageStyle,
   resolveThumbnailPresentation,
   resolveThumbnailViewportRect,
 } from "@/lib/thumbnail-crop";
@@ -120,5 +121,21 @@ describe("thumbnail-crop utils", () => {
     expect(rect!.topPct).toBe(0);
     expect(rect!.widthPct).toBeLessThanOrEqual(100);
     expect(rect!.heightPct).toBeLessThanOrEqual(100);
+  });
+
+  it("converts viewport rects to absolute image styles for preview parity", () => {
+    const style = resolveThumbnailViewportImageStyle({
+      leftPct: 12.5,
+      topPct: 20,
+      widthPct: 50,
+      heightPct: 40,
+    });
+
+    expect(style).toEqual({
+      width: "200.0000%",
+      height: "250.0000%",
+      left: "-25.0000%",
+      top: "-50.0000%",
+    });
   });
 });

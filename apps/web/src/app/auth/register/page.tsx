@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth, signInWithGoogle } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, OAuthProvider, signInWithPopup, updateProfile } from "firebase/auth";
-import { upsertUserProfile, getUserProfile, checkUserExists } from "@/lib/db/users";
+import { upsertUserProfile, getUserProfile, checkUserExists, isFirestoreUnavailableError } from "@/lib/db/users";
 import { validateEmail, validatePassword } from "@/lib/validation/user";
 
 const ENABLE_APPLE = (process.env.NEXT_PUBLIC_ENABLE_APPLE ?? "false").toLowerCase() === "true";
@@ -166,9 +166,14 @@ function RegisterContent() {
             // Incomplete profile, go to finish page
             router.replace("/auth/finish");
           }
-        } catch {
-          // If we can't get profile, assume incomplete and go to finish
-          router.replace("/auth/finish");
+        } catch (error) {
+          if (isFirestoreUnavailableError(error)) {
+            // Avoid trapping existing users in /auth/finish when Firestore lookups are down.
+            router.replace("/hub");
+          } else {
+            // If we can't get profile for another reason, assume incomplete and go to finish.
+            router.replace("/auth/finish");
+          }
         }
         return;
       }

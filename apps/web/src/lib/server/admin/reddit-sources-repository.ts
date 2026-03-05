@@ -1161,6 +1161,13 @@ interface StoredTrackedFlairContainerRow {
   container_post_count: number | null;
 }
 
+interface StoredPendingTrackedFlairRow {
+  container_key: string | null;
+  flair_key: string;
+  flair_label: string;
+  post_count: number;
+}
+
 export interface StoredTrackedFlairContainerCount {
   container_key: string;
   post_count: number;
@@ -1171,6 +1178,13 @@ export interface StoredTrackedFlairCount {
   flair_label: string;
   post_count: number;
   container_counts: StoredTrackedFlairContainerCount[];
+}
+
+export interface StoredPendingTrackedFlairCount {
+  container_key: string;
+  flair_key: string;
+  flair_label: string;
+  post_count: number;
 }
 
 /**
@@ -1319,4 +1333,72 @@ export async function getStoredTrackedPostFlairCountsByCommunityAndSeason(
     }
   }
   return [...byFlair.values()];
+}
+
+/**
+ * Returns unassigned tracked-flair post counts grouped by container+flair for
+ * a community+season. "Unassigned" excludes posts already saved as reddit
+ * threads for the same community in either the selected season or global
+ * (season null) scope.
+ */
+export async function getStoredPendingTrackedFlairCountsByCommunityAndSeason(
+  communityId: string,
+  seasonId: string,
+): Promise<StoredPendingTrackedFlairCount[]> {
+  const result = await query<StoredPendingTrackedFlairRow>(
+    `WITH scoped AS (
+       SELECT DISTINCT
+         m.reddit_post_id,
+         substring(m.period_key FROM 'container:([^:]+)') AS container_key,
+         COALESCE(NULLIF(m.canonical_flair_key, ''), NULLIF(p.canonical_flair_key, ''), '') AS flair_key,
+         COALESCE(
+           NULLIF(TRIM(m.link_flair_text), ''),
+           NULLIF(TRIM(p.link_flair_text), ''),
+           '(No Flair)'
+         ) AS flair_label
+       FROM social.reddit_period_post_matches m
+       LEFT JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
+       WHERE m.community_id = $1::uuid
+         AND m.season_id = $2::uuid
+         AND m.passes_flair_filter = true
+     ),
+     unassigned AS (
+       SELECT s.*
+       FROM scoped s
+       WHERE s.container_key IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM ${THREADS_TABLE} t
+           WHERE t.community_id = $1::uuid
+             AND t.reddit_post_id = s.reddit_post_id
+             AND (t.trr_season_id = $2::uuid OR t.trr_season_id IS NULL)
+         )
+     )
+     SELECT
+       container_key,
+       flair_key,
+       MIN(flair_label) AS flair_label,
+       COUNT(DISTINCT reddit_post_id)::int AS post_count
+     FROM unassigned
+     GROUP BY container_key, flair_key
+     ORDER BY container_key ASC, post_count DESC, flair_label ASC`,
+    [communityId, seasonId],
+  );
+
+  return result.rows
+    .filter(
+      (row): row is StoredPendingTrackedFlairRow =>
+        typeof row.container_key === "string" &&
+        row.container_key.length > 0 &&
+        typeof row.flair_key === "string" &&
+        typeof row.flair_label === "string" &&
+        typeof row.post_count === "number" &&
+        Number.isFinite(row.post_count),
+    )
+    .map((row) => ({
+      container_key: row.container_key as string,
+      flair_key: row.flair_key,
+      flair_label: row.flair_label || "(No Flair)",
+      post_count: row.post_count,
+    }));
 }

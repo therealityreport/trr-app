@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
-import { getUserByUsername } from "@/lib/db/users";
+import { getUserByUsername, isFirestoreUnavailableError } from "@/lib/db/users";
 import { validateBirthday, validateUsername, parseShows, validateShowsMin, type UserProfile } from "@/lib/validation/user";
 import { ALL_SHOWS } from "@/lib/data/shows";
 import { COUNTRIES } from "@/lib/data/countries";
@@ -176,8 +176,13 @@ function FinishProfileContent() {
   const checkUsernameUnique = async (u: string): Promise<string | null> => {
     const baseErr = validateUsername(u);
     if (baseErr) return baseErr;
-    const existing = await getUserByUsername(u);
-    return existing ? "That username is taken. Try another." : null;
+    try {
+      const existing = await getUserByUsername(u);
+      return existing ? "That username is taken. Try another." : null;
+    } catch (error) {
+      console.warn("Finish: username uniqueness lookup unavailable; skipping live uniqueness check", error);
+      return null;
+    }
   };
 
   const validateAll = async (): Promise<boolean> => {
@@ -262,9 +267,9 @@ function FinishProfileContent() {
       try {
         console.log("Finish: Writing profile directly to Firestore");
         const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
-        const { db } = await import("@/lib/firebase");
+        const { getDb } = await import("@/lib/firebase-db");
         
-        const userRef = doc(db, "users", u.uid);
+        const userRef = doc(getDb(), "users", u.uid);
         const profileData = {
           uid: u.uid,
           email: u.email ?? null,
@@ -293,7 +298,12 @@ function FinishProfileContent() {
         router.replace("/hub");
       } catch (firestoreError) {
         console.error("Finish: Direct Firestore write failed", firestoreError);
-        setFormError("Unable to save profile. Please try again.");
+        if (isFirestoreUnavailableError(firestoreError)) {
+          sessionStorage.setItem("toastMessage", "Signed in. Profile sync is temporarily unavailable.");
+          router.replace("/hub");
+        } else {
+          setFormError("Unable to save profile. Please try again.");
+        }
       }
     } catch (err: unknown) {
       console.error("Finish: Error saving profile", err);

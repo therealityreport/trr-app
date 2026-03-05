@@ -1,7 +1,8 @@
 // @ts-nocheck - Test files use different module resolution and mock configurations
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import * as usersDb from '@/lib/db/users';
 
 const replace = vi.fn();
 const router = { replace };
@@ -73,5 +74,16 @@ describe('/auth/finish interactions', () => {
     expect(screen.getByLabelText(/remove requested show the valley/i)).toBeInTheDocument();
     const raw = sessionStorage.getItem('finish_show_requests');
     expect(raw).toContain('The Valley');
+  });
+
+  it('keeps the form usable when username lookup fails', async () => {
+    vi.mocked(usersDb.getUserByUsername).mockRejectedValueOnce(new Error('firestore unavailable'));
+    render(<FinishPage />);
+    const uname = await screen.findByLabelText(/username/i);
+    fireEvent.change(uname, { target: { value: 'fallback_user' } });
+    fireEvent.blur(uname);
+    await waitFor(() => {
+      expect(screen.queryByText(/taken/i)).not.toBeInTheDocument();
+    });
   });
 });

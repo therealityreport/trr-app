@@ -24,6 +24,12 @@ export interface PhotoFaceBox {
     person_name?: string;
     similarity: number;
   }> | null;
+  filter_decision?: string | null;
+  filter_metrics?: {
+    face_w?: number;
+    face_h?: number;
+    face_area_ratio?: number;
+  } | null;
   label_source?: string | null;
 }
 
@@ -65,6 +71,8 @@ export interface PhotoMetadata {
   imdbTitleUrl?: string | null;
   mediaTypeLabel?: string | null;
   eventName?: string | null;
+  episodeTitle?: string | null;
+  episodeNumber?: number | null;
   episodeLabel?: string | null;
   sourceVariant?: string | null;
   sourcePageTitle?: string | null;
@@ -75,6 +83,9 @@ export interface PhotoMetadata {
   faceBoxes?: PhotoFaceBox[];
   faceCrops?: PhotoFaceCrop[];
   peopleCount?: number | null;
+  faceCountRaw?: number | null;
+  faceCountFiltered?: number | null;
+  faceFilterThresholds?: { min_side_px?: number; min_area_ratio?: number } | null;
   caption: string | null;
   dimensions: { width: number; height: number } | null;
   season: number | null;
@@ -119,6 +130,38 @@ const parseDateValue = (value: unknown): Date | null => {
     if (!trimmed) return null;
     const date = new Date(trimmed);
     return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+};
+
+const decodeHtmlEntities = (value: string): string =>
+  value
+    .replace(/&amp;/g, "&")
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, digits: string) => {
+      const parsed = Number.parseInt(digits, 10);
+      return Number.isFinite(parsed) ? String.fromCharCode(parsed) : _;
+    });
+
+const decodeAndNormalizeText = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = decodeHtmlEntities(value).trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\s+/g, " ");
+};
+
+const parseIntegerValue = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    if (Number.isFinite(parsed)) return parsed;
   }
   return null;
 };
@@ -431,6 +474,28 @@ const parseFaceBoxes = (value: unknown): PhotoFaceBox[] => {
       typeof candidate.label_source === "string" && candidate.label_source.trim().length > 0
         ? candidate.label_source.trim()
         : null;
+    const filterDecision =
+      typeof candidate.filter_decision === "string" && candidate.filter_decision.trim().length > 0
+        ? candidate.filter_decision.trim().toLowerCase()
+        : null;
+    const filterMetricsRaw =
+      candidate.filter_metrics && typeof candidate.filter_metrics === "object"
+        ? (candidate.filter_metrics as Record<string, unknown>)
+        : null;
+    const filterMetrics = filterMetricsRaw
+      ? {
+          ...(typeof filterMetricsRaw.face_w === "number" && Number.isFinite(filterMetricsRaw.face_w)
+            ? { face_w: filterMetricsRaw.face_w }
+            : {}),
+          ...(typeof filterMetricsRaw.face_h === "number" && Number.isFinite(filterMetricsRaw.face_h)
+            ? { face_h: filterMetricsRaw.face_h }
+            : {}),
+          ...(typeof filterMetricsRaw.face_area_ratio === "number" &&
+          Number.isFinite(filterMetricsRaw.face_area_ratio)
+            ? { face_area_ratio: filterMetricsRaw.face_area_ratio }
+            : {}),
+        }
+      : null;
 
     boxes.push({
       index,
@@ -447,6 +512,8 @@ const parseFaceBoxes = (value: unknown): PhotoFaceBox[] => {
       ...(matchStatus ? { match_status: matchStatus } : {}),
       ...(matchReason ? { match_reason: matchReason } : {}),
       ...(matchCandidates.length > 0 ? { match_candidates: matchCandidates } : {}),
+      ...(filterDecision ? { filter_decision: filterDecision } : {}),
+      ...(filterMetrics && Object.keys(filterMetrics).length > 0 ? { filter_metrics: filterMetrics } : {}),
       ...(labelSource ? { label_source: labelSource } : {}),
     });
   }
@@ -629,8 +696,9 @@ const parseImdbCaptionEntities = (
   value: string | null | undefined
 ): { people: string[]; titles: string[] } => {
   if (!value) return { people: [], titles: [] };
-  const text = value.trim().replace(/\s+/g, " ");
-  if (!text) return { people: [], titles: [] };
+  const decoded = decodeAndNormalizeText(value);
+  if (!decoded) return { people: [], titles: [] };
+  const text = decoded;
 
   const titles: string[] = [];
   const people: string[] = [];
@@ -892,16 +960,10 @@ export function mapPhotoToMetadata(
       : resolvedContentType ?? inferredContentType;
   const sectionTagOut = contentType ?? inferredSectionTag;
 
-  const episodeNumber =
-    typeof metadata.episode_number === "number"
-      ? metadata.episode_number
-      : typeof metadata.episode_number === "string"
-        ? Number.parseInt(metadata.episode_number, 10)
-        : null;
-  const episodeTitle =
-    typeof metadata.episode_title === "string" ? metadata.episode_title : null;
+  const episodeNumber = parseIntegerValue(metadata.episode_number);
+  const episodeTitle = decodeAndNormalizeText(metadata.episode_title);
   const episodeLabel =
-    episodeNumber && Number.isFinite(episodeNumber)
+    episodeNumber !== null && Number.isFinite(episodeNumber)
       ? `Episode ${episodeNumber}${episodeTitle ? ` - ${episodeTitle}` : ""}`
       : episodeTitle;
   const captionEntities = isImdb ? parseImdbCaptionEntities(photo.caption) : { people: [], titles: [] };
@@ -965,7 +1027,8 @@ export function mapPhotoToMetadata(
     "sourcePageTitle",
     "page_title",
     "pageTitle"
-  ) ?? captionEntities.titles[0] ?? null;
+  );
+  const normalizedSourcePageTitle = decodeAndNormalizeText(sourcePageTitle) ?? captionEntities.titles[0] ?? null;
   const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
     [
@@ -1057,9 +1120,9 @@ export function mapPhotoToMetadata(
     : [];
   const people = [
     ...new Set([
-      ...peopleFromPhoto,
-      ...peopleFromMeta,
-      ...peopleFromTags,
+      ...peopleFromPhoto.map((value) => decodeAndNormalizeText(value) ?? value.trim()),
+      ...peopleFromMeta.map((value) => decodeAndNormalizeText(value) ?? value),
+      ...peopleFromTags.map((value) => decodeAndNormalizeText(value) ?? value),
       ...captionEntities.people,
       ...(options?.fallbackPeople ?? []).filter(
         (name): name is string => typeof name === "string" && name.trim().length > 0
@@ -1068,9 +1131,9 @@ export function mapPhotoToMetadata(
   ];
   const titles = [
     ...new Set([
-      ...titlesFromPhoto,
-      ...titlesFromMeta,
-      ...titlesFromTags,
+      ...titlesFromPhoto.map((value) => decodeAndNormalizeText(value) ?? value.trim()),
+      ...titlesFromMeta.map((value) => decodeAndNormalizeText(value) ?? value),
+      ...titlesFromTags.map((value) => decodeAndNormalizeText(value) ?? value),
       ...captionEntities.titles,
     ]),
   ];
@@ -1112,7 +1175,7 @@ export function mapPhotoToMetadata(
   const resolvedHeight = parseDimensionNumber(photo.height) ?? metadataHeight;
   const inferredSeason =
     photo.season ??
-    (typeof metadata.season_number === "number" ? metadata.season_number : null) ??
+    parseIntegerValue(metadata.season_number) ??
     parseSeasonNumber(sectionLabel) ??
     parseSeasonNumber(photo.caption ?? null);
   const sourceLogo = getMetadataString(
@@ -1123,8 +1186,8 @@ export function mapPhotoToMetadata(
     "originalSourceLogo"
   ) ?? (isImdb ? "IMDb" : null);
   const assetName =
-    getMetadataString(metadata, "asset_name", "assetName", "name", "title") ??
-    sourcePageTitle ??
+    decodeAndNormalizeText(getMetadataString(metadata, "asset_name", "assetName", "name", "title")) ??
+    normalizedSourcePageTitle ??
     captionEntities.titles[0] ??
     null;
   const galleryStatus =
@@ -1139,13 +1202,13 @@ export function mapPhotoToMetadata(
   const galleryStatusCheckedAt = parseDateValue(
     metadata.gallery_status_checked_at ?? metadata.gallery_status_checkedAt ?? null
   );
-  const showName = getMetadataString(
+  const showName = decodeAndNormalizeText(getMetadataString(
     metadata,
     "show_name",
     "showName",
     "imdb_fallback_show_name",
     "imdbFallbackShowName"
-  );
+  ));
   const showId = getMetadataString(metadata, "show_id", "showId");
   const showContextSource = getMetadataString(
     metadata,
@@ -1175,7 +1238,30 @@ export function mapPhotoToMetadata(
   })();
   const eventName =
     mediaTypeLabel?.toLowerCase() === "event"
-      ? eventNameRaw ?? titles[0] ?? null
+      ? decodeAndNormalizeText(eventNameRaw) ?? titles[0] ?? null
+      : null;
+  const faceDiagnosticsRaw =
+    metadata.face_detection_diagnostics && typeof metadata.face_detection_diagnostics === "object"
+      ? (metadata.face_detection_diagnostics as Record<string, unknown>)
+      : null;
+  const faceCountRaw = faceDiagnosticsRaw ? toPeopleCount(faceDiagnosticsRaw.raw) : null;
+  const faceCountFiltered = faceDiagnosticsRaw ? toPeopleCount(faceDiagnosticsRaw.filtered) : null;
+  const faceFilterThresholdsRaw =
+    faceDiagnosticsRaw?.thresholds && typeof faceDiagnosticsRaw.thresholds === "object"
+      ? (faceDiagnosticsRaw.thresholds as Record<string, unknown>)
+      : null;
+  const faceFilterThresholds =
+    faceFilterThresholdsRaw
+      ? {
+          ...(typeof faceFilterThresholdsRaw.min_side_px === "number" &&
+          Number.isFinite(faceFilterThresholdsRaw.min_side_px)
+            ? { min_side_px: faceFilterThresholdsRaw.min_side_px }
+            : {}),
+          ...(typeof faceFilterThresholdsRaw.min_area_ratio === "number" &&
+          Number.isFinite(faceFilterThresholdsRaw.min_area_ratio)
+            ? { min_area_ratio: faceFilterThresholdsRaw.min_area_ratio }
+            : {}),
+        }
       : null;
 
   return {
@@ -1205,9 +1291,11 @@ export function mapPhotoToMetadata(
     imdbTitleUrl,
     mediaTypeLabel,
     eventName,
+    episodeTitle,
+    episodeNumber,
     episodeLabel,
     sourceVariant,
-    sourcePageTitle,
+    sourcePageTitle: normalizedSourcePageTitle,
     sourceUrl,
     showName,
     showId,
@@ -1215,7 +1303,11 @@ export function mapPhotoToMetadata(
     faceBoxes,
     faceCrops,
     peopleCount,
-    caption: photo.caption,
+    faceCountRaw,
+    faceCountFiltered,
+    faceFilterThresholds:
+      faceFilterThresholds && Object.keys(faceFilterThresholds).length > 0 ? faceFilterThresholds : null,
+    caption: decodeAndNormalizeText(photo.caption) ?? photo.caption,
     dimensions:
       resolvedWidth && resolvedHeight
         ? {

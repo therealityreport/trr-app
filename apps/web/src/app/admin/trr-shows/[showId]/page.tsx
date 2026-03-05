@@ -11,6 +11,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import AdminModal from "@/components/admin/AdminModal";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import SeasonSocialAnalyticsSection, {
   type PlatformTab,
@@ -136,6 +137,14 @@ import {
   adminMutation,
   fetchWithTimeout,
 } from "@/lib/admin/admin-fetch";
+import {
+  canonicalizeOperationStatus,
+  isCanonicalTerminalStatus,
+  monitorKickoffHandle,
+  normalizeKickoffHandle,
+  type CanonicalOperationStatus,
+} from "@/lib/admin/async-handles";
+import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
 import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
 import {
@@ -749,6 +758,7 @@ const NEWS_LOAD_TIMEOUT_MS = 45_000;
 const NEWS_SYNC_TIMEOUT_MS = 60_000;
 const NEWS_SYNC_POLL_INTERVAL_MS = 1_500;
 const NEWS_SYNC_POLL_TIMEOUT_MS = 90_000;
+const NEWS_OPERATION_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000, 15_000] as const;
 const NEWS_PAGE_SIZE = 50;
 const EMPTY_NEWS_FACETS: UnifiedNewsFacets = {
   sources: [],
@@ -1541,6 +1551,7 @@ export default function TrrShowDetailPage() {
     isCurrentShowId,
   } = useShowCore<TrrShow, TrrSeason>(showRouteParam);
   const { user, checking, hasAccess } = useAdminGuard();
+  useAdminOperationUnloadGuard();
 
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
@@ -2574,115 +2585,62 @@ export default function TrrShowDetailPage() {
           if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
           streamIdleTimeout = null;
         };
+        let completePayload: Record<string, unknown> | null = null;
         bumpStreamIdleTimeout();
         try {
-          const streamResponse = await fetch(
+          await adminStream(
             `/api/admin/trr-api/people/${personId}/refresh-images/stream`,
             {
               method: "POST",
               headers: { ...headers, "Content-Type": "application/json" },
               body: JSON.stringify(body),
-              signal: streamController.signal,
+              timeoutMs: PERSON_REFRESH_STREAM_TIMEOUT_MS,
+              externalSignal: streamController.signal,
+              onEvent: async ({ event, payload }) => {
+                bumpStreamIdleTimeout();
+                if (event === "progress" && payload && typeof payload === "object") {
+                  const stageLabel = resolveStageLabel(
+                    (payload as { stage?: unknown }).stage,
+                    PERSON_REFRESH_STAGE_LABELS
+                  );
+                  const current = parseProgressNumber((payload as { current?: unknown }).current);
+                  const total = parseProgressNumber((payload as { total?: unknown }).total);
+                  onProgress?.({
+                    stage: stageLabel,
+                    message: buildProgressMessage(
+                      stageLabel,
+                      (payload as { message?: unknown }).message,
+                      baseProgressMessage
+                    ),
+                    current,
+                    total,
+                  });
+                  return;
+                }
+
+                if (event === "error") {
+                  const message =
+                    payload && typeof payload === "object"
+                      ? (payload as { error?: unknown; detail?: unknown })
+                      : null;
+                  const errorText =
+                    typeof message?.error === "string" && message.error
+                      ? message.error
+                      : "Failed to refresh person images";
+                  const detailText =
+                    typeof message?.detail === "string" && message.detail ? message.detail : null;
+                  throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+                }
+
+                if (event === "complete") {
+                  completePayload =
+                    payload && typeof payload === "object"
+                      ? (payload as Record<string, unknown>)
+                      : {};
+                }
+              },
             }
           );
-
-          if (!streamResponse.ok || !streamResponse.body) {
-            throw new Error("Person refresh stream unavailable");
-          }
-
-          const reader = streamResponse.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-          let completePayload: Record<string, unknown> | null = null;
-          let shouldStopReading = false;
-
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            bumpStreamIdleTimeout();
-            buffer += decoder.decode(value, { stream: true });
-            buffer = buffer.replace(/\r\n/g, "\n");
-
-            let boundaryIndex = buffer.indexOf("\n\n");
-            while (boundaryIndex !== -1) {
-              const rawEvent = buffer.slice(0, boundaryIndex);
-              buffer = buffer.slice(boundaryIndex + 2);
-
-              const lines = rawEvent.split("\n").filter(Boolean);
-              let eventType = "message";
-              const dataLines: string[] = [];
-              for (const line of lines) {
-                if (line.startsWith("event:")) {
-                  eventType = line.slice(6).trim();
-                } else if (line.startsWith("data:")) {
-                  dataLines.push(line.slice(5).trim());
-                }
-              }
-
-              const dataStr = dataLines.join("\n");
-              let payload: Record<string, unknown> | string = dataStr;
-              try {
-                payload = JSON.parse(dataStr) as Record<string, unknown>;
-              } catch {
-                payload = dataStr;
-              }
-
-              if (eventType === "progress" && payload && typeof payload === "object") {
-                const stageLabel = resolveStageLabel(
-                  (payload as { stage?: unknown }).stage,
-                  PERSON_REFRESH_STAGE_LABELS
-                );
-                const current = parseProgressNumber((payload as { current?: unknown }).current);
-                const total = parseProgressNumber((payload as { total?: unknown }).total);
-                onProgress?.({
-                  stage: stageLabel,
-                  message: buildProgressMessage(
-                    stageLabel,
-                    (payload as { message?: unknown }).message,
-                    baseProgressMessage
-                  ),
-                  current,
-                  total,
-                });
-              } else if (eventType === "error") {
-                const message =
-                  payload && typeof payload === "object"
-                    ? (payload as { error?: unknown; detail?: unknown })
-                    : null;
-                const errorText =
-                  typeof message?.error === "string" && message.error
-                    ? message.error
-                    : "Failed to refresh person images";
-                const detailText =
-                  typeof message?.detail === "string" && message.detail ? message.detail : null;
-                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-              } else if (eventType === "complete") {
-                completePayload =
-                  payload && typeof payload === "object"
-                    ? (payload as Record<string, unknown>)
-                    : {};
-                shouldStopReading = true;
-              }
-
-              if (shouldStopReading) {
-                break;
-              }
-              boundaryIndex = buffer.indexOf("\n\n");
-            }
-            if (shouldStopReading) {
-              break;
-            }
-          }
-
-          clearStreamIdleTimeout();
-          if (shouldStopReading) {
-            try {
-              await reader.cancel();
-            } catch {
-              // no-op
-            }
-          }
-
           return completePayload ?? {};
         } finally {
           if (externalSignal) {
@@ -2797,113 +2755,64 @@ export default function TrrShowDetailPage() {
       };
 
       bumpStreamIdleTimeout();
+      let sawComplete = false;
+      let completePayload: Record<string, unknown> | null = null;
       try {
-        const streamResponse = await fetch(
+        await adminStream(
           `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
           {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
-            signal: streamController.signal,
+            timeoutMs: PERSON_REFRESH_STREAM_TIMEOUT_MS,
+            externalSignal: streamController.signal,
+            onEvent: async ({ event, payload }) => {
+              bumpStreamIdleTimeout();
+              if (event === "progress" && payload && typeof payload === "object") {
+                const stageLabel = resolveStageLabel(
+                  (payload as { stage?: unknown }).stage,
+                  PERSON_REFRESH_STAGE_LABELS
+                );
+                const current = parseProgressNumber((payload as { current?: unknown }).current);
+                const total = parseProgressNumber((payload as { total?: unknown }).total);
+                onProgress?.({
+                  stage: stageLabel,
+                  message: buildProgressMessage(
+                    stageLabel,
+                    (payload as { message?: unknown }).message,
+                    "Enriching existing cast media..."
+                  ),
+                  current,
+                  total,
+                });
+                return;
+              }
+
+              if (event === "error") {
+                const message =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: unknown; detail?: unknown })
+                    : null;
+                const errorText =
+                  typeof message?.error === "string" && message.error
+                    ? message.error
+                    : "Failed to reprocess person images";
+                const detailText =
+                  typeof message?.detail === "string" && message.detail ? message.detail : null;
+                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+              }
+
+              if (event === "complete") {
+                sawComplete = true;
+                completePayload =
+                  payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+              }
+            },
           }
         );
-
-        if (!streamResponse.ok || !streamResponse.body) {
-          throw new Error("Person reprocess stream unavailable");
+        if (!sawComplete) {
+          throw new Error("Reprocess stream ended before completion.");
         }
-
-        const reader = streamResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let completePayload: Record<string, unknown> | null = null;
-        let shouldStopReading = false;
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          bumpStreamIdleTimeout();
-          buffer += decoder.decode(value, { stream: true });
-          buffer = buffer.replace(/\r\n/g, "\n");
-
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
-
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-              }
-            }
-
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
-
-            if (eventType === "progress" && payload && typeof payload === "object") {
-              const stageLabel = resolveStageLabel(
-                (payload as { stage?: unknown }).stage,
-                PERSON_REFRESH_STAGE_LABELS
-              );
-              const current = parseProgressNumber((payload as { current?: unknown }).current);
-              const total = parseProgressNumber((payload as { total?: unknown }).total);
-              onProgress?.({
-                stage: stageLabel,
-                message: buildProgressMessage(
-                  stageLabel,
-                  (payload as { message?: unknown }).message,
-                  "Enriching existing cast media..."
-                ),
-                current,
-                total,
-              });
-            } else if (eventType === "error") {
-              const message =
-                payload && typeof payload === "object"
-                  ? (payload as { error?: unknown; detail?: unknown })
-                  : null;
-              const errorText =
-                typeof message?.error === "string" && message.error
-                  ? message.error
-                  : "Failed to reprocess person images";
-              const detailText =
-                typeof message?.detail === "string" && message.detail ? message.detail : null;
-              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
-            } else if (eventType === "complete") {
-              completePayload =
-                payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-              shouldStopReading = true;
-            }
-
-            if (shouldStopReading) {
-              break;
-            }
-            boundaryIndex = buffer.indexOf("\n\n");
-          }
-
-          if (shouldStopReading) {
-            break;
-          }
-        }
-
-        clearStreamIdleTimeout();
-        if (shouldStopReading) {
-          try {
-            await reader.cancel();
-          } catch {
-            // no-op
-          }
-          return completePayload ?? {};
-        }
-        throw new Error("Reprocess stream ended before completion.");
+        return completePayload ?? {};
       } catch (streamErr) {
         if (isAbortError(streamErr) && externalSignal?.aborted) {
           throw new Error("Cast media enrich canceled.");
@@ -4988,77 +4897,118 @@ export default function TrrShowDetailPage() {
         try {
           if (!isCurrentShowId(requestShowId)) return false;
           setNewsSyncing(true);
-          const headers = await getAuthHeaders();
-          const response = await fetchWithTimeout(
-            `/api/admin/trr-api/shows/${requestShowId}/google-news/sync`,
-            {
-              method: "POST",
-              headers: { ...headers, "Content-Type": "application/json" },
-              body: JSON.stringify({ force, async: true }),
-            },
-            NEWS_SYNC_TIMEOUT_MS
-          );
-          const data = (await response.json().catch(() => ({}))) as {
-            error?: string;
-            job_id?: string;
-            status?: string;
+          const kickoffPath = `/api/admin/trr-api/shows/${requestShowId}/google-news/sync`;
+          const flowScope = `POST:${kickoffPath}:google-news-sync`;
+          const flowKey = getOrCreateAdminFlowKey(flowScope);
+          const authHeaders = await getAuthHeaders();
+          const requestHeaders = {
+            ...authHeaders,
+            "Content-Type": "application/json",
+            "x-trr-flow-key": flowKey,
           };
-          if (!response.ok) {
-            if (response.status === 409) {
-              const message = data.error || "Google News URL is not configured for this show.";
-              if (!isCurrentShowId(requestShowId)) return false;
-              setNewsGoogleUrlMissing(true);
-              setNewsNotice(message);
-              return false;
-            }
-            throw new Error(data.error || "Failed to sync Google News");
+          const kickoffPayload = await adminMutation<Record<string, unknown>>(kickoffPath, {
+            method: "POST",
+            headers: requestHeaders,
+            body: JSON.stringify({ force, async: true }),
+            timeoutMs: NEWS_SYNC_TIMEOUT_MS,
+          });
+          const kickoffHandle = normalizeKickoffHandle(kickoffPayload);
+          const kickoffMetaParts: string[] = [];
+          if (kickoffHandle.executionOwner) {
+            kickoffMetaParts.push(
+              kickoffHandle.executionOwner === "remote_worker"
+                ? "remote worker"
+                : kickoffHandle.executionOwner
+            );
           }
-          const jobId = typeof data.job_id === "string" ? data.job_id.trim() : "";
-          if (jobId) {
+          if (kickoffHandle.executionModeCanonical) {
+            kickoffMetaParts.push(`mode ${kickoffHandle.executionModeCanonical}`);
+          }
+          if (kickoffHandle.operationId) {
+            kickoffMetaParts.push(`op ${kickoffHandle.operationId.slice(0, 8)}`);
+          }
+          const kickoffMeta = kickoffMetaParts.length > 0 ? ` (${kickoffMetaParts.join(" · ")})` : "";
+          if (kickoffHandle.rawStatus) {
+            setNewsNotice(`Google News sync ${canonicalizeOperationStatus(kickoffHandle.rawStatus)}${kickoffMeta}.`);
+          } else if (kickoffHandle.operationId || kickoffHandle.jobId) {
+            setNewsNotice(`Google News sync queued${kickoffMeta}.`);
+          }
+
+          const waitForLegacyJobTerminal = async (): Promise<CanonicalOperationStatus> => {
+            if (!kickoffHandle.jobId) return kickoffHandle.canonicalStatus;
             const pollStartedAt = Date.now();
             while (Date.now() - pollStartedAt < NEWS_SYNC_POLL_TIMEOUT_MS) {
-              if (!isCurrentShowId(requestShowId)) return false;
+              if (!isCurrentShowId(requestShowId)) return "cancelled";
               const statusResponse = await fetchWithTimeout(
-                `/api/admin/trr-api/shows/${requestShowId}/google-news/sync/${encodeURIComponent(jobId)}`,
-                { headers, cache: "no-store" },
-                NEWS_SYNC_TIMEOUT_MS
+                `/api/admin/trr-api/shows/${requestShowId}/google-news/sync/${encodeURIComponent(kickoffHandle.jobId)}`,
+                { headers: requestHeaders, cache: "no-store" },
+                NEWS_SYNC_TIMEOUT_MS,
               );
               const statusData = (await statusResponse.json().catch(() => ({}))) as {
                 error?: string;
                 status?: string;
-                result?: { synced?: boolean; stale_guard_skipped?: boolean } | null;
+                result?: { synced?: boolean; stale_guard_skipped?: boolean; error?: string } | null;
               };
               if (!statusResponse.ok) {
                 throw new Error(statusData.error || "Failed to fetch Google News sync status");
               }
-              const jobStatus = String(statusData.status || "").trim().toLowerCase();
-              if (jobStatus === "completed") {
-                break;
-              }
-              if (jobStatus === "failed") {
-                const detail =
-                  (statusData.result &&
-                    typeof statusData.result === "object" &&
-                    "error" in statusData.result &&
-                    typeof statusData.result.error === "string" &&
-                    statusData.result.error) ||
-                  statusData.error ||
-                  "Google News sync failed";
-                throw new Error(detail);
+              const jobStatus = canonicalizeOperationStatus(statusData.status, "running");
+              setNewsNotice(`Google News sync ${jobStatus}.`);
+              if (isCanonicalTerminalStatus(jobStatus)) {
+                if (jobStatus === "failed") {
+                  const detail =
+                    (statusData.result &&
+                      typeof statusData.result === "object" &&
+                      typeof statusData.result.error === "string" &&
+                      statusData.result.error) ||
+                    statusData.error ||
+                    "Google News sync failed";
+                  throw new Error(detail);
+                }
+                return jobStatus;
               }
               await new Promise((resolve) => setTimeout(resolve, NEWS_SYNC_POLL_INTERVAL_MS));
             }
-            if (Date.now() - pollStartedAt >= NEWS_SYNC_POLL_TIMEOUT_MS) {
-              throw new Error(
-                `Google News sync polling timed out after ${Math.round(NEWS_SYNC_POLL_TIMEOUT_MS / 1000)}s`
-              );
-            }
+            throw new Error(`Google News sync polling timed out after ${Math.round(NEWS_SYNC_POLL_TIMEOUT_MS / 1000)}s`);
+          };
+
+          const finalStatus = await monitorKickoffHandle({
+            handle: kickoffHandle,
+            operation: {
+              flowScope,
+              flowKey,
+              input: kickoffPath,
+              method: "POST",
+              requestHeaders,
+              streamTimeoutMs: NEWS_SYNC_TIMEOUT_MS,
+              statusTimeoutMs: NEWS_SYNC_TIMEOUT_MS,
+              reconnectBackoffMs: [...NEWS_OPERATION_RECONNECT_BACKOFF_MS],
+              onState: (state) => {
+                if (!isCurrentShowId(requestShowId)) return;
+                setNewsNotice(`Google News sync ${state.status}.`);
+              },
+            },
+            waitForLegacyTerminal: kickoffHandle.jobId ? waitForLegacyJobTerminal : undefined,
+          });
+          if (finalStatus === "failed") {
+            throw new Error("Google News sync failed");
           }
+          if (finalStatus === "cancelled") {
+            throw new Error("Google News sync was cancelled");
+          }
+
           if (!isCurrentShowId(requestShowId)) return false;
           setNewsGoogleUrlMissing(false);
           setNewsNotice(null);
           return true;
         } catch (err) {
+          if (err instanceof AdminRequestError && err.status === 409) {
+            const message = err.message || "Google News URL is not configured for this show.";
+            if (!isCurrentShowId(requestShowId)) return false;
+            setNewsGoogleUrlMissing(true);
+            setNewsNotice(message);
+            return false;
+          }
           throw err instanceof Error
             ? err
             : new Error(isAbortError(err) ? "Timed out syncing Google News" : "Failed to sync Google News");
@@ -5456,7 +5406,7 @@ export default function TrrShowDetailPage() {
         castOnlyController = new AbortController();
         syncBravoPreviewAbortControllerRef.current = castOnlyController;
 
-        const streamResponse = await fetch(
+        await adminStream(
           `/api/admin/trr-api/shows/${showId}/import-bravo/preview/stream`,
           {
             method: "POST",
@@ -5470,294 +5420,283 @@ export default function TrrShowDetailPage() {
               person_url_candidates: syncBravoCastUrlCandidates,
               season_number: syncBravoTargetSeasonNumber ?? defaultSyncBravoSeasonNumber ?? undefined,
             }),
-            signal: castOnlyController.signal,
+            timeoutMs: ASSET_PIPELINE_STEP_TIMEOUT_MS,
+            externalSignal: castOnlyController.signal,
+            onEvent: async ({ event, payload }) => {
+              if (runId !== syncBravoPreviewRunRef.current) {
+                castOnlyController?.abort();
+                return;
+              }
+              if (!payload || typeof payload !== "object") {
+                return;
+              }
+
+              if (event === "start") {
+                const startCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+                const seededRows = startCandidates
+                  .map((candidate) => {
+                    if (!candidate || typeof candidate !== "object") return null;
+                    const url =
+                      typeof (candidate as { url?: unknown }).url === "string"
+                        ? String((candidate as { url?: unknown }).url).trim()
+                        : "";
+                    if (!url) return null;
+                    const nameRaw = (candidate as { name?: unknown }).name;
+                    const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : null;
+                    return {
+                      url,
+                      source: "bravo",
+                      name,
+                      status: "pending",
+                      error: null,
+                      person: null,
+                    } satisfies BravoPersonCandidateResult;
+                  })
+                  .filter((value) => Boolean(value)) as BravoPersonCandidateResult[];
+
+                if (seededRows.length > 0) {
+                  bravoTotal = seededRows.length;
+                  setSyncBravoPersonCandidateResults(seededRows);
+                }
+                const totalRaw = (payload as { total?: unknown }).total;
+                if (typeof totalRaw === "number" && Number.isFinite(totalRaw) && totalRaw >= 0) {
+                  bravoTotal = totalRaw;
+                }
+
+                const fandomCandidates = Array.isArray((payload as { fandom_candidates?: unknown }).fandom_candidates)
+                  ? ((payload as { fandom_candidates?: Array<Record<string, unknown>> }).fandom_candidates ?? [])
+                  : [];
+                const seededFandomRows = fandomCandidates
+                  .map((candidate) => {
+                    if (!candidate || typeof candidate !== "object") return null;
+                    const url = typeof candidate.url === "string" ? candidate.url.trim() : "";
+                    if (!url) return null;
+                    const name = typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : null;
+                    return {
+                      url,
+                      source: "fandom",
+                      name,
+                      status: "pending",
+                      error: null,
+                      person: null,
+                    } satisfies BravoPersonCandidateResult;
+                  })
+                  .filter((value) => Boolean(value)) as BravoPersonCandidateResult[];
+                if (seededFandomRows.length > 0) {
+                  fandomTotal = seededFandomRows.length;
+                  setSyncFandomPersonCandidateResults(seededFandomRows);
+                }
+                const fandomTotalRaw = (payload as { fandom_total?: unknown }).fandom_total;
+                if (
+                  typeof fandomTotalRaw === "number" &&
+                  Number.isFinite(fandomTotalRaw) &&
+                  fandomTotalRaw >= 0
+                ) {
+                  fandomTotal = fandomTotalRaw;
+                }
+                const fandomDomainsRaw = (payload as { fandom_domains_used?: unknown }).fandom_domains_used;
+                if (Array.isArray(fandomDomainsRaw)) {
+                  const parsedDomains = fandomDomainsRaw
+                    .filter((value): value is string => typeof value === "string")
+                    .map((value) => value.trim())
+                    .filter((value) => value.length > 0);
+                  setSyncFandomDomainsUsed(parsedDomains);
+                }
+
+                const totalToProbe = bravoTotal + fandomTotal;
+                setSyncBravoProbeTotal(totalToProbe);
+                const inFlight = totalToProbe > 0 ? 1 : 0;
+                setSyncBravoProbeActive(inFlight > 0);
+                if (totalToProbe > 0) {
+                  setSyncBravoProbeStatusMessage(
+                    `Probing cast profiles: Bravo ${liveBravoSummary.tested}/${bravoTotal}, Fandom ${liveFandomSummary.tested}/${fandomTotal} (${inFlight} in flight).`
+                  );
+                }
+                return;
+              }
+
+              if (event === "progress") {
+                const url = typeof payload.url === "string" ? payload.url.trim() : "";
+                if (!url) return;
+                const source = payload.source === "fandom" ? "fandom" : "bravo";
+                const statusRaw = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
+                const status = statusRaw || "in_progress";
+                const nameRaw = typeof payload.name === "string" ? payload.name.trim() : "";
+                const errorRaw =
+                  typeof payload.error === "string" && payload.error.trim().length > 0
+                    ? payload.error.trim()
+                    : null;
+                const personRaw = payload.person;
+                const person =
+                  personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
+                    ? (personRaw as BravoPreviewPerson)
+                    : null;
+
+                const setResults =
+                  source === "fandom" ? setSyncFandomPersonCandidateResults : setSyncBravoPersonCandidateResults;
+                setResults((prev) => {
+                  const next = [...prev];
+                  const index = next.findIndex((row) => row.url === url);
+                  const nextRow: BravoPersonCandidateResult = {
+                    ...(index >= 0 ? next[index] : {}),
+                    url,
+                    source,
+                    name: nameRaw || (index >= 0 ? next[index]?.name ?? null : null),
+                    status,
+                    error: errorRaw,
+                    person,
+                  };
+                  if (index >= 0) {
+                    next[index] = nextRow;
+                  } else {
+                    next.push(nextRow);
+                  }
+                  return next;
+                });
+
+                if (person && typeof person.canonical_url === "string" && person.canonical_url.trim()) {
+                  const personUrl = person.canonical_url.trim();
+                  const setPeople = source === "fandom" ? setSyncFandomPreviewPeople : setSyncBravoPreviewPeople;
+                  setPeople((prev) => {
+                    const byUrl = new Map<string, BravoPreviewPerson>();
+                    for (const existing of prev) {
+                      const existingUrl =
+                        typeof existing.canonical_url === "string" ? existing.canonical_url.trim() : "";
+                      if (!existingUrl) continue;
+                      byUrl.set(existingUrl, existing);
+                    }
+                    byUrl.set(personUrl, person);
+                    return Array.from(byUrl.values()).sort((a, b) => {
+                      const aKey = String(a.name || a.canonical_url || "").toLowerCase();
+                      const bKey = String(b.name || b.canonical_url || "").toLowerCase();
+                      return aKey.localeCompare(bKey);
+                    });
+                  });
+                }
+
+                const testedRaw =
+                  source === "fandom" ? payload.fandom_candidates_tested : payload.bravo_candidates_tested;
+                const validRaw =
+                  source === "fandom" ? payload.fandom_candidates_valid : payload.bravo_candidates_valid;
+                const missingRaw =
+                  source === "fandom" ? payload.fandom_candidates_missing : payload.bravo_candidates_missing;
+                const errorsRaw =
+                  source === "fandom" ? payload.fandom_candidates_errors : payload.bravo_candidates_errors;
+                if (
+                  typeof testedRaw === "number" &&
+                  typeof validRaw === "number" &&
+                  typeof missingRaw === "number" &&
+                  typeof errorsRaw === "number"
+                ) {
+                  const resolvedSummary = {
+                    tested: testedRaw,
+                    valid: validRaw,
+                    missing: missingRaw,
+                    errors: errorsRaw,
+                  };
+                  if (source === "fandom") {
+                    liveFandomSummary = resolvedSummary;
+                    setSyncFandomCandidateSummary(resolvedSummary);
+                  } else {
+                    liveBravoSummary = resolvedSummary;
+                    setSyncBravoCandidateSummary(resolvedSummary);
+                  }
+                } else {
+                  let nextSummary = source === "fandom" ? liveFandomSummary : liveBravoSummary;
+                  if (status === "ok") nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, valid: nextSummary.valid + 1 };
+                  else if (status === "missing") {
+                    nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, missing: nextSummary.missing + 1 };
+                  } else if (status === "error") {
+                    nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, errors: nextSummary.errors + 1 };
+                  }
+                  if (source === "fandom") {
+                    liveFandomSummary = nextSummary;
+                    setSyncFandomCandidateSummary(nextSummary);
+                  } else {
+                    liveBravoSummary = nextSummary;
+                    setSyncBravoCandidateSummary(nextSummary);
+                  }
+                }
+
+                const bravoInFlight = bravoTotal > liveBravoSummary.tested ? 1 : 0;
+                const fandomInFlight = fandomTotal > liveFandomSummary.tested ? 1 : 0;
+                const inFlight = bravoInFlight + fandomInFlight;
+                setSyncBravoProbeActive(inFlight > 0);
+                setSyncBravoProbeStatusMessage(
+                  bravoTotal + fandomTotal > 0
+                    ? `Probing cast profiles: Bravo ${Math.min(liveBravoSummary.tested, bravoTotal)}/${bravoTotal}, Fandom ${Math.min(liveFandomSummary.tested, fandomTotal)}/${fandomTotal} (${inFlight} in flight).`
+                    : "No canonical cast profile URLs to probe."
+                );
+                return;
+              }
+
+              if (event === "complete") {
+                finalPayload = payload;
+                return;
+              }
+
+              if (event === "error") {
+                const detail =
+                  typeof payload.detail === "string" && payload.detail.trim()
+                    ? payload.detail.trim()
+                    : null;
+                const errorLabel =
+                  typeof payload.error === "string" && payload.error.trim()
+                    ? payload.error.trim()
+                    : "Bravo cast-only stream failed";
+                throw new Error(detail ? `${errorLabel}: ${detail}` : errorLabel);
+              }
+            },
           }
         );
 
-        if (!streamResponse.ok || !streamResponse.body) {
-          const streamErrorText = (await streamResponse.text().catch(() => "")).trim();
-          throw new Error(
-            streamErrorText || `Bravo cast-only stream failed (HTTP ${streamResponse.status})`
-          );
-        }
+        type BravoCastOnlyPayload = {
+          people?: unknown[];
+          fandom_people?: unknown[];
+          person_candidate_results?: unknown[];
+          fandom_candidate_results?: unknown[];
+          bravo_candidates_tested?: number;
+          bravo_candidates_valid?: number;
+          bravo_candidates_missing?: number;
+          bravo_candidates_errors?: number;
+          fandom_candidates_tested?: number;
+          fandom_candidates_valid?: number;
+          fandom_candidates_missing?: number;
+          fandom_candidates_errors?: number;
+          fandom_domains_used?: unknown[];
+          discovered_person_urls?: unknown[];
+          preview_signature?: string;
+        };
 
-        const reader = streamResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (runId !== syncBravoPreviewRunRef.current) {
-            break;
-          }
-          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-
-          let boundaryIndex = buffer.indexOf("\n\n");
-          while (boundaryIndex !== -1) {
-            const rawEvent = buffer.slice(0, boundaryIndex);
-            buffer = buffer.slice(boundaryIndex + 2);
-
-            const lines = rawEvent.split("\n").filter(Boolean);
-            let eventType = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-              }
-            }
-
-            const dataStr = dataLines.join("\n");
-            let payload: Record<string, unknown> | string = dataStr;
-            try {
-              payload = JSON.parse(dataStr) as Record<string, unknown>;
-            } catch {
-              payload = dataStr;
-            }
-            if (!payload || typeof payload !== "object") {
-              boundaryIndex = buffer.indexOf("\n\n");
-              continue;
-            }
-
-            if (eventType === "start") {
-              const startCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-              const seededRows = startCandidates
-                .map((candidate) => {
-                  if (!candidate || typeof candidate !== "object") return null;
-                  const url =
-                    typeof (candidate as { url?: unknown }).url === "string"
-                      ? String((candidate as { url?: unknown }).url).trim()
-                      : "";
-                  if (!url) return null;
-                  const nameRaw = (candidate as { name?: unknown }).name;
-                  const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : null;
-                  return {
-                    url,
-                    source: "bravo",
-                    name,
-                    status: "pending",
-                    error: null,
-                    person: null,
-                  } satisfies BravoPersonCandidateResult;
-                })
-                .filter((value) => Boolean(value)) as BravoPersonCandidateResult[];
-
-              if (seededRows.length > 0) {
-                bravoTotal = seededRows.length;
-                setSyncBravoPersonCandidateResults(seededRows);
-              }
-              const totalRaw = (payload as { total?: unknown }).total;
-              if (typeof totalRaw === "number" && Number.isFinite(totalRaw) && totalRaw >= 0) {
-                bravoTotal = totalRaw;
-              }
-
-              const fandomCandidates = Array.isArray((payload as { fandom_candidates?: unknown }).fandom_candidates)
-                ? ((payload as { fandom_candidates?: Array<Record<string, unknown>> }).fandom_candidates ?? [])
-                : [];
-              const seededFandomRows = fandomCandidates
-                .map((candidate) => {
-                  if (!candidate || typeof candidate !== "object") return null;
-                  const url = typeof candidate.url === "string" ? candidate.url.trim() : "";
-                  if (!url) return null;
-                  const name = typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : null;
-                  return {
-                    url,
-                    source: "fandom",
-                    name,
-                    status: "pending",
-                    error: null,
-                    person: null,
-                  } satisfies BravoPersonCandidateResult;
-                })
-                .filter((value) => Boolean(value)) as BravoPersonCandidateResult[];
-              if (seededFandomRows.length > 0) {
-                fandomTotal = seededFandomRows.length;
-                setSyncFandomPersonCandidateResults(seededFandomRows);
-              }
-              const fandomTotalRaw = (payload as { fandom_total?: unknown }).fandom_total;
-              if (
-                typeof fandomTotalRaw === "number" &&
-                Number.isFinite(fandomTotalRaw) &&
-                fandomTotalRaw >= 0
-              ) {
-                fandomTotal = fandomTotalRaw;
-              }
-              const fandomDomainsRaw = (payload as { fandom_domains_used?: unknown }).fandom_domains_used;
-              if (Array.isArray(fandomDomainsRaw)) {
-                const parsedDomains = fandomDomainsRaw
-                  .filter((value): value is string => typeof value === "string")
-                  .map((value) => value.trim())
-                  .filter((value) => value.length > 0);
-                setSyncFandomDomainsUsed(parsedDomains);
-              }
-
-              const totalToProbe = bravoTotal + fandomTotal;
-              setSyncBravoProbeTotal(totalToProbe);
-              const inFlight = totalToProbe > 0 ? 1 : 0;
-              setSyncBravoProbeActive(inFlight > 0);
-              if (totalToProbe > 0) {
-                setSyncBravoProbeStatusMessage(
-                  `Probing cast profiles: Bravo ${liveBravoSummary.tested}/${bravoTotal}, Fandom ${liveFandomSummary.tested}/${fandomTotal} (${inFlight} in flight).`
-                );
-              }
-            } else if (eventType === "progress") {
-              const url = typeof payload.url === "string" ? payload.url.trim() : "";
-              if (!url) {
-                boundaryIndex = buffer.indexOf("\n\n");
-                continue;
-              }
-              const source = payload.source === "fandom" ? "fandom" : "bravo";
-              const statusRaw = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
-              const status = statusRaw || "in_progress";
-              const nameRaw = typeof payload.name === "string" ? payload.name.trim() : "";
-              const errorRaw =
-                typeof payload.error === "string" && payload.error.trim().length > 0
-                  ? payload.error.trim()
-                  : null;
-              const personRaw = payload.person;
-              const person =
-                personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
-                  ? (personRaw as BravoPreviewPerson)
-                  : null;
-
-              const setResults =
-                source === "fandom" ? setSyncFandomPersonCandidateResults : setSyncBravoPersonCandidateResults;
-              setResults((prev) => {
-                const next = [...prev];
-                const index = next.findIndex((row) => row.url === url);
-                const nextRow: BravoPersonCandidateResult = {
-                  ...(index >= 0 ? next[index] : {}),
-                  url,
-                  source,
-                  name: nameRaw || (index >= 0 ? next[index]?.name ?? null : null),
-                  status,
-                  error: errorRaw,
-                  person,
-                };
-                if (index >= 0) {
-                  next[index] = nextRow;
-                } else {
-                  next.push(nextRow);
-                }
-                return next;
-              });
-
-              if (person && typeof person.canonical_url === "string" && person.canonical_url.trim()) {
-                const personUrl = person.canonical_url.trim();
-                const setPeople = source === "fandom" ? setSyncFandomPreviewPeople : setSyncBravoPreviewPeople;
-                setPeople((prev) => {
-                  const byUrl = new Map<string, BravoPreviewPerson>();
-                  for (const existing of prev) {
-                    const existingUrl =
-                      typeof existing.canonical_url === "string" ? existing.canonical_url.trim() : "";
-                    if (!existingUrl) continue;
-                    byUrl.set(existingUrl, existing);
-                  }
-                  byUrl.set(personUrl, person);
-                  return Array.from(byUrl.values()).sort((a, b) => {
-                    const aKey = String(a.name || a.canonical_url || "").toLowerCase();
-                    const bKey = String(b.name || b.canonical_url || "").toLowerCase();
-                    return aKey.localeCompare(bKey);
-                  });
-                });
-              }
-
-              const testedRaw =
-                source === "fandom" ? payload.fandom_candidates_tested : payload.bravo_candidates_tested;
-              const validRaw =
-                source === "fandom" ? payload.fandom_candidates_valid : payload.bravo_candidates_valid;
-              const missingRaw =
-                source === "fandom" ? payload.fandom_candidates_missing : payload.bravo_candidates_missing;
-              const errorsRaw =
-                source === "fandom" ? payload.fandom_candidates_errors : payload.bravo_candidates_errors;
-              if (
-                typeof testedRaw === "number" &&
-                typeof validRaw === "number" &&
-                typeof missingRaw === "number" &&
-                typeof errorsRaw === "number"
-              ) {
-                const resolvedSummary = {
-                  tested: testedRaw,
-                  valid: validRaw,
-                  missing: missingRaw,
-                  errors: errorsRaw,
-                };
-                if (source === "fandom") {
-                  liveFandomSummary = resolvedSummary;
-                  setSyncFandomCandidateSummary(resolvedSummary);
-                } else {
-                  liveBravoSummary = resolvedSummary;
-                  setSyncBravoCandidateSummary(resolvedSummary);
-                }
-              } else {
-                let nextSummary = source === "fandom" ? liveFandomSummary : liveBravoSummary;
-                if (status === "ok") nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, valid: nextSummary.valid + 1 };
-                else if (status === "missing") {
-                  nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, missing: nextSummary.missing + 1 };
-                } else if (status === "error") {
-                  nextSummary = { ...nextSummary, tested: nextSummary.tested + 1, errors: nextSummary.errors + 1 };
-                }
-                if (source === "fandom") {
-                  liveFandomSummary = nextSummary;
-                  setSyncFandomCandidateSummary(nextSummary);
-                } else {
-                  liveBravoSummary = nextSummary;
-                  setSyncBravoCandidateSummary(nextSummary);
-                }
-              }
-
-              const bravoInFlight = bravoTotal > liveBravoSummary.tested ? 1 : 0;
-              const fandomInFlight = fandomTotal > liveFandomSummary.tested ? 1 : 0;
-              const inFlight = bravoInFlight + fandomInFlight;
-              setSyncBravoProbeActive(inFlight > 0);
-              setSyncBravoProbeStatusMessage(
-                bravoTotal + fandomTotal > 0
-                  ? `Probing cast profiles: Bravo ${Math.min(liveBravoSummary.tested, bravoTotal)}/${bravoTotal}, Fandom ${Math.min(liveFandomSummary.tested, fandomTotal)}/${fandomTotal} (${inFlight} in flight).`
-                  : "No canonical cast profile URLs to probe."
-              );
-            } else if (eventType === "complete") {
-              finalPayload = payload;
-            } else if (eventType === "error") {
-              const detail =
-                typeof payload.detail === "string" && payload.detail.trim()
-                  ? payload.detail.trim()
-                  : null;
-              const errorLabel =
-                typeof payload.error === "string" && payload.error.trim()
-                  ? payload.error.trim()
-                  : "Bravo cast-only stream failed";
-              throw new Error(detail ? `${errorLabel}: ${detail}` : errorLabel);
-            }
-
-            boundaryIndex = buffer.indexOf("\n\n");
-          }
-        }
-
-        const completePayload = finalPayload ?? {};
+        const completePayload = (finalPayload ?? {}) as BravoCastOnlyPayload & Record<string, unknown>;
         const nextPeople = Array.isArray(completePayload.people)
-          ? completePayload.people.filter((person): person is BravoPreviewPerson => {
-              const personUrl = person?.canonical_url;
+          ? completePayload.people.filter((person: unknown): person is BravoPreviewPerson => {
+              const personUrl =
+                person && typeof person === "object"
+                  ? (person as { canonical_url?: unknown }).canonical_url
+                  : null;
               return typeof personUrl === "string" && personUrl.trim().length > 0;
             })
           : [];
         const nextFandomPeople = Array.isArray(completePayload.fandom_people)
-          ? completePayload.fandom_people.filter((person): person is BravoPreviewPerson => {
-              const personUrl = person?.canonical_url;
+          ? completePayload.fandom_people.filter((person: unknown): person is BravoPreviewPerson => {
+              const personUrl =
+                person && typeof person === "object"
+                  ? (person as { canonical_url?: unknown }).canonical_url
+                  : null;
               return typeof personUrl === "string" && personUrl.trim().length > 0;
             })
           : [];
-        const nextCandidateResults = Array.isArray(completePayload.person_candidate_results)
+        const nextCandidateResults: BravoPersonCandidateResult[] = Array.isArray(completePayload.person_candidate_results)
           ? completePayload.person_candidate_results
-              .map((row) => {
-                if (!row || typeof row !== "object") return null;
+              .flatMap((row: unknown): BravoPersonCandidateResult[] => {
+                if (!row || typeof row !== "object") return [];
                 const url = typeof (row as { url?: unknown }).url === "string" ? String((row as { url?: unknown }).url).trim() : "";
-                if (!url) return null;
+                if (!url) return [];
                 const nameRaw = (row as { name?: unknown }).name;
                 const errorRaw = (row as { error?: unknown }).error;
                 const personRaw = (row as { person?: unknown }).person;
-                return {
+                return [{
                   url,
                   source: "bravo",
                   name: typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : null,
@@ -5767,23 +5706,22 @@ export default function TrrShowDetailPage() {
                       : undefined,
                   error: typeof errorRaw === "string" && errorRaw.trim() ? errorRaw.trim() : null,
                   person:
-                  personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
+                    personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
                       ? (personRaw as BravoPreviewPerson)
                       : null,
-                } satisfies BravoPersonCandidateResult;
+                } satisfies BravoPersonCandidateResult];
               })
-              .filter((value) => Boolean(value)) as BravoPersonCandidateResult[]
           : [];
-        const nextFandomCandidateResults = Array.isArray(completePayload.fandom_candidate_results)
+        const nextFandomCandidateResults: BravoPersonCandidateResult[] = Array.isArray(completePayload.fandom_candidate_results)
           ? completePayload.fandom_candidate_results
-              .map((row) => {
-                if (!row || typeof row !== "object") return null;
+              .flatMap((row: unknown): BravoPersonCandidateResult[] => {
+                if (!row || typeof row !== "object") return [];
                 const url = typeof (row as { url?: unknown }).url === "string" ? String((row as { url?: unknown }).url).trim() : "";
-                if (!url) return null;
+                if (!url) return [];
                 const nameRaw = (row as { name?: unknown }).name;
                 const errorRaw = (row as { error?: unknown }).error;
                 const personRaw = (row as { person?: unknown }).person;
-                return {
+                return [{
                   url,
                   source: "fandom",
                   name: typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : null,
@@ -5796,9 +5734,8 @@ export default function TrrShowDetailPage() {
                     personRaw && typeof personRaw === "object" && !Array.isArray(personRaw)
                       ? (personRaw as BravoPreviewPerson)
                       : null,
-                } satisfies BravoPersonCandidateResult;
+                } satisfies BravoPersonCandidateResult];
               })
-              .filter((value) => Boolean(value)) as BravoPersonCandidateResult[]
           : [];
         const summary: BravoCandidateSummary = {
           tested:
@@ -5849,15 +5786,15 @@ export default function TrrShowDetailPage() {
         };
         const nextFandomDomainsUsed = Array.isArray(completePayload.fandom_domains_used)
           ? completePayload.fandom_domains_used
-              .filter((value): value is string => typeof value === "string")
-              .map((value) => value.trim())
-              .filter((value) => value.length > 0)
+              .filter((value: unknown): value is string => typeof value === "string")
+              .map((value: string) => value.trim())
+              .filter((value: string) => value.length > 0)
           : [];
         const nextDiscoveredUrls = Array.isArray(completePayload.discovered_person_urls)
           ? completePayload.discovered_person_urls
-              .filter((url): url is string => typeof url === "string")
-              .map((url) => url.trim())
-              .filter((url) => url.length > 0)
+              .filter((url: unknown): url is string => typeof url === "string")
+              .map((url: string) => url.trim())
+              .filter((url: string) => url.length > 0)
           : [];
 
         setSyncBravoDescription("");
@@ -8514,140 +8451,99 @@ export default function TrrShowDetailPage() {
             SHOW_REFRESH_STREAM_MAX_DURATION_MS
           );
           bumpStreamIdleTimeout();
-          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-          let shouldStopReading = false;
           try {
-            const response = await fetch(streamUrl, {
+            await adminStream(streamUrl, {
               method: "POST",
               headers: { ...headers, "Content-Type": "application/json" },
               body: JSON.stringify(streamBody),
-              signal: streamController.signal,
-            });
-
-            if (!response.ok || !response.body) {
-              const data = await response.json().catch(() => ({}));
-              const message =
-                data.error && data.detail
-                  ? `${data.error}: ${data.detail}`
-                  : data.error || data.detail || "Refresh failed";
-              throw new Error(message);
-            }
-
-            reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              bumpStreamIdleTimeout();
-              buffer += decoder.decode(value, { stream: true });
-              // Some environments send SSE with CRLF delimiters. Normalize to LF so our
-              // "\n\n" boundary detection works reliably and progress updates stream live.
-              buffer = buffer.replace(/\r\n/g, "\n");
-
-              let boundaryIndex = buffer.indexOf("\n\n");
-              while (boundaryIndex !== -1) {
-                const rawEvent = buffer.slice(0, boundaryIndex);
-                buffer = buffer.slice(boundaryIndex + 2);
-
-                const lines = rawEvent.split("\n").filter(Boolean);
-                let eventType = "message";
-                const dataLines: string[] = [];
-                for (const line of lines) {
-                  if (line.startsWith("event:")) {
-                    eventType = line.slice(6).trim();
-                  } else if (line.startsWith("data:")) {
-                    dataLines.push(line.slice(5).trim());
+              timeoutMs: SHOW_REFRESH_STREAM_MAX_DURATION_MS,
+              externalSignal: streamController.signal,
+              onEvent: async ({ event, payload }) => {
+                bumpStreamIdleTimeout();
+                if (event === "progress" && payload && typeof payload === "object") {
+                  const stageKeyRaw =
+                    (payload as { stage_key?: unknown }).stage_key
+                    ?? (payload as { step?: unknown }).step;
+                  const stageRaw =
+                    stageKeyRaw
+                    ?? (payload as { stage?: unknown; target?: unknown }).stage
+                    ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).target;
+                  const messageRaw = (payload as { message?: unknown }).message;
+                  const stageCurrentRaw = (payload as { stage_current?: unknown }).stage_current;
+                  const stageTotalRaw = (payload as { stage_total?: unknown }).stage_total;
+                  const currentRaw = (payload as { current?: unknown }).current;
+                  const totalRaw = (payload as { total?: unknown }).total;
+                  const topicRaw = (payload as { topic?: unknown }).topic;
+                  const providerRaw = (payload as { provider?: unknown }).provider;
+                  const sourceRaw = (payload as { source?: unknown }).source;
+                  const skipReasonRaw = (payload as { skip_reason?: unknown }).skip_reason;
+                  const heartbeat = (payload as { heartbeat?: unknown }).heartbeat === true;
+                  const elapsedMsRaw = (payload as { elapsed_ms?: unknown }).elapsed_ms;
+                  const elapsedMs = parseProgressNumber(elapsedMsRaw);
+                  const sourceTotal = parseProgressNumber((payload as { source_total?: unknown }).source_total);
+                  const mirroredCount = parseProgressNumber((payload as { mirrored_count?: unknown }).mirrored_count);
+                  const current = parseProgressNumber(stageCurrentRaw ?? currentRaw);
+                  const total = parseProgressNumber(stageTotalRaw ?? totalRaw);
+                  const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
+                  let progressMessage = buildProgressMessage(
+                    stageLabel,
+                    messageRaw,
+                    `Refreshing ${label}...`
+                  );
+                  if (heartbeat && elapsedMs !== null && elapsedMs >= 0) {
+                    progressMessage = `${progressMessage} · ${Math.round(elapsedMs / 1000)}s elapsed`;
                   }
-                }
+                  if (typeof skipReasonRaw === "string" && skipReasonRaw === "already_mirrored") {
+                    const counts =
+                      sourceTotal !== null && mirroredCount !== null
+                        ? ` (${mirroredCount}/${sourceTotal})`
+                        : "";
+                    progressMessage = `${progressMessage}${counts}`;
+                  }
+                  const nextLiveCounts = resolveJobLiveCounts(
+                    refreshTargetLiveCounts[target] ?? null,
+                    payload
+                  );
+                  setRefreshTargetLiveCounts((prev) => ({ ...prev, [target]: nextLiveCounts }));
+                  const enrichedProgressMessage = appendLiveCountsToMessage(
+                    progressMessage,
+                    nextLiveCounts
+                  );
 
-                const dataStr = dataLines.join("\n");
-                let payload: Record<string, unknown> | string = dataStr;
-                try {
-                  payload = JSON.parse(dataStr) as Record<string, unknown>;
-                } catch {
-                  payload = dataStr;
-                }
-
-                if (eventType === "progress" && payload && typeof payload === "object") {
-                const stageKeyRaw =
-                  (payload as { stage_key?: unknown }).stage_key
-                  ?? (payload as { step?: unknown }).step;
-                const stageRaw =
-                  stageKeyRaw
-                  ?? (payload as { stage?: unknown; target?: unknown }).stage
-                  ?? (payload as { stage?: unknown; step?: unknown; target?: unknown }).target;
-                const messageRaw = (payload as { message?: unknown }).message;
-                const stageCurrentRaw = (payload as { stage_current?: unknown }).stage_current;
-                const stageTotalRaw = (payload as { stage_total?: unknown }).stage_total;
-                const currentRaw = (payload as { current?: unknown }).current;
-                const totalRaw = (payload as { total?: unknown }).total;
-                const topicRaw = (payload as { topic?: unknown }).topic;
-                const providerRaw = (payload as { provider?: unknown }).provider;
-                const sourceRaw = (payload as { source?: unknown }).source;
-                const skipReasonRaw = (payload as { skip_reason?: unknown }).skip_reason;
-                const heartbeat = (payload as { heartbeat?: unknown }).heartbeat === true;
-                const elapsedMsRaw = (payload as { elapsed_ms?: unknown }).elapsed_ms;
-                const elapsedMs = parseProgressNumber(elapsedMsRaw);
-                const sourceTotal = parseProgressNumber((payload as { source_total?: unknown }).source_total);
-                const mirroredCount = parseProgressNumber((payload as { mirrored_count?: unknown }).mirrored_count);
-                const current = parseProgressNumber(stageCurrentRaw ?? currentRaw);
-                const total = parseProgressNumber(stageTotalRaw ?? totalRaw);
-                const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
-                let progressMessage = buildProgressMessage(
-                  stageLabel,
-                  messageRaw,
-                  `Refreshing ${label}...`
-                );
-                if (heartbeat && elapsedMs !== null && elapsedMs >= 0) {
-                  progressMessage = `${progressMessage} · ${Math.round(elapsedMs / 1000)}s elapsed`;
-                }
-                if (typeof skipReasonRaw === "string" && skipReasonRaw === "already_mirrored") {
-                  const counts =
-                    sourceTotal !== null && mirroredCount !== null
-                      ? ` (${mirroredCount}/${sourceTotal})`
-                      : "";
-                  progressMessage = `${progressMessage}${counts}`;
-                }
-                const nextLiveCounts = resolveJobLiveCounts(
-                  refreshTargetLiveCounts[target] ?? null,
-                  payload
-                );
-                setRefreshTargetLiveCounts((prev) => ({ ...prev, [target]: nextLiveCounts }));
-                const enrichedProgressMessage = appendLiveCountsToMessage(
-                  progressMessage,
-                  nextLiveCounts
-                );
-
-                setRefreshTargetProgress((prev) => ({
-                  ...prev,
-                  [target]: {
-                    stage: stageLabel ?? prev[target]?.stage ?? null,
-                    message: enrichedProgressMessage || prev[target]?.message || null,
+                  setRefreshTargetProgress((prev) => ({
+                    ...prev,
+                    [target]: {
+                      stage: stageLabel ?? prev[target]?.stage ?? null,
+                      message: enrichedProgressMessage || prev[target]?.message || null,
+                      current: typeof current === "number" && Number.isFinite(current) ? current : null,
+                      total: typeof total === "number" && Number.isFinite(total) ? total : null,
+                    },
+                  }));
+                  appendRefreshLog({
+                    category: label,
+                    message: enrichedProgressMessage,
                     current: typeof current === "number" && Number.isFinite(current) ? current : null,
                     total: typeof total === "number" && Number.isFinite(total) ? total : null,
-                  },
-                }));
-                appendRefreshLog({
-                  category: label,
-                  message: enrichedProgressMessage,
-                  current: typeof current === "number" && Number.isFinite(current) ? current : null,
-                  total: typeof total === "number" && Number.isFinite(total) ? total : null,
-                  stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
-                  topic: typeof topicRaw === "string" ? topicRaw : null,
-                  provider:
-                    typeof providerRaw === "string"
-                      ? providerRaw
-                      : typeof sourceRaw === "string"
-                        ? sourceRaw
-                        : null,
-                });
-                } else if (eventType === "complete") {
+                    stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
+                    topic: typeof topicRaw === "string" ? topicRaw : null,
+                    provider:
+                      typeof providerRaw === "string"
+                        ? providerRaw
+                        : typeof sourceRaw === "string"
+                          ? sourceRaw
+                          : null,
+                  });
+                  return;
+                }
+
+                if (event === "complete") {
+                  const payloadObject = payload && typeof payload === "object"
+                    ? (payload as Record<string, unknown>)
+                    : {};
                   sawComplete = true;
                   const completeLiveCounts = resolveJobLiveCounts(
                     refreshTargetLiveCounts[target] ?? null,
-                    payload
+                    payloadObject
                   );
                   setRefreshTargetLiveCounts((prev) => ({
                     ...prev,
@@ -8657,48 +8553,46 @@ export default function TrrShowDetailPage() {
 
                   if (
                     target === "photos" &&
-                    payload &&
-                    typeof payload === "object" &&
-                    ("cast_photos_upserted" in payload || "cast_photos_fetched" in payload)
+                    ("cast_photos_upserted" in payloadObject || "cast_photos_fetched" in payloadObject)
                   ) {
-                  const asNum = (value: unknown): number | null =>
-                    typeof value === "number" && Number.isFinite(value) ? value : null;
-                  const durationMs = asNum((payload as { duration_ms?: unknown }).duration_ms);
-                  const castFetched = asNum((payload as { cast_photos_fetched?: unknown }).cast_photos_fetched);
-                  const castUpserted = asNum((payload as { cast_photos_upserted?: unknown }).cast_photos_upserted);
-                  const castMirrored = asNum((payload as { cast_photos_mirrored?: unknown }).cast_photos_mirrored);
-                  const castFailed = asNum((payload as { cast_photos_failed?: unknown }).cast_photos_failed);
-                  const castPruned = asNum((payload as { cast_photos_pruned?: unknown }).cast_photos_pruned);
-                  const sourcesSkipped = asNum((payload as { sources_skipped?: unknown }).sources_skipped);
-                  const autoSucceeded = asNum((payload as { auto_counts_succeeded?: unknown }).auto_counts_succeeded);
-                  const autoFailed = asNum((payload as { auto_counts_failed?: unknown }).auto_counts_failed);
-                  const wordSucceeded = asNum((payload as { text_overlay_succeeded?: unknown }).text_overlay_succeeded);
-                  const wordFailed = asNum((payload as { text_overlay_failed?: unknown }).text_overlay_failed);
+                    const asNum = (value: unknown): number | null =>
+                      typeof value === "number" && Number.isFinite(value) ? value : null;
+                    const durationMs = asNum((payloadObject as { duration_ms?: unknown }).duration_ms);
+                    const castFetched = asNum((payloadObject as { cast_photos_fetched?: unknown }).cast_photos_fetched);
+                    const castUpserted = asNum((payloadObject as { cast_photos_upserted?: unknown }).cast_photos_upserted);
+                    const castMirrored = asNum((payloadObject as { cast_photos_mirrored?: unknown }).cast_photos_mirrored);
+                    const castFailed = asNum((payloadObject as { cast_photos_failed?: unknown }).cast_photos_failed);
+                    const castPruned = asNum((payloadObject as { cast_photos_pruned?: unknown }).cast_photos_pruned);
+                    const sourcesSkipped = asNum((payloadObject as { sources_skipped?: unknown }).sources_skipped);
+                    const autoSucceeded = asNum((payloadObject as { auto_counts_succeeded?: unknown }).auto_counts_succeeded);
+                    const autoFailed = asNum((payloadObject as { auto_counts_failed?: unknown }).auto_counts_failed);
+                    const wordSucceeded = asNum((payloadObject as { text_overlay_succeeded?: unknown }).text_overlay_succeeded);
+                    const wordFailed = asNum((payloadObject as { text_overlay_failed?: unknown }).text_overlay_failed);
 
-                  if (activeTab === "assets" && assetsView === "images") {
-                    await loadGalleryAssets(selectedGallerySeason);
-                  }
+                    if (activeTab === "assets" && assetsView === "images") {
+                      await loadGalleryAssets(selectedGallerySeason);
+                    }
 
-                  const successParts = [
-                    castFetched !== null ? `photos fetched: ${castFetched}` : null,
-                    castUpserted !== null ? `photos upserted: ${castUpserted}` : null,
-                    castMirrored !== null ? `photos mirrored: ${castMirrored}` : null,
-                    castPruned !== null ? `photos pruned: ${castPruned}` : null,
-                    sourcesSkipped !== null && sourcesSkipped > 0
-                      ? `sources skipped: ${sourcesSkipped}`
-                      : null,
-                    autoSucceeded !== null ? `auto counts set: ${autoSucceeded}` : null,
-                    wordSucceeded !== null ? `text-overlay classified: ${wordSucceeded}` : null,
-                  ].filter((part): part is string => Boolean(part));
-                  const failParts = [
-                    castFailed !== null && castFailed > 0 ? `photos failed: ${castFailed}` : null,
-                    autoFailed !== null && autoFailed > 0
-                      ? `auto counts failed: ${autoFailed}`
-                      : null,
-                    wordFailed !== null && wordFailed > 0
-                      ? `text-overlay failed: ${wordFailed}`
-                      : null,
-                  ].filter((part): part is string => Boolean(part));
+                    const successParts = [
+                      castFetched !== null ? `photos fetched: ${castFetched}` : null,
+                      castUpserted !== null ? `photos upserted: ${castUpserted}` : null,
+                      castMirrored !== null ? `photos mirrored: ${castMirrored}` : null,
+                      castPruned !== null ? `photos pruned: ${castPruned}` : null,
+                      sourcesSkipped !== null && sourcesSkipped > 0
+                        ? `sources skipped: ${sourcesSkipped}`
+                        : null,
+                      autoSucceeded !== null ? `auto counts set: ${autoSucceeded}` : null,
+                      wordSucceeded !== null ? `text-overlay classified: ${wordSucceeded}` : null,
+                    ].filter((part): part is string => Boolean(part));
+                    const failParts = [
+                      castFailed !== null && castFailed > 0 ? `photos failed: ${castFailed}` : null,
+                      autoFailed !== null && autoFailed > 0
+                        ? `auto counts failed: ${autoFailed}`
+                        : null,
+                      wordFailed !== null && wordFailed > 0
+                        ? `text-overlay failed: ${wordFailed}`
+                        : null,
+                    ].filter((part): part is string => Boolean(part));
 
                     if (!suppressSuccessNotice) {
                       setRefreshTargetNotice((prev) => ({
@@ -8724,71 +8618,74 @@ export default function TrrShowDetailPage() {
                       current: null,
                       total: null,
                     });
-                  } else {
-                    const resultsRaw = (payload as { results?: unknown }).results;
-                    const results =
-                      resultsRaw && typeof resultsRaw === "object"
-                        ? (resultsRaw as Record<string, unknown>)
-                        : null;
-                    const stepRaw = results ? results[target] : null;
-                    const step =
-                      stepRaw && typeof stepRaw === "object"
-                        ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
-                        : null;
-                    if (step?.status === "failed") {
-                      const stepError =
-                        typeof step.error === "string" && step.error
-                          ? step.error
-                          : "Refresh failed";
-                      throw new Error(stepError);
-                    }
-
-                    if (target === "details") {
-                      await fetchShow();
-                    } else if (target === "seasons_episodes") {
-                      await Promise.all([fetchShow(), fetchSeasons()]);
-                    } else if (target === "photos") {
-                      if (activeTab === "assets" && assetsView === "images") {
-                        await loadGalleryAssets(selectedGallerySeason);
-                      }
-                    } else if (target === "cast_credits") {
-                      if (includeCastProfiles) {
-                        const castMembers = await fetchCast({
-                          rosterMode: "imdb_show_membership",
-                          minEpisodes: 1,
-                        });
-                        castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
-                      }
-                      await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 });
-                    }
-
-                    const durationMs =
-                      typeof step?.duration_ms === "number" ? step.duration_ms : null;
-                    const castSuffix =
-                      target === "cast_credits" && castProfilesSummary
-                        ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
-                            castProfilesSummary.failed > 0
-                              ? ` (${castProfilesSummary.failed} failed)`
-                              : ""
-                          }`
-                        : "";
-                    if (!suppressSuccessNotice) {
-                      setRefreshTargetNotice((prev) => ({
-                        ...prev,
-                        [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}${
-                          liveCountSuffix ? `. ${liveCountSuffix}` : "."
-                        }`,
-                      }));
-                    }
-                    appendRefreshLog({
-                      category: label,
-                      message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
-                      current: null,
-                      total: null,
-                    });
+                    return;
                   }
-                  shouldStopReading = true;
-                } else if (eventType === "error") {
+
+                  const resultsRaw = (payloadObject as { results?: unknown }).results;
+                  const results =
+                    resultsRaw && typeof resultsRaw === "object"
+                      ? (resultsRaw as Record<string, unknown>)
+                      : null;
+                  const stepRaw = results ? results[target] : null;
+                  const step =
+                    stepRaw && typeof stepRaw === "object"
+                      ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
+                      : null;
+                  if (step?.status === "failed") {
+                    const stepError =
+                      typeof step.error === "string" && step.error
+                        ? step.error
+                        : "Refresh failed";
+                    throw new Error(stepError);
+                  }
+
+                  if (target === "details") {
+                    await fetchShow();
+                  } else if (target === "seasons_episodes") {
+                    await Promise.all([fetchShow(), fetchSeasons()]);
+                  } else if (target === "photos") {
+                    if (activeTab === "assets" && assetsView === "images") {
+                      await loadGalleryAssets(selectedGallerySeason);
+                    }
+                  } else if (target === "cast_credits") {
+                    if (includeCastProfiles) {
+                      const castMembers = await fetchCast({
+                        rosterMode: "imdb_show_membership",
+                        minEpisodes: 1,
+                      });
+                      castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
+                    }
+                    await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 });
+                  }
+
+                  const durationMs =
+                    typeof step?.duration_ms === "number" ? step.duration_ms : null;
+                  const castSuffix =
+                    target === "cast_credits" && castProfilesSummary
+                      ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
+                          castProfilesSummary.failed > 0
+                            ? ` (${castProfilesSummary.failed} failed)`
+                            : ""
+                        }`
+                      : "";
+                  if (!suppressSuccessNotice) {
+                    setRefreshTargetNotice((prev) => ({
+                      ...prev,
+                      [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}${
+                        liveCountSuffix ? `. ${liveCountSuffix}` : "."
+                      }`,
+                    }));
+                  }
+                  appendRefreshLog({
+                    category: label,
+                    message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
+                    current: null,
+                    total: null,
+                  });
+                  return;
+                }
+
+                if (event === "error") {
                   const message =
                     payload && typeof payload === "object"
                       ? (payload as { error?: string; detail?: string })
@@ -8805,26 +8702,11 @@ export default function TrrShowDetailPage() {
                   });
                   throw new Error(errorText);
                 }
-
-                if (shouldStopReading) {
-                  break;
-                }
-                boundaryIndex = buffer.indexOf("\n\n");
-              }
-              if (shouldStopReading) {
-                break;
-              }
-            }
+              },
+            });
           } finally {
             clearStreamIdleTimeout();
             clearTimeout(streamTimeout);
-            if (reader && shouldStopReading) {
-              try {
-                await reader.cancel();
-              } catch {
-                // no-op
-              }
-            }
           }
         } catch (streamErr) {
           streamFailed = true;
