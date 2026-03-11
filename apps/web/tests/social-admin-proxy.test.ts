@@ -112,9 +112,8 @@ describe("social-admin-proxy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("uses seasonIdHint only when it matches canonical season resolution", async () => {
+  it("uses seasonIdHint directly when it is a valid UUID (skips canonical lookup)", async () => {
     const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
-    getSeasonByShowAndNumberMock.mockResolvedValue({ id: hintedSeasonId });
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `http://backend.local/api/v1${path}`,
     );
@@ -126,7 +125,7 @@ describe("social-admin-proxy", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const payload = await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+    const payload = await fetchSeasonBackendJson("show-hint-1", "7", "/analytics", {
       queryString: "source_scope=bravo",
       seasonIdHint: hintedSeasonId,
       fallbackError: "Failed to fetch social analytics",
@@ -135,15 +134,13 @@ describe("social-admin-proxy", () => {
     });
 
     expect(payload).toEqual({ ok: true });
-    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
+    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics?source_scope=bravo`);
   });
 
-  it("ignores seasonIdHint when it mismatches canonical season resolution", async () => {
+  it("uses seasonIdHint even when canonical differs (no verification against DB)", async () => {
     const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
-    const canonicalSeasonId = "22222222-2222-4222-8222-222222222222";
-    getSeasonByShowAndNumberMock.mockResolvedValue({ id: canonicalSeasonId });
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `http://backend.local/api/v1${path}`,
     );
@@ -155,18 +152,23 @@ describe("social-admin-proxy", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+    await fetchSeasonBackendJson("show-hint-2", "8", "/analytics", {
       seasonIdHint: hintedSeasonId,
       fallbackError: "Failed to fetch social analytics",
       retries: 0,
       timeoutMs: 1000,
     });
 
-    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${canonicalSeasonId}/analytics`);
+    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(0);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics`);
   });
 
   it("falls back to season lookup when seasonIdHint is invalid", async () => {
+    getSeasonByShowAndNumberMock.mockResolvedValue({ id: "resolved-season-id" });
+    getBackendApiUrlMock.mockImplementation(
+      (path: string) => `http://backend.local/api/v1${path}`,
+    );
+
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -174,7 +176,7 @@ describe("social-admin-proxy", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+    await fetchSeasonBackendJson("show-hint-3", "9", "/analytics", {
       seasonIdHint: "bad-season-id",
       fallbackError: "Failed to fetch social analytics",
       retries: 0,

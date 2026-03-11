@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { AdminDocsCatalogContent } from "@/app/docs/page";
+import { AdminDocsCatalogContent } from "@/components/admin/AdminDocsCatalogContent";
 
 describe("admin docs page", () => {
   it("renders grouped job docs with exact trigger labels", () => {
