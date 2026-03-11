@@ -60,10 +60,10 @@ describe("social worker-health proxy route", () => {
     expect(payload.healthy).toBe(true);
     expect(payload.healthy_workers).toBe(1);
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
-      "/ingest/worker-health",
+      "/ingest/health-dot",
       expect.objectContaining({
         fallbackError: "Failed to fetch social ingest worker health",
-        retries: 0,
+        retries: 1,
         timeoutMs: 25_000,
       }),
     );
