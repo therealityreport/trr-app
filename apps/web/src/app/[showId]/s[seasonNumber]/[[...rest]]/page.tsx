@@ -17,6 +17,7 @@ interface RedditPathContext {
   season: string | null;
   windowKey: string | null;
   postId: string | null;
+  detailSlug: string | null;
 }
 
 const resolveRedditPathContext = ({
@@ -36,6 +37,7 @@ const resolveRedditPathContext = ({
   let season: string | null = null;
   let windowKey: string | null = null;
   let postId: string | null = null;
+  let detailSlug: string | null = null;
 
   if (isSeasonToken(segments[2] ?? "")) {
     season = (segments[2] ?? "").slice(1);
@@ -44,15 +46,19 @@ const resolveRedditPathContext = ({
     }
     if ((segments[4] ?? "").toLowerCase() === "post" && (segments[5] ?? "").length > 0) {
       postId = segments[5] ?? null;
+    } else if ((segments[4] ?? "").length > 0) {
+      detailSlug = segments[4] ?? null;
     }
   } else {
     windowKey = segments[2] ?? null;
     if ((segments[3] ?? "").toLowerCase() === "post" && (segments[4] ?? "").length > 0) {
       postId = segments[4] ?? null;
+    } else if ((segments[3] ?? "").length > 0) {
+      detailSlug = segments[3] ?? null;
     }
   }
 
-  return { communitySlug, season, windowKey, postId };
+  return { communitySlug, season, windowKey, postId, detailSlug };
 };
 
 export default async function RootShowSeasonAliasPage({
@@ -70,7 +76,7 @@ export default async function RootShowSeasonAliasPage({
 
   const ctx = resolveRedditPathContext({ rest });
   if (ctx) {
-    if (ctx.windowKey && ctx.postId) {
+    if (ctx.windowKey && (ctx.postId || ctx.detailSlug)) {
       const { default: AdminRedditPostDetailsPage } = await import(
         "@/app/admin/reddit-post-details/page"
       );

@@ -3,6 +3,76 @@
 Repo: TRR-APP  
 Last updated: March 5, 2026
 
+## March 7 rollout follow-up — app docs now reflect Modal as the live runtime
+
+- Consumed the completed backend staging rollout from:
+  - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/cross-collab/TASK11/STATUS.md`
+- Updated the local admin `/docs` catalog so the covered social and image-analysis jobs now show:
+  - `Current Runtime: Modal`
+  - `Target Runtime: Modal`
+  - `Migration Status: Cutover Complete`
+- Removed `EC2` from the app docs runtime enum because no documented admin job still uses it as the current runtime after the staging cutover evidence:
+  - `trr-worker-asg` is absent in the current AWS account
+  - staging API host resolves `run_admin_vision`
+  - staging worker-health remains Modal-backed
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/admin-docs-page.test.tsx tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx`
+  - `pnpm -C apps/web exec eslint src/lib/admin/docs/job-catalog.ts tests/admin-docs-page.test.tsx`
+  - `pnpm -C apps/web run lint`
+
+## March 7 rollout checkpoint — backend staging is live on remote+Modal
+
+- Consumed the backend live rollout from:
+  - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/cross-collab/TASK11/STATUS.md`
+- Staging backend now runs on the canonical `remote + modal` contract and reports fresh Modal dispatcher rows on social worker-health.
+- No additional TRR-APP wire-shape or UI changes were required for this live cutover because the additive executor fields were already implemented and validated locally.
+- No separate app-host rollout was executed in this pass because the current AWS account context exposed only the backend staging target and no distinct production namespace.
+
+## March 6 Late Follow-Up — Week-detail render-order crash fixed
+
+- A follow-up on the week-detail scope wiring introduced a render-order bug:
+  - `appendSyncRunScopeParams(...)` referenced `activeDayFilter` before the memo was initialized
+  - the page crashed on render with `Cannot access 'activeDayFilter' before initialization`
+- Fix:
+  - moved the scope helper below the `activeDayFilter` memo in `apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/social-week-detail-wiring.test.ts`
+  - `pnpm -C apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx tests/social-week-detail-wiring.test.ts`
+
+## March 6 Late Follow-Up — Social season pages now bind run history to exact page scope
+
+- Problem:
+  - the season social pages could kick off a platform/day/week-specific sync but then query back all season runs, which let unrelated older runs repopulate the page and made the UI look like a one-platform sync was doing hundreds of jobs
+- App changes:
+  - `apps/web/src/components/admin/season-social-analytics-section.tsx`
+    - added `appendCurrentRunScopeParams(...)`
+    - run-list and run-summary requests now include current `platforms`, `week_index`, `date_start`, `date_end` scope
+    - bounded one-platform sync kickoff now sends single-runner coarse scheduling instead of always sending dual-runner fine-grained shards
+  - `apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+    - added `appendSyncRunScopeParams(...)`
+    - sync recovery and manual attach use exact page scope so week/day views only attach to relevant runs
+  - tests updated to cover strict mode load, scoped run wiring, transient jobs-refresh behavior, and week-detail wiring
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/social-week-detail-wiring.test.ts tests/social-run-scope-wiring.test.ts`
+  - `pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx src/components/admin/social-week/WeekDetailPageView.tsx tests/season-social-analytics-section.test.tsx tests/social-week-detail-wiring.test.ts tests/social-run-scope-wiring.test.ts`
+- Coupled backend rollout outcome:
+  - the matching backend fix was deployed live
+  - verification run `09765051-9627-4e3a-8977-60087fce671c` proved the old RHOSLC Twitter preseason scope now completes with `2` jobs instead of the old `408` job explosion
+
+
+## March 6 Follow-Up — Week-detail progress copy now reflects live execution vs backlog
+
+- Review-driven follow-up on the social week-detail view found two remaining UX correctness gaps:
+  - the progress math still treated queued backlog as `active` execution
+  - the top KPI containers were still pinned to persisted gallery totals during an active sync
+- App changes in `apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`:
+  - sync progress now uses `running` and `waiting` separately for queue/start cards and stage cards
+  - total-job math now uses `completed + failed + running + waiting`
+  - KPI cards merge live `syncWeekLiveHealth` telemetry into the displayed totals while a sync is active
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/social-week-detail-wiring.test.ts`
+  - `pnpm -C apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx tests/social-week-detail-wiring.test.ts`
+
 ## Plan A Contract Freeze Consumption (Backend)
 
 - Consumed backend freeze checkpoint from `TRR-Backend/docs/cross-collab/TASK11/STATUS.md`.
@@ -105,6 +175,24 @@ Plan B consumption stance:
 Backend evidence root:
 - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/ai/evidence/aws-worker-plane/20260304-195705-task11-unblock`
 
+## March 6, 2026 — System Health modal copy/layout hardening
+
+TRR-APP admin UX change only; backend contract unchanged.
+
+- `SystemHealthModal` now renders a plain-language ops dashboard:
+  - `Social Sync Health`
+  - `How This Sync Runs`
+  - `Queue Health`
+  - `Live Workers`
+  - `Problems to Review`
+  - `Admin Actions`
+- Summary cards now lead the modal with operator-facing status/risk wording.
+- Worker rows now lead with role and host instead of raw worker IDs.
+- Queue tables keep the same data but use clearer column labels (`Running now`, `Waiting`, `Failed`, `Completed`).
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/system-health-modal.test.tsx`
+  - `pnpm -C apps/web exec eslint src/components/admin/SystemHealthModal.tsx tests/system-health-modal.test.tsx`
+
 Consumer-impact summary:
 - Backend staging runtime/network correction was applied:
   - `trr-api-sg` and `trr-worker-sg` now allow `tcp/6543` egress.
@@ -127,6 +215,19 @@ TRR-APP stance:
 
 ## March 5, 2026 — Consumer checkpoint after DB parity fix + rerun continuation
 
+## March 6, 2026 — Week detail summary timeout hardening
+
+TRR-APP consumer-only fix; backend contract unchanged.
+
+- Raised week-summary request budgets to match the existing speed-first proxy path:
+  - client page timeout `20_000 -> 40_000`
+  - summary proxy route timeout `25_000 -> 40_000`
+- Fixed unhandled runtime overlays caused by cached in-flight requests using `promise.finally(...)` without consuming the rejected `finally` promise.
+- Added `registerInFlightRequest(...)` and routed both cached week-detail and week-summary requests through it.
+- Validation:
+  - `pnpm -C apps/web exec vitest run tests/social-week-detail-wiring.test.ts`
+  - `pnpm -C apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/summary/route.ts' tests/social-week-detail-wiring.test.ts`
+
 Backend evidence root (unchanged):
 - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/ai/evidence/aws-worker-plane/20260304-195705-task11-unblock`
 
@@ -142,3 +243,31 @@ Remaining backend blockers that still affect canary confidence:
 TRR-APP stance:
 - Contract consumption remains unchanged.
 - Keep canary confidence blocked until backend supplies a green replay-continuity evidence set, including non-empty `scenario_sse_replay_stream.txt` with monotonic replay sequence continuity.
+
+## March 7, 2026 — Local app verified against the deployed Modal backend API
+
+- Local `TRR-APP` admin verification now works against the deployed Modal backend endpoint:
+  - `TRR_API_URL=https://admin-56995--trr-backend-api.modal.run`
+- Verified in managed Chrome:
+  - `/admin/social-media` still renders shared ingest, shared sources, and covered-show links
+  - system health modal now shows `Remote executor`, `Modal`, `Remote`, and `Local execution is disabled`
+  - `/rhoslc/social/s6` still renders `Classification Rules` and `Shared Async Pipeline`
+- Consumer impact:
+  - No route or payload changes were required in `TRR-APP` for this verification
+  - Existing additive executor metadata remains sufficient for the Modal-hosted backend
+- Still not completed in this pass:
+  - staging/prod `TRR-APP` runtime configuration cutover to the Modal backend URL
+  - any frontend hosting migration
+
+## March 7, 2026 — Frontend validation still green after backend test stabilization
+
+- Re-ran the app validation lane after the final backend test fixes:
+  - `pnpm -C apps/web run lint` on Node `24`
+  - `pnpm -C apps/web exec vitest run tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx`
+- Result:
+  - frontend/admin consumer behavior remains green against the Modal-oriented backend contract
+  - no new `TRR-APP` code changes were required
+- Remaining TASK11 scope is operational:
+  - update deployed app runtime `TRR_API_URL` to the Modal backend endpoint
+  - verify the deployed app against that endpoint
+  - retire legacy AWS backend runtime after rollback-window completion

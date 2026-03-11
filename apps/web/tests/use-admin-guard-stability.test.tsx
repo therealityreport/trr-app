@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -348,5 +349,15 @@ describe("useAdminGuard stability", () => {
     });
     expect(screen.getByTestId("guard-state")).toHaveTextContent("dev-admin-bypass");
     expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("renders a deterministic checking state during SSR even when local bypass is enabled", () => {
+    mocks.isDevAdminBypassEnabledClient.mockReturnValue(true);
+
+    const html = renderToString(<GuardObserver onUserKey={() => undefined} />);
+
+    expect(html).toContain('data-checking="1"');
+    expect(html).toContain('data-access="0"');
+    expect(html).not.toContain("dev-admin-bypass");
   });
 });

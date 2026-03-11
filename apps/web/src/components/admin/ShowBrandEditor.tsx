@@ -1198,7 +1198,7 @@ export default function ShowBrandEditor({
             <h2 className="mt-1 text-2xl font-bold text-zinc-900">{showRecord.title}</h2>
             <p className="mt-2 text-sm text-zinc-600">
               Palette, fonts, and brand assets for this TRR show. Fonts are free-text; reference the{" "}
-              <Link href="/admin/fonts" className="font-semibold text-zinc-900 hover:underline">
+              <Link href="/design-system/fonts" className="font-semibold text-zinc-900 hover:underline">
                 Font Library
               </Link>{" "}
               for available stacks.

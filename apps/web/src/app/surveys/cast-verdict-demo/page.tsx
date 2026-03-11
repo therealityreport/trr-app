@@ -2,17 +2,15 @@
 
 import * as React from "react";
 import CastVerdict, { CastVerdictFlow } from "@/components/cast-verdict";
+import { RHOSLC_S6_CAST_MEMBERS } from "@/lib/surveys/rhoslc-assets";
 import type { CastVerdictChoice, SurveyRankingItem } from "@/lib/surveys/types";
 
 const RHOSLC_CAST: SurveyRankingItem[] = [
-  { id: "angie", label: "Angie", img: "/images/cast/rhoslc-s6/angie.png" },
-  { id: "britani", label: "Britani", img: "/images/cast/rhoslc-s6/britani.png" },
-  { id: "bronwyn", label: "Bronwyn", img: "/images/cast/rhoslc-s6/bronwyn.png" },
-  { id: "heather", label: "Heather", img: "/images/cast/rhoslc-s6/heather.png" },
-  { id: "lisa", label: "Lisa", img: "/images/cast/rhoslc-s6/lisa.png" },
-  { id: "mary", label: "Mary", img: "/images/cast/rhoslc-s6/mary.png" },
-  { id: "meredith", label: "Meredith", img: "/images/cast/rhoslc-s6/meredith.png" },
-  { id: "whitney", label: "Whitney", img: "/images/cast/rhoslc-s6/whitney.png" },
+  ...RHOSLC_S6_CAST_MEMBERS.map((member) => ({
+    id: member.id,
+    label: member.shortName,
+    img: member.imagePath,
+  })),
 ];
 
 export default function CastVerdictDemoPage() {

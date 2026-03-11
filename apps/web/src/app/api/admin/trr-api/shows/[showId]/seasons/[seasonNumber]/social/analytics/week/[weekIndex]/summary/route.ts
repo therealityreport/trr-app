@@ -68,7 +68,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         seasonIdHint,
         fallbackError: "Failed to fetch week summary",
         retries: 0,
-        timeoutMs: 25_000,
+        timeoutMs: 40_000,
       },
     );
     return NextResponse.json(data);

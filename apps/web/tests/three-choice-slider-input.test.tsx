@@ -24,8 +24,8 @@ function makeQuestion(
         { value: "keep", label: "Keep" },
       ],
       rows: [
-        { id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" },
-        { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" },
+        { id: "whitney", label: "Whitney Rose", img: "/images/shows/rhoslc/season-6/Whitney.png" },
+        { id: "lisa", label: "Lisa Barlow", img: "/images/shows/rhoslc/season-6/LIsa.png" },
       ],
       ...configOverride,
     },
@@ -214,7 +214,7 @@ describe("CastDecisionCardInput", () => {
 
   it("shows Continue for single-row keep/fire/demote after a selection", () => {
     const singleRow = makeQuestion({
-      rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" }],
+      rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/shows/rhoslc/season-6/Whitney.png" }],
     });
 
     function Harness() {

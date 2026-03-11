@@ -103,6 +103,17 @@ const SOURCE_COLORS: Record<string, string> = {
   tmdb: "#01d277",
   fandom: "#00d6a3",
   "fandom-gallery": "#00d6a3",
+  nbcumv: "#0ea5e9",
+  getty: "#111827",
+};
+
+const NORMALIZED_SOURCE_LABELS: Record<string, string> = {
+  imdb: "IMDb",
+  tmdb: "TMDb",
+  fandom: "Fandom",
+  "fandom-gallery": "Fandom Gallery",
+  nbcumv: "NBCUMV",
+  getty: "Getty",
 };
 
 const CONTENT_TYPE_TO_EXT: Record<string, string> = {
@@ -253,6 +264,17 @@ const getMetadataString = (
   return null;
 };
 
+const getNestedMetadataObject = (
+  metadata: Record<string, unknown> | null | undefined,
+  key: string
+): Record<string, unknown> | null => {
+  if (!metadata) return null;
+  const value = metadata[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+};
+
 const normalizeMirrorKey = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const trimmed = value.trim();
@@ -344,10 +366,25 @@ const getDomainLabel = (value: string | null | undefined): string | null => {
   if (!normalized) return null;
   try {
     const hostname = new URL(normalized).hostname.toLowerCase().replace(/^www\./, "");
+    if (hostname.includes("gettyimages.com")) return "GETTY";
+    if (hostname.includes("nbcumv.com")) return "NBCUMV";
+    if (hostname.includes("photobank.nbcuni.com")) return "NBCU PHOTO BANK";
+    if (hostname.includes("imdb.com")) return "IMDb";
+    if (hostname.includes("themoviedb.org") || hostname.includes("tmdb.org")) return "TMDb";
+    if (hostname.includes("fandom.com") || hostname.includes("wikia.com") || hostname.includes("nocookie.net")) {
+      return "FANDOM";
+    }
     return hostname ? hostname.toUpperCase() : null;
   } catch {
     return null;
   }
+};
+
+export const formatPhotoSourceLabel = (value: string | null | undefined): string => {
+  if (typeof value !== "string") return "unknown";
+  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  if (!normalized) return "unknown";
+  return NORMALIZED_SOURCE_LABELS[normalized] ?? value.trim();
 };
 
 const resolveOriginalImageUrl = (
@@ -905,6 +942,8 @@ export function mapPhotoToMetadata(
 ): PhotoMetadata {
   const ingestStatus = (photo.ingest_status ?? "").toLowerCase();
   const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+  const gettyMetadata = getNestedMetadataObject(metadata, "getty");
+  const nbcumvMetadata = getNestedMetadataObject(metadata, "nbcumv");
   const sourceLower = photo.source?.toLowerCase?.() ?? "";
   const isImdb = sourceLower === "imdb";
 
@@ -1013,7 +1052,12 @@ export function mapPhotoToMetadata(
     }
     return `https://www.imdb.com/name/${imdbPersonId}/mediaindex/`;
   })();
-  const sourceUrl = metadataSourceUrl ?? sourcePageUrlFromPhoto ?? imdbSourceUrlFallback;
+  const sourceUrl =
+    metadataSourceUrl ??
+    sourcePageUrlFromPhoto ??
+    getMetadataString(gettyMetadata, "detail_url", "source_page_url", "source_url") ??
+    getMetadataString(nbcumvMetadata, "source_page_url", "source_url") ??
+    imdbSourceUrlFallback;
 
   const sourceVariant = getMetadataString(
     metadata,
@@ -1027,7 +1071,9 @@ export function mapPhotoToMetadata(
     "sourcePageTitle",
     "page_title",
     "pageTitle"
-  );
+  ) ??
+    getMetadataString(gettyMetadata, "title", "headline", "object_name") ??
+    getMetadataString(nbcumvMetadata, "lbx_headline", "lbx_filename");
   const normalizedSourcePageTitle = decodeAndNormalizeText(sourcePageTitle) ?? captionEntities.titles[0] ?? null;
   const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
@@ -1038,6 +1084,8 @@ export function mapPhotoToMetadata(
       typeof metadata.image_url === "string" ? metadata.image_url : null,
       getMetadataString(metadata, "source_file_url", "sourceFileUrl"),
       getMetadataString(tags, "image_url", "imageUrl", "source_file_url", "sourceFileUrl"),
+      getMetadataString(gettyMetadata, "image_url", "source_image_url"),
+      getMetadataString(nbcumvMetadata, "location", "source_image_url"),
       photo.url ?? null,
       (photo as { original_url?: string | null }).original_url ?? null,
     ],
@@ -1054,7 +1102,7 @@ export function mapPhotoToMetadata(
   const originalSourceLabel =
     getDomainLabel(originalSourcePageUrl) ??
     getDomainLabel(originalSourceFileUrl) ??
-    (photo.source?.trim() ? photo.source.toUpperCase() : null);
+    (photo.source?.trim() ? formatPhotoSourceLabel(photo.source) : null);
   const normalizedHostedUrl = normalizeUrl(photo.hosted_url ?? null);
   const isS3Mirrored = normalizedHostedUrl ? isLikelyHostedMirrorUrl(normalizedHostedUrl) : false;
   const faceBoxes = parseFaceBoxes(
@@ -1337,6 +1385,8 @@ export function mapSeasonAssetToMetadata(
 ): PhotoMetadata {
   const ingestStatus = (asset.ingest_status ?? "").toLowerCase();
   const metadata = (asset.metadata ?? {}) as Record<string, unknown>;
+  const gettyMetadata = getNestedMetadataObject(metadata, "getty");
+  const nbcumvMetadata = getNestedMetadataObject(metadata, "nbcumv");
   const sourceLower = asset.source?.toLowerCase?.() ?? "";
   const isImdb = sourceLower === "imdb";
 
@@ -1420,7 +1470,8 @@ export function mapSeasonAssetToMetadata(
       ? metadata.source_page_title
       : typeof metadata.page_title === "string"
         ? metadata.page_title
-        : null;
+        : getMetadataString(gettyMetadata, "title", "headline", "object_name") ??
+          getMetadataString(nbcumvMetadata, "lbx_headline", "lbx_filename");
   const sourceUrl =
     typeof metadata.source_page_url === "string"
       ? metadata.source_page_url
@@ -1428,7 +1479,8 @@ export function mapSeasonAssetToMetadata(
         ? metadata.source_url
         : typeof metadata.page_url === "string"
           ? metadata.page_url
-          : null;
+          : getMetadataString(gettyMetadata, "detail_url", "source_page_url", "source_url") ??
+            getMetadataString(nbcumvMetadata, "source_page_url", "source_url");
   const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
     [
@@ -1452,7 +1504,7 @@ export function mapSeasonAssetToMetadata(
   const originalSourceLabel =
     getDomainLabel(originalSourcePageUrl) ??
     getDomainLabel(originalSourceFileUrl) ??
-    (asset.source?.trim() ? asset.source.toUpperCase() : null);
+    (asset.source?.trim() ? formatPhotoSourceLabel(asset.source) : null);
   const normalizedHostedUrl = normalizeUrl(asset.hosted_url ?? null);
   const isS3Mirrored = normalizedHostedUrl ? isLikelyHostedMirrorUrl(normalizedHostedUrl) : false;
   const faceBoxes = parseFaceBoxes(metadata.face_boxes);

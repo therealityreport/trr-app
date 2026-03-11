@@ -134,7 +134,7 @@ describe("person reprocess-images stream proxy route", () => {
       target_media_link_ids: ["link-1"],
       sources: ["imdb", "tmdb"],
     };
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url === BACKEND_HEALTH_URL) {
         return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));

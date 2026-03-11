@@ -2,6 +2,7 @@ import React from "react";
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import IconRatingInput from "@/components/survey/IconRatingInput";
+import { RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH } from "@/lib/surveys/rhoslc-assets";
 
 function readFillPercents(container: HTMLElement) {
   return Array.from(container.querySelectorAll("[data-fill-percent]")).map((el) =>
@@ -37,10 +38,10 @@ function Harness({ initialValue }: { initialValue: number | null }) {
     <IconRatingInput
       value={value}
       onChange={setValue}
-      min={1}
+      min={0}
       max={5}
       step={0.5}
-      iconSrc="/icons/snowflake-solid-ice-7.svg"
+      iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH}
       iconCount={5}
       ariaLabel="Season rating"
     />
@@ -50,7 +51,7 @@ function Harness({ initialValue }: { initialValue: number | null }) {
 describe("IconRatingInput", () => {
   it("renders value=null as all empty and numeric input empty", () => {
     const { container } = render(
-      <IconRatingInput value={null} onChange={() => {}} iconSrc="/icons/snowflake-solid-ice-7.svg" ariaLabel="Season rating" />,
+      <IconRatingInput value={null} onChange={() => {}} iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH} ariaLabel="Season rating" />,
     );
 
     expect(readFillPercents(container)).toEqual([0, 0, 0, 0, 0]);
@@ -59,7 +60,7 @@ describe("IconRatingInput", () => {
 
   it("renders value=3.5 with icon fill percents [100,100,100,50,0]", () => {
     const { container } = render(
-      <IconRatingInput value={3.5} onChange={() => {}} iconSrc="/icons/snowflake-solid-ice-7.svg" ariaLabel="Season rating" />,
+      <IconRatingInput value={3.5} onChange={() => {}} iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH} ariaLabel="Season rating" />,
     );
 
     expect(readFillPercents(container)).toEqual([100, 100, 100, 50, 0]);
@@ -80,6 +81,18 @@ describe("IconRatingInput", () => {
     expect(readFillPercents(container)).toEqual([100, 100, 100, 50, 0]);
   });
 
+  it("allows pointer selection of 0.0 from the left edge of the control", () => {
+    const { container } = render(<Harness initialValue={2.0} />);
+    mockIconRects(container, { size: 40, gap: 8 });
+    const slider = screen.getByRole("slider", { name: /season rating/i });
+    const input = screen.getByRole("textbox", { name: /season rating/i });
+
+    fireEvent.pointerDown(slider, { pointerId: 1, clientX: -12, clientY: 10 });
+
+    expect(readFillPercents(container)).toEqual([0, 0, 0, 0, 0]);
+    expect(input).toHaveValue("0.0");
+  });
+
   it("keyboard arrows increment/decrement by 0.5", () => {
     const { container } = render(<Harness initialValue={3.0} />);
     const slider = screen.getByRole("slider", { name: /season rating/i });
@@ -91,5 +104,18 @@ describe("IconRatingInput", () => {
     fireEvent.keyDown(slider, { key: "ArrowLeft" });
     expect(readFillPercents(container)).toEqual([100, 100, 100, 0, 0]);
   });
-});
 
+  it("supports a 0.0 minimum via Home and numeric input", () => {
+    const { container } = render(<Harness initialValue={2.5} />);
+    const slider = screen.getByRole("slider", { name: /season rating/i });
+    const input = screen.getByRole("textbox", { name: /season rating/i });
+
+    fireEvent.keyDown(slider, { key: "Home" });
+    expect(readFillPercents(container)).toEqual([0, 0, 0, 0, 0]);
+    expect(slider).toHaveAttribute("aria-valuemin", "0");
+
+    fireEvent.change(input, { target: { value: "0" } });
+    fireEvent.blur(input);
+    expect(input).toHaveValue("0.0");
+  });
+});

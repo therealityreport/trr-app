@@ -334,7 +334,7 @@ describe("admin reddit window posts page", () => {
 
     const detailsLink = await screen.findByRole("link", { name: "View Details" });
     expect(detailsLink.getAttribute("href")).toBe(
-      "/rhoslc/social/reddit/BravoRealHousewives/s6/w0/post/abc123?community_id=community-1&season_id=season-6",
+      "/rhoslc/social/reddit/BravoRealHousewives/s6/w0/sample-thread--u-test-user",
     );
     expect(replaceMock).not.toHaveBeenCalled();
   });

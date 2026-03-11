@@ -28,4 +28,19 @@ describe("show route slug preference", () => {
     });
     expect(slug).toBe("rhoslc");
   });
+
+  it("normalizes diacritics in canonical and fallback show slugs", () => {
+    expect(
+      resolvePreferredShowRouteSlug({
+        canonicalSlug: "Les Séries & Réalité",
+        fallback: "fallback-slug",
+      }),
+    ).toBe("les-series-and-realite");
+
+    expect(
+      resolvePreferredShowRouteSlug({
+        fallback: "Séries & Réalité",
+      }),
+    ).toBe("series-and-realite");
+  });
 });

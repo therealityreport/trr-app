@@ -119,6 +119,20 @@ describe("root show season alias reddit window routing", () => {
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
+  it("renders reddit post details page directly for canonical detail slug paths", async () => {
+    redirectMock.mockReset();
+
+    await RootShowSeasonAliasPage({
+      params: Promise.resolve({
+        showId: "rhoslc",
+        seasonNumber: "social",
+        rest: ["reddit", "BravoRealHousewives", "s6", "w0", "sample-thread--u-test-user"],
+      }),
+    });
+
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
   it("does not redirect valid numeric season routes", async () => {
     redirectMock.mockReset();
 

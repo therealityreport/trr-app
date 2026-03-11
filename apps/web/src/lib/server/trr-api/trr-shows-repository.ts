@@ -12,6 +12,7 @@ import {
   resolveParentRelationLabel,
   resolveSiblingRelationLabel,
 } from "@/lib/server/trr-api/fandom-ownership";
+import { slugifyToken } from "@/lib/slugify";
 
 // ============================================================================
 // Types
@@ -339,21 +340,11 @@ export async function getShowById(id: string): Promise<TrrShow | null> {
 }
 
 export const toShowSlug = (value: string): string => {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+  return slugifyToken(value);
 };
 
 export const toPersonSlug = (value: string): string => {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+  return slugifyToken(value);
 };
 
 const buildShowSlugCandidates = (rawSlug: string): string[] => {

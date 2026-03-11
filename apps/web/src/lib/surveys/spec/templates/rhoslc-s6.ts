@@ -15,17 +15,15 @@ import type {
   TwoChoiceSliderQuestion,
   MultiSelectChoiceQuestion,
 } from "../question-types";
+import { RHOSLC_S6_CAST_MEMBERS } from "@/lib/surveys/rhoslc-assets";
 
 // Cast member data with shape images
 export const RHOSLC_S6_CAST: CastMemberOption[] = [
-  { id: "angie", name: "Angie", img: "/images/cast/rhoslc-s6/angie.png" },
-  { id: "britani", name: "Britani", img: "/images/cast/rhoslc-s6/britani.png" },
-  { id: "bronwyn", name: "Bronwyn", img: "/images/cast/rhoslc-s6/bronwyn.png" },
-  { id: "heather", name: "Heather", img: "/images/cast/rhoslc-s6/heather.png" },
-  { id: "lisa", name: "Lisa", img: "/images/cast/rhoslc-s6/lisa.png" },
-  { id: "mary", name: "Mary", img: "/images/cast/rhoslc-s6/mary.png" },
-  { id: "meredith", name: "Meredith", img: "/images/cast/rhoslc-s6/meredith.png" },
-  { id: "whitney", name: "Whitney", img: "/images/cast/rhoslc-s6/whitney.png" },
+  ...RHOSLC_S6_CAST_MEMBERS.map((member) => ({
+    id: member.id,
+    name: member.shortName,
+    img: member.imagePath,
+  })),
 ];
 
 // Helper to get cast member by id

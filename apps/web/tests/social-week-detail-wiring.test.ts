@@ -73,7 +73,9 @@ describe("social week detail wiring", () => {
 
     expect(contents).toMatch(/const REQUEST_TIMEOUT_MS = \{/);
     expect(contents).toMatch(/const fetchWithTimeout = async/);
+    expect(contents).toMatch(/weekSummary:\s*40_000/);
     expect(contents).toMatch(/Week detail request timed out/);
+    expect(contents).toMatch(/Week detail summary request timed out/);
     expect(contents).toMatch(/Sync runs request timed out/);
     expect(contents).toMatch(/Sync run progress request timed out/);
     expect(contents).toMatch(/Week live health request timed out/);
@@ -86,6 +88,20 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/syncPollFailureCountRef\.current >= 2 && !isTransientDevRestartMessage\(message\)/);
   });
 
+  it("cleans up in-flight week requests without leaking rejected finally promises", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const registerInFlightRequest = \(/);
+    expect(contents).toMatch(/requestPromise\s*\.finally\(\(\) => \{/);
+    expect(contents).toMatch(/\.catch\(\(\) => \{\}\);/);
+    expect(contents).toMatch(/registerInFlightRequest\(\s*weekDetailInFlightRef\.current,/s);
+    expect(contents).toMatch(/registerInFlightRequest\(\s*weekSummaryInFlightRef\.current,/s);
+  });
+
   it("defaults summary proxy include mode to totals_only", () => {
     const filePath = path.resolve(
       __dirname,
@@ -94,6 +110,7 @@ describe("social week detail wiring", () => {
     const contents = fs.readFileSync(filePath, "utf8");
 
     expect(contents).toMatch(/forwardedSearchParams\.set\("include", "totals_only"\)/);
+    expect(contents).toMatch(/timeoutMs:\s*40_000/);
   });
 
   it("keeps transient dev-restart poll failures below retry-banner threshold", () => {
@@ -253,5 +270,82 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Refresh completed with warnings:/);
     expect(contents).toMatch(/Transcript/);
     expect(contents).toMatch(/Slide \{boundedInstagramDrawerSlideIndex \+ 1\} of/);
+  });
+
+  it("uses coarse single-runner scheduling for manual single-platform sync kickoff", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const singlePlatform = requestedPlatforms\.length === 1/);
+    expect(contents).toMatch(/const singleRunnerPass = pass === 1 && \(singlePlatform \|\| igTikTokOnly\)/);
+    expect(contents).toMatch(/singlePlatformTarget === "instagram" \|\| singlePlatformTarget === "tiktok"/);
+    expect(contents).toMatch(/runner_strategy: singleRunnerPass \? "single_runner" : "adaptive_dual_runner"/);
+    expect(contents).toMatch(/runner_count: singleRunnerPass \? 1 : 2/);
+    expect(contents).toMatch(/window_shard_hours: shardOptimizedPass \? optimizedWindowShardHours : 4/);
+  });
+
+  it("separates running work from queued work in sync progress copy", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/jobs_running\?: number/);
+    expect(contents).toMatch(/jobs_waiting\?: number/);
+    expect(contents).toMatch(/syncProgress\.running/);
+    expect(contents).toMatch(/syncProgress\.waiting/);
+    expect(contents).toMatch(/stage\.running/);
+    expect(contents).toMatch(/stage\.waiting/);
+    expect(contents).toMatch(/completed \+ failed \+ running \+ waiting/);
+    expect(contents).not.toMatch(/`\s*· \$\{stage\.active\} active/);
+  });
+
+  it("merges live sync telemetry into KPI cards while a sync is active", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const syncLiveSummaryTotals = useMemo/);
+    expect(contents).toMatch(/Math\.max\(filteredTotals\.posts, syncLiveSummaryTotals\.posts\)/);
+    expect(contents).toMatch(/const displayedPlatformMetrics = useMemo/);
+    expect(contents).toMatch(/merged\.likes = Math\.max\(merged\.likes \?\? 0, syncLiveSummaryTotals\.total_likes\)/);
+    expect(contents).toMatch(/merged\.comments_count = Math\.max\(merged\.comments_count \?\? 0, syncLiveSummaryTotals\.total_comments\)/);
+    expect(contents).toMatch(/displayedPlatformMetrics\[metric\.key\]/);
+  });
+
+  it("scopes live day-view sync telemetry to the active platform and day filters", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const scopedRows = \(syncWeekLiveHealth\?\.day_account_rows \?\? \[\]\)\.filter/);
+    expect(contents).toMatch(/if \(platformFilter !== "all" && row\.platform !== platformFilter\) return false/);
+    expect(contents).toMatch(/if \(activeDayFilter && row\.day !== activeDayFilter\) return false/);
+    expect(contents).toMatch(/const syncScheduleModeLabel = useMemo/);
+    expect(contents).toMatch(/Single-lane schedule/);
+  });
+
+  it("renders explicit platform status cards and post-level sync chips from backend status objects", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/status_by_platform\?: Record<string, PlatformStatusPayload>/);
+    expect(contents).toMatch(/const visiblePlatformStatuses = useMemo/);
+    expect(contents).toMatch(/formatPlatformStatusSummary/);
+    expect(contents).toMatch(/Comment sync/);
+    expect(contents).toMatch(/Comment sync \{formatPlatformSyncStatus\(postStatus\.comment_sync_status\.status\)\}/);
+    expect(contents).toMatch(/Mirror/);
+    expect(contents).toMatch(/Mirror \{formatPlatformSyncStatus\(postStatus\.media_mirror_status\.status\)\}/);
   });
 });

@@ -367,6 +367,9 @@ interface DiscoveryFetchResult {
   warning: string | null;
   run: RefreshRunStatus | null;
   source: "cache" | "live_run" | null;
+  cache_status?: string | null;
+  cache_age_seconds?: number | null;
+  partial_failures?: Array<Record<string, unknown>>;
 }
 
 interface RefreshRunStatus {
@@ -434,6 +437,9 @@ interface RefreshRunStatus {
   queue_position?: number | null;
   active_jobs?: number | null;
   updated_at?: string | null;
+  phase?: string | null;
+  partial_failures?: Array<Record<string, unknown>>;
+  stalled?: boolean;
 }
 
 interface ContainerRefreshProgress {
@@ -818,7 +824,7 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
     syncing_details: "syncing details",
     finalizing: "finalizing run",
   };
-  const normalizedStage = (liveProgress?.stage ?? "").trim().toLowerCase();
+  const normalizedStage = (liveProgress?.stage ?? run.phase ?? "").trim().toLowerCase();
   const stageText = stageTextByKey[normalizedStage] ?? "scraping in progress";
   const otherRunning = run.queue?.other_running;
   const queuedAhead = run.queue?.queued_ahead;
@@ -846,14 +852,16 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
       typeof run.active_jobs === "number" && run.active_jobs > 0
         ? ` · ${fmtNum(run.active_jobs)} active jobs`
         : "";
-    return `${label}: refresh queued in backend (run ${run.run_id.slice(0, 8)})${queuePositionText}${activeJobsText}${queuedHintText}${listingText}${searchText}`;
+    const stalledText = run.stalled ? " · stalled heartbeat" : "";
+    return `${label}: refresh queued in backend (run ${run.run_id.slice(0, 8)})${queuePositionText}${activeJobsText}${queuedHintText}${listingText}${searchText}${stalledText}`;
   }
   if (run.status === "running") {
     const runningHintText =
       typeof otherRunning === "number" && otherRunning > 0
         ? ` · ${fmtNum(otherRunning)} other running`
         : "";
-    return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}${detailPostsText}${detailCommentsText}${mediaText}`;
+    const stalledText = run.stalled ? " · stalled heartbeat" : "";
+    return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}${detailPostsText}${detailCommentsText}${mediaText}${stalledText}`;
   }
   if (run.status === "cancelling") {
     return `${label}: refresh cancelling (run ${run.run_id.slice(0, 8)})${queuedHintText}${listingText}${searchText}`;
@@ -879,8 +887,12 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
     }
     const completenessText =
       completenessHints.length > 0 ? ` · ${completenessHints.join(" · ")}` : "";
+    const partialFailuresText =
+      Array.isArray(run.partial_failures) && run.partial_failures.length > 0
+        ? ` · ${run.partial_failures.length} partial failure${run.partial_failures.length === 1 ? "" : "s"}`
+        : "";
     if (run.status === "partial") {
-      return `${label}: refresh completed with partial coverage${passText}${completenessText}${totalsText}`;
+      return `${label}: refresh completed with partial coverage${passText}${completenessText}${totalsText}${partialFailuresText}`;
     }
     return `${label}: refresh completed${passText}${totalsText}`;
   }
@@ -5045,6 +5057,11 @@ export default function RedditSourcesManager({
         queue_position: typeof payload.queue_position === "number" ? payload.queue_position : null,
         active_jobs: typeof payload.active_jobs === "number" ? payload.active_jobs : null,
         updated_at: typeof payload.updated_at === "string" ? payload.updated_at : null,
+        phase: typeof payload.phase === "string" ? payload.phase : null,
+        partial_failures: Array.isArray(payload.partial_failures)
+          ? (payload.partial_failures as Array<Record<string, unknown>>)
+          : undefined,
+        stalled: typeof payload.stalled === "boolean" ? payload.stalled : false,
       };
     },
     [fetchWithTimeout, getAuthHeaders],

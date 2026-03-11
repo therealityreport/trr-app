@@ -58,6 +58,7 @@ type SocialRun = {
   operation_id?: string | null;
   execution_owner?: string | null;
   execution_mode_canonical?: string | null;
+  execution_backend_canonical?: string | null;
   status: "queued" | "pending" | "retrying" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
   source_scope?: string;
   initiated_by?: string | null;
@@ -358,6 +359,82 @@ type IngestProxyErrorPayload = {
   upstream_detail_code?: string;
 };
 
+type SyncStatusPayload = {
+  sync_status?: "idle" | "queued" | "running" | "partial" | "complete" | "failed";
+  comment_sync_status?: {
+    status?: "idle" | "queued" | "running" | "partial" | "complete" | "failed" | "not_attempted" | "unknown";
+    expected_count?: number;
+    fetched_count?: number;
+    upserted_count?: number;
+    failure_reason?: string | null;
+  } | null;
+  media_mirror_status?: {
+    status?:
+      | "not_needed"
+      | "pending"
+      | "queued"
+      | "running"
+      | "partial"
+      | "complete"
+      | "failed"
+      | "not_attempted"
+      | "unknown";
+    source_count?: number;
+    mirrored_count?: number;
+    failed_count?: number;
+    pending_count?: number;
+    partial_count?: number;
+    last_job_id?: string | null;
+    failure_reason?: string | null;
+  } | null;
+  active_job_summary?: {
+    sync_status?: "queued" | "running";
+    dominant_stage?: "posts" | "comments" | "media_mirror" | "comment_media_mirror" | null;
+    job_count?: number;
+    stage_statuses?: Partial<
+      Record<
+        "posts" | "comments" | "media_mirror" | "comment_media_mirror",
+        { status?: "queued" | "running"; job_count?: number }
+      >
+    >;
+  } | null;
+  last_refresh_at?: string | null;
+  last_refresh_reason?: string | null;
+  stale?: boolean;
+  worker_run_id?: string | null;
+};
+
+type SharedPipelineStageStatus = {
+  status?: "idle" | "queued" | "running" | "partial" | "complete" | "failed";
+  job_count?: number;
+  active_jobs?: number;
+  completed_jobs?: number;
+  failed_jobs?: number;
+};
+
+type SharedSeasonStatus = {
+  season_id?: string;
+  show_id?: string;
+  show_name?: string | null;
+  season_number?: number | null;
+  source_scope?: string;
+  ingest_mode?: "legacy_season_targeted" | "shared_account_async" | string | null;
+  matched_posts?: number;
+  matched_source_ids?: string[];
+  latest_match_at?: string | null;
+  review_queue_count?: number;
+  shared_scrape_status?: SharedPipelineStageStatus | null;
+  classification_status?: SharedPipelineStageStatus | null;
+  materialization_status?: SharedPipelineStageStatus | null;
+  latest_shared_run?: {
+    run_id?: string | null;
+    status?: string | null;
+    created_at?: string | null;
+    started_at?: string | null;
+    completed_at?: string | null;
+  } | null;
+};
+
 type CommentsCoverageResponse = {
   total_saved_comments: number;
   total_reported_comments: number;
@@ -365,6 +442,14 @@ type CommentsCoverageResponse = {
   up_to_date: boolean;
   stale_posts_count: number;
   posts_scanned: number;
+  sync_status?: SyncStatusPayload["sync_status"];
+  comment_sync_status?: SyncStatusPayload["comment_sync_status"];
+  media_mirror_status?: SyncStatusPayload["media_mirror_status"];
+  active_job_summary?: SyncStatusPayload["active_job_summary"];
+  last_refresh_at?: string | null;
+  last_refresh_reason?: string | null;
+  stale?: boolean;
+  worker_run_id?: string | null;
   by_platform?: Record<
     string,
     {
@@ -374,6 +459,14 @@ type CommentsCoverageResponse = {
       up_to_date: boolean;
       stale_posts_count: number;
       posts_scanned: number;
+      sync_status?: SyncStatusPayload["sync_status"];
+      comment_sync_status?: SyncStatusPayload["comment_sync_status"];
+      media_mirror_status?: SyncStatusPayload["media_mirror_status"];
+      active_job_summary?: SyncStatusPayload["active_job_summary"];
+      last_refresh_at?: string | null;
+      last_refresh_reason?: string | null;
+      stale?: boolean;
+      worker_run_id?: string | null;
     }
   >;
 };
@@ -386,6 +479,14 @@ type MirrorCoverageResponse = {
   partial_count: number;
   pending_count: number;
   posts_scanned: number;
+  sync_status?: SyncStatusPayload["sync_status"];
+  comment_sync_status?: SyncStatusPayload["comment_sync_status"];
+  media_mirror_status?: SyncStatusPayload["media_mirror_status"];
+  active_job_summary?: SyncStatusPayload["active_job_summary"];
+  last_refresh_at?: string | null;
+  last_refresh_reason?: string | null;
+  stale?: boolean;
+  worker_run_id?: string | null;
   comment_media_items_scanned?: number;
   comment_media_needs_mirror_count?: number;
   comment_media_mirrored_count?: number;
@@ -402,6 +503,14 @@ type MirrorCoverageResponse = {
       partial_count: number;
       pending_count: number;
       posts_scanned: number;
+      sync_status?: SyncStatusPayload["sync_status"];
+      comment_sync_status?: SyncStatusPayload["comment_sync_status"];
+      media_mirror_status?: SyncStatusPayload["media_mirror_status"];
+      active_job_summary?: SyncStatusPayload["active_job_summary"];
+      last_refresh_at?: string | null;
+      last_refresh_reason?: string | null;
+      stale?: boolean;
+      worker_run_id?: string | null;
       comment_media_items_scanned?: number;
       comment_media_needs_mirror_count?: number;
       comment_media_mirrored_count?: number;
@@ -437,6 +546,12 @@ type WeekDetailResponse = {
       }
     >
   >;
+  pagination?: {
+    limit?: number;
+    offset?: number;
+    returned?: number;
+    has_more?: boolean;
+  };
 };
 
 type HashtagUsageByPlatform = Record<Platform, number>;
@@ -579,6 +694,138 @@ const getWeekSyncActionLabel = (platformFilter: "all" | Platform): string => {
   return selectedPlatform ? `Sync ${platformLabel}` : "Sync All";
 };
 const PLATFORM_ORDER: Platform[] = ["instagram", "youtube", "tiktok", "twitter", "facebook", "threads"];
+
+const formatSyncStatusLabel = (value: string | null | undefined): string => {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return "Idle";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1).replace(/_/g, " ");
+};
+
+const getSyncStatusTone = (value: string | null | undefined, stale = false): string => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "failed") return "bg-red-100 text-red-700";
+  if (normalized === "running" || normalized === "queued") return "bg-blue-100 text-blue-700";
+  if (normalized === "partial" || stale) return "bg-amber-100 text-amber-700";
+  if (normalized === "complete") return "bg-emerald-100 text-emerald-700";
+  return "bg-zinc-100 text-zinc-600";
+};
+
+const getCombinedSyncStatus = (status: SyncStatusPayload): NonNullable<SyncStatusPayload["sync_status"]> => {
+  const values = [
+    String(status.active_job_summary?.sync_status ?? "").trim().toLowerCase(),
+    String(status.sync_status ?? "").trim().toLowerCase(),
+    String(status.comment_sync_status?.status ?? "").trim().toLowerCase(),
+    String(status.media_mirror_status?.status ?? "").trim().toLowerCase(),
+  ];
+  if (values.includes("running")) return "running";
+  if (values.includes("queued") || values.includes("pending")) return "queued";
+  if (values.includes("failed")) return "failed";
+  if (values.includes("partial") || values.includes("unknown") || values.includes("not_attempted") || status.stale) {
+    return "partial";
+  }
+  if (values.includes("complete")) return "complete";
+  return "idle";
+};
+
+const mergeSyncStatusPayloads = (
+  commentPlatform: NonNullable<CommentsCoverageResponse["by_platform"]>[string] | undefined,
+  mirrorPlatform: NonNullable<MirrorCoverageResponse["by_platform"]>[string] | undefined,
+): SyncStatusPayload => {
+  const commentStatus = commentPlatform?.comment_sync_status ?? null;
+  const mirrorStatus = mirrorPlatform?.media_mirror_status ?? commentPlatform?.media_mirror_status ?? null;
+  const activeJobSummary =
+    commentPlatform?.active_job_summary ?? mirrorPlatform?.active_job_summary ?? null;
+  const status: SyncStatusPayload = {
+    comment_sync_status: commentStatus,
+    media_mirror_status: mirrorStatus,
+    active_job_summary: activeJobSummary,
+    last_refresh_at: commentPlatform?.last_refresh_at ?? mirrorPlatform?.last_refresh_at ?? null,
+    last_refresh_reason:
+      commentStatus?.failure_reason ??
+      mirrorStatus?.failure_reason ??
+      commentPlatform?.last_refresh_reason ??
+      mirrorPlatform?.last_refresh_reason ??
+      null,
+    stale: Boolean(commentPlatform?.stale || mirrorPlatform?.stale),
+    worker_run_id: commentPlatform?.worker_run_id ?? mirrorPlatform?.worker_run_id ?? null,
+  };
+  status.sync_status = getCombinedSyncStatus(status);
+  if (status.sync_status === "queued" || status.sync_status === "running") {
+    status.stale = false;
+  }
+  return status;
+};
+
+const ACTIVE_JOB_STAGE_ORDER: Array<NonNullable<NonNullable<SyncStatusPayload["active_job_summary"]>["dominant_stage"]>> = [
+  "posts",
+  "comments",
+  "media_mirror",
+  "comment_media_mirror",
+];
+
+const formatActiveJobSummary = (status: SyncStatusPayload): string | null => {
+  const summary = status.active_job_summary;
+  if (!summary?.sync_status) return null;
+  const stageLabel = summary.dominant_stage?.replaceAll("_", " ") ?? "sync";
+  const jobCount = Number(summary.job_count ?? 0);
+  const countLabel = Number.isFinite(jobCount) && jobCount > 0 ? ` · ${formatInteger(jobCount)} jobs` : "";
+  const stageStatuses = Object.entries(summary.stage_statuses ?? {})
+    .filter((entry): entry is [string, { status?: "queued" | "running"; job_count?: number }] => Boolean(entry[0]))
+    .sort(
+      ([stageA], [stageB]) =>
+        ACTIVE_JOB_STAGE_ORDER.indexOf(stageA as (typeof ACTIVE_JOB_STAGE_ORDER)[number]) -
+        ACTIVE_JOB_STAGE_ORDER.indexOf(stageB as (typeof ACTIVE_JOB_STAGE_ORDER)[number]),
+    )
+    .map(([stage, payload]) => {
+      const stageJobCount = Number(payload?.job_count ?? 0);
+      const countSuffix =
+        Number.isFinite(stageJobCount) && stageJobCount > 0 ? ` ${formatInteger(stageJobCount)}` : "";
+      return `${formatSyncStatusLabel(payload?.status)} ${stage.replaceAll("_", " ")}${countSuffix}`;
+    });
+  const detailLabel = stageStatuses.length > 1 ? ` · ${stageStatuses.join(", ")}` : "";
+  return `${formatSyncStatusLabel(summary.sync_status)} ${stageLabel}${countLabel}${detailLabel}`;
+};
+
+const formatSharedPipelineStageSummary = (stage: SharedPipelineStageStatus | null | undefined): string => {
+  if (!stage) return "Idle";
+  const statusLabel = formatSyncStatusLabel(stage.status);
+  const jobCount = Number(stage.job_count ?? 0);
+  const activeJobs = Number(stage.active_jobs ?? 0);
+  if (jobCount > 0 && activeJobs > 0) {
+    return `${statusLabel} · ${formatInteger(activeJobs)}/${formatInteger(jobCount)} active`;
+  }
+  if (jobCount > 0) {
+    return `${statusLabel} · ${formatInteger(jobCount)} jobs`;
+  }
+  return statusLabel;
+};
+
+const formatClassificationRuleSummary = (target: SocialTarget): string => {
+  const parts: string[] = [];
+  if ((target.accounts ?? []).length > 0) {
+    parts.push(`accounts ${(target.accounts ?? []).join(", ")}`);
+  }
+  if ((target.hashtags ?? []).length > 0) {
+    parts.push(
+      `hashtags ${(target.hashtags ?? []).map((tag) => (String(tag).startsWith("#") ? String(tag) : `#${String(tag)}`)).join(", ")}`,
+    );
+  }
+  if ((target.keywords ?? []).length > 0) {
+    parts.push(`keywords ${(target.keywords ?? []).join(", ")}`);
+  }
+  return parts.join(" · ") || "No rule signals configured.";
+};
+
+export const buildPreviewPlatformStatuses = (
+  commentsCoverage: CommentsCoverageResponse | null,
+  mirrorCoverage: MirrorCoverageResponse | null,
+): Array<{ platform: Platform; status: SyncStatusPayload }> =>
+  PLATFORM_ORDER.map((platform) => {
+    const commentPlatform = commentsCoverage?.by_platform?.[platform];
+    const mirrorPlatform = mirrorCoverage?.by_platform?.[platform];
+    const status = mergeSyncStatusPayloads(commentPlatform, mirrorPlatform);
+    return { platform, status };
+  }).filter(({ status }) => Boolean(status.comment_sync_status || status.media_mirror_status));
 const STALE_RUN_THRESHOLD_DEFAULT_MINUTES = 45;
 const MAX_COMMENT_ANCHOR_SOURCE_IDS_PER_PLATFORM = 5000;
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
@@ -920,6 +1167,8 @@ const ANALYTICS_POLL_REFRESH_MS = 60_000;
 const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 20_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 const WEEK_DETAIL_FETCH_CONCURRENCY = 2;
+const WEEK_DETAIL_TARGETS_PAGE_LIMIT = 100;
+const WEEK_DETAIL_TARGETS_MAX_PAGES = 20;
 
 export const POLL_FAILURES_BEFORE_RETRY_BANNER = 2;
 export const shouldSetPollingRetry = (consecutiveFailures: number): boolean =>
@@ -1012,7 +1261,12 @@ const normalizeWorkerHealth = (value: unknown): WorkerHealthState | null => {
       : null;
   const reason = typeof payload.reason === "string" && payload.reason.trim() ? payload.reason.trim() : null;
   const checkedAt =
-    typeof payload.checked_at === "string" && payload.checked_at.trim() ? payload.checked_at : null;
+    typeof payload.checked_at === "string" && payload.checked_at.trim()
+      ? payload.checked_at
+      : typeof (payload as Record<string, unknown>).updated_at === "string" &&
+          String((payload as Record<string, unknown>).updated_at).trim()
+        ? String((payload as Record<string, unknown>).updated_at)
+        : null;
   return {
     queueEnabled,
     healthy,
@@ -1122,14 +1376,14 @@ export const formatIngestErrorMessage = (payload: IngestProxyErrorPayload): stri
       upstreamDetail?.worker_health && typeof upstreamDetail.worker_health === "object"
         ? (upstreamDetail.worker_health as Record<string, unknown>)
         : null;
-    const healthReason =
+  const healthReason =
       typeof workerHealth?.reason === "string" && workerHealth.reason.trim()
         ? ` (${workerHealth.reason})`
         : "";
-    return `${upstreamMessage}${healthReason}. Start the social worker and retry; inline fallback only works in local/dev backend runtime.`;
+    return `${upstreamMessage}${healthReason}. Start the remote social executor and retry; inline fallback only works in local/dev backend runtime.`;
   }
   if (upstreamCode === "SOCIAL_REMOTE_WORKER_REQUIRED") {
-    return `${upstreamMessage}. This ingest is remote-only for Instagram/TikTok. Start remote AWS workers and retry.`;
+    return `${upstreamMessage}. This ingest is remote-only for Instagram/TikTok. Start the configured remote executor and retry.`;
   }
 
   return upstreamMessage;
@@ -1589,6 +1843,14 @@ const getJobActivity = (job: SocialJob): Record<string, unknown> | null => {
   return activity;
 };
 
+const getJobRetrievalMeta = (job: SocialJob): Record<string, unknown> | null => {
+  const retrievalMeta = (job.metadata as Record<string, unknown> | undefined)?.retrieval_meta as
+    | Record<string, unknown>
+    | undefined;
+  if (!retrievalMeta || typeof retrievalMeta !== "object") return null;
+  return retrievalMeta;
+};
+
 const formatJobActivitySummary = (activity: Record<string, unknown> | null): string => {
   if (!activity) return "";
   const segments: string[] = [];
@@ -1597,9 +1859,11 @@ const formatJobActivitySummary = (activity: Record<string, unknown> | null): str
       posts_start: "Starting",
       posts_scan: "Scanning for posts",
       posts_complete: "Posts complete",
+      posts_end: "Scan complete",
       comments_start: "Starting comments",
       comments_scan: "Collecting comments",
       comments_complete: "Comments complete",
+      comments_end: "Comments complete",
     };
     const raw = activity.phase.trim();
     segments.push(phaseLabels[raw] ?? raw.replaceAll("_", " "));
@@ -1611,7 +1875,9 @@ const formatJobActivitySummary = (activity: Record<string, unknown> | null): str
     segments.push(`checked ${activity.posts_checked} ${activity.posts_checked === 1 ? "post" : "posts"}`);
   }
   if (typeof activity.matched_posts === "number") {
-    segments.push(`${activity.matched_posts} matched`);
+    segments.push(
+      `${activity.matched_posts} ${activity.matched_posts === 1 ? "post" : "posts"} matched the run window`,
+    );
   }
   return segments.join(", ");
 };
@@ -1639,6 +1905,53 @@ const formatCountersPlain = (posts: number, comments: number): string => {
   parts.push(`${posts.toLocaleString()} ${posts === 1 ? "post" : "posts"}`);
   parts.push(`${comments.toLocaleString()} ${comments === 1 ? "comment" : "comments"}`);
   return parts.join(", ");
+};
+
+export const formatJobOutcomeNote = (job: SocialJob): string => {
+  const stage = getJobStageLabel(job);
+  const counters = getJobStageCounters(job);
+  const persistCounters = getJobPersistCounters(job);
+  const activity = getJobActivity(job);
+  const retrievalMeta = getJobRetrievalMeta(job);
+  const failReasons = Array.isArray(retrievalMeta?.comment_fail_reasons)
+    ? retrievalMeta?.comment_fail_reasons.map((value) => String(value).toLowerCase())
+    : [];
+  const providerErrorCode = String(job.job_error_code ?? "").trim().toUpperCase();
+  const matchedPosts =
+    typeof activity?.matched_posts === "number" ? Number(activity.matched_posts) : undefined;
+  const postsChecked =
+    typeof activity?.posts_checked === "number" ? Number(activity.posts_checked) : undefined;
+  const observedPosts = Number(counters?.posts ?? 0);
+  const observedComments = Number(counters?.comments ?? 0);
+  const savedPosts = Number(persistCounters?.posts_upserted ?? 0);
+  const incompleteCommentFetches = Number(retrievalMeta?.incomplete_comment_fetches ?? 0);
+  const commentsAuthFailed = retrievalMeta?.comments_auth_failed === true;
+
+  if (stage === "posts" && observedPosts > 0 && savedPosts === 0 && matchedPosts === 0) {
+    return "Candidate posts were scanned, but none matched the selected run window.";
+  }
+  if (stage === "posts" && observedPosts === 0 && observedComments === 0 && (postsChecked ?? 0) === 0) {
+    if (providerErrorCode === "AUTH" || failReasons.some((reason) => reason.includes("auth") || reason.includes("challenge"))) {
+      return "The provider rejected this shard before posts could be scanned because authentication or checkpoint verification was required.";
+    }
+    if (providerErrorCode === "RATE_LIMIT" || failReasons.some((reason) => reason.includes("rate") || reason.includes("throttle") || reason.includes("quota"))) {
+      return "The provider throttled this shard before any posts were scanned.";
+    }
+    if (job.status === "failed" && (job.error_message || providerErrorCode)) {
+      return "The provider failed before any posts were scanned for this shard.";
+    }
+    return "No posts were available for this account in the selected run window.";
+  }
+  if (stage === "comments" && observedPosts > 0 && observedComments === 0) {
+    if (commentsAuthFailed || incompleteCommentFetches > 0) {
+      const affectedPosts = Math.max(incompleteCommentFetches, observedPosts);
+      return `Comment fetch was blocked on ${affectedPosts.toLocaleString()} matched ${
+        affectedPosts === 1 ? "post" : "posts"
+      } by an Instagram auth/challenge response.`;
+    }
+    return "Matched posts were checked, but no comments were returned for this shard.";
+  }
+  return "";
 };
 
 const isVideoLikeThumbnailUrl = (url: string): boolean => {
@@ -1818,6 +2131,7 @@ export default function SeasonSocialAnalyticsSection({
   const [targets, setTargets] = useState<SocialTarget[]>([]);
   const [runs, setRuns] = useState<SocialRun[]>([]);
   const [runSummaries, setRunSummaries] = useState<SocialRunSummary[]>([]);
+  const [sharedStatus, setSharedStatus] = useState<SharedSeasonStatus | null>(null);
   const [runSummariesLoading, setRunSummariesLoading] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<SocialJob[]>([]);
@@ -1837,6 +2151,7 @@ export default function SeasonSocialAnalyticsSection({
   const [runSummaryError, setRunSummaryError] = useState<string | null>(null);
   const [workerHealth, setWorkerHealth] = useState<WorkerHealthState | null>(null);
   const [workerHealthError, setWorkerHealthError] = useState<string | null>(null);
+  const [sharedStatusError, setSharedStatusError] = useState<string | null>(null);
   const [staleThresholdMinutes] = useState<number>(STALE_RUN_THRESHOLD_DEFAULT_MINUTES);
   const [ingestMessage, setIngestMessage] = useState<string | null>(null);
   const [syncCommentsCoveragePreview, setSyncCommentsCoveragePreview] = useState<CommentsCoverageResponse | null>(null);
@@ -1917,12 +2232,14 @@ export default function SeasonSocialAnalyticsSection({
     runsByKey: Map<string, Promise<SocialRun[]>>;
     targetsByKey: Map<string, Promise<SocialTarget[]>>;
     jobsByKey: Map<string, Promise<SocialJob[]>>;
+    workerHealthByKey: Map<string, Promise<WorkerHealthState | null>>;
     refreshAllByView: Map<SocialAnalyticsView, Promise<void>>;
   }>({
     analyticsByKey: new Map(),
     runsByKey: new Map(),
     targetsByKey: new Map(),
     jobsByKey: new Map(),
+    workerHealthByKey: new Map(),
     refreshAllByView: new Map(),
   });
   const showRouteSlug = (showSlug || showId).trim();
@@ -1997,10 +2314,13 @@ export default function SeasonSocialAnalyticsSection({
     });
     setWorkerHealth(null);
     setWorkerHealthError(null);
+    setSharedStatus(null);
+    setSharedStatusError(null);
     setRunSummaryError(null);
   }, [analyticsView]);
 
   useEffect(() => {
+    componentMountedRef.current = true;
     return () => {
       componentMountedRef.current = false;
     };
@@ -2349,11 +2669,59 @@ export default function SeasonSocialAnalyticsSection({
     showId,
   ]);
 
+  const appendCurrentRunScopeParams = useCallback(
+    (
+      params: URLSearchParams,
+      options?: {
+        platform?: "all" | Platform | null;
+        week?: number | null;
+        day?: string | null;
+      },
+    ) => {
+      const effectivePlatform = options?.platform ?? activeRunRequest?.platform ?? platformFilter;
+      const effectiveDay = options?.day?.trim() || activeRunRequest?.day?.trim() || "";
+      const effectiveWeek =
+        effectiveDay.length > 0
+          ? null
+          : (options?.week ?? activeRunRequest?.week ?? (weekFilter === "all" ? null : weekFilter));
+
+      if (effectivePlatform && effectivePlatform !== "all") {
+        params.set("platforms", effectivePlatform);
+      }
+      if (effectiveDay) {
+        const dayRange = buildIsoDayRange(effectiveDay);
+        if (dayRange) {
+          params.set("date_start", dayRange.dateStart);
+          params.set("date_end", dayRange.dateEnd);
+        }
+        return;
+      }
+      if (effectiveWeek !== null) {
+        params.set("week_index", String(effectiveWeek));
+        const weekWindow =
+          (analytics?.weekly ?? []).find((item) => item.week_index === effectiveWeek) ??
+          (analytics?.weekly_platform_posts ?? []).find((item) => item.week_index === effectiveWeek);
+        if (weekWindow) {
+          params.set("date_start", weekWindow.start);
+          params.set("date_end", weekWindow.end);
+        }
+      }
+    },
+    [activeRunRequest, analytics, platformFilter, weekFilter],
+  );
+
   const fetchRuns = useCallback(async (options?: { runId?: string | null; limit?: number }) => {
     const runId = options?.runId?.trim() || null;
     const requestedLimit = Number.isFinite(options?.limit) ? Number(options?.limit) : 100;
     const safeLimit = Math.max(1, Math.min(250, requestedLimit));
-    const scopedRunsKey = `${runsRequestKey}:run=${runId ?? "all"}:limit=${safeLimit}`;
+    const scopePlatformKey = activeRunRequest?.platform ?? platformFilter;
+    const scopeDayKey = activeRunRequest?.day?.trim() || "all";
+    const scopeWeekKey =
+      scopeDayKey !== "all"
+        ? "day"
+        : String(activeRunRequest?.week ?? (weekFilter === "all" ? "all" : weekFilter));
+    const scopedRunsKey =
+      `${runsRequestKey}:platform=${scopePlatformKey}:week=${scopeWeekKey}:day=${scopeDayKey}:run=${runId ?? "all"}:limit=${safeLimit}`;
     const existingRequest = inFlightRef.current.runsByKey.get(scopedRunsKey);
     if (existingRequest) {
       return existingRequest;
@@ -2368,6 +2736,7 @@ export default function SeasonSocialAnalyticsSection({
       const params = new URLSearchParams({ limit: String(safeLimit) });
       params.set("source_scope", scope);
       params.set("season_id", seasonId);
+      appendCurrentRunScopeParams(params);
       if (runId) {
         params.set("run_id", runId);
       }
@@ -2418,7 +2787,21 @@ export default function SeasonSocialAnalyticsSection({
         inFlightRef.current.runsByKey.delete(scopedRunsKey);
       }
     }
-  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, runsRequestKey, scope, seasonId, seasonNumber, showId]);
+  }, [
+    activeRunRequest,
+    analyticsView,
+    appendCurrentRunScopeParams,
+    getAuthHeaders,
+    isActiveView,
+    platformFilter,
+    readErrorMessage,
+    runsRequestKey,
+    scope,
+    seasonId,
+    seasonNumber,
+    showId,
+    weekFilter,
+  ]);
 
   const fetchRunSummaries = useCallback(async () => {
     if (!isActiveView(analyticsView)) return [] as SocialRunSummary[];
@@ -2428,6 +2811,7 @@ export default function SeasonSocialAnalyticsSection({
       const params = new URLSearchParams({ limit: "20" });
       params.set("source_scope", scope);
       params.set("season_id", seasonId);
+      appendCurrentRunScopeParams(params);
       const response = await fetchAdminWithTimeout(
         `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/runs/summary?${params.toString()}`,
         { headers, cache: "no-store" },
@@ -2452,44 +2836,105 @@ export default function SeasonSocialAnalyticsSection({
         setRunSummariesLoading(false);
       }
     }
-  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, scope, seasonId, seasonNumber, showId]);
+  }, [
+    analyticsView,
+    appendCurrentRunScopeParams,
+    getAuthHeaders,
+    isActiveView,
+    readErrorMessage,
+    scope,
+    seasonId,
+    seasonNumber,
+    showId,
+  ]);
 
   const fetchWorkerHealth = useCallback(async () => {
     if (!isActiveView(analyticsView)) {
       return null;
     }
+    const workerHealthRequestKey = `${runsRequestKey}:worker-health`;
+    const existingRequest = inFlightRef.current.workerHealthByKey.get(workerHealthRequestKey);
+    if (existingRequest) {
+      return existingRequest;
+    }
+    const request = (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchAdminWithTimeout(
+          "/api/admin/trr-api/social/ingest/health-dot",
+          { headers, cache: "no-store" },
+          REQUEST_TIMEOUT_MS.workerHealth,
+          "Social worker health request timed out",
+        );
+        if (!response.ok) {
+          throw new Error(await readErrorMessage(response, "Failed to load social worker health"));
+        }
+        const data = await parseResponseJson<Record<string, unknown>>(
+          response,
+          "Failed to load social worker health",
+        );
+        const normalized = normalizeWorkerHealth(data.worker_health ?? data);
+        if (isActiveView(analyticsView)) {
+          setWorkerHealth(normalized);
+          setWorkerHealthError(null);
+        }
+        return normalized;
+      } catch (workerHealthFetchError) {
+        const message =
+          workerHealthFetchError instanceof Error
+            ? workerHealthFetchError.message
+            : "Failed to load social worker health";
+        if (isActiveView(analyticsView)) {
+          setWorkerHealthError(message);
+        }
+        throw workerHealthFetchError;
+      }
+    })();
+    inFlightRef.current.workerHealthByKey.set(workerHealthRequestKey, request);
+    try {
+      return await request;
+    } finally {
+      const activeRequest = inFlightRef.current.workerHealthByKey.get(workerHealthRequestKey);
+      if (activeRequest === request) {
+        inFlightRef.current.workerHealthByKey.delete(workerHealthRequestKey);
+      }
+    }
+  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, runsRequestKey]);
+
+  const fetchSharedStatus = useCallback(async () => {
+    if (!isActiveView(analyticsView)) {
+      return null;
+    }
     try {
       const headers = await getAuthHeaders();
-      const response = await fetchAdminWithTimeout(
-        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/ingest/worker-health`,
-        { headers, cache: "no-store" },
-        REQUEST_TIMEOUT_MS.workerHealth,
-        "Social worker health request timed out",
+      const params = new URLSearchParams();
+      params.set("season_id", seasonId);
+      params.set("source_scope", scope);
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/shared-status?${params.toString()}`,
+        {
+          headers,
+          cache: "no-store",
+        },
+        { allowDevAdminBypass: true },
       );
       if (!response.ok) {
-        throw new Error(await readErrorMessage(response, "Failed to load social worker health"));
+        throw new Error(await readErrorMessage(response, "Failed to load shared social pipeline status"));
       }
-      const data = await parseResponseJson<Record<string, unknown>>(
-        response,
-        "Failed to load social worker health",
-      );
-      const normalized = normalizeWorkerHealth(data.worker_health ?? data);
+      const data = await parseResponseJson<SharedSeasonStatus>(response, "Failed to load shared social pipeline status");
       if (isActiveView(analyticsView)) {
-        setWorkerHealth(normalized);
-        setWorkerHealthError(null);
+        setSharedStatus(data);
+        setSharedStatusError(null);
       }
-      return normalized;
-    } catch (workerHealthFetchError) {
-      const message =
-        workerHealthFetchError instanceof Error
-          ? workerHealthFetchError.message
-          : "Failed to load social worker health";
+      return data;
+    } catch {
       if (isActiveView(analyticsView)) {
-        setWorkerHealthError(message);
+        setSharedStatus(null);
+        setSharedStatusError(null);
       }
-      throw workerHealthFetchError;
+      return null;
     }
-  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, seasonNumber, showId]);
+  }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, scope, seasonId, seasonNumber, showId]);
 
   const fetchTargets = useCallback(async () => {
     const existingRequest = inFlightRef.current.targetsByKey.get(runsRequestKey);
@@ -2767,6 +3212,8 @@ export default function SeasonSocialAnalyticsSection({
       weekIndex: number;
       platform: "all" | Platform;
       sourceScope: Scope;
+      postLimit?: number;
+      postOffset?: number;
       signal?: AbortSignal;
     }) => {
       const headers = await getAuthHeaders();
@@ -2775,6 +3222,8 @@ export default function SeasonSocialAnalyticsSection({
       params.set("source_scope", scopeWindow.sourceScope);
       params.set("timezone", SOCIAL_TIME_ZONE);
       params.set("max_comments_per_post", "0");
+      params.set("post_limit", String(Math.max(1, Number(scopeWindow.postLimit ?? WEEK_DETAIL_TARGETS_PAGE_LIMIT))));
+      params.set("post_offset", String(Math.max(0, Number(scopeWindow.postOffset ?? 0))));
       if (scopeWindow.platform !== "all") {
         params.set("platforms", scopeWindow.platform);
       }
@@ -2798,14 +3247,50 @@ export default function SeasonSocialAnalyticsSection({
       platform: "all" | Platform;
       sourceScope: Scope;
     }): Promise<MissingCommentTargets> => {
-      const detail = await fetchWeekDetail(scopeWindow);
+      const aggregatedPlatforms: Partial<Record<Platform, { posts?: WeekDetailPost[] }>> = {};
+      let pageOffset = 0;
+      let pageCount = 0;
+      let hasMore = true;
+
+      while (hasMore && pageCount < WEEK_DETAIL_TARGETS_MAX_PAGES) {
+        const page = await fetchWeekDetail({
+          ...scopeWindow,
+          postLimit: WEEK_DETAIL_TARGETS_PAGE_LIMIT,
+          postOffset: pageOffset,
+        });
+        for (const platform of PLATFORM_ORDER) {
+          const pagePlatformPayload = page.platforms?.[platform];
+          if (!pagePlatformPayload?.posts?.length) continue;
+          const existingPlatformPayload = aggregatedPlatforms[platform] ?? {
+            posts: [],
+          };
+          existingPlatformPayload.posts = [
+            ...(existingPlatformPayload.posts ?? []),
+            ...(pagePlatformPayload.posts ?? []),
+          ];
+          aggregatedPlatforms[platform] = existingPlatformPayload;
+        }
+        const returnedCount = Number(
+          page.pagination?.returned ??
+            Object.values(page.platforms ?? {}).reduce(
+              (sum, platformPayload) => sum + (platformPayload?.posts?.length ?? 0),
+              0,
+            ),
+        );
+        hasMore = Boolean(page.pagination?.has_more) && returnedCount > 0;
+        pageOffset =
+          page.pagination && Number.isFinite(Number(page.pagination.offset))
+            ? Number(page.pagination.offset) + returnedCount
+            : pageOffset + returnedCount;
+        pageCount += 1;
+      }
       const sourceIdsByPlatform: Partial<Record<Platform, string[]>> = {};
       const stalePlatforms = new Set<Platform>();
       const overflowPlatforms = new Set<Platform>();
       let staleAnchorsCount = 0;
 
       for (const platform of PLATFORM_ORDER) {
-        const posts = detail.platforms?.[platform]?.posts ?? [];
+        const posts = aggregatedPlatforms[platform]?.posts ?? [];
         const staleSourceIds = new Set<string>();
         for (const post of posts) {
           const sourceId = String(post?.source_id ?? "").trim();
@@ -2862,6 +3347,8 @@ export default function SeasonSocialAnalyticsSection({
         });
         setWorkerHealth(null);
         setWorkerHealthError(null);
+        setSharedStatus(null);
+        setSharedStatusError(null);
         setRunSummaryError(null);
         return;
       }
@@ -2875,11 +3362,12 @@ export default function SeasonSocialAnalyticsSection({
         jobs: null as string | null,
       };
 
-      const [targetsResult, runsResult, runSummariesResult, workerHealthResult] = await Promise.allSettled([
+      const [targetsResult, runsResult, runSummariesResult, workerHealthResult, sharedStatusResult] = await Promise.allSettled([
         fetchTargets(),
         fetchRuns(),
         fetchRunSummaries(),
         fetchWorkerHealth(),
+        fetchSharedStatus(),
       ]);
 
       if (!isCurrentRequest()) {
@@ -2931,6 +3419,15 @@ export default function SeasonSocialAnalyticsSection({
       } else {
         setWorkerHealthError(null);
       }
+      if (sharedStatusResult.status === "rejected") {
+        setSharedStatusError(
+          sharedStatusResult.reason instanceof Error
+            ? sharedStatusResult.reason.message
+            : "Failed to load shared social pipeline status",
+        );
+      } else {
+        setSharedStatusError(null);
+      }
 
       try {
         await fetchJobs(runIdToLoad);
@@ -2976,6 +3473,7 @@ export default function SeasonSocialAnalyticsSection({
     fetchJobs,
     fetchRunSummaries,
     fetchRuns,
+    fetchSharedStatus,
     fetchTargets,
     fetchWorkerHealth,
     isCurrentRefreshRequest,
@@ -3225,13 +3723,14 @@ export default function SeasonSocialAnalyticsSection({
         const counters = getJobStageCounters(job);
         const persistCounters = getJobPersistCounters(job);
         const activity = getJobActivity(job);
+        const outcomeNote = formatJobOutcomeNote(job);
         const account = typeof job.config?.account === "string" && job.config.account ? ` @${job.config.account}` : "";
         const stagePlain = STAGE_LABELS_PLAIN[stage] ?? stage;
         const statusPlain = JOB_STATUS_PLAIN[statusToLogVerb(job.status)] ?? statusToLogVerb(job.status);
 
         let msg = `${PLATFORM_LABELS[job.platform] ?? job.platform}${account} \u2014 ${stagePlain}: ${statusPlain}`;
         if (counters) {
-          msg += `. Found ${formatCountersPlain(counters.posts, counters.comments)}`;
+          msg += `. Observed ${formatCountersPlain(counters.posts, counters.comments)}`;
         } else if (typeof job.items_found === "number" && job.items_found > 0) {
           msg += `. ${job.items_found.toLocaleString()} items found`;
         }
@@ -3241,6 +3740,9 @@ export default function SeasonSocialAnalyticsSection({
         const actPlain = formatJobActivitySummary(activity);
         if (actPlain) {
           msg += `. ${actPlain}`;
+        }
+        if (outcomeNote) {
+          msg += `. ${outcomeNote}`;
         }
         return {
           id: job.id,
@@ -3254,10 +3756,10 @@ export default function SeasonSocialAnalyticsSection({
   }, [runScopedJobs, selectedRunId]);
 
   const hasRunningJobs = useMemo(() => {
-    if (activeRun && ACTIVE_RUN_STATUSES.has(activeRun.status)) {
-      return true;
-    }
-    return runScopedJobs.some((job) => ACTIVE_RUN_STATUSES.has(job.status as SocialRun["status"]));
+    const jobLevelActiveWork = runScopedJobs.some((job) => ACTIVE_RUN_STATUSES.has(job.status as SocialRun["status"]));
+    if (jobLevelActiveWork) return true;
+    if (runScopedJobs.length > 0) return false;
+    return Boolean(activeRun && ACTIVE_RUN_STATUSES.has(activeRun.status));
   }, [activeRun, runScopedJobs]);
 
   useEffect(() => {
@@ -3742,6 +4244,7 @@ export default function SeasonSocialAnalyticsSection({
         accounts_override?: string[];
         hashtags_override?: string[];
         keywords_override?: string[];
+        week_index?: number;
         max_posts_per_target: number;
         max_comments_per_post: number;
         max_replies_per_post: number;
@@ -3765,16 +4268,7 @@ export default function SeasonSocialAnalyticsSection({
         ingest_mode: effectiveIngestMode,
         sync_strategy: syncStrategy,
         allow_inline_dev_fallback: false,
-      }
-      if (effectiveIngestMode === "comments_only") {
-        payload.runner_strategy = "single_runner";
-        payload.runner_count = 1;
-        payload.window_shard_hours = 12;
-      } else {
-        payload.runner_strategy = "adaptive_dual_runner";
-        payload.runner_count = 2;
-        payload.window_shard_hours = 6;
-      }
+      };
       const label = effectiveDay
         ? formatDayScopeLabel(effectiveDay)
         : effectiveWeek !== null
@@ -3796,6 +4290,7 @@ export default function SeasonSocialAnalyticsSection({
         payload.date_start = dayRange.dateStart;
         payload.date_end = dayRange.dateEnd;
       } else if (effectiveWeek !== null) {
+        payload.week_index = effectiveWeek;
         const weekWindow =
           (analytics?.weekly ?? []).find((item) => item.week_index === effectiveWeek) ??
           (analytics?.weekly_platform_posts ?? []).find((item) => item.week_index === effectiveWeek);
@@ -3838,6 +4333,27 @@ export default function SeasonSocialAnalyticsSection({
       payload.accounts_override = targetOverrides.accounts_override;
       payload.hashtags_override = targetOverrides.hashtags_override;
       payload.keywords_override = targetOverrides.keywords_override;
+      const requestedPlatforms =
+        payload.platforms && payload.platforms.length > 0
+          ? payload.platforms
+          : (["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"] as Platform[]);
+      const singlePlatform = requestedPlatforms.length === 1;
+      const singlePlatformTarget = singlePlatform ? requestedPlatforms[0] : null;
+      const igTikTokOnly = requestedPlatforms.every((platform) => platform === "instagram" || platform === "tiktok");
+      if (effectiveIngestMode === "comments_only") {
+        payload.runner_strategy = "single_runner";
+        payload.runner_count = 1;
+        payload.window_shard_hours = 12;
+      } else if (singlePlatform || igTikTokOnly) {
+        payload.runner_strategy = "single_runner";
+        payload.runner_count = 1;
+        payload.window_shard_hours =
+          singlePlatformTarget === "instagram" || singlePlatformTarget === "tiktok" ? 12 : 24;
+      } else {
+        payload.runner_strategy = "adaptive_dual_runner";
+        payload.runner_count = 2;
+        payload.window_shard_hours = 6;
+      }
       setIngestMessage(`Starting ${label} · ${platformLabel} · ${modeLabel}...`);
 
       const response = await fetchAdminWithAuth(
@@ -3863,6 +4379,7 @@ export default function SeasonSocialAnalyticsSection({
         run_id?: string;
         operation_id?: string;
         execution_owner?: string;
+        execution_backend_canonical?: string;
         execution_mode_canonical?: string;
         stages?: string[];
         queued_or_started_jobs?: number;
@@ -3875,9 +4392,12 @@ export default function SeasonSocialAnalyticsSection({
       if (typeof result.execution_owner === "string" && result.execution_owner.trim()) {
         executionMetaParts.push(
           result.execution_owner.trim() === "remote_worker"
-            ? "remote worker"
+            ? "remote executor"
             : result.execution_owner.trim()
         );
+      }
+      if (typeof result.execution_backend_canonical === "string" && result.execution_backend_canonical.trim()) {
+        executionMetaParts.push(`backend ${result.execution_backend_canonical.trim()}`);
       }
       if (typeof result.execution_mode_canonical === "string" && result.execution_mode_canonical.trim()) {
         executionMetaParts.push(`mode ${result.execution_mode_canonical.trim()}`);
@@ -4369,19 +4889,19 @@ export default function SeasonSocialAnalyticsSection({
       return null;
     }
     const reason = workerHealth.reason ? ` (${workerHealth.reason})` : "";
-    return `Queue mode is enabled but no healthy workers are reporting${reason}.`;
+    return `Queue mode is enabled but no healthy remote executors are reporting${reason}.`;
   }, [workerHealth]);
   const workerHealthUnavailableWarning = useMemo(() => {
     if (!workerHealthError) {
       return null;
     }
     if (isTransientBackendSectionError(workerHealthError)) {
-      return `Worker health check is temporarily unavailable: ${workerHealthError}`;
+      return `Remote executor health check is temporarily unavailable: ${workerHealthError}`;
     }
-    return `Worker health check failed: ${workerHealthError}`;
+    return `Remote executor health check failed: ${workerHealthError}`;
   }, [workerHealthError]);
   const ingestActionsBlockedReason = workerHealthWarning
-          ? `${workerHealthWarning} Run Week and ${getWeekSyncActionLabel(platformFilter)} are disabled until workers recover.`
+          ? `${workerHealthWarning} Run Week and ${getWeekSyncActionLabel(platformFilter)} are disabled until executor health recovers.`
     : null;
   const staleRuns = useMemo<StaleRunState[]>(() => {
     const thresholdMs = staleThresholdMinutes * 60_000;
@@ -4661,6 +5181,10 @@ export default function SeasonSocialAnalyticsSection({
   const isAdvancedView = analyticsView === "advanced";
   const isRedditView = analyticsView === "reddit";
   const selectedRunLabel = selectedRunId ? (runOptionLabelById.get(selectedRunId) ?? null) : null;
+  const displayedTargets = useMemo(() => {
+    if (platformTab === "overview") return targets;
+    return targets.filter((target) => target.platform === platformTab);
+  }, [platformTab, targets]);
   const selectLatestRun = useCallback(() => {
     if (!runs.length) return;
     const preferredRun = runs.find((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? runs[0];
@@ -4921,17 +5445,90 @@ export default function SeasonSocialAnalyticsSection({
         </div>
       )}
       <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-        <p className="font-semibold text-zinc-700">Configured Targets</p>
+        <p className="font-semibold text-zinc-700">
+          {platformTab === "overview"
+            ? "Classification Rules"
+            : `${PLATFORM_LABELS[platformTab] ?? platformTab} Classification Rules`}
+        </p>
         <ul className="mt-1 space-y-1">
-          {targets.map((target) => (
+          {displayedTargets.map((target) => (
             <li key={target.platform}>
-              {(PLATFORM_LABELS[target.platform] ?? target.platform) + ": "}
-              {(target.accounts ?? []).join(", ") || "(none)"}
+              <span className="font-semibold text-zinc-700">{(PLATFORM_LABELS[target.platform] ?? target.platform) + ":"}</span>{" "}
+              {formatClassificationRuleSummary(target)}
             </li>
           ))}
-          {targets.length === 0 && <li>No active targets configured.</li>}
+          {displayedTargets.length === 0 && (
+            <li>
+              {platformTab === "overview"
+                ? "No active classification rules configured."
+                : `No active ${(PLATFORM_LABELS[platformTab] ?? platformTab).toLowerCase()} classification rules configured.`}
+            </li>
+          )}
         </ul>
       </div>
+      {(sharedStatus || sharedStatusError) && (
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-semibold text-zinc-700">Shared Async Pipeline</p>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${
+                sharedStatus?.ingest_mode === "shared_account_async" ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-600"
+              }`}
+            >
+              {sharedStatus?.ingest_mode === "shared_account_async" ? "Production Path" : "Unavailable"}
+            </span>
+          </div>
+          {sharedStatusError ? (
+            <p className="mt-2 text-amber-700">{sharedStatusError}</p>
+          ) : (
+            <>
+              <p className="mt-2 text-zinc-600">
+                Shared Bravo-owned account scraping feeds this season. These classification rules decide which posts materialize into the existing season tables.
+              </p>
+              <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+                <div className="flex items-center gap-1.5">
+                  <dt className="font-semibold text-zinc-700">Matched posts</dt>
+                  <dd>{formatInteger(sharedStatus?.matched_posts ?? 0)}</dd>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <dt className="font-semibold text-zinc-700">Review queue</dt>
+                  <dd>{formatInteger(sharedStatus?.review_queue_count ?? 0)}</dd>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <dt className="font-semibold text-zinc-700">Latest match</dt>
+                  <dd>{formatDateTime(sharedStatus?.latest_match_at)}</dd>
+                </div>
+              </dl>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[
+                  { label: "Shared scrape", value: sharedStatus?.shared_scrape_status },
+                  { label: "Classification", value: sharedStatus?.classification_status },
+                  { label: "Materialization", value: sharedStatus?.materialization_status },
+                ].map((item) => (
+                  <span
+                    key={item.label}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSyncStatusTone(item.value?.status)}`}
+                  >
+                    <span>{item.label}</span>
+                    <span>{formatSharedPipelineStageSummary(item.value)}</span>
+                  </span>
+                ))}
+              </div>
+              {sharedStatus?.latest_shared_run?.run_id && (
+                <p className="mt-3 text-xs text-zinc-500">
+                  Latest shared run {sharedStatus.latest_shared_run.run_id.slice(0, 8)} ·{" "}
+                  {formatSyncStatusLabel(sharedStatus.latest_shared_run.status)} ·{" "}
+                  {formatDateTime(
+                    sharedStatus.latest_shared_run.completed_at ??
+                      sharedStatus.latest_shared_run.started_at ??
+                      sharedStatus.latest_shared_run.created_at,
+                  )}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </article>
   );
 
@@ -5328,10 +5925,10 @@ export default function SeasonSocialAnalyticsSection({
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
                   {workerHealth?.queueEnabled === true ? (
                     <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                      Background workers: {workerHealth.healthyWorkers ?? 0} healthy{workerHealth.reason ? ` (${workerHealth.reason})` : ""}
+                      Remote executor health: {workerHealth.healthyWorkers ?? 0} healthy{workerHealth.reason ? ` (${workerHealth.reason})` : ""}
                     </span>
                   ) : (
-                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Background workers: off</span>
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">Remote executor: off</span>
                   )}
                   {syncCommentsCoveragePreview && (
                     <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5">
@@ -5355,6 +5952,43 @@ export default function SeasonSocialAnalyticsSection({
                     </span>
                   )}
                 </div>
+                {buildPreviewPlatformStatuses(syncCommentsCoveragePreview, syncMirrorCoveragePreview).length > 0 && (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {buildPreviewPlatformStatuses(syncCommentsCoveragePreview, syncMirrorCoveragePreview).map(
+                      ({ platform, status }) => (
+                        <div key={`sync-preview-status-${platform}`} className="rounded-lg border border-zinc-200 bg-white px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-zinc-900">{PLATFORM_LABELS[platform] ?? platform}</span>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${getSyncStatusTone(status.sync_status, Boolean(status.stale))}`}>
+                              {formatSyncStatusLabel(status.sync_status)}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                            {status.comment_sync_status && (
+                              <span className={`inline-flex rounded-full px-2 py-0.5 ${getSyncStatusTone(status.comment_sync_status.status)}`}>
+                                Comments {formatSyncStatusLabel(status.comment_sync_status.status)}
+                              </span>
+                            )}
+                            {status.media_mirror_status && (
+                              <span className={`inline-flex rounded-full px-2 py-0.5 ${getSyncStatusTone(status.media_mirror_status.status)}`}>
+                                Mirror {formatSyncStatusLabel(status.media_mirror_status.status)}
+                              </span>
+                            )}
+                          </div>
+                          {formatActiveJobSummary(status) && (
+                            <p className="mt-1 text-[11px] text-zinc-600">{formatActiveJobSummary(status)}</p>
+                          )}
+                          {(status.last_refresh_reason || status.worker_run_id) && (
+                            <p className="mt-1 text-[11px] text-zinc-500">
+                              {status.last_refresh_reason ? `Reason: ${status.last_refresh_reason}` : "Reason: n/a"}
+                              {status.worker_run_id ? ` · Run ${status.worker_run_id.slice(0, 8)}` : ""}
+                            </p>
+                          )}
+                        </div>
+                      ),
+                    )}
+                  </div>
+                )}
 
                 {/* Raw ingest message for debugging */}
                 {ingestMessage && (

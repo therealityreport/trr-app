@@ -149,12 +149,12 @@ describe("people home page runtime", () => {
     render(<PeopleHomePage />);
 
     const input = screen.getByRole("searchbox", { name: "Find people" });
-    fireEvent.change(input, { target: { value: "al" } });
+    fireEvent.change(input, { target: { value: "ala" } });
 
     await waitFor(() => {
       expect(
         mocks.fetchAdminWithAuthMock.mock.calls.some(([url]) =>
-          String(url).includes("/api/admin/trr-api/search?q=al&limit=8"),
+          String(url).includes("/api/admin/trr-api/search?q=ala&limit=8"),
         ),
       ).toBe(true);
       expect(screen.getByRole("link", { name: /Alan Cumming/ })).toBeInTheDocument();

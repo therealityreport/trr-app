@@ -1,7 +1,7 @@
 import "server-only";
 
 const normalizeBackendBase = (rawUrl: string): string => {
-  const trimmed = rawUrl.replace(/\/+$/, "");
+  const trimmed = rawUrl.trim().replace(/\/+$/, "");
   let normalized = trimmed;
   try {
     const parsed = new URL(trimmed);
@@ -17,7 +17,7 @@ const normalizeBackendBase = (rawUrl: string): string => {
 };
 
 export const getBackendApiBase = (): string | null => {
-  const raw = process.env.TRR_API_URL;
+  const raw = process.env.TRR_API_URL?.trim();
   if (!raw) return null;
   return normalizeBackendBase(raw);
 };

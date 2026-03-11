@@ -32,7 +32,7 @@ export default React.forwardRef<HTMLDivElement, IconRatingInputProps>(function I
   {
     value,
     onChange,
-    min = 1,
+    min = 0,
     max = 5,
     step = 0.5,
     iconSrc,
@@ -69,6 +69,11 @@ export default React.forwardRef<HTMLDivElement, IconRatingInputProps>(function I
     (clientX: number, clientY: number) => {
       const icons = iconRefs.current.filter(Boolean) as HTMLSpanElement[];
       if (icons.length === 0) return null;
+
+      const firstRect = icons[0].getBoundingClientRect();
+      if (clientX <= firstRect.left) {
+        return min;
+      }
 
       let bestIndex = 0;
       // Use DOMRectReadOnly to avoid TS lib variance across environments.

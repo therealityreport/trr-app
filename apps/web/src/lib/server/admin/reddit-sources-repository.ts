@@ -1,5 +1,6 @@
 import "server-only";
 
+import { buildRedditDetailSlugBase } from "@/lib/admin/reddit-detail-slug";
 import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
 import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
 import {
@@ -906,6 +907,26 @@ interface RedditPostMediaSummaryRowRaw {
   failed_media: number | null;
 }
 
+interface RedditDetailSlugCandidateRow {
+  reddit_post_id: string;
+  title: string;
+  author: string | null;
+  posted_at: string | null;
+  url: string | null;
+  permalink: string | null;
+}
+
+export interface ResolvedRedditPostDetail {
+  reddit_post_id: string;
+  detail_slug: string;
+  collision: boolean;
+  title: string;
+  author: string | null;
+  posted_at: string | null;
+  url: string | null;
+  permalink: string | null;
+}
+
 const toStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
@@ -1137,6 +1158,76 @@ export async function getRedditPostDetailsByCommunityAndSeason(input: {
     })),
     media_summary: toMediaSummary(mediaSummaryResult.rows[0]),
     assigned_threads: threadsResult.rows,
+  };
+}
+
+export async function resolveRedditPostDetailBySlug(input: {
+  communityId: string;
+  seasonId: string;
+  containerKey: string;
+  titleSlug?: string | null;
+  authorSlug?: string | null;
+  redditPostId?: string | null;
+}): Promise<ResolvedRedditPostDetail | null> {
+  const rowsResult = await query<RedditDetailSlugCandidateRow>(
+    `SELECT DISTINCT ON (p.reddit_post_id)
+       p.reddit_post_id,
+       p.title,
+       p.author,
+       p.posted_at::text,
+       p.url,
+       p.permalink
+     FROM social.reddit_period_post_matches m
+     JOIN social.reddit_posts p ON p.reddit_post_id = m.reddit_post_id
+     WHERE m.community_id = $1::uuid
+       AND m.season_id = $2::uuid
+       AND substring(m.period_key FROM 'container:([^:]+)') = $3
+     ORDER BY p.reddit_post_id, m.updated_at DESC`,
+    [input.communityId, input.seasonId, input.containerKey],
+  );
+
+  const candidates = rowsResult.rows.map((row) => ({
+    ...row,
+    slug_base: buildRedditDetailSlugBase({
+      title: row.title,
+      author: row.author,
+    }),
+  }));
+  const collisions = new Map<string, number>();
+  for (const candidate of candidates) {
+    collisions.set(candidate.slug_base, (collisions.get(candidate.slug_base) ?? 0) + 1);
+  }
+
+  const normalizedPostId = String(input.redditPostId ?? "").trim();
+  const requestedBase =
+    String(input.titleSlug ?? "").trim() && String(input.authorSlug ?? "").trim()
+      ? `${String(input.titleSlug).trim().toLowerCase()}--u-${String(input.authorSlug).trim().toLowerCase()}`
+      : "";
+
+  const matched =
+    (normalizedPostId
+      ? candidates.find((candidate) => candidate.reddit_post_id === normalizedPostId)
+      : null) ??
+    (requestedBase
+      ? candidates.find(
+          (candidate) =>
+            candidate.slug_base === requestedBase &&
+            (collisions.get(candidate.slug_base) ?? 0) === 1,
+        )
+      : null) ??
+    null;
+
+  if (!matched) return null;
+  const collision = (collisions.get(matched.slug_base) ?? 0) > 1;
+  return {
+    reddit_post_id: matched.reddit_post_id,
+    detail_slug: collision ? `${matched.slug_base}--p-${matched.reddit_post_id}` : matched.slug_base,
+    collision,
+    title: matched.title,
+    author: matched.author,
+    posted_at: matched.posted_at,
+    url: matched.url,
+    permalink: matched.permalink,
   };
 }
 

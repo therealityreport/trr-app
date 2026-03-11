@@ -72,9 +72,9 @@ const postPayload = {
   matches: [],
   comments: [],
   comment_summary: {
-    total_comments: 0,
-    top_level_comments: 0,
-    reply_comments: 0,
+    total_comments: 6,
+    top_level_comments: 4,
+    reply_comments: 2,
     earliest_comment_at: null,
     latest_comment_at: null,
   },
@@ -128,6 +128,17 @@ describe("admin reddit post details page", () => {
           status: "completed",
         });
       }
+      if (url.includes("/posts/resolve?")) {
+        return jsonResponse({
+          reddit_post_id: "abc123",
+          detail_slug: "sample-thread--u-test-user",
+          collision: false,
+          post: {
+            title: "Sample thread",
+            author: "test-user",
+          },
+        });
+      }
       if (url.includes("/discover?") && url.includes("mode=sync_details")) {
         return jsonResponse({
           run: {
@@ -159,6 +170,13 @@ describe("admin reddit post details page", () => {
 
     render(<AdminRedditPostDetailsPage />);
     await screen.findByText("Sample thread");
+    await screen.findByText("67% saved to Supabase: 6 of 9 Reddit comments are stored. 3 comments are still missing.");
+
+    fireEvent.click(screen.getByRole("tab", { name: /mirrored media/i }));
+    await screen.findByText("0 of 0 media rows are mirrored to hosted storage (0% coverage).");
+
+    fireEvent.click(screen.getByRole("tab", { name: /comments/i }));
+    await screen.findByText("67% saved to Supabase: 6 of 9 Reddit comments are stored. 3 comments are still missing.");
 
     fireEvent.click(screen.getByRole("button", { name: "Sync Details" }));
 

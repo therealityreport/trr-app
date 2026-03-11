@@ -3,6 +3,20 @@
 Repo: TRR-APP  
 Last updated: March 3, 2026
 
+## March 7, 2026 admin-docs alignment follow-up
+
+- TRR-Backend staging now has the full admin Modal surface required by this workspace:
+  - `remote + modal` social/admin execution
+  - dedicated `run_admin_vision` for covered image-analysis jobs
+- TRR-APP has updated its admin docs registry to treat those documented jobs as `Modal` current runtime.
+- screenalytics should no longer be considered part of the documented TRR admin job happy path on staging.
+
+## March 7, 2026 rollout checkpoint
+
+- TRR-Backend staging is now live on `remote + modal`.
+- The app remains compatible with the deployed additive executor metadata and does not require a follow-up consumer patch for this rollout.
+- Production remains blocked outside this account context because no separate `/trr/production/*` backend namespace or companion runtime target is visible here.
+
 ## Cross-Repo Snapshot
 
 - TRR-Backend: Complete for Plan A operation persistence/replay contracts; additionally exposed additive `GET /admin/socials/reddit/runs` for Plan B manual-attach run selection.

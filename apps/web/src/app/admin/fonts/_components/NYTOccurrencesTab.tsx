@@ -151,6 +151,27 @@ export default function NYTOccurrencesTab({ preferredUser }: NYTOccurrencesTabPr
         </div>
       ) : null}
 
+      {payload.occurrences[0] ? (
+        <div className="rounded-xl border border-zinc-200 bg-white p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-zinc-900">Example Match</h3>
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+              Diagnostic specimen
+            </span>
+          </div>
+          <div className="space-y-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+              <code className="rounded bg-white px-2 py-1">{payload.occurrences[0].match}</code>
+              <code className="rounded bg-white px-2 py-1">{payload.occurrences[0].file_path}</code>
+              <span>{payload.occurrences[0].line_number}:{payload.occurrences[0].column_number}</span>
+            </div>
+            <p className="rounded-lg bg-white px-3 py-3 font-mono text-xs leading-6 text-zinc-700">
+              {payload.occurrences[0].line_text}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
         <table className="min-w-full divide-y divide-zinc-200 text-sm">
           <thead className="bg-zinc-50">

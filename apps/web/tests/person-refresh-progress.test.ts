@@ -79,6 +79,8 @@ describe("person refresh progress mapping", () => {
     expect(formatRefreshSourceLabel("imdb")).toBe("IMDb");
     expect(formatRefreshSourceLabel("fandom-gallery")).toBe("Fandom Gallery");
     expect(formatRefreshSourceLabel("tmdb")).toBe("TMDb");
+    expect(formatRefreshSourceLabel("nbcumv")).toBe("NBCUMV");
+    expect(formatRefreshSourceLabel("getty")).toBe("Getty");
   });
 
   it("builds detailed heartbeat messages with source + elapsed context", () => {
@@ -210,11 +212,35 @@ describe("person refresh progress mapping", () => {
     expect(failed.find((step) => step.id === "auto_count")?.status).toBe("failed");
   });
 
+  it("does not mark zero-failure completion messages as failed", () => {
+    const initial = createPersonRefreshPipelineSteps("ingest");
+    const updated = updatePersonRefreshPipelineSteps(initial, {
+      rawStage: "metadata_repair",
+      message: "Fixing IMDb Details complete (reviewed 7/7, changed 7, failed 0).",
+      current: 7,
+      total: 7,
+    });
+
+    expect(updated.find((step) => step.id === "metadata_repair")?.status).toBe("completed");
+  });
+
   it("includes metadata repair step in reprocess mode", () => {
     const steps = createPersonRefreshPipelineSteps("reprocess");
     const metadataRepair = steps.find((step) => step.id === "metadata_repair");
     expect(metadataRepair).toBeDefined();
     expect(metadataRepair?.label).toBe("Fixing IMDb Details");
+  });
+
+  it("limits ingest mode to sync-and-mirror stages", () => {
+    const steps = createPersonRefreshPipelineSteps("ingest");
+    expect(steps.map((step) => step.id)).toEqual([
+      "profiles",
+      "source_sync",
+      "metadata_enrichment",
+      "upserting",
+      "metadata_repair",
+      "mirroring",
+    ]);
   });
 
   it("finalizes step summaries with completed vs failed details", () => {
@@ -250,6 +276,26 @@ describe("person refresh progress mapping", () => {
     expect(sourceSync?.result).toContain("Fetched 12 photos");
     expect(autoCount?.result).toContain("Saved tagging for 7/9 images");
     expect(mirroring?.status).toBe("failed");
+  });
+
+  it("finalizes ingest summaries without downstream reprocess stages", () => {
+    const initial = createPersonRefreshPipelineSteps("ingest");
+    const finalized = finalizePersonRefreshPipelineSteps(initial, "ingest", {
+      photos_fetched: 89,
+      photos_upserted: 46,
+      photos_mirrored: 12,
+      photos_failed: 0,
+      existing_imdb_rows_repaired: 7,
+      metadata_enrichment_failed: 0,
+      episode_metadata_tagged: 27,
+      show_context_tagged: 0,
+    });
+
+    expect(finalized.find((step) => step.id === "source_sync")?.result).toContain("Fetched 89 photos");
+    expect(finalized.find((step) => step.id === "mirroring")?.result).toContain("Hosted 12 assets");
+    expect(finalized.find((step) => step.id === "metadata_repair")?.result).toContain("Repaired 7 IMDb rows");
+    expect(finalized.some((step) => step.id === "auto_count")).toBe(false);
+    expect(finalized.some((step) => step.id === "resizing")).toBe(false);
   });
 
   it("finalizes reprocess metadata repair summary", () => {

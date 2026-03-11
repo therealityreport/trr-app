@@ -46,7 +46,11 @@ import {
   normalizeFandomDynamicSections,
   normalizeFandomSyncPreviewResponse,
 } from "@/lib/admin/fandom-sync-types";
-import { mapPhotoToMetadata, resolveMetadataDimensions } from "@/lib/photo-metadata";
+import {
+  formatPhotoSourceLabel,
+  mapPhotoToMetadata,
+  resolveMetadataDimensions,
+} from "@/lib/photo-metadata";
 import {
   THUMBNAIL_CROP_LIMITS,
   THUMBNAIL_DEFAULTS,
@@ -62,12 +66,16 @@ import {
   type AdvancedFilterState,
 } from "@/lib/admin/advanced-filters";
 import {
+  CANONICAL_SCOPED_SOURCE_ORDER,
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
   computePersonPhotoShowBuckets,
   isWwhlShowName,
   resolveGalleryShowFilterFallback,
+  resolvePersonGalleryImportContext,
+  toCanonicalScopedSource,
   WWHL_LABEL,
+  type CanonicalScopedSource,
   type GalleryShowFilter,
 } from "@/lib/admin/person-gallery-media-view";
 import { formatPersonRefreshSummary } from "@/lib/admin/person-refresh-summary";
@@ -473,7 +481,6 @@ interface UnifiedNewsFacets {
 
 type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom";
 type ReprocessStageKey = "all" | "tagging" | "crop" | "id_text" | "resize";
-type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery";
 type StageTargetScope = "filtered" | "full";
 type StageTargets = {
   totalFiltered: number;
@@ -482,23 +489,6 @@ type StageTargets = {
   targetCastPhotoIds: string[];
   targetMediaLinkIds: string[];
   sources: CanonicalScopedSource[];
-};
-
-const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
-  "fandom",
-  "fandom-gallery",
-  "imdb",
-  "tmdb",
-];
-
-const toCanonicalScopedSource = (value: string | null | undefined): CanonicalScopedSource | null => {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
-  if (normalized === "imdb") return "imdb";
-  if (normalized === "tmdb") return "tmdb";
-  if (normalized === "fandom") return "fandom";
-  if (normalized === "fandom-gallery") return "fandom-gallery";
-  return null;
 };
 
 const buildStageTargetsFromPhotos = (photoList: TrrPersonPhoto[]): StageTargets => {
@@ -936,9 +926,6 @@ const readGalleryStatusFromMetadata = (
 const isBrokenUnreachableGalleryStatus = (status: string | null | undefined): boolean =>
   typeof status === "string" && status.trim().toLowerCase() === "broken_unreachable";
 
-const getPersonPhotoCardUrl = (photo: TrrPersonPhoto): string | null =>
-  firstImageUrlCandidate(getPersonPhotoCardUrlCandidates(photo));
-
 const getPersonPhotoDetailUrl = (photo: TrrPersonPhoto): string | null =>
   firstImageUrlCandidate(getPersonPhotoDetailUrlCandidates(photo));
 
@@ -1024,14 +1011,38 @@ type ThumbnailCropOverlayUpdate = ThumbnailCropPreview & {
 };
 
 // Profile photo with error handling
-function ProfilePhoto({ url, name }: { url: string | null | undefined; name: string }) {
+function ProfilePhoto({ urls, name }: { urls: Array<string | null | undefined>; name: string }) {
+  const candidates = useMemo(() => {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const value of urls) {
+      if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      ordered.push(trimmed);
+    }
+    return ordered;
+  }, [urls]);
   const [hasError, setHasError] = useState(false);
-  const [currentSrc, setCurrentSrc] = useState<string | null>(url ?? null);
+  const [currentSrc, setCurrentSrc] = useState<string | null>(candidates[0] ?? null);
+  const [fallbackIndex, setFallbackIndex] = useState(1);
 
   useEffect(() => {
     setHasError(false);
-    setCurrentSrc(url ?? null);
-  }, [url]);
+    setCurrentSrc(candidates[0] ?? null);
+    setFallbackIndex(1);
+  }, [candidates]);
+
+  const handleError = () => {
+    const nextSrc = candidates[fallbackIndex] ?? null;
+    if (nextSrc && nextSrc !== currentSrc) {
+      setCurrentSrc(nextSrc);
+      setFallbackIndex((prev) => prev + 1);
+      return;
+    }
+    setHasError(true);
+  };
 
   if (!currentSrc || hasError) {
     return (
@@ -1055,7 +1066,7 @@ function ProfilePhoto({ url, name }: { url: string | null | undefined; name: str
         className="object-cover"
         sizes="128px"
         unoptimized
-        onError={() => setHasError(true)}
+        onError={handleError}
       />
     </div>
   );
@@ -2969,9 +2980,7 @@ export default function PersonProfilePage() {
   );
 
   // Gallery filter/sort state
-  const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>(
-    showIdParam ? "this-show" : "all"
-  );
+  const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>("all");
   const [selectedOtherShowKey, setSelectedOtherShowKey] = useState<string>("all");
   const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
   const canonicalSourceOrderDirty = useMemo(
@@ -2984,7 +2993,7 @@ export default function PersonProfilePage() {
       setGalleryShowFilter("all");
       return;
     }
-    setGalleryShowFilter((prev) => (prev === "all" ? "this-show" : prev));
+    setGalleryShowFilter((prev) => (prev === "all" ? "all" : prev));
   }, [showIdParam]);
 
   const galleryFilterCreditsSource = useMemo(() => {
@@ -3085,12 +3094,47 @@ export default function PersonProfilePage() {
     () => knownShowOptions.find((option) => option.key === selectedOtherShowKey) ?? null,
     [knownShowOptions, selectedOtherShowKey]
   );
+  const wwhlShowOption = useMemo(() => {
+    const credit = galleryFilterCreditsSource.find((entry) => isWwhlShowName(entry.show_name));
+    if (!credit) return null;
+    const showName = credit.show_name?.trim() ?? null;
+    if (!credit.show_id && !showName) return null;
+    return {
+      showId: credit.show_id ?? null,
+      showName,
+    };
+  }, [galleryFilterCreditsSource]);
   const hasWwhlCredit = useMemo(
     () => galleryFilterCreditsSource.some((credit) => isWwhlShowName(credit.show_name)),
     [galleryFilterCreditsSource]
   );
   const canSelectWwhlWithoutMatches = hasWwhlCredit;
   const canSelectOtherShowWithoutMatches = selectedOtherShow !== null;
+  const effectiveGalleryImportContext = useMemo(
+    () =>
+      resolvePersonGalleryImportContext({
+        galleryShowFilter,
+        routeShow: {
+          showId: showIdForApi,
+          showName: activeShowName,
+          label: activeShowFilterLabel,
+        },
+        selectedOtherShow,
+        wwhlShow: wwhlShowOption,
+      }),
+    [
+      activeShowFilterLabel,
+      activeShowName,
+      galleryShowFilter,
+      selectedOtherShow,
+      showIdForApi,
+      wwhlShowOption,
+    ]
+  );
+  const effectiveGalleryImportLabel = effectiveGalleryImportContext.label;
+  const effectiveGalleryImportSuffix = effectiveGalleryImportLabel
+    ? ` for ${effectiveGalleryImportLabel}`
+    : "";
 
   useEffect(() => {
     if (selectedOtherShowKey === "all") return;
@@ -3384,7 +3428,6 @@ export default function PersonProfilePage() {
     advancedFilters.people,
     advancedFilters.contentTypes,
     advancedFilters.seeded,
-    advancedFilters.references,
     advancedFilters.sort,
     referencesFilterActive,
     wantsReferences,
@@ -5186,7 +5229,7 @@ export default function PersonProfilePage() {
       setGetImagesFollowUpPromptOpen(false);
     }
     if (mode === "sync" && scopedStageTargets.totalFiltered === 0) {
-      const message = "No filtered images to sync.";
+      const message = `No filtered images to sync${effectiveGalleryImportSuffix}.`;
       setRefreshNotice(message);
       setRefreshError(null);
       appendRefreshLog({
@@ -5198,7 +5241,7 @@ export default function PersonProfilePage() {
       return;
     }
     if (mode === "sync" && scopedStageTargets.sources.length === 0) {
-      const message = "No eligible filtered sources to sync.";
+      const message = `No eligible filtered sources to sync${effectiveGalleryImportSuffix}.`;
       setRefreshNotice(message);
       setRefreshError(null);
       appendRefreshLog({
@@ -5210,7 +5253,7 @@ export default function PersonProfilePage() {
       return;
     }
     const requestId = buildPersonRefreshRequestId();
-    const pipelineMode: PersonRefreshPipelineMode = "refresh";
+    const pipelineMode: PersonRefreshPipelineMode = "ingest";
     const speedExecutionConfig = {
       execution_profile: "speed" as const,
       prefer_fast_pass: true,
@@ -5218,42 +5261,35 @@ export default function PersonProfilePage() {
       max_parallelism: { sync: 3, mirror: 12, tagging: 8, crop: 8 },
       batch_size: { tagging: 32, mirror: 200, crop: 64 },
     };
-    const refreshBody =
-      mode === "sync"
-        ? {
-            ...speedExecutionConfig,
-            skip_mirror: false,
-            force_mirror: false,
-            limit_per_source: 200,
-            enforce_show_source_policy: false,
-            skip_auto_count: true,
-            skip_word_detection: true,
-            skip_centering: true,
-            skip_resize: true,
-            skip_prune: true,
-            sources: scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined,
-            show_id: showIdForApi ?? undefined,
-            show_name: activeShowName ?? undefined,
-          }
-        : {
-            ...speedExecutionConfig,
-            skip_mirror: false,
-            force_mirror: false,
-            limit_per_source: 200,
-            enforce_show_source_policy: false,
-            show_id: showIdForApi ?? undefined,
-            show_name: activeShowName ?? undefined,
-          };
+    const perSourceLimit =
+      effectiveGalleryImportContext.showId ?? effectiveGalleryImportContext.showName ? 500 : 1000;
+    const refreshBody = {
+      ...speedExecutionConfig,
+      skip_mirror: false,
+      force_mirror: false,
+      limit_per_source: perSourceLimit,
+      enforce_show_source_policy: false,
+      // Get Images should stop after source sync + mirroring. Full downstream
+      // reprocessing stays on Refresh Details or the follow-up prompt.
+      skip_auto_count: true,
+      skip_word_detection: true,
+      skip_centering: true,
+      skip_resize: true,
+      skip_prune: true,
+      sources: mode === "sync" && scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined,
+      show_id: effectiveGalleryImportContext.showId ?? undefined,
+      show_name: effectiveGalleryImportContext.showName ?? undefined,
+    };
 
     setRefreshingImages(true);
     setRefreshPipelineSteps(createPersonRefreshPipelineSteps(pipelineMode));
     setRefreshProgress({
       phase: PERSON_REFRESH_PHASES.syncing,
-      message: mode === "sync" ? "Opening sync stream..." : "Opening refresh stream...",
+      message: mode === "sync" ? "Opening sync stream..." : "Opening get-images stream...",
       detailMessage:
         mode === "sync"
-          ? "Connecting to backend stream for sync stages..."
-          : "Connecting to backend stream for image refresh...",
+          ? `Connecting to backend stream for sync stages${effectiveGalleryImportSuffix}...`
+          : `Connecting to backend stream for source sync and mirroring${effectiveGalleryImportSuffix}...`,
       current: null,
       total: null,
       rawStage: "syncing",
@@ -5267,7 +5303,7 @@ export default function PersonProfilePage() {
     appendRefreshLog({
       source: "page_refresh",
       stage: "syncing",
-      message: mode === "sync" ? "Sync stage started" : "Get Images started",
+      message: `${mode === "sync" ? "Sync stage started" : "Get Images started"}${effectiveGalleryImportSuffix}`,
       level: "info",
       runId: requestId,
     });
@@ -5923,11 +5959,16 @@ export default function PersonProfilePage() {
             streamErr.name === "StreamTimeoutError" &&
             streamErr.message.includes("received within");
           streamError = streamErr instanceof Error ? streamErr.message : String(streamErr);
+          const isOperationSequenceConflict =
+            /admin_operation_events_op_seq_unique|duplicate key value violates unique constraint/i.test(
+              streamError,
+            );
           const isNonRetryableError =
-            streamErr instanceof Error &&
-            (streamErr.name === "BackendError" ||
-              streamErr.name === "StreamAbortError" ||
-              (streamErr.name === "StreamTimeoutError" && !isConnectionTimeout));
+            (streamErr instanceof Error &&
+              (streamErr.name === "BackendError" ||
+                streamErr.name === "StreamAbortError" ||
+                (streamErr.name === "StreamTimeoutError" && !isConnectionTimeout))) ||
+            isOperationSequenceConflict;
           if (isBackendError || isNonRetryableError || attempt >= 2) {
             break;
           }
@@ -6022,9 +6063,10 @@ export default function PersonProfilePage() {
     personId,
     refreshProgress,
     refreshLiveCounts,
-    showIdForApi,
-    activeShowName,
     buildPersonRefreshRequestId,
+    effectiveGalleryImportContext.showId,
+    effectiveGalleryImportContext.showName,
+    effectiveGalleryImportSuffix,
     scopedStageTargets,
   ]);
 
@@ -6035,7 +6077,10 @@ export default function PersonProfilePage() {
     if (refreshingImages || reprocessingImages) return;
     setGetImagesFollowUpPromptOpen(false);
     if (stageTargets.totalFiltered === 0) {
-      const message = scope === "full" ? "No images to reprocess." : "No filtered images to reprocess.";
+      const message =
+        scope === "full"
+          ? `No images to reprocess${effectiveGalleryImportSuffix}.`
+          : `No filtered images to reprocess${effectiveGalleryImportSuffix}.`;
       setRefreshNotice(message);
       setRefreshError(null);
       appendRefreshLog({
@@ -6052,8 +6097,8 @@ export default function PersonProfilePage() {
     ) {
       const message =
         scope === "full"
-          ? "No eligible gallery images to reprocess."
-          : "No eligible filtered images to reprocess.";
+          ? `No eligible gallery images to reprocess${effectiveGalleryImportSuffix}.`
+          : `No eligible filtered images to reprocess${effectiveGalleryImportSuffix}.`;
       setRefreshNotice(message);
       setRefreshError(null);
       appendRefreshLog({
@@ -6181,10 +6226,10 @@ export default function PersonProfilePage() {
         scope === "full"
           ? `Full-gallery run: ${stageTargets.totalFiltered} images (${stageTargets.castCount} cast, ${stageTargets.mediaLinkCount} media links).`
           : `Scoped run: ${stageTargets.totalFiltered} filtered (${stageTargets.castCount} cast, ${stageTargets.mediaLinkCount} media links).`,
-      detail:
-        stageTargets.sources.length > 0
-          ? `sources: ${stageTargets.sources.join(", ")}`
-          : "sources: all",
+        detail:
+          stageTargets.sources.length > 0
+            ? `sources: ${stageTargets.sources.join(", ")}`
+            : "sources: all",
       level: "info",
       runId: requestId,
     });
@@ -6201,8 +6246,8 @@ export default function PersonProfilePage() {
         sources: stageTargets.sources.length > 0 ? stageTargets.sources : undefined,
         target_cast_photo_ids: stageTargets.targetCastPhotoIds,
         target_media_link_ids: stageTargets.targetMediaLinkIds,
-        show_id: showIdForApi ?? undefined,
-        show_name: activeShowName || undefined,
+        show_id: effectiveGalleryImportContext.showId ?? undefined,
+        show_name: effectiveGalleryImportContext.showName || undefined,
       });
       let hadError = false;
       let sawComplete = false;
@@ -6711,8 +6756,9 @@ export default function PersonProfilePage() {
     buildPersonRefreshRequestId,
     fullStageTargets,
     scopedStageTargets,
-    showIdForApi,
-    activeShowName,
+    effectiveGalleryImportContext.showId,
+    effectiveGalleryImportContext.showName,
+    effectiveGalleryImportSuffix,
   ]);
 
   const handleGetImagesFollowUpSelection = useCallback(
@@ -7068,12 +7114,19 @@ export default function PersonProfilePage() {
           return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
         })()
       : null;
-  // Get primary photo - cover photo first, then Bravo profile fallback, then first hosted photo.
-  const primaryPhotoUrl =
-    coverPhoto?.photo_url ||
-    bravoProfileImage ||
-    (photos.length > 0 ? getPersonPhotoCardUrl(photos[0]) : null) ||
-    photos.find((p) => p.hosted_url)?.hosted_url;
+  const primaryPhotoCandidates = useMemo(() => {
+    const coverPhotoRecord =
+      coverPhoto?.photo_id
+        ? photos.find((photo) => photo.id === coverPhoto.photo_id) ?? null
+        : null;
+    return [
+      ...(coverPhotoRecord ? getPersonPhotoCardUrlCandidates(coverPhotoRecord) : []),
+      coverPhoto?.photo_url ?? null,
+      bravoProfileImage,
+      ...(photos.length > 0 ? getPersonPhotoCardUrlCandidates(photos[0]) : []),
+      photos.find((photo) => typeof photo.hosted_url === "string" && photo.hosted_url.trim())?.hosted_url ?? null,
+    ];
+  }, [bravoProfileImage, coverPhoto?.photo_id, coverPhoto?.photo_url, photos]);
 
   const formatBravoPublishedDate = (value: string | null | undefined): string | null => {
     if (!value || typeof value !== "string") return null;
@@ -7327,7 +7380,7 @@ export default function PersonProfilePage() {
             </div>
             <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
               {/* Profile Photo */}
-              <ProfilePhoto url={primaryPhotoUrl} name={person.full_name} />
+              <ProfilePhoto urls={primaryPhotoCandidates} name={person.full_name} />
 
               {/* Person Info */}
               <div className="flex-1">
@@ -7803,6 +7856,11 @@ export default function PersonProfilePage() {
                   <button
                     onClick={() => void handleRefreshImages()}
                     disabled={refreshingImages || reprocessingImages}
+                    title={
+                      effectiveGalleryImportLabel
+                        ? `Run Get Images for ${effectiveGalleryImportLabel} (source sync + mirror only).`
+                        : "Run Get Images for the current gallery context (source sync + mirror only)."
+                    }
                     className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7813,6 +7871,11 @@ export default function PersonProfilePage() {
                     <button
                       onClick={() => void handleReprocessImages()}
                       disabled={refreshingImages || reprocessingImages}
+                      title={
+                        effectiveGalleryImportLabel
+                          ? `Run Refresh Details for ${effectiveGalleryImportLabel}.`
+                          : "Run Refresh Details for the current gallery context."
+                      }
                       className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                     >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7898,6 +7961,11 @@ export default function PersonProfilePage() {
                 </div>
               </div>
               <div className="mb-4 space-y-2">
+                {effectiveGalleryImportLabel && (
+                  <p className="text-xs font-medium text-zinc-500">
+                    Import target: {effectiveGalleryImportLabel}
+                  </p>
+                )}
                 <RefreshProgressBar
                   show={
                     refreshingImages ||
@@ -7921,7 +7989,7 @@ export default function PersonProfilePage() {
                 {getImagesFollowUpPromptOpen && (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
                     <p className="text-xs font-medium text-emerald-900">
-                      Get Images finished. Run full Refresh Details now?
+                      Get Images finished{effectiveGalleryImportSuffix}. Run full Refresh Details now?
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
@@ -8101,7 +8169,7 @@ export default function PersonProfilePage() {
                             )}
                             <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
                               <p className="text-xs text-white truncate">
-                                {photo.source}
+                                {formatPhotoSourceLabel(photo.source)}
                                 {photo.season && ` • S${photo.season}`}
                               </p>
                             </div>
@@ -8151,7 +8219,7 @@ export default function PersonProfilePage() {
                             )}
                             <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition group-hover:opacity-100">
                               <p className="text-xs text-white truncate">
-                                {photo.source}
+                                {formatPhotoSourceLabel(photo.source)}
                                 {photo.season && ` • S${photo.season}`}
                               </p>
                             </div>

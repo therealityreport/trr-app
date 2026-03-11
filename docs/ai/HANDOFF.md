@@ -1,6 +1,1550 @@
 # Session Handoff (TRR-APP)
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
+## Latest Update (2026-03-07 19:52 EST) — Admin docs now match the live Modal runtime state
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+  - `senior-devops`
+- mcp_tools_used:
+  - `functions.exec_command`
+  - `functions.mcp__awslabs-aws-api__call_aws`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/docs/job-catalog.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-docs-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/cross-collab/TASK11/STATUS.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/cross-collab/TASK11/OTHER_PROJECTS.md`
+- behavior_summary:
+  - Updated the admin `/docs` runtime catalog to match the live staging cutover state:
+    - social entries now show `Current Runtime: Modal`
+    - social entries now show `Target Runtime: Modal`
+    - social entries now show `Migration Status: Cutover Complete`
+  - Removed the remaining `EC2` runtime state from the app docs enum because no documented admin job still uses EC2 as the current runtime after the staging cutover.
+  - No separate TRR-APP host rollout was required or executed; this change is the local app/docs alignment to the live backend runtime.
+- validation_evidence:
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-docs-page.test.tsx tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx` (pass; `93 passed`)
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/lib/admin/docs/job-catalog.ts' 'tests/admin-docs-page.test.tsx'` (pass)
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` (pass)
+  - Backend runtime evidence consumed from:
+    - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/ai/HANDOFF.md`
+    - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/cross-collab/TASK11/STATUS.md`
+    - live AWS verification showing `run_admin_vision` deployed and `trr-worker-asg` absent in this account
+- blocked_checks:
+  - No deployed TRR-APP browser target exists in the current AWS account context, so there was no separate app-host rollout or deployed app-browser verification in this pass.
+## Latest Update (2026-03-07 19:25 EST) — Staging backend is live on remote+Modal; no separate app rollout target found in current AWS account
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+  - `senior-devops`
+- mcp_tools_used:
+  - `functions.exec_command`
+  - `functions.mcp__awslabs-aws-api__call_aws`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/cross-collab/TASK11/STATUS.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/cross-collab/TASK11/OTHER_PROJECTS.md`
+- behavior_summary:
+  - Recorded the live backend rollout state that the app now depends on:
+    - staging backend is running the canonical `remote + modal` executor contract
+    - staging worker-health now reports fresh `modal:*` dispatcher rows for social/admin/reddit/google-news
+  - No separate TRR-APP AWS rollout target was discoverable in the current account context, so this pass did not perform an app-host deployment distinct from the backend runtime rollout.
+  - Existing app-side Modal executor rendering remains the correct consumer behavior for staging after the backend cutover.
+- validation_evidence:
+  - Backend rollout evidence consumed from:
+    - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/ai/HANDOFF.md`
+    - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/cross-collab/TASK11/STATUS.md`
+  - AWS account discovery:
+    - only `/trr/staging/*` parameters are present
+    - `/trr/production/*` is empty
+    - only one visible ASG exists for this surface: `trr-api-asg`
+- blocked_checks:
+  - No separate staging-browser or production-browser verification was run against a deployed TRR-APP host in this pass because no distinct app deployment target was surfaced in the current AWS account context.
+## Latest Update (2026-03-07 19:16 EST) — Local admin browser verification completed against remote+Modal workspace and shared-ingest schema
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+  - `orchestrate-plan-execution`
+- mcp_tools_used:
+  - `functions.mcp__chrome-devtools__navigate_page`
+  - `functions.mcp__chrome-devtools__take_snapshot`
+  - `functions.mcp__chrome-devtools__take_screenshot`
+  - `functions.mcp__chrome-devtools__evaluate_script`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/system-health-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Completed the managed-Chrome verification that had been pending for the Modal-backed admin health work.
+  - Verified the local workspace after updating the workspace launcher to pass the canonical `remote + modal` env contract through to the backend.
+  - Re-ran the check after the linked Supabase schema was updated so the shared-ingest panel could be verified end-to-end instead of failing on missing tables.
+- validation_evidence:
+  - Frontend checks:
+    - `source /Users/thomashulihan/.nvm/nvm.sh && cd /Users/thomashulihan/Projects/TRR/TRR-APP && nvm use --silent >/dev/null && pnpm -C apps/web run lint` (pass)
+    - `source /Users/thomashulihan/.nvm/nvm.sh && cd /Users/thomashulihan/Projects/TRR/TRR-APP && nvm use --silent >/dev/null && pnpm -C apps/web exec vitest run tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx` (pass; `91 passed`)
+  - Managed Chrome evidence:
+    - `/Users/thomashulihan/Projects/TRR/.tmp/system-health-modal-after-0179.png`
+      - system health modal shows `Execution owner: Remote executor`
+      - system health modal shows `Execution backend: Modal`
+      - worker copy is the generic `Remote executor processes...`
+    - `/Users/thomashulihan/Projects/TRR/.tmp/social-media-shared-ingest-after-0179.png`
+      - shared-ingest section now renders `SHARED SOURCES`, active account inventory, and review queue counts without fetch errors
+    - `/Users/thomashulihan/Projects/TRR/.tmp/rhoslc-social-after-0179.png`
+      - RHOSLC season social screen shows `Classification Rules` and `Shared Async Pipeline`
+      - managed-Chrome DOM check confirmed `{hasEC2:false, hasAWSWorkers:false, hasClassificationRules:true, hasSharedAsyncPipeline:true}`
+- blocked_checks:
+  - No staging-browser or production-browser verification was run in this pass.
+## Latest Update (2026-03-07 18:53 EST) — Admin Docs page now has top-level pill filters for migration status, page, and runtime
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/docs/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-docs-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added a dedicated filter section at the top of the admin Docs catalog with pill groups for `Migration Status`, `Page`, and `Current Runtime`.
+  - Each filter group now offers an `All` pill plus per-value pills with counts, and the catalog applies the three filters by intersection while preserving the existing category-grouped layout.
+  - Added a filtered-results summary and an empty-state card so the page remains legible when the selected pill combination narrows the catalog to zero entries.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run -c vitest.config.ts tests/admin-docs-page.test.tsx` (pass; `2 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/app/docs/page.tsx tests/admin-docs-page.test.tsx` (pass)
+- blocked_checks:
+  - Managed Chrome verification was not completed in this pass; validation evidence is the focused docs-page test and eslint on the touched files.
+## Latest Update (2026-03-07 17:24 EST) — Admin health and season social UI now surface Modal-backed executor state
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/system-health-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Updated the admin system-health modal to treat remote social execution as a generic remote executor instead of EC2/AWS workers, and surfaced additive backend executor fields including backend label, active invocations, oldest queued age, stale running count, and last dispatch success/error metadata.
+  - Updated the season social analytics/admin copy to reference the configured remote executor, display additive `execution_backend_canonical` metadata from ingest responses, and remain compatible with the backend’s Modal-backed queue-status payload changes.
+  - Hardened the frontend tests around the new wording and Modal executor rendering so the health modal and season social analytics views continue to render correctly with the additive contract.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx` (pass; `90 passed`)
+- blocked_checks:
+  - Managed Chrome verification was not rerun in this pass; validation remained targeted to the updated component tests.
+## Latest Update (2026-03-07 15:11 EST) — Admin Docs catalog now includes runtime ownership and recommendations
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/docs/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/docs/job-catalog.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-docs-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - The admin Docs catalog now shows `Current Runtime` and `Recommended Runtime` for every documented job, using the three requested planes: `Local`, `EC2`, and `Modal`.
+  - Added per-job runtime notes to explain the basis for each label, including Modal-backed admin operations, Screenalytics-backed image jobs, and worker-owned social ingest flows.
+  - Expanded the docs intro and render coverage so the runtime ownership metadata is part of the page contract.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-docs-page.test.tsx tests/admin-navigation.test.ts tests/admin-host-middleware.test.ts` (pass; `39 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/docs/page.tsx' 'src/lib/admin/docs/job-catalog.ts' 'tests/admin-docs-page.test.tsx'` (pass)
+- blocked_checks:
+  - Managed Chrome validation was not rerun in this pass; validation remains targeted to the docs tests and lint.
+## Latest Update (2026-03-07 13:13 EST) — Season/week social admin UI now reflects merged live sync state and richer failure semantics
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Season preview cards now merge comment + mirror coverage into one combined status so active comment jobs are not hidden by stale mirror data; preview cards also render tone-coded comment/mirror pills plus additive active-job summary copy.
+  - `formatJobOutcomeNote()` now distinguishes posts-stage auth/checkpoint failures, rate limits, and provider failures from true no-post windows.
+  - Week-detail platform cards now keep zero-post `partial` / `failed` semantics for previously attempted runs while still showing `No posts` as the badge label, and they surface active-job summary copy for in-flight work.
+  - Post cards in week detail now render tone-coded `Comment sync` and `Mirror` pills from the new backend status payload instead of flat gray chips.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx` (pass; `135 passed`)
+- blocked_checks:
+  - No managed-Chrome validation was run in this pass; verification stayed in targeted frontend tests.
+## Latest Update (2026-03-07 11:11 EST) — Zero-post week status cards now surface live sync activity instead of collapsing to “No posts”
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Week-detail platform status cards now preserve backend `queued` / `running` states even when the saved post count for that platform is still `0`. This prevents active week syncs from being mislabeled as `No posts` purely because no rows have been saved yet.
+  - Zero-post in-flight cards now show `Running` / `Queued`, use in-progress copy for the summary/timestamp line, and still expose `Reason` + run id when the backend supplies them.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx -t 'zero-post platform status cards'` (pass; `2 passed`)
+- blocked_checks:
+  - No managed-Chrome verification was run in this pass; validation stayed in the targeted week-detail test slice.
+## Latest Update (2026-03-07 09:52 EST) — Person-gallery Get Images now defaults to all-person Getty/NBCUMV scope
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/person-gallery-media-view.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-media-view.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-request-id-wiring.test.ts`
+- behavior_summary:
+  - Person-gallery `Get Images` no longer defaults to `This Show` merely because the route includes a show slug. The gallery scope now starts at `all`, and only explicit single-show chips (`This Show`, `WWHL`, `Other Shows`) send `show_id/show_name`.
+  - This restores all-person Getty -> NBCUMV import behavior for cast members like Lisa Barlow, instead of silently constraining `Get Images` to the current route show.
+  - Increased the ingest per-source limit so all-person runs can request up to `1000` items per source; explicit single-show runs use a lower `500` item cap.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run tests/person-gallery-media-view.test.ts tests/person-refresh-request-id-wiring.test.ts` (pass; `39 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/lib/admin/person-gallery-media-view.ts' 'tests/person-gallery-media-view.test.ts' 'tests/person-refresh-request-id-wiring.test.ts'` (pass)
+- blocked_checks:
+  - Managed Chrome verification is still blocked in this thread because the `chrome-devtools` MCP transport closes immediately (`Transport closed`).
+## Latest Update (2026-03-07 09:58 EST) — Brands/news workspace and shared logo modal received bug sweep + UX hardening
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/news/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandLogoOptionsModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brands-news-page-auth-bypass.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brand-logo-options-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Hardened the shared `BrandLogoOptionsModal` so featured-logo selection is now singular per role, the initial saved selection no longer renders as a false `Pending Featured` state, `Save Featured` stays disabled until the selection actually changes, source tabs stay visible while scrolling, and replaced candidate refreshes drop stale pending selections cleanly.
+  - Tightened modal form behavior with explicit `name`/`aria-label` wiring on manual-import and query inputs, clearer loading copy for the results area, stronger card selection copy, and stricter manual-import validation that only accepts image-like http(s) URLs.
+  - Upgraded `/brands/news` from a raw card grid into a usable admin workspace with debounced search, clear/reset support, safer explicit refresh behavior, stats cards, completeness filters, sort controls, preserved rows on transient load failures, humanized source-provider labels, and clearer per-card completeness/status messaging.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-logo-options-modal.test.tsx tests/brands-news-page-auth-bypass.test.tsx tests/brands-logos-options-proxy-routes.test.ts tests/brands-logo-sync-wiring.test.ts` (pass; `18 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/BrandLogoOptionsModal.tsx src/app/admin/news/page.tsx tests/brand-logo-options-modal.test.tsx tests/brands-news-page-auth-bypass.test.tsx tests/brands-logos-options-proxy-routes.test.ts` (pass)
+  - Managed Chrome smoke on `http://admin.localhost:3000/brands/news`:
+    - verified the new stats/filter/sort controls render on load
+    - verified the page still loads card data after reload
+    - verified opening `Wordmark Options • trakt.tv` now shows `Current Featured` and an initially disabled `Save Featured`
+- blocked_checks:
+  - I did not exhaustively re-test every other brands surface (`networks`, `production-companies`, `other`, `shows-and-franchises`) in browser, though the modal changes are shared across them.
+## Latest Update (2026-03-07 09:39 EST) — Get Images now stops after sync + mirror instead of replaying full resize/tagging backlog
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-request-id-wiring.test.ts`
+- behavior_summary:
+  - Changed the main person-gallery `Get Images` action so it now uses the ingestion-only stage profile: source sync plus mirror, while explicitly skipping auto-count, word detection, centering, resize, and prune.
+  - This prevents the main import button from unexpectedly replaying the entire existing gallery backlog, which had been surfacing as large resize/tagging failure counts even on runs that only fetched a small number of new source images.
+  - Updated the in-flight progress copy and button title to reflect that `Get Images` is now a source-sync + mirror action, with the existing follow-up prompt preserved for optional full `Refresh Details`.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-request-id-wiring.test.ts` (pass; `6 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'tests/person-refresh-request-id-wiring.test.ts'` (pass)
+- blocked_checks:
+  - Managed Chrome validation is still blocked in this thread because the `chrome-devtools` MCP transport closes immediately (`Transport closed`), so the fix was validated with targeted tests and code-path review rather than a live in-browser run.
+## Latest Update (2026-03-07 09:41 EST) — Get Images progress now shows ingestion-only stages and stops retrying duplicate event-seq failures
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/refresh-progress.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-progress.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-request-id-wiring.test.ts`
+- behavior_summary:
+  - Split the person-gallery `Get Images` pipeline into its own `ingest` progress mode so the progress panel now only renders the stages that can actually run for ingestion: `Profiles`, `Source Sync`, `Metadata`, `Saving Photos`, `Fixing IMDb Details`, and `S3 Mirroring`.
+  - Removed misleading downstream `Tagging`, `Text Overlay`, `Centering/Cropping`, and `Resizing` pending steps from `Get Images`; those remain exclusive to `Refresh Details` / stage reprocess actions.
+  - Hardened the stream retry loop so duplicate operation-event sequence failures (`admin_operation_events_op_seq_unique`) are treated as non-retryable backend failures instead of showing `Stream disconnected, retrying...`.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-progress.test.ts tests/person-refresh-request-id-wiring.test.ts` (pass; `27 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/refresh-progress.ts' 'tests/person-refresh-progress.test.ts' 'tests/person-refresh-request-id-wiring.test.ts'` (pass)
+- blocked_checks:
+  - Managed Chrome verification is still blocked in this thread because the `chrome-devtools` MCP transport closes immediately (`Transport closed`).
+## Latest Update (2026-03-07 09:27 EST) — Route-show context restored for NBCUMV Get Images runs
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/person-gallery-media-view.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-media-view.test.ts`
+- behavior_summary:
+  - Revised the gallery import-context resolver so show-scoped person pages keep the route show as the default import target for `Get Images`, even when the gallery chip is set to `all`, `events`, or `other`.
+  - This restores the `show_id` / `show_name` payload that the backend requires before it keeps `nbcumv` in the source list, which was the reason the `nbcumv_import` phase disappeared from normal show-page gallery runs.
+  - Explicit override chips still take precedence: `other-shows` uses the selected alternate show and `wwhl` uses the WWHL credit context.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-gallery-media-view.test.ts` (pass; `30 passed`)
+- blocked_checks:
+  - Managed Chrome validation against the live admin people gallery is still blocked in this thread because the `chrome-devtools` MCP transport closes immediately (`Transport closed`).
+  - Separate downstream resize failures remain for some hosted assets (`NoSuchKey` on S3-backed originals). That is independent of the NBCUMV source-selection bug fixed in this pass.
+
+## Latest Update (2026-03-07 03:35 EST) — Person gallery now uses selected show chips for NBCUMV/Gettty image refresh context
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/person-gallery-media-view.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/photo-metadata.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/refresh-progress.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/ImageLightbox.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-media-view.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-request-id-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/photo-metadata.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-progress.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/image-lightbox-metadata.test.tsx`
+- behavior_summary:
+  - Added an effective gallery import context resolver so generic person gallery pages can pass the selected show chip into `Get Images` and `Refresh Details` instead of only using route-scoped show context.
+  - WWHL and other-show chips now resolve to a concrete show payload when available, while `all`, `events`, and `other` intentionally send no single-show context.
+  - Person gallery stage targeting now recognizes `nbcumv` as a scoped source, and gallery overlays, refresh progress copy, photo metadata, and lightbox provenance now normalize `nbcumv`/`getty` labels instead of rendering raw lowercase IDs or hostnames.
+  - The gallery actions now expose the active import target in the UI before kickoff and carry that label into the follow-up prompt and stage start copy.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-gallery-media-view.test.ts tests/person-refresh-request-id-wiring.test.ts tests/photo-metadata.test.ts tests/person-refresh-progress.test.ts tests/image-lightbox-metadata.test.tsx`
+  - result: `5 passed`, `119 passed`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/lib/admin/person-gallery-media-view.ts' 'src/lib/photo-metadata.ts' 'src/app/admin/trr-shows/people/[personId]/refresh-progress.ts' 'src/components/admin/ImageLightbox.tsx' 'tests/person-gallery-media-view.test.ts' 'tests/person-refresh-request-id-wiring.test.ts' 'tests/photo-metadata.test.ts' 'tests/person-refresh-progress.test.ts' 'tests/image-lightbox-metadata.test.tsx'`
+  - result: pass
+- blocked_checks:
+  - Managed Chrome validation on `http://admin.localhost:3000/people/lisa-barlow/gallery` is still blocked in this thread because the `chrome-devtools` MCP transport closes immediately (`Transport closed`) even though local debug ports remain healthy.
+## Latest Update (2026-03-07 01:55 EST) — Removed admin reload prompts and stopped browser-native unload confirmation on admin pages
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/use-operation-unload-guard.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+- behavior_summary:
+  - Disabled the shared admin `beforeunload` guard that had been showing Chrome’s `Reload site? Changes you made may not be saved.` prompt during ordinary admin refresh/navigation.
+  - Removed the separate show-admin `beforeunload` listener tied to `hasUnsavedDetailsChanges`, so the main show admin page no longer forces the same browser-native confirmation dialog.
+  - Admin pages that still call `useAdminOperationUnloadGuard()` now effectively no-op, which eliminates tab reload prompts without changing the underlying operation/run session tracking logic.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/admin/use-operation-unload-guard.ts 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/components/admin/social-week/WeekDetailPageView.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/app/admin/trr-shows/people/[personId]/page.tsx' 'src/app/admin/reddit-window-posts/page.tsx'`
+  - result: pass with one pre-existing warning in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx:3400`
+- blocked_checks:
+  - Managed Chrome in-chat verification still requires a restarted Codex thread before the `chrome-devtools` MCP becomes callable in this conversation.
+## Latest Update (2026-03-07 02:00 EST) — Week-detail platform totals/status cards now respect zero-post platforms and RHOSLC Threads live counts
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/week-social-thumbnails.test.tsx`
+- behavior_summary:
+  - Platform status cards now carry post-count context from the week payload, which lets the UI render `No posts` / `No posts in this week window` for zero-post platforms instead of showing stale operational `Partial` state from historical ingest health.
+  - Status-card comment and mirror counters are now clamped to their reported totals, matching the earlier per-post clamp work and avoiding impossible saved-over-expected copy in the summary strip.
+  - Live RHOSLC week verification now shows converged post counts from the backend summary/detail pair: `All(53)`, `Threads(3)`, `YouTube(0)`, with zero-post YouTube/Facebook cards rendered as informational rather than degraded.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/week-social-thumbnails.test.tsx -c vitest.config.ts --pool=forks --poolOptions.forks.singleFork`
+  - Managed Chrome verification on `http://admin.localhost:3000/rhoslc/s6/social/w1`
+- blocked_checks:
+  - The live page still inherits a backend residual comment-total drift between fast summary and full detail payloads; the visible post counts/status cards are fixed, but aggregate comment totals remain rounded-close rather than contract-identical.
+## Latest Update (2026-03-07 01:12 EST) — Week-detail and season social admin pages now render explicit backend sync/mirror state
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/reddit-sources-manager.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+- behavior_summary:
+  - Week-detail now consumes backend `status_by_platform` and per-post `status` payloads directly, rendering explicit sync/mirror status cards and post-level chips instead of inferring health from aggregate counts.
+  - Post cards now surface backend-sourced comment sync state, media mirror state, and Instagram metadata errors. Season sync preview cards now surface the same additive status payloads from comments coverage and mirror coverage APIs.
+  - Reddit source manager now understands run `phase`, `partial_failures`, `stalled`, and cache-age/cache-status metadata so stalled or partial Reddit refreshes produce actionable progress copy in the admin UI.
+  - The week-detail wiring spec was extended to lock the new platform-status rendering and to keep recent sync-telemetry wiring assertions stable.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/social-week-detail-wiring.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx src/components/admin/season-social-analytics-section.tsx src/components/admin/reddit-sources-manager.tsx tests/social-week-detail-wiring.test.ts`
+- blocked_checks:
+  - Managed Chrome DevTools MCP validation was required by workspace policy but could not be executed in this session because the `chrome-devtools` tool surface was not exposed here.
+  - No repo-wide `typecheck` or full frontend test run was executed in this session; validation stayed targeted to the touched social admin surfaces.
+## Latest Update (2026-03-07 10:15 EST) — Social admin pages: season-proxy fast path, lighter worker health, full week target scans
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `debugging-wizard`
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/social-admin-proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/worker-health/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+- behavior_summary:
+  - Social proxy season resolution is now single-flight and TTL-cached per `showId:seasonNumber`, so the social admin API routes no longer hammer `getSeasonByShowAndNumber(...)` on every panel request.
+  - The season analytics route now uses a long timeout profile, which lets the first cold RHOSLC season analytics payload complete and populate cache instead of 504ing at the old 45s proxy ceiling.
+  - Season worker-health polling was moved onto the lightweight `health-dot` payload path and deduped in-flight in the frontend, reducing repeated queue/worker load during dashboard refresh and active ingest polling.
+  - Week-detail sync live-health and worker-health fetches are now deduped in-flight, and manual attach polling stops while a sync is already running.
+  - The season social dashboard now scans paginated week-detail results when building missing-comment targets, instead of only inspecting the first 20 posts of a week.
+  - Week-detail day-scoped sync requests now have a local `buildIsoDayRange(...)` helper, fixing the previously unresolved reference in that page’s sync scope builder.
+- validation_evidence:
+  - `python -m py_compile /Users/thomashulihan/Projects/TRR/TRR-Backend/api/routers/socials.py` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/lib/server/trr-api/social-admin-proxy.ts' 'src/components/admin/season-social-analytics-section.tsx' 'src/components/admin/social-week/WeekDetailPageView.tsx' 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/worker-health/route.ts'` (pass)
+  - `/usr/bin/curl -H 'Host: admin.localhost:3000' -H 'Authorization: Bearer dev-admin-bypass' 'http://127.0.0.1:3000/rhoslc/s6/social'` (200)
+  - `/usr/bin/curl -H 'Host: admin.localhost:3000' -H 'Authorization: Bearer dev-admin-bypass' 'http://127.0.0.1:3000/rhoslc/s6/social?social_platform=instagram'` (200)
+  - `/usr/bin/curl -H 'Host: admin.localhost:3000' -H 'Authorization: Bearer dev-admin-bypass' 'http://127.0.0.1:3000/rhoslc/s6/social/w1/details'` (200)
+  - `/usr/bin/curl -H 'Host: admin.localhost:3000' -H 'Authorization: Bearer dev-admin-bypass' 'http://127.0.0.1:3000/rhoslc/s6/social/w1/details?social_platform=instagram'` (200)
+  - RHOSLC API timing spot checks after the patch:
+    - season analytics cold hit: `200` in `30.28s`; immediate cached repeat: `200` in `0.024s`
+    - week detail cold hit: `200` in `5.33s`; immediate cached repeat: `200` in `0.078s`
+    - mirror coverage cold hit: `200` in `4.27s`; immediate cached repeat: `200` in `1.54s`
+    - health dot cold hit: `200` in `4.96s`; immediate cached repeat: `200` in `0.38s`
+- blocked_checks:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run typecheck` still fails on pre-existing unrelated issues in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx` and `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/ui/editable.tsx`.
+## Latest Update (2026-03-07 00:35 EST) — Season analytics now explains zero-result logs and scopes targets to the active platform tab
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-backend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin social analytics UX/state fixes paired with backend stale-run reconciliation)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Scoped the `Configured Targets` card to the active platform tab while keeping overview/all tabs unchanged, so Instagram no longer shows TikTok targets in that panel.
+  - Reworked run-log wording from generic `Found` copy to `Observed` plus explicit outcome notes for common zero-result cases, including out-of-window post scans and Instagram comment fetches blocked by auth/challenge responses.
+  - Tightened active-run detection so loaded terminal jobs no longer keep the UI in a misleading `Run Active` state just because a stale parent run row still says `running`.
+  - Fixed the season analytics test harness to select the mocked run and attach mocked jobs to that run, matching the component’s real run-scoping behavior.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx`
+  - result: pass (`1 file`, `76 tests`)
+
+## Latest Update (2026-03-07 00:24 EST) — Social sync progress copy now uses lane scheduling, Day View respects active platform filters, and health workers explain current work in plain English
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-backend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin social-sync UI copy/filtering changes; no backend contract change)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/system-health-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Reframed per-handle sync progress from misleading `Single-runner mode (1 worker)` copy to schedule-oriented language (`Single-lane schedule`) so the UI no longer implies a hard live concurrency cap of exactly one worker.
+  - Scoped live Day View rows to the active platform and day filters inside the client, which fixes Instagram-tab runs showing TikTok, Twitter/X, Threads, and other platform rows when the live-health payload contains broader data.
+  - Added a live-health refetch when the active platform tab changes so the Day View and related sync-health panels stay aligned with the selected platform during an active run.
+  - Reworked the System Health `Live Workers` copy and selected-worker panel into plain-English summaries that explain each worker’s role, supported platforms, current run, and current task instead of exposing mostly raw internal IDs.
+  - Investigated run `9addf5d4` directly in Supabase: the run config is Instagram-only (`platforms=["instagram"]`, `runner_strategy="single_runner"`, `runner_count=1`) and all six jobs are Instagram jobs. `@bravowwhl` completed with `0` posts/comments because there are no Instagram posts stored for that handle in the requested `2025-09-17` through `2025-09-23` window.
+  - Confirmed TikTok profile pictures are not just a rendering problem: the current season’s TikTok post/comment records have no avatar URLs stored, so the missing avatars require backend ingestion/storage work rather than another UI patch.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/system-health-modal.test.tsx tests/social-week-detail-wiring.test.ts`
+  - result: pass (`2 files`, `35 tests`)
+- blocked_checks:
+  - A full TypeScript no-emit check was attempted but did not complete in this session, so no repo-wide typecheck pass is recorded here.
+
+## Latest Update (2026-03-07 00:09 EST) — `/rhobh/cast` load crash fixed by restoring missing Google News setters in show page state
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (single-page client runtime fix; no contract changes)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Fixed the shared show admin page crash that was taking down `http://admin.localhost:3000/rhobh/cast` and sending the app into the global `ErrorBoundary`.
+  - Root cause was a `ReferenceError` thrown during page reset logic: `setGoogleNewsLinkId is not defined`.
+  - Restored the missing local Google News state setters so the page reset effect can clear that state without crashing during mount/navigation.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx'`
+  - Headless Chromium smoke using `@playwright/test` against `http://admin.localhost:3000/rhobh/cast`:
+    - response `200`
+    - `Something went wrong` not present
+    - no `setGoogleNewsLinkId is not defined` console/page error
+
+## Latest Update (2026-03-06 23:59 EST) — IconRatingInput pointer flow now reaches 0.0 and `/rhobh/cast` reloads were traced to dev runtime, not route code
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (shared survey input interaction fix; no contract changes)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/survey/IconRatingInput.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/icon-rating-input.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Kept `IconRatingInput` on the `0.0` to `5.0` range with `0.5` steps and fixed pointer interaction so dragging/clicking from the left edge can now select `0.0`, not just keyboard `Home` or manual text entry.
+  - Added a regression test covering pointer-based selection of `0.0` while preserving the existing half-step interaction checks.
+  - Traced `http://admin.localhost:3000/rhobh/cast` to the admin show page cast tab (`/admin/trr-shows/:showId?tab=cast`). That route only auto-fetches cast data; it does not call `location.reload`, `router.refresh`, or perform redirect loops.
+  - Verified workspace browser sync is currently `WORKSPACE_BROWSER_TAB_SYNC_MODE=reuse_no_reload`, so startup tab sync is not set to reload every matching tab. Remaining multi-tab refresh behavior is consistent with Next.js dev hot reload affecting open tabs on the same dev app/origin.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/icon-rating-input.test.tsx`
+
+## Latest Update (2026-03-06 23:39 EST) — Components tab now includes a full avatar inventory section
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (design-system-only inventory expansion)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/ComponentsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/components-tab.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added a dedicated `Avatars` section under the design-system `Components` tab to inventory avatar/frame systems used across surveys, social surfaces, profiles, people admin, and show/media tiles.
+  - Included interactive previews for the major avatar families and their states: survey cast circles, social handle avatars, profile hero avatars, admin face-crop chips, and show/media thumbnail frames.
+  - Each avatar entry now documents its usage states and source paths so the design system covers the currently used avatar variations across the app.
+  - Fixed the social-avatar preview chip rendering bug so the new section renders correctly.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-system/ComponentsTab.tsx tests/components-tab.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/components-tab.test.tsx`
+
+## Latest Update (2026-03-06 23:31 EST) — IconRatingInput now supports 0.0 to 5.0 in 0.5 increments
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (shared survey input range/default update)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/survey/IconRatingInput.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/surveys/rhoslc-s6/play/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/ComponentsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/icon-rating-input.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Changed the shared `IconRatingInput` default minimum from `1` to `0`, preserving the existing `0.5` step and `5.0` maximum.
+  - Updated the RHOSLC season-rating copy and the design-system previews so they explicitly use the `0.0` to `5.0` range.
+  - Added a regression test proving the component can reach `0.0` via keyboard `Home` and numeric input.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/survey/IconRatingInput.tsx src/app/surveys/rhoslc-s6/play/page.tsx src/app/admin/fonts/_components/QuestionsTab.tsx src/components/admin/design-system/ComponentsTab.tsx tests/icon-rating-input.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/icon-rating-input.test.tsx`
+
+## Latest Update (2026-03-06 22:05 EST) — Design-system fonts “Currently Used” now excludes inventory-only rows and shows page pills by family/weight
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (design-system-only inventory/filtering change)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/DesignSystemPageClient.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Tightened the fonts-page “Currently Used” filter so it ignores inventory-only rows such as `Not yet used`, `Not actively used`, `Available`, and `Deprecated`.
+  - Aggregated family-level usage from both top-level font entries and per-weight usage entries, so fonts like Hamburg Serial now show page pills even when usage is tracked only at the weight level.
+  - Added visible family-level page pills in the collapsed card header for active fonts.
+  - Reworked the expanded weights area into a three-column layout (`Style`, `Preview`, `Pages`) so each weight row now shows the pages where that weight is used.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-system/DesignSystemPageClient.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-fonts-tabs.test.ts`
+
+## Latest Update (2026-03-06 22:04 EST) — RHOSLC snowflake asset corrected and design-system cast previews now use real Season 6 photos
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `typescript-pro`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.mcp__awslabs-aws-api__call_aws`
+  - supporting:
+    - `functions.exec_command`
+    - `functions.apply_patch`
+- risk_class: `medium` (shared RHOSLC asset references changed across survey pages, design-system previews, and checked-in icon inventory)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/surveys/rhoslc-assets.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/public/icons/snowflake-solid-ice-6.svg`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/ComponentsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/IconsIllustrationsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/surveys/rhoslc-s6/play/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/surveys/rhoslc-s6/results/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/surveys/cast-verdict-demo/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/surveys/spec/templates/rhoslc-s6.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/icon-rating-input.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/three-choice-slider-input.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/whose-side-input.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Uploaded the corrected snowflake SVG to `s3://trr-backend/icons/snowflake-solid-ice-6.svg` with `image/svg+xml` and immutable cache headers.
+  - Canonical hosted snowflake URL is now `https://d1fmdyqfafwim3.cloudfront.net/icons/snowflake-solid-ice-6.svg`.
+  - Added a shared RHOSLC asset module so survey pages and design-system previews stop duplicating stale cast-image and icon paths.
+  - The design-system `Questions & Forms` tab now pulls RHOSLC Season 6 cast circle/frame photos from the actual checked-in `public/images/shows/rhoslc/season-6/*` files instead of the dead `/images/cast/rhoslc-s6/*` path family.
+  - The design-system `Components` tab now uses the real `IconRatingInput` component with the corrected hosted snowflake asset for its interactive preview.
+  - The `Icons & Illustrations` inventory now points its checked-in snowflake preview at the corrected repo asset `public/icons/snowflake-solid-ice-6.svg`.
+- validation_evidence:
+  - AWS MCP upload:
+    - `aws s3 cp snowflake-solid-ice-6.svg s3://trr-backend/icons/snowflake-solid-ice-6.svg --content-type image/svg+xml --cache-control public,max-age=31536000,immutable --region us-east-1`
+    - `aws s3api head-object --bucket trr-backend --key icons/snowflake-solid-ice-6.svg --region us-east-1`
+  - targeted lint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/surveys/rhoslc-assets.ts src/lib/surveys/spec/templates/rhoslc-s6.ts src/app/surveys/rhoslc-s6/play/page.tsx src/app/surveys/rhoslc-s6/results/page.tsx src/app/surveys/cast-verdict-demo/page.tsx src/app/admin/fonts/_components/QuestionsTab.tsx src/components/admin/design-system/IconsIllustrationsTab.tsx src/components/admin/design-system/ComponentsTab.tsx tests/icon-rating-input.test.tsx tests/three-choice-slider-input.test.tsx tests/whose-side-input.test.tsx`
+    - result: pass
+  - targeted vitest:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/icon-rating-input.test.tsx tests/three-choice-slider-input.test.tsx tests/whose-side-input.test.tsx`
+    - result: pass (`3 files, 17 tests`)
+
+## Latest Update (2026-03-06 22:00 EST) — Week-detail scope helper no longer crashes during render
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (single-component render-order fix)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Moved `appendSyncRunScopeParams(...)` below the `activeDayFilter` memo so the week-detail page no longer throws `Cannot access 'activeDayFilter' before initialization` during render.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/social-week-detail-wiring.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx tests/social-week-detail-wiring.test.ts`
+- blocked_checks:
+  - No deploy was required; this is a local app-only render fix.
+
+## Latest Update (2026-03-06 21:41 EST) — Missing top-level admin tool aliases no longer fall into the show router
+
+- primary_skill: `senior-fullstack`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-backend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (top-level admin routing and nav entry points changed)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-navigation.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/dev-dashboard/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/groups/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/settings/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/social-media/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/surveys/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/users/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-host-middleware.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-navigation.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added explicit root aliases for `/dev-dashboard`, `/groups`, `/settings`, `/social-media`, `/surveys`, and `/users`, each re-exporting the matching admin page.
+  - Updated proxy routing so those aliases are reserved from root show-slug capture and redirect to `admin.localhost` on the public host.
+  - Updated the shared admin navigation config so dashboard/tool links now point at the canonical one-slug aliases instead of `/admin/*` entry points.
+  - Before this fix, those aliases were compiling through the root show dynamic route on the admin host, so users could land in the show admin shell instead of the intended tool page.
+- validation_evidence:
+  - targeted Vitest:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-host-middleware.test.ts tests/admin-navigation.test.ts`
+    - result: pass (`2 files, 36 tests`)
+  - live HTTP checks:
+    - `curl -sS -o /dev/null -w '%{http_code}\t%{redirect_url}\n' http://127.0.0.1:3000/dev-dashboard`
+    - `curl -sS -o /dev/null -w '%{http_code}\t%{redirect_url}\n' http://127.0.0.1:3000/groups`
+    - `curl -sS -o /dev/null -w '%{http_code}\t%{redirect_url}\n' http://127.0.0.1:3000/settings`
+    - `curl -sS -o /dev/null -w '%{http_code}\t%{redirect_url}\n' http://127.0.0.1:3000/social-media`
+    - `curl -sS -o /dev/null -w '%{http_code}\t%{redirect_url}\n' http://127.0.0.1:3000/surveys`
+    - `curl -sS -o /dev/null -w '%{http_code}\t%{redirect_url}\n' http://127.0.0.1:3000/users`
+    - result: all pass (`307 -> http://admin.localhost:3000/<alias>`)
+  - live module checks:
+    - admin-host HTML for `/dev-dashboard`, `/groups`, `/settings`, `/social-media`, `/surveys`, and `/users` now loads `app/<alias>/page.js`
+    - result: pass (previously these aliases loaded the root show dynamic route)
+
+## Latest Update (2026-03-06 19:29 EST) — Season social pages now recover only scoped runs and bounded single-platform syncs
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-frontend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (local admin social pages now bind run history and sync kickoff settings to exact platform/week/day scope)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-run-scope-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Season social run lists and run summaries now append exact scope params from the current page context:
+    - selected platform tab
+    - selected week
+    - selected day window
+  - Week-detail recovery/manual-attach run queries now use the same exact scope params, which prevents unrelated season runs from hijacking the current sync view.
+  - Manual/season kickoff payloads for bounded one-platform syncs now send coarse single-runner scheduling so the backend no longer creates huge shard backlogs for a simple one-platform window sync.
+  - Updated stale test coverage around the ingest-job drawer to match the current user-facing row copy (`Done`, per-job counters) and keep transient job-refresh failure behavior covered.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/social-week-detail-wiring.test.ts tests/social-run-scope-wiring.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/season-social-analytics-section.tsx src/components/admin/social-week/WeekDetailPageView.tsx tests/season-social-analytics-section.test.tsx tests/social-week-detail-wiring.test.ts tests/social-run-scope-wiring.test.ts`
+- blocked_checks:
+  - No production app deploy was required in this pass because the user-facing admin pages are being exercised locally at `admin.localhost`.
+
+## Latest Update (2026-03-06 19:23 EST) — Root admin aliases and people/search slug contracts repaired
+
+- primary_skill: `senior-fullstack`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-backend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin-host routing and backend-facing slug/search contracts changed)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/slugify.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-admin-routes.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-route-slug.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/trr-shows-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/search/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/people/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/shows/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/games/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/people-home-page.runtime.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-host-middleware.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-admin-routes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-route-slug.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added concrete root-level `/shows` and `/games` pages so those admin aliases no longer fall through to the root show slug route.
+  - Updated admin-host proxy classification so `/games` is reserved from show-slug capture and redirects to `admin.localhost` the same way `/shows` and `/people` already do.
+  - Raised the `/people` client-side search minimum from 2 to 3 characters so the page stops issuing guaranteed `400 Query must be at least 3 characters` backend requests.
+  - Added a shared slug normalizer and applied it to person/show route slug generation so diacritics like `Sébastien` now normalize to `sebastien` instead of dropping letters.
+  - Updated admin global search to emit route-safe show slugs through the same canonical slug preference path used elsewhere in the app.
+- validation_evidence:
+  - targeted Vitest:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-host-middleware.test.ts tests/people-home-page.runtime.test.tsx tests/admin-global-search-route.test.ts tests/show-admin-routes.test.ts tests/show-route-slug.test.ts`
+    - result: pass (`5 files, 50 tests`)
+  - live HTTP checks:
+    - `curl -sS -I http://127.0.0.1:3000/games`
+    - result: pass (`307 Location: http://admin.localhost:3000/games`)
+    - `curl -sS -I --resolve admin.localhost:3000:127.0.0.1 http://admin.localhost:3000/games`
+    - result: pass (`200 OK`)
+    - `curl -sS -I --resolve admin.localhost:3000:127.0.0.1 http://admin.localhost:3000/shows`
+    - result: pass (`200 OK`)
+    - `curl -sS -D - -H 'Authorization: Bearer dev-admin-bypass' --resolve admin.localhost:3000:127.0.0.1 'http://admin.localhost:3000/api/admin/trr-api/search?q=ab&limit=8'`
+    - result: pass (`400 Query must be at least 3 characters`)
+    - `curl -sS -D - -H 'Authorization: Bearer dev-admin-bypass' --resolve admin.localhost:3000:127.0.0.1 'http://admin.localhost:3000/api/admin/trr-api/people/home?limit=12'`
+    - result: pass (`Sébastien Schmitt` now returns `person_slug: sebastien-schmitt--67d07c9b`)
+
+## Latest Update (2026-03-06 19:02 EST) — Component catalog previews are now interactive
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (design-system documentation surface only)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/ComponentsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Replaced static mock preview blocks in the `Components` tab with stateful mini-demos.
+  - Preview examples now support interaction such as tab switching, modal open/close, drawer open/close, inline edit/save, pill selection, radio selection, progress stepping, clickable rating, and rank-to-top reordering.
+- validation_evidence:
+  - file-scoped ESLint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-system/ComponentsTab.tsx tests/components-tab.test.tsx`
+    - result: pass
+  - targeted Vitest:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/components-tab.test.tsx`
+    - result: pass (`2 passed`)
+
+## Latest Update (2026-03-06) — app policy now requires auto-deploy for deployable AWS rollout work
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `skillcreator`
+  - `senior-devops`
+  - `aws-solution-architect`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (repo policy/shim-only change)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/AGENTS.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/CLAUDE.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added an app-facing AWS deploy rule requiring deployable AWS/cloud-infra/backend implementation work to include successful AWS rollout after checks pass.
+  - Trimmed repo `CLAUDE.md` back to a pure pointer shim with no quickstart content.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR && make check-policy` (pass)
+- blocked_checks:
+  - No frontend runtime tests were run because no application code changed.
+
+## Latest Update (2026-03-06 19:22 EST) — Brand logo modal now has a Saved tab, featured preview, and sticky action footer
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `react-expert`
+  - `typescript-pro`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin modal behavior and selection flow changed)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandLogoOptionsModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brand-logo-options-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added a `Saved` source tab backed by stored library assets so the modal can switch between already-saved assets and newly discovered candidates.
+  - Source pills continue to hide `related_network_streaming` when it has no results and discovered-source pills are ordered by the latest fetched counts in descending order.
+  - The modal now defaults to the `Saved` tab when stored assets already exist for the active role.
+  - Added a featured-preview strip under the modal header that shows the current or pending featured wordmark/icon selection.
+  - Made the footer action row sticky so `Cancel` and `Save Selected` remain visible while scrolling the source/query/results content.
+- validation_evidence:
+  - targeted Vitest:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts tests/brands-logo-sync-wiring.test.ts`
+    - result: pass (`15 passed`)
+  - file-scoped ESLint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/BrandLogoOptionsModal.tsx tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts`
+    - result: pass
+- blocked_checks:
+  - Runtime browser smoke was not rerun after this latest modal-only slice.
+## Latest Update (2026-03-06 18:51 EST) — Design-system inventory tabs now render visual examples
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (design-system documentation surface only)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/ComponentsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/IconsIllustrationsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/NYTOccurrencesTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `Components` entries now render miniature example states instead of showing only names, scope badges, and source paths.
+  - `Icons & Illustrations` now renders actual previews for checked-in public assets and miniature example treatments for inline SVG/icon systems.
+  - `NYT Occurrences` now shows a concrete example match block above the occurrence table so the tab demonstrates the scanned output format immediately.
+- validation_evidence:
+  - file-scoped ESLint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-system/ComponentsTab.tsx src/components/admin/design-system/IconsIllustrationsTab.tsx src/app/admin/fonts/_components/NYTOccurrencesTab.tsx tests/components-tab.test.tsx tests/icons-illustrations-tab.test.tsx`
+    - result: pass
+  - targeted Vitest:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/components-tab.test.tsx tests/icons-illustrations-tab.test.tsx`
+    - result: pass (`4 passed`)
+## Latest Update (2026-03-06) — app policy now requires skill review before each plan
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `skillcreator`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (repo policy-only change)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/AGENTS.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added a mandatory `Before Each Plan` subsection requiring app-scope skill review, minimal skill selection, explicit plan-writing and implementation skill selection, and canonical fallback order.
+  - Kept `CLAUDE.md` pointer-only behavior unchanged.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR && make check-policy` (pass)
+- blocked_checks:
+  - No frontend runtime tests were run because no application code changed.
+
+## Latest Update (2026-03-06 18:45 EST) — Design system moved to canonical `/design-system/*` routes with refreshed inventory tabs
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-frontend`
+  - `typescript-pro`
+  - `react-expert`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin-host routing and design-system documentation surface changed)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/design-system-routing.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/design-system/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/design-system/[tab]/[[...subtab]]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/DesignSystemPageClient.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/ComponentsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/IconsIllustrationsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/QuestionsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/ButtonsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/button-catalog.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/tab-routing.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-navigation.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/ShowBrandEditor.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-navigation.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-fonts-tabs.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-host-middleware.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/components-tab.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/icons-illustrations-tab.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Moved the UI Design System to canonical admin-host routes under `/design-system`, with `/design-system` redirecting to `/design-system/fonts`.
+  - Added typed tab/subtab routing for `fonts`, `colors`, `buttons`, `questions-forms`, `nyt-occurrences`, `components`, and `icons-illustrations`.
+  - Kept `/admin/fonts` as a legacy redirect entry point, including old `?tab=` query values mapping into the canonical slug routes.
+  - Updated admin navigation, breadcrumbs, and in-app links to use `/design-system/fonts`.
+  - Updated admin-host proxy routing so `/design-system/*` is treated as admin UI and is reserved from root show-slug handling.
+  - Refreshed the design-system inventory:
+    - color families are grouped by actual app surfaces
+    - questions/forms now include survey, auth, and admin editor coverage plus blank-container placeholders
+    - buttons gained additional catalog entries and missing-pattern placeholders
+    - new `Components` and `Icons & Illustrations` tabs catalog reusable project surfaces and asset groups
+- validation_evidence:
+  - targeted Vitest:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-navigation.test.ts tests/admin-fonts-tabs.test.ts tests/admin-host-middleware.test.ts tests/components-tab.test.tsx tests/icons-illustrations-tab.test.tsx tests/questions-tab-ranking-labels.test.tsx`
+    - result: pass (`39 passed`)
+  - file-scoped ESLint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/admin/design-system-routing.ts src/components/admin/design-system/DesignSystemPageClient.tsx src/components/admin/design-system/ComponentsTab.tsx src/components/admin/design-system/IconsIllustrationsTab.tsx src/app/admin/fonts/page.tsx src/app/admin/fonts/_components/QuestionsTab.tsx src/app/admin/fonts/_components/ButtonsTab.tsx src/app/admin/fonts/_components/button-catalog.ts src/app/admin/fonts/_components/tab-routing.ts src/app/design-system/page.tsx 'src/app/design-system/[tab]/[[...subtab]]/page.tsx' src/lib/admin/admin-navigation.ts src/components/admin/ShowBrandEditor.tsx src/proxy.ts tests/admin-navigation.test.ts tests/admin-fonts-tabs.test.ts tests/admin-host-middleware.test.ts tests/components-tab.test.tsx tests/icons-illustrations-tab.test.tsx`
+    - result: pass
+  - full repo typecheck:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run typecheck`
+    - result: fails on pre-existing unrelated issues:
+      - `src/app/admin/trr-shows/[showId]/page.tsx:12955` (`source.link` possibly null)
+      - `src/components/ui/editable.tsx:43` (spread types from non-object)
+      - `src/lib/server/trr-api/social-admin-proxy.ts:360` (`proxyError.retryAfterSeconds` possibly undefined)
+  - full repo lint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint`
+    - result: fails on pre-existing unrelated issues:
+      - `src/app/admin/reddit-post-details/page.tsx:1644` (`@next/next/no-img-element`)
+      - warnings in unrelated files remain
+  - full repo tests:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run test:ci`
+    - result: reproduced existing unrelated failure:
+      - `tests/social-season-hint-routes.test.ts > social routes season_id hint forwarding > forwards week summary route to summary endpoint with speed-first defaults`
+      - current baseline sends `timeoutMs: 40000` plus `fallbackError` and `queryString`, while the test still expects the older `timeoutMs: 25000` shape
+## Latest Update (2026-03-06 18:13 EST) — Show settings links now use row-aligned edit actions and handle-first social labels
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-frontend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (admin-only layout and label changes in show settings links)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Moved `Edit URL` into the right-side action column for show-page rows, social rows, season link rows, cast-member approved links, and unvalidated-source rows with persisted URLs.
+  - Reworked the Settings social-links section from pill cards into link rows so the left-side text is the discovered handle like `@BravoTV` instead of the platform label.
+  - Social handle extraction now prefers the URL path before falling back to any stored label, which keeps TikTok, YouTube, Threads, and similar sources handle-first in the UI even when the label is platform text.
+  - Details-tab social pills remain compact, but they continue to reuse the same normalized handle text generated from the settings link data.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx tests/show-settings-links-fandom-visibility.test.ts`
+    - pass
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-settings-link-display.test.ts`
+    - pass (`8 passed`)
+- blocked_checks:
+  - Full `test:ci` and browser smoke were not rerun for this layout-only follow-up.
+Continuation (2026-03-06 18:29 EST) — Cast-member rows now use person-name text for canonical links.
+
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+- behavior_summary:
+  - Added `getCastMemberLinkText(...)` so cast-member approved rows now show the person name for non-social sources and keep only handles for social sources.
+  - This removes visible fallback IDs and slugs like Wikidata Q-ids, TMDb numeric ids, Freebase ids, and raw path fragments from the cast-member card text.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/app/admin/trr-shows/[showId]/page.tsx tests/show-settings-links-fandom-visibility.test.ts`
+    - pass
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-settings-link-display.test.ts`
+    - pass (`8 passed`)
+## Latest Update (2026-03-06) — Repo-local frontend and Figma skills canonicalized
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `skillcreator`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (repo policy and skill-governance only)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/skills/senior-frontend/SKILL.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/skills/senior-frontend/agents/openai.yaml`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/skills/figma-frontend-design-engineer/SKILL.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/skills/figma-frontend-design-engineer/agents/openai.yaml`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/AGENTS.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added repo-local canonical `senior-frontend` and `figma-frontend-design-engineer` skills under `TRR-APP/skills/`.
+  - Folded Next.js App Router, browser-validation, client-side security, and Figma-parity guidance into the repo-local owners.
+  - Updated repo policy to route TRR-APP work through repo-local and workspace-local canonical skills first.
+- validation_evidence:
+  - `find /Users/thomashulihan/Projects/TRR/TRR-APP/skills -type f | sort` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR && make check-policy` (pass)
+- blocked_checks:
+  - No frontend runtime tests were run because no application code changed.
+## Latest Update (2026-03-06 17:56 EST) — Brand logo modal shared slugs + count-sorted pills
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin modal state flow and source discovery controls changed)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandLogoOptionsModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brand-logo-options-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added a header-level `Slugs` button next to `Add Manual Import`.
+  - Shared slugs are derived from compatible source queries, can be edited or appended in the new panel, and are applied across compatible search/slug providers with automatic refresh after each save/apply.
+  - Source pills are now sorted by fetched/live counts, and `related_network_streaming` is suppressed when its count is zero.
+  - The modal keeps manual import separate, while active-source refresh and per-source query editing still behave as before.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts tests/brands-logo-sync-wiring.test.ts`
+    - pass (`15 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/BrandLogoOptionsModal.tsx tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts`
+    - pass
+- blocked_checks:
+  - Managed-browser runtime smoke was not rerun for the shared-slug panel in this pass.
+## Latest Update (2026-03-06 17:49 EST) — Existing show settings links now support inline URL editing via DiceUI Editable
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-frontend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (admin-only inline editing on existing settings link rows)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Added inline URL editing for persisted links in the show Settings tab using the existing DiceUI-style wrapper at `@/components/ui/editable`.
+  - Added reusable `InlineEditableLinkUrl` plus `updateShowLinkUrl(...)` PATCH mutation wiring.
+  - Editable URL controls now appear for:
+    - show-level social links
+    - show page rows
+    - season page source rows
+    - cast-member approved links
+    - cast-member unvalidated canonical-source rows in the accordion
+  - Save path reuses the existing backend `PATCH /api/admin/trr-api/shows/{showId}/links/{linkId}` endpoint, so URL edits still go through server-side canonicalization and validation.
+  - Also normalized social-handle rendering so encoded `%40` path segments display as `@...` in the pills.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-settings-link-display.test.ts`
+    - pass (`8 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'tests/show-settings-links-fandom-visibility.test.ts'`
+    - pass
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no new backend change required`
+  - `screenalytics`: `no`
+## Latest Update (2026-03-06 17:42 EST) — Brand logo modal supports multiple saved queries per source
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin-only modal behavior/state flow changed around discovery and query persistence)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandLogoOptionsModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brand-logo-options-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brands-logos-options-proxy-routes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - The brand logo modal now treats source queries as an ordered list per provider instead of a single string.
+  - Added `Add Query` to the active source query box so admins can append multiple provider-specific query values from the UI.
+  - Saving or adding a query now persists `query_values` through the proxy route and automatically refreshes that source’s discovery results with the updated query list.
+  - The modal test harness and proxy-route coverage were updated to exercise multi-query saves and multi-query discovery requests.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts tests/brands-logo-sync-wiring.test.ts`
+  - result: pass (`14 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/BrandLogoOptionsModal.tsx tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts`
+  - result: pass
+- blocked_checks:
+  - Deferred by user for the next pass:
+    - add a header-level `Slugs` control shared across sources
+    - show/hide/sort source pills by fetched counts and hide `related_network_streaming`
+    - debug pasted full-provider URLs so only slugs/identifiers are retained in query boxes
+    - clamp `official_site` results to PNG/SVG only
+## Latest Update (2026-03-06) — Show settings links are now page-centric with shared social pills
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin-only UI/view-model rewrite on a large show settings/details page)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-page/link-display.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SocialPlatformTabIcon.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-link-display.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Reworked show links rendering in the admin show page so Settings now has four explicit sections:
+    - `Social Links`
+    - `Show Pages`
+    - `Season Pages`
+    - `Cast Member Pages`
+  - Removed the visible `Active Fandom Seeds` block from the add box.
+  - Fandom root/community URLs remain internal-only by filtering them out of rendered sections with `isFandomSeedUrl(...)`.
+  - Show pages now render page-centric rows as `source token | title`.
+    - Fandom rows prefer `metadata.site_title | metadata.page_title`.
+    - show-level social links are excluded from this section.
+  - Season pages now render as `Season N` followed by linked source badges/icons only.
+  - Cast-member pages now render one card per person:
+    - all approved links are flattened into a single pill area
+    - canonical missing or non-approved sources are moved into a collapsed `Missing / Unvalidated Sources` accordion
+    - per-source green/red container rows and the old `Other Verified Links` section were removed
+  - Details tab social handles now reuse the same `SocialHandlePill` rendering used by Settings so the visual treatment is shared between both tabs.
+  - Added a shared source-badge formatter and expanded `SocialPlatformTabIcon` to cover Reddit.
+- validation_evidence:
+  - targeted frontend tests:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-settings-link-display.test.ts`
+    - result: pass (`7 passed`)
+  - targeted lint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'tests/show-settings-links-fandom-visibility.test.ts' 'tests/show-settings-link-display.test.ts'`
+    - result: pass
+  - full repo lint:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint`
+    - result: pass with 3 pre-existing warnings unrelated to this change:
+      - `src/app/admin/trr-shows/people/[personId]/page.tsx:3400`
+      - `tests/person-reprocess-images-stream-route.test.ts:137`
+      - `tests/show-featured-media-selectors.runtime.test.tsx:2`
+  - full repo tests:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run test:ci`
+    - result: one pre-existing unrelated failure:
+      - `tests/social-season-hint-routes.test.ts > social routes season_id hint forwarding > forwards week summary route to summary endpoint with speed-first defaults`
+      - failure expects `timeoutMs: 25000`, but current baseline sends `timeoutMs: 40000` plus `fallbackError` and `queryString`
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `paired additive metadata change in same session`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-frontend`
+  - `senior-qa`
+  - `code-reviewer`
+- default_skill_chain_exception_reason: `none`
+## Latest Update (2026-03-06) — Person gallery header media now falls back when stored cover URLs are stale
+
+- primary_skill: `chromedevtools-expert`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-frontend`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (client-side admin/person page fallback logic only)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Investigated `http://admin.localhost:3000/people/lisa-barlow/gallery?showId=rhoslc` with managed Chrome and direct admin API calls.
+  - Root cause on the page header/media shell:
+    - the person gallery header preferred `coverPhoto.photo_url` as a single primary image
+    - for Lisa Barlow, that stored cover URL pointed at a legacy CloudFront path under `/images/people/...` that now returns `403`
+    - current gallery media rows still had valid variant URLs under `/media-variants/...` and `/cast-photo-variants/...`
+    - because the header used only one URL, the cast-member gallery page could show a broken/empty hero image even though valid gallery media existed
+  - Fix in `apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`:
+    - `ProfilePhoto` now accepts an ordered list of candidate URLs and advances on image load failure
+    - the page now builds `primaryPhotoCandidates` from:
+      - current gallery card candidates for the saved cover-photo record when available
+      - the stored cover-photo URL
+      - the Bravo profile image
+      - the first loaded gallery photo candidates / hosted URL fallback
+    - result: stale stored cover URLs fail over to current working media instead of leaving the gallery header blank
+- validation_evidence:
+  - Managed Chrome on the live route showed the page loading `98 photos` / `83 visible`
+  - direct HEAD checks:
+    - stale cover URL under `/images/people/...` returned `403`
+    - current gallery variant URLs under `/media-variants/...` and `/cast-photo-variants/...` returned `200`
+  - `pnpm -C apps/web exec eslint src/app/admin/trr-shows/people/[personId]/page.tsx`
+    - pass with one pre-existing warning at `page.tsx:3400` (`react-hooks/exhaustive-deps`, unrelated to this change)
+  - `pnpm -C apps/web run typecheck`
+    - still fails due pre-existing unrelated errors in:
+      - `src/app/admin/trr-shows/[showId]/page.tsx`
+      - `src/lib/server/trr-api/social-admin-proxy.ts`
+
+## Latest Update (2026-03-06) — System health modal now normalizes abort timeouts and gives queue diagnostics longer to load
+
+- User-visible symptom:
+  - System Health modal showed:
+    - `Error`
+    - `signal is aborted without reason`
+    - `Loading detailed queue and worker diagnostics...`
+- Root cause in `apps/web/src/components/admin/SystemHealthModal.tsx`:
+  - both the shared health-dot poll and the detailed queue-status fetch used raw `AbortController.abort()` with no reason
+  - when the queue diagnostics call exceeded the client-side timeout, browsers surfaced the low-level abort text `signal is aborted without reason`
+  - queue-status was also using the same `12s` timeout as the small health-dot request, which was too short for heavy diagnostics payloads
+- Fix:
+  - added `normalizeFetchErrorMessage(...)` so abort-like client fetch failures render as `Request timed out`
+  - health-dot timeout stays short (`12s`)
+  - detailed queue-status timeout is now longer (`30s`)
+  - both abort paths now use a real `DOMException("Request timed out", "AbortError")` reason
+- Regression coverage:
+  - `tests/system-health-modal.test.tsx::it("normalizes aborted queue-status fetch errors to request timed out", ...)`
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec vitest run tests/system-health-modal.test.tsx`
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec eslint src/components/admin/SystemHealthModal.tsx tests/system-health-modal.test.tsx`
+
+## Latest Update (2026-03-06) — Week-detail sync progress now separates queued work and uses live KPI telemetry
+
+- Root cause from review follow-up:
+  - week-detail sync progress copy had already split `running` vs `queued`, but the aggregate math still used `jobs_active`, which bundled queued backlog together with live execution
+  - the KPI containers at the top of the week-detail page were still bound to persisted gallery totals, so they did not move while a sync was actively scraping
+- Fix in `apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`:
+  - progress totals now use `completed + failed + running + waiting` instead of the old `active` aggregate
+  - stage filtering/status copy now keys off `running` and `waiting`
+  - live day/account telemetry from `syncWeekLiveHealth` is merged into the KPI cards during an active sync for the metrics we actually have live telemetry for (`posts`, `likes`, and comment totals)
+  - static gallery totals remain the fallback when there is no live sync telemetry
+- Regression coverage:
+  - `tests/social-week-detail-wiring.test.ts` now asserts:
+    - queued/running math is separate in the sync progress path
+    - top KPI cards merge `syncLiveSummaryTotals` / `displayedPlatformMetrics` during an active sync
+- Validation:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec vitest run tests/social-week-detail-wiring.test.ts`
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx tests/social-week-detail-wiring.test.ts`
+
+## Latest Update (2026-03-05) — Season social analytics no longer deadlocks in dev StrictMode
+
+- primary_skill: `chromedevtools-expert`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-frontend`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin-only React client behavior; no backend contract change)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Investigated the user-reported stall on the season social admin page with managed Chrome at:
+    - `http://admin.localhost:3000/rhoslc/social/s6`
+    - `http://admin.localhost:3000/rhoslc/s6/social`
+  - Chrome/DevTools findings:
+    - slug/show/seasons/targets/runs/run-summary/worker-health requests all returned `200`
+    - the browser never issued the `/social/analytics` request
+    - the page remained on the skeleton state (`data-testid="social-analytics-skeleton"`) with `runs` still empty, which is why the UI stayed pinned at `No Run Selected`
+  - Root cause was a client-side mounted-state bug in `season-social-analytics-section.tsx`:
+    - `componentMountedRef` started as `true`
+    - the effect cleanup set it to `false`
+    - but the effect body never restored it to `true`
+    - under React dev/StrictMode, that left `isActiveView(...)` / `isCurrentRefreshRequest(...)` returning `false` after the first cleanup cycle
+    - initial async fetches could still hit the network, but their state commits were discarded and the initial `refreshAll()` request returned early before clearing `loading`
+  - Fix:
+    - the mount/unmount effect now explicitly sets `componentMountedRef.current = true` on mount before registering the cleanup that resets it to `false`
+  - Added regression coverage:
+    - wrapped `SeasonSocialAnalyticsSection` in `React.StrictMode`
+    - asserted the initial load completes, the skeleton disappears, and the `/social/analytics` request is actually made
+- validation_evidence:
+  - managed Chrome/DevTools inspection showed both routes reproduced the same client-side deadlock before the fix
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (pass; `75 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint src/components/admin/season-social-analytics-section.tsx tests/season-social-analytics-section.test.tsx` (pass)
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `false`
+- default_skill_chain_used:
+  - `chromedevtools-expert`
+  - `orchestrate-plan-execution`
+  - `senior-frontend`
+  - `senior-qa`
+- default_skill_chain_exception_reason: `User explicitly requested Chrome DevTools debugging on the live admin route.`
+## Latest Update (2026-03-05) — System health worker list now defaults to AWS-only visibility
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-fullstack`
+  - `senior-qa`
+  - `social-ingestion-reliability`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin-only UI behavior change coupled to live worker-plane cleanup)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/system-health-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - `SystemHealthModal` worker rows are now classified client-side by host origin:
+    - `aws` when worker host / metadata hostname ends with `.ec2.internal`
+    - `local` for `.local` / `localhost`
+    - `unknown` otherwise
+  - The worker list now defaults to AWS-only visibility.
+  - Local / non-AWS workers are hidden behind an explicit `Show local/non-AWS workers` debug toggle.
+  - The existing stale-worker toggle still applies inside the currently selected origin filter.
+  - Non-AWS workers shown through the debug toggle are labeled inline with their origin badge.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/system-health-modal.test.tsx` (pass; `9 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint src/components/admin/SystemHealthModal.tsx tests/system-health-modal.test.tsx` (pass)
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `operational only`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+  - `social-ingestion-reliability`
+- default_skill_chain_exception_reason: `none`
+## Latest Update (2026-03-05) — Shared client auth now waits for preferred admin user before covered-shows fetches
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-fullstack`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (shared admin client auth timing fix)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/client-auth.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-client-auth.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/trr-shows-page-covered-shows-loading.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - User-reported console error on `/admin/trr-shows` was:
+    - `Not authenticated`
+    - thrown from `getClientAuthHeaders(...)` before the covered-shows request was sent
+  - Verified the editorial coverage data itself was present in the app DB connection:
+    - `admin.covered_shows` returned `11` rows
+    - this includes the user-facing shows list that should be available to users (`RHOSLC`, `The Traitors`, etc.)
+  - Root cause:
+    - `useAdminGuard` had already resolved a preferred admin user
+    - but `auth.currentUser` in the shared client auth helper could still lag briefly behind that preferred user
+    - `getClientAuthHeaders` threw `Not authenticated` instead of waiting for the preferred Firebase user/token to land
+    - on `http://admin.localhost:3000/shows`, the page-specific `fetchAdminWithAuth(...)` wrapper also omitted `allowDevAdminBypass: true`, unlike other working admin.localhost pages
+  - Fix:
+    - added preferred-user wait logic in `src/lib/admin/client-auth.ts`
+    - aligned `src/app/admin/trr-shows/page.tsx` with the local-admin bypass pattern used by other admin pages by passing `allowDevAdminBypass: true`
+    - the helper now waits briefly on `onIdTokenChanged` / auth state for the preferred user before giving up
+    - `/admin/trr-shows` keeps the earlier UI improvement that distinguishes a real covered-shows load failure from a truly empty list
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/admin-client-auth.test.ts tests/trr-shows-page-covered-shows-loading.test.tsx` (pass; `12 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint src/lib/admin/client-auth.ts src/app/admin/trr-shows/page.tsx tests/admin-client-auth.test.ts tests/trr-shows-page-covered-shows-loading.test.tsx` (pass)
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+- default_skill_chain_exception_reason: `none`
+## Latest Update (2026-03-05) — Shows page covered-shows load now retries auth misses and surfaces real load errors
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `senior-fullstack`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `low` (admin-only page behavior; no contract change)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/trr-shows-page-covered-shows-loading.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/cross-collab/TASK5/STATUS.md`
+- behavior_summary:
+  - Investigated `/admin/trr-shows` empty-state behavior and confirmed the underlying data was present: the app-side Postgres connection returned `11` rows from `admin.covered_shows`, including `The Traitors`, `RHOSLC`, and other expected editorial shows.
+  - Root cause was page behavior, not missing data:
+    - the covered-shows load path collapsed fetch/auth/database failures into the same UI as a truly empty covered-shows table
+    - a transient `Not authenticated` miss during initial admin auth readiness could leave the page showing `0 shows` even though rows existed
+  - Updated `apps/web/src/app/admin/trr-shows/page.tsx` to:
+    - retry covered-shows loads for transient auth failures
+    - preserve a distinct `Covered Shows Unavailable` error state when the list request fails
+    - render a Retry button instead of misleadingly showing `No shows added yet`
+  - Added regression coverage proving:
+    - a transient auth miss is retried and covered shows render afterward
+    - a failed covered-shows request shows a load error instead of the empty-state copy
+- validation_evidence:
+  - direct DB verification from `apps/web/.env.local` connection:
+    - `admin.covered_shows` count = `11`
+    - repository SQL shape returned `11` rows with metadata
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec vitest run tests/trr-shows-page-covered-shows-loading.test.tsx` (pass; `2 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && pnpm -C apps/web exec eslint src/app/admin/trr-shows/page.tsx tests/trr-shows-page-covered-shows-loading.test.tsx` (pass)
+- downstream_repos_impacted:
+  - `TRR-APP`: `yes`
+  - `TRR-Backend`: `no`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `true`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `senior-fullstack`
+  - `senior-qa`
+- default_skill_chain_exception_reason: `none`
+## Latest Update (2026-03-05) — System health modal now surfaces worker-plane ownership and stage depth
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `social-ingestion-reliability`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin observability surface only; no end-user UI)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/system-health-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - System Health now renders explicit worker-plane ownership metadata (`execution_owner`, `execution_mode_canonical`, remote enforcement) instead of only aggregate queue health.
+  - Added stage-level queue depth visibility so admin operators can see backlog by ingest stage, not only by platform.
+  - Added stale-claimed-job summary visibility and worker supported-platform metadata in the worker list/detail panel.
+  - Worker detail now surfaces the attached run’s execution ownership metadata so operators can confirm a long-running run is remote-owned.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec eslint 'src/components/admin/SystemHealthModal.tsx' 'tests/system-health-modal.test.tsx'` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec vitest run tests/system-health-modal.test.tsx` (pass; `9 passed`)
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes` (UI now expects richer social queue-status / worker-detail payloads)
+  - `TRR-APP`: `yes`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `false`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `social-ingestion-reliability`
+  - `senior-qa`
+- default_skill_chain_exception_reason: `User explicitly requested more worker-plane debugging, observability, and social-job hardening.`
+## Latest Update (2026-03-05) — Reddit run ownership surfacing + explicit week-scoped social ingest payloads
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `fullstack-guardian`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (admin route behavior + ingest kickoff metadata)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/discover/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-discover-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - The Reddit discover route now merges top-level backend execution metadata into the returned run payload, so admin views immediately know whether a refresh is owned by a remote worker without waiting for a later poll/list refresh.
+  - Season social ingest kickoff now sends explicit `week_index` for week-scoped runs alongside the existing canonical date window, letting the backend store and recover week intent directly.
+  - Added regression coverage for both behaviors:
+    - reddit discover immediate-run response includes remote worker ownership metadata
+    - weekly social sync requests include `week_index`
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec eslint 'src/app/api/admin/reddit/communities/[communityId]/discover/route.ts' 'src/components/admin/season-social-analytics-section.tsx' 'tests/reddit-community-discover-route.test.ts' 'tests/season-social-analytics-section.test.tsx'` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec vitest run tests/reddit-community-discover-route.test.ts tests/season-social-analytics-section.test.tsx` (pass; `84 passed`)
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes` (consumes new backend run metadata / week ingest contract)
+  - `TRR-APP`: `yes`
+  - `screenalytics`: `no`
+- default_skill_chain_applied: `false`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `fullstack-guardian`
+- default_skill_chain_exception_reason: `User explicitly named non-default skills for the session and requested another social-job hardening pass.`
+## Latest Update (2026-03-05) — Social proxy env fallback + upstream backoff normalization
+
+- primary_skill: `orchestrate-plan-execution`
+- supporting_skills:
+  - `fullstack-guardian`
+  - `senior-qa`
+- mcp_tools_used:
+  - primary: `functions.exec_command`
+  - fallback: `functions.apply_patch`
+- risk_class: `medium` (server-side admin proxy behavior; additive tests only)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/backend.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/trr-api/social-admin-proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/backend-base.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-admin-proxy.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Treated blank/whitespace `TRR_API_URL` as unset and preserved localhost normalization in backend URL building.
+  - Allowed the social admin proxy to fall back to `SUPABASE_SERVICE_ROLE_KEY` when `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY` is absent, matching the rest of the repo’s server-side admin behavior.
+  - Mapped missing backend configuration to `BACKEND_UNREACHABLE` instead of generic internal-error envelopes.
+  - Marked upstream `429` responses as retryable, parsed `Retry-After`, and surfaced that value in both the JSON error envelope and response headers.
+  - Preserved existing retry semantics for 5xx/transient errors while letting upstream backoff windows drive retry sleep when supplied.
+- validation_evidence:
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec eslint tests/social-admin-proxy.test.ts tests/backend-base.test.ts src/lib/server/trr-api/backend.ts src/lib/server/trr-api/social-admin-proxy.ts` (pass)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec vitest run tests/social-admin-proxy.test.ts tests/backend-base.test.ts` (pass; `11 passed`)
+  - `cd /Users/thomashulihan/Projects/TRR/TRR-APP && export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$PATH" && pnpm -C apps/web exec vitest run tests/social-worker-health-route.test.ts tests/social-ingest-stuck-jobs-cancel-route.test.ts` (pass; `7 passed`)
+- downstream_repos_impacted:
+  - `TRR-Backend`: `yes` (app proxy consumes backend admin/social endpoints)
+  - `screenalytics`: `indirect`
+  - `TRR-APP`: `yes`
+- default_skill_chain_applied: `false`
+- default_skill_chain_used:
+  - `orchestrate-plan-execution`
+  - `fullstack-guardian`
+- default_skill_chain_exception_reason: `User explicitly named non-default skills for this turn; applied them alongside the required orchestration entrypoint.`
 ## Latest Update (2026-03-05) — social admin reliability test stabilization + networks stopped-state parsing
 
 - primary_skill: `social-ingestion-reliability`
@@ -23438,6 +24982,25 @@ Continuation (2026-03-02) — System Health summary switched to run-based counts
   - Sync progress percent now uses stage-active and fallback telemetry when run summary lags, preventing the 1% stuck behavior.
   - Season ingest payloads now include safer runner/shard defaults to reduce extreme shard fanout and local load.
   - System Health stuck-job worker IDs now render collision-safe full IDs (not truncated prefixes).
+## Latest Update (2026-03-06) — System Health modal redesign for plain-language ops view
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `typescript-pro`
+  - `react-expert`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/system-health-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Reframed the modal as `Social Sync Health` with plain-language summary cards, an explanatory header, and clearer status wording (`Needs Attention`, `How This Sync Runs`, `Queue Health`, `Live Workers`, `Problems to Review`, `Admin Actions`).
+  - Added a typed presentation/view-model layer so the UI translates backend payloads into human-readable labels without changing the backend contract or action endpoints.
+  - Reworked worker rows to lead with role, host, last-seen state, and current run context while demoting raw worker IDs to secondary detail.
+  - Merged stuck jobs and recent failures into a more operator-friendly problems section and relabeled the worker detail/debug area for clearer admin use.
+- validation_evidence:
+  - `pnpm -C apps/web exec vitest run tests/system-health-modal.test.tsx` (pass; `10 passed`)
+  - `pnpm -C apps/web exec eslint src/components/admin/SystemHealthModal.tsx tests/system-health-modal.test.tsx` (pass)
+
 - validation_evidence:
   - `pnpm -C apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx src/components/admin/SystemHealthModal.tsx src/components/admin/season-social-analytics-section.tsx` (pass)
   - `pnpm -C apps/web exec vitest run tests/season-social-analytics-section.test.tsx tests/system-health-modal.test.tsx tests/social-week-detail-wiring.test.ts` (pass)
@@ -23448,6 +25011,25 @@ Continuation (2026-03-02) — System Health summary switched to run-based counts
 - supporting_skills:
   - `fullstack-guardian`
   - `debugging-wizard`
+## Latest Update (2026-03-06) — Week detail summary timeout/runtime overlay fix
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `debugging-wizard`
+  - `social-ingestion-reliability`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/summary/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Fixed recurring `Week detail summary request timed out` runtime overlays in the social week-detail page.
+  - Root cause was twofold: the client summary fetch used a shorter `20s` timeout than the server proxy budget, and the in-flight request cache used `promise.finally(...)` without consuming the rejected `finally` promise, which leaked unhandled runtime errors on timeout/rejection.
+  - Added `REQUEST_TIMEOUT_MS.weekSummary = 40_000`, aligned the summary proxy route timeout to `40_000`, and introduced `registerInFlightRequest(...)` so cached in-flight week detail/summary fetches clean themselves up without leaking rejected `finally` chains.
+- validation_evidence:
+  - `pnpm -C apps/web exec vitest run tests/social-week-detail-wiring.test.ts` (pass; `23 passed`)
+  - `pnpm -C apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/summary/route.ts' tests/social-week-detail-wiring.test.ts` (pass)
+
 - files_changed:
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/[runId]/cancel/route.ts`
@@ -23460,3 +25042,461 @@ Continuation (2026-03-02) — System Health summary switched to run-based counts
 - validation_evidence:
   - `pnpm -C apps/web exec eslint src/components/admin/social-week/WeekDetailPageView.tsx 'src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/runs/[runId]/cancel/route.ts' tests/social-run-cancel-route.test.ts` (pass)
   - `pnpm -C apps/web exec vitest run tests/social-run-cancel-route.test.ts tests/season-social-analytics-section.test.tsx tests/system-health-modal.test.tsx tests/social-week-detail-wiring.test.ts` (pass; `104 passed`)
+
+## Latest Update (2026-03-06) — Week sync progress semantics: running vs queued
+
+- primary_skill: `social-ingestion-reliability`
+- supporting_skills:
+  - `debugging-wizard`
+  - `senior-frontend`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-detail-wiring.test.ts`
+- behavior_summary:
+  - Updated week sync progress typing/UI to consume additive `jobs_running` and `jobs_waiting` fields from the backend progress snapshot.
+  - The page now labels queued work as `queued` instead of `active`, which fixes misleading copy like `203 active` when nothing is actually running for a handle.
+  - Step status now keys off live running workers, not the stale `summary.active_jobs` count.
+  - This makes the RHOSLC Twitter preseason replacement run render as the real state: `4` jobs total, mostly completed, with only the remaining comment job shown as running.
+- validation_evidence:
+  - `pnpm -C apps/web exec vitest run tests/social-week-detail-wiring.test.ts` (pass; `21 passed`)
+
+## Latest Update (2026-03-06 14:59 EST) — System Health modal: live blockers vs historical failures
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `typescript-pro`
+  - `react-expert`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/SystemHealthModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/system-health-modal.test.tsx`
+- behavior_summary:
+  - Adjusted the System Health modal header and view model to treat historical failure counts as review-only noise instead of live degradation.
+  - The modal now shows `Needs Attention` only for current blockers such as queue errors, unavailable workers, stuck jobs, or stale claimed jobs.
+  - Historical failures still appear in the `Problems to Review` and `Attention Needed` sections, but they no longer downgrade the top-level modal status on their own.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/system-health-modal.test.tsx` (pass; `11 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/SystemHealthModal.tsx tests/system-health-modal.test.tsx` (pass)
+
+## Latest Update (2026-03-06 15:37 EST) — Brands/News logo modal: live counts, editable queries, manual import header action
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `react-expert`
+  - `typescript-pro`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandLogoOptionsModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/ui/button.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/ui/editable.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/brands/logos/options/source-query/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/button-catalog.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/fonts/_components/ButtonsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brand-logo-options-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brands-logos-options-proxy-routes.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brands-logo-sync-wiring.test.ts`
+- behavior_summary:
+  - Reworked `BrandLogoOptionsModal` to auto-scrape refreshable providers on open, cache provider results, and display live per-source counts from backend `discover.total_count`.
+  - Added provider-specific query editing with the new backend `source-query` route and auto-refresh of only the edited provider after save.
+  - Moved manual import into the modal header as a top-right action that reveals the input panel inline under the discovery header.
+  - Added TRR-themed local `Button` and Dice-compatible `Editable` primitives, then documented the editable trigger/save/cancel pattern in the admin fonts design-system page.
+  - Split accessible names between source-table activators and source-filter pills so the modal remains screen-reader/test stable despite duplicate visible labels.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts tests/brands-logo-sync-wiring.test.ts` (pass; `13 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/BrandLogoOptionsModal.tsx tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts tests/brands-logo-sync-wiring.test.ts` (pass)
+- blocked_checks:
+  - Managed-Chrome runtime smoke was not completed from this session because the `chrome-devtools` MCP tool was unavailable here, even though the workspace Chrome agent was running.
+
+## Latest Update (2026-03-06 17:03 EST) — Live smoke on `/brands/news` completed for `peacocktv.com`
+
+- primary_skill: `senior-qa`
+- supporting_skills:
+  - `react-expert`
+  - `chromedevtools-expert` (workflow intent only; runtime used local Playwright because MCP browser tooling was unavailable)
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Started the local-lite workspace with `make dev-lite`, used the live `/brands/news` admin page, and ran `Sync News/Publication Logos` so publication cards existed in the local UI.
+  - Opened the live `Wordmark Options • peacocktv.com` modal and confirmed auto-scraped counts were populated from backend discovery, including `official_site (19)`, `logos1000 (0)`, and `logosearch (1)` in this environment.
+  - Confirmed the `logos1000` query-edit path worked end-to-end after the backend schema drift was resolved: saving `peacock-logo` updated the query link to `https://1000logos.net/peacock-logo/` while leaving `official_site` count/query unchanged.
+  - Confirmed the per-source `Refresh logos1000` action completed and the top-right `Add Manual Import` flow produced `manual_import_url (1)`.
+- validation_evidence:
+  - Local runtime smoke script against `http://admin.localhost:3000/brands/news` produced:
+    - before edit: `official_site (19)`, `logos1000 (0)`, `logosearch (1)`
+    - after edit: `logos1000` link `https://1000logos.net/peacock-logo/`, `official_site (19)` unchanged
+    - after refresh: `logos1000 (0)`
+    - manual import: `manual_import_url (1)`
+  - Evidence screenshots:
+    - `/Users/thomashulihan/Projects/TRR/.logs/workspace/peacocktv-modal-runtime-smoke.png`
+    - `/Users/thomashulihan/Projects/TRR/.logs/workspace/peacocktv-modal-counts.png`
+- blocked_checks:
+  - The smoke depended on first running page sync because the local News page initially rendered `Publications (0)` in this dataset.
+
+## Latest Update (2026-03-06 17:09 EST) — Brand logo modal compact source pills + scrollable results
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `react-expert`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/BrandLogoOptionsModal.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brand-logo-options-modal.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Replaced the full per-source table at the top of the logo modal with a compact pill/filter bar so every source stays selectable without consuming the whole viewport.
+  - Scoped query/edit/refresh controls to the active source only, which keeps the control surface visible while leaving room for the logo grid.
+  - Made the results pane explicitly `min-h-0` + `overflow-y-auto` inside the modal so the logo cards remain reachable even with many sources and long query-link content.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-logo-options-modal.test.tsx tests/brands-logos-options-proxy-routes.test.ts tests/brands-logo-sync-wiring.test.ts` (pass; `13 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/BrandLogoOptionsModal.tsx tests/brand-logo-options-modal.test.tsx` (pass)
+
+## Latest Update (2026-03-06 16:47 EST) — Reddit admin redesign + canonical post detail routing
+
+- primary_skill: `senior-fullstack`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `fullstack-guardian`
+  - `senior-frontend`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/reddit-detail-slug.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-admin-routes.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/reddit-sources-repository.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/reddit/communities/[communityId]/posts/resolve/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/[showId]/social/reddit/[communitySlug]/s[seasonNumber]/[windowKey]/[detailSlug]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/[showId]/s[seasonNumber]/social/reddit/[communitySlug]/[windowKey]/[detailSlug]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/[showId]/s[seasonNumber]/[[...rest]]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/reddit-post-details/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/reddit-window-posts/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/reddit/communities/[communityId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/RedditAdminShell.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-post-resolve-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-view-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-post-details-route.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-post-details-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-season-alias-window-route.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-window-posts-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-admin-routes.test.ts`
+- behavior_summary:
+  - Added canonical Reddit post detail URLs in the form `/:showId/social/reddit/:communitySlug/s:seasonNumber/:windowKey/:detailSlug`, where `detailSlug` is title+author based and appends `--p-{postId}` only for in-window collisions.
+  - Preserved legacy `/post/:postId` deep links by resolving them through the new app proxy route and canonicalizing to the slug route without retaining query-param dependency.
+  - Added shared slug helpers plus a server-side resolver that validates `communityId`, `season_id`, `window_key`, slug parts, and returns minimal resolution metadata only.
+  - Extracted a shared `RedditAdminShell` and redesigned the Reddit landing/community/window/detail surfaces around a unified season nav, social nav, hero band, and cleaner summary/status presentation.
+  - Updated window/detail pages to use the canonical route builders for `View Details`, while keeping manual attach and same-tab auto-resume behavior intact.
+  - Adjusted the refreshed hero copy to avoid duplicate exact-title collisions in testing while preserving the real window/post titles in the page body.
+- validation_evidence:
+  - `pnpm -C TRR-APP/apps/web exec vitest run tests/reddit-window-posts-page.test.tsx tests/reddit-post-details-page.test.tsx tests/reddit-community-post-details-route.test.ts tests/reddit-community-post-resolve-route.test.ts tests/reddit-season-alias-window-route.test.tsx tests/reddit-community-view-page.test.tsx tests/show-admin-routes.test.ts` (pass; `48 passed`)
+- blocked_checks:
+  - Managed-browser/manual smoke against the local admin URLs was not completed in this session; UI validation is limited to route and page tests.
+
+## Latest Update (2026-03-06 17:17 EST) — Reddit UI cleanup: flat surfaces, media gallery, slimmer detail page
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/RedditAdminShell.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/reddit/communities/[communityId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/reddit-window-posts/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/reddit-post-details/page.tsx`
+- behavior_summary:
+  - Removed the Reddit-page gradient background treatments and switched the shared shell and hero surfaces back to plain white/zinc panels.
+  - Dropped the low-signal `Thread Assignments` and `Match Contexts` containers from the Reddit post detail page.
+  - Reworked the media block into a preview gallery with inline image/video rendering plus source/hosted links instead of a raw URL-heavy list.
+  - Hid `depth` labels from comment metadata while preserving nested indentation.
+- validation_evidence:
+  - `pnpm -C TRR-APP/apps/web exec vitest run tests/reddit-window-posts-page.test.tsx tests/reddit-post-details-page.test.tsx tests/reddit-community-post-details-route.test.ts tests/reddit-community-post-resolve-route.test.ts tests/reddit-season-alias-window-route.test.tsx tests/reddit-community-view-page.test.tsx tests/show-admin-routes.test.ts` (pass; `48 passed`)
+
+## Latest Update (2026-03-06 17:23 EST) — Reddit post detail metric tabs + comment coverage freshness signal
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/reddit-post-details/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-post-details-page.test.tsx`
+- behavior_summary:
+  - Converted the post detail hero metric cards (`Score`, `Comments`, `Mirrored Media`) into keyboard-reachable tabs.
+  - Added a metric summary panel that changes with the selected tab.
+  - The `Comments` tab now shows Supabase-vs-Reddit sync coverage using `comment_summary.total_comments` against `num_comments`, including a percent saved and remaining-count signal so freshness is visible at a glance.
+- validation_evidence:
+  - `pnpm -C TRR-APP/apps/web exec vitest run tests/reddit-post-details-page.test.tsx tests/reddit-window-posts-page.test.tsx tests/reddit-community-post-details-route.test.ts tests/reddit-community-post-resolve-route.test.ts tests/reddit-season-alias-window-route.test.tsx tests/reddit-community-view-page.test.tsx tests/show-admin-routes.test.ts` (pass; `48 passed`)
+
+## Latest Update (2026-03-06 18:52 EST) — Show links refresh status card + canonical Show Pages titles
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-page/link-display.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-page/link-discovery-progress.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-link-display.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-links-refresh-progress.test.ts`
+- behavior_summary:
+  - Replaced the old single-line `Refresh in progress` string with a structured status card that shows the current discovery stage, elapsed time, stage elapsed time, scan targets, discovered-row counts, Fandom candidate counts, and candidate-budget progress.
+  - Added a dedicated helper for interpreting discovery stream payloads so heartbeat events stay readable and consistent even when the backend is idle between network-bound stages.
+  - Corrected Show Pages title resolution so non-Fandom sources default to the canonical show name instead of leaking slugs or opaque IDs, while Fandom still uses `site_title | page_title` from additive metadata when available.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-settings-link-display.test.ts tests/show-links-refresh-progress.test.ts` (pass; `11 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/lib/admin/show-page/link-display.ts' 'src/lib/admin/show-page/link-discovery-progress.ts' 'tests/show-settings-links-fandom-visibility.test.ts' 'tests/show-settings-link-display.test.ts' 'tests/show-links-refresh-progress.test.ts'` (pass)
+- blocked_checks:
+  - Manual browser smoke for the live Settings refresh flow was not run in this session; UI verification is limited to targeted tests plus static lint.
+
+## Latest Update (2026-03-06 19:04 EST) — Cast-member Settings names prefer canonical sources instead of gallery/ID fallbacks
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-page/link-display.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-link-display.test.ts`
+- behavior_summary:
+  - Fixed the cast-card title resolver so it no longer latches onto the first parsed person link, which could be a Fandom gallery slug or another low-signal source.
+  - Cast names now prefer roster names first, then approved canonical source links in priority order (Bravo, Wikipedia, Fandom, Wikidata, IMDb, TMDb), instead of low-value fallbacks like `.../Gallery`, `Q...`, `nm...`, or plain numeric IDs.
+  - Hardened `parsePersonNameFromLink(...)` to strip `/Gallery`, `.html`, and source suffixes, and to reject opaque non-name tokens such as `search`, Wikidata IDs, IMDb IDs, and numeric TMDb IDs.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-settings-link-display.test.ts tests/show-links-refresh-progress.test.ts` (pass; `12 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/lib/admin/show-page/link-display.ts' 'tests/show-settings-links-fandom-visibility.test.ts' 'tests/show-settings-link-display.test.ts' 'tests/show-links-refresh-progress.test.ts'` (pass)
+- blocked_checks:
+  - Chrome DevTools MCP was not available in this session, so no managed-browser live Settings-page inspection was executed.
+
+## Latest Update (2026-03-06 22:06 EST) — Admin guard hydration mismatch fixed for local bypass flows
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/useAdminGuard.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/use-admin-guard-stability.test.tsx`
+- behavior_summary:
+  - Removed the render-time local-bypass initialization from `useAdminGuard`, so admin routes now start from the same SSR-safe `checking` state on both the server prerender and the client hydration pass.
+  - Kept dev/local bypass behavior intact by resolving the bypass inside `useEffect`, which avoids text mismatches like `Loading admin access...` versus `Loading person data...` during hydration.
+  - Replaced the old synchronous-bypass regression test with an SSR-focused assertion that locks in deterministic server markup even when bypass mode is enabled.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/use-admin-guard-stability.test.tsx` (pass; `13 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/lib/admin/useAdminGuard.ts' 'tests/use-admin-guard-stability.test.tsx'` (pass)
+- blocked_checks:
+  - Managed-browser verification of the affected admin person route was not run in this session.
+
+## Latest Update (2026-03-06 22:20 EST) — Settings refresh card shows per-person progress and local admin bypass resolves immediately
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/useAdminGuard.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/show-page/link-discovery-progress.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/use-admin-guard-stability.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-links-refresh-progress.test.ts`
+- behavior_summary:
+  - Reintroduced a client-safe initial local-bypass state in `useAdminGuard` so local admin routes do not sit in `checking=true` waiting for Firebase before they can render.
+  - Extended the Settings refresh status summary to show stage-specific work details from the backend, including processed/total cast targets, links found, matches, and the current cast member being evaluated.
+  - Updated the status card UI to render the new stage-progress line and current-target line beneath the existing elapsed/target summary.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-settings-link-display.test.ts tests/show-links-refresh-progress.test.ts tests/use-admin-guard-stability.test.tsx` (pass; `26 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/admin/useAdminGuard.ts src/lib/admin/show-page/link-discovery-progress.ts 'src/app/admin/trr-shows/[showId]/page.tsx' tests/show-links-refresh-progress.test.ts tests/use-admin-guard-stability.test.tsx` (pass; only Babel deopt note for the large show page file)
+- blocked_checks:
+  - Chrome DevTools MCP remained unavailable in-session, so the live browser pass still used shell/API fallback rather than managed DevTools tooling.
+
+## Latest Update (2026-03-06 22:17 EST) — Google News topic URLs moved into normal Show Pages flow
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-settings-links-fandom-visibility.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-news-tab-google-wiring.test.ts`
+- behavior_summary:
+  - Removed the standalone `Google News Feed` settings block from the top of the show Settings tab.
+  - Existing `google_news_url` rows now render in the normal `Show Pages` section, using the same editable row UI as other approved show links.
+  - Added a dedicated `Google News` source token in the show-page badge formatter so these rows do not fall back to a generic `Link` label.
+  - Updated the Add Links helper copy and example placeholder to show that `news.google.com/topics/...` URLs are accepted and routed into the correct section.
+  - Updated the News-tab missing-config guidance to point users to Show Settings links instead of an implied special Google News form.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/show-settings-links-fandom-visibility.test.ts tests/show-news-tab-google-wiring.test.ts` (pass; `7 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' tests/show-settings-links-fandom-visibility.test.ts tests/show-news-tab-google-wiring.test.ts` (pass; Babel deopt note only for the large page file)
+
+## Latest Update (2026-03-07 10:58 EST) — Person gallery progress parser no longer flags `failed 0` as failed
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/refresh-progress.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-progress.test.ts`
+- behavior_summary:
+  - Fixed the person-gallery refresh pipeline status parser so zero-failure completion messages like `Fixing IMDb Details complete (... failed 0)` no longer mark the step as failed.
+  - The parser now strips `failed 0`, `0 failed`, and equivalent parenthesized zero-failure variants before deciding whether a progress message indicates failure.
+  - Added a regression test covering the exact `Fixing IMDb Details complete (... failed 0)` case.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/person-refresh-progress.test.ts` (pass; `21 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/admin/trr-shows/people/[personId]/refresh-progress.ts' 'tests/person-refresh-progress.test.ts'` (pass)
+
+## Latest Update (2026-03-07 14:18 EST) — Social season preview and week detail now surface live job state ahead of stale mirror gaps
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/social-week/WeekDetailPageView.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- behavior_summary:
+  - Season preview platform cards now let queued/running sync state override stale mirror coloring, so comment-sync progress is not visually hidden behind an older stale flag.
+  - The preview-strip and week-detail active-job summary formatter now keep the existing short copy for single-stage work and append per-stage details only when multiple live stages are active.
+  - Week-detail status pills now render queued/running tones for comment-sync and mirror substatus payloads before applying stale warning styling, keeping live pipeline work visually distinct from backlog conditions.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/week-social-thumbnails.test.tsx tests/season-social-analytics-section.test.tsx` (pass; `135 passed`)
+- blocked_checks:
+  - Managed Chrome / Chrome DevTools MCP UI verification was not rerun in this session; validation stayed at component-test level.
+
+## Latest Update (2026-03-07 15:51 EST) — Social admin UI now exposes shared account ingest alongside legacy-preserved season analytics
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/social-media/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/social/shared/sources/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/social/shared/ingest/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/social/shared/runs/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/social/shared/review-queue/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/social/shared/review-queue/[itemId]/resolve/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/shared-status/route.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/season-social-analytics-section.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/season-social-analytics-section.test.tsx`
+- behavior_summary:
+  - Added the shared-account ingest admin surface with shared source, run, and review-queue data wired through TRR-APP proxy routes to the backend’s additive admin APIs.
+  - Reframed the season analytics classification UI from crawl-target wording to classification-rule wording, and added a shared async pipeline status card that surfaces matched posts, review-queue counts, stage summaries, and latest shared-run context without breaking the existing season analytics page.
+  - Hardened the component tests around the new copy and per-platform classification filtering so the overview and active-platform rule cards continue to render correctly under the shared-ingest additions.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/season-social-analytics-section.test.tsx` (pass; `79 passed`)
+- blocked_checks:
+  - No managed-browser or cloud runtime validation was executed in this session. The user explicitly deferred the infra/runtime migration away from EC2 toward a separate Modal planning pass.
+
+## Latest Update (2026-03-07 17:08 EST) — Admin docs route now catalogs live TRR-APP job flows with exact triggers
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `orchestrate-plan-execution`
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/docs/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/docs/job-catalog.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/admin-navigation.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-navigation.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-host-middleware.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-docs-page.test.tsx`
+- behavior_summary:
+  - Added a new top-level `/docs` admin route that renders a curated TRR-APP operational catalog for job-oriented workflows.
+  - Added `Docs` to the shared admin navigation so it appears in both the side menu and the `/admin` dashboard tool grid.
+  - Reserved `/docs` in the admin host proxy so `admin.localhost:3000/docs` is treated as an admin UI route instead of a root show slug.
+  - Encoded exact UI labels, page surfaces, page-container breadcrumbs, and route references for scraping, sync/import, image tooling, brand/logo, and social run workflows in a typed static registry.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-navigation.test.ts tests/admin-host-middleware.test.ts tests/admin-docs-page.test.tsx` (pass; `39 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/docs/page.tsx' 'src/lib/admin/docs/job-catalog.ts' 'src/lib/admin/admin-navigation.ts' 'src/proxy.ts' 'tests/admin-navigation.test.ts' 'tests/admin-host-middleware.test.ts' 'tests/admin-docs-page.test.tsx'` (pass)
+- blocked_checks:
+  - Managed-browser authenticated verification was not completed in-session. HTTP smoke checks against `Host: admin.localhost:3000` confirmed `/docs` serves `app/docs/page.js` and `/admin` serves the updated dashboard shell, but the guarded page body remained in the loading shell without an authenticated admin session.
+
+## Latest Update (2026-03-07 18:35 EST) — Admin docs now track current runtime, target runtime, and migration status
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/docs/job-catalog.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/docs/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-docs-page.test.tsx`
+- behavior_summary:
+  - Replaced `recommendedRuntime` in the admin docs catalog with `targetRuntime` and added migration-truth rendering for `Migration Status`.
+  - The docs page now shows `Current Runtime`, `Target Runtime`, and `Migration Status` per job, with inferred states for stable, planned, migrating, and cutover-complete flows.
+  - Updated the catalog notes for the Screenalytics-backed people-count/image flows and the legacy EC2 social flows so the docs reflect Modal as the target runtime while still recording the current execution state.
+  - Updated the system health modal intro copy from AWS-worker wording to remote-executor wording so the local admin UI matches the cutover direction.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-docs-page.test.tsx tests/system-health-modal.test.tsx` (pass; `12 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/docs/page.tsx' 'src/lib/admin/docs/job-catalog.ts' 'src/components/admin/SystemHealthModal.tsx' 'tests/admin-docs-page.test.tsx' 'tests/system-health-modal.test.tsx'` (pass)
+- notes:
+  - The docs continue to allow `EC2` as a current-state value until those flows are actually cut over. The target runtime for those entries is now `Modal`.
+
+## Latest Update (2026-03-07 19:30 EST) — Admin docs now reflect the Modal vision cutover for covered image-analysis jobs
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+  - `senior-backend`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/admin/docs/job-catalog.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-docs-page.test.tsx`
+- behavior_summary:
+  - Marked the covered image-analysis entries as post-cutover truth: `People Count Tools` and `Person Image Refresh / Reprocess` now show `Current Runtime: Modal`, `Target Runtime: Modal`, and `Migration Status: Cutover Complete`.
+  - Updated the runtime notes so the docs describe the dedicated Modal vision worker and backend-owned vision runtime rather than the old Screenalytics service dependency.
+  - Kept the social entries at `EC2 -> Modal` because the live social runtime has not yet been fully cut over; the docs remain intentionally truthful about that gap.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-docs-page.test.tsx tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx` under Node `v24.14.0` (pass; `93 passed`)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint 'src/app/docs/page.tsx' 'src/lib/admin/docs/job-catalog.ts' 'src/components/admin/SystemHealthModal.tsx' 'tests/admin-docs-page.test.tsx' 'tests/system-health-modal.test.tsx' 'tests/season-social-analytics-section.test.tsx'` under Node `v24.14.0` (pass)
+  - Managed Chrome verification on `http://admin.localhost:3000/docs` confirmed the updated docs content, and the system-health modal showed `Execution owner: Remote executor`, `Execution backend: Modal`, and `Execution mode: Remote`. Screenshot: `/Users/thomashulihan/Projects/TRR/output/admin-docs-modal-cutover.png`
+- notes:
+  - The admin docs still show four social entries with `Current Runtime: EC2` because the social-plane rollout and EC2 decommission steps were not executed in this pass.
+
+## Latest Update (2026-03-07 20:15 EST) — Local admin UI verified against the deployed Modal backend API
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+  - `senior-devops`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/.env.example`
+- behavior_summary:
+  - Updated the app env example so `TRR_API_URL` explicitly documents the Modal-hosted backend URL shape.
+  - Verified the current admin UI locally with `TRR_API_URL` pointed at the deployed Modal backend endpoint instead of the local FastAPI server.
+  - Confirmed the system health modal renders the fixed backend contract with `Execution owner: Remote executor`, `Execution backend: Modal`, `Execution mode: Remote`, and `Local execution is disabled`.
+  - Confirmed the shared-ingest admin surface still renders correctly and the RHOSLC season analytics page still shows `Classification Rules` and `Shared Async Pipeline` against the Modal backend.
+- verification_evidence:
+  - Modal backend URL used by the local app: [https://admin-56995--trr-backend-api.modal.run](https://admin-56995--trr-backend-api.modal.run)
+  - Managed Chrome screenshots:
+    - [modal-system-health-local.png](/Users/thomashulihan/Projects/TRR/.tmp/modal-system-health-local.png)
+    - [modal-shared-ingest-local.png](/Users/thomashulihan/Projects/TRR/.tmp/modal-shared-ingest-local.png)
+    - [modal-rhoslc-social-local.png](/Users/thomashulihan/Projects/TRR/.tmp/modal-rhoslc-social-local.png)
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` under Node `v24.14.0` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx` under Node `v24.14.0` (pass; `91 passed`)
+- notes:
+  - This was a local verification pass only. It did not mutate the deployed TRR-APP hosting configuration to point production or staging traffic at the Modal backend URL.
+
+## Latest Update (2026-03-07 20:30 EST) — Frontend validation remains clean against the Modal-hosted backend contract
+
+- primary_skill: `senior-qa`
+- supporting_skills:
+  - `senior-frontend`
+  - `senior-devops`
+- files_changed:
+  - none beyond the earlier env-example/docs updates; this checkpoint records final validation only
+- behavior_summary:
+  - Re-validated the app-side contract after the backend test isolation fixes with no additional consumer changes required.
+  - The local app remains compatible with the Modal-hosted backend URL and the additive executor metadata already introduced earlier in the session.
+- validation_evidence:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run lint` under Node `v24.14.0` (pass)
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx` under Node `v24.14.0` (pass; `91 passed`)
+- notes:
+  - No deployed `TRR-APP` hosting mutation was executed in this pass, so full backend-traffic cutover remains an ops follow-up rather than an app-code blocker.
