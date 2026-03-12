@@ -1,7 +1,46 @@
 # Status — Task 11 (Tab-Isolated Admin Operations + Resumable Streams)
 
-Repo: TRR-APP  
-Last updated: March 5, 2026
+Repo: TRR-APP
+Last updated: March 13, 2026
+
+## March 13, 2026 — Frontend blockers resolved; backend canary gate is now GREEN
+
+- Frontend baseline blockers documented in this file are now resolved:
+  - `ImageLightbox.tsx:621` type error: fixed in commit `85b9f12` (March 11)
+  - `social-season-hint-routes.test.ts` 500 failures: fixed in commits `85b9f12` and `f2cc505` (March 11)
+- Backend canary re-validation passed against the live Vercel → Modal path:
+  - Operation `ab3a5dab-c7b5-4d0f-9c07-bb401948a3b1` completed with 4 SSE events, monotonic `event_seq`, and `execution_backend_canonical=modal`
+  - Replay continuity confirmed: `after_seq=2` correctly returns only events 3 and 4
+  - Full evidence recorded in `TRR-Backend/docs/cross-collab/TASK11/STATUS.md`
+- Canary confidence is now GREEN for the Modal live path.
+- Remaining Task 11 work:
+  - Better Stack token setup (current token returns 401)
+  - AWS teardown (gated until `2026-03-13T16:09:13-04:00`)
+
+## March 12, 2026 — Vercel Preview and Production now point at the Modal backend URL
+
+- Deployed app runtime cutover is complete:
+  - Preview `TRR_API_URL` -> `https://admin-56995--trr-backend-api.modal.run`
+  - Production `TRR_API_URL` -> `https://admin-56995--trr-backend-api.modal.run`
+- Fixed a deployment bug in the env rollout path:
+  - the first Vercel env add stored `TRR_API_URL` with a trailing newline
+  - both Preview and Production vars were recreated cleanly before the final redeploys
+- Deploy evidence:
+  - Preview deployment: `dpl_7mCRQqEiWPmuruGriqTTjfLxNgSZ`
+    - URL: `https://trr-bfmzez5z5-the-reality-reports-projects.vercel.app`
+  - Production deployment: `dpl_C6JooMoQh4gD1jQpNRRS5qF41Lt6`
+    - URL: `https://trr-mea2e0kmv-the-reality-reports-projects.vercel.app`
+    - alias: `https://trr-app.vercel.app`
+- Production HTTP verification:
+  - `/` -> `200`
+  - `/login` -> `200`
+  - `/admin` -> `403` expected auth guard
+  - `/docs` -> `403` expected auth guard
+- Backend contract verification stayed clean through the deployed cutover:
+  - Modal `/health` -> healthy
+  - social worker-health and queue-status still report `Remote executor` + `Modal` canonical metadata
+- Preview validation note:
+  - the Preview deployment is Vercel-SSO protected, so this session used deployment readiness and env verification for Preview rather than a shared authenticated browser pass
 
 ## March 7 rollout follow-up — app docs now reflect Modal as the live runtime
 
@@ -19,6 +58,15 @@ Last updated: March 5, 2026
   - `pnpm -C apps/web exec vitest run tests/admin-docs-page.test.tsx tests/system-health-modal.test.tsx tests/season-social-analytics-section.test.tsx`
   - `pnpm -C apps/web exec eslint src/lib/admin/docs/job-catalog.ts tests/admin-docs-page.test.tsx`
   - `pnpm -C apps/web run lint`
+
+## March 12, 2026 — deployed cutover target is Vercel Preview/Production via `TRR_API_URL`
+
+- The remaining deployed cutover surface for `TRR-APP` is Vercel runtime configuration, not repo-local env files.
+- Preview and production both consume the backend through `TRR_API_URL`.
+- In this cutover phase:
+  - staging means Vercel Preview
+  - production means Vercel Production
+  - the canonical backend target is the Modal API URL returned by backend readiness verification
 
 ## March 7 rollout checkpoint — backend staging is live on remote+Modal
 
@@ -142,8 +190,9 @@ Last updated: March 5, 2026
 
 ## Blockers (Known Baseline, Not Introduced by Task 11)
 
-- Build blocker: `ImageLightbox` type mismatch (`number | undefined` -> `number`) at `src/components/admin/ImageLightbox.tsx:621`.
-- Broad test blocker: `tests/social-season-hint-routes.test.ts` currently red in baseline.
+- ~~Build blocker: `ImageLightbox` type mismatch — **resolved** in commit `85b9f12` (March 11).~~
+- ~~Broad test blocker: `social-season-hint-routes.test.ts` — **resolved** in commits `85b9f12` and `f2cc505` (March 11).~~
+- No remaining frontend blockers.
 
 ## Residual Risks
 
