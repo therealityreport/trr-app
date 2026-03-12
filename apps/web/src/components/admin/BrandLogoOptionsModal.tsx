@@ -914,7 +914,7 @@ export default function BrandLogoOptionsModal({
   const activeSourceQueryValues = getSourceQueryValues(activeSourceRow);
   const featuredOption = selectedOption || storedOptions.find((row) => row.is_selected_for_role) || allOptions[0] || null;
   const hasPendingSelection = Boolean(selectedOption?.id && selectedOption.id !== currentFeaturedOptionId);
-  const canSaveSelection = Boolean(selectedOption) && (currentFeaturedOptionId === null || selectedOption.id !== currentFeaturedOptionId);
+  const canSaveSelection = Boolean(selectedOption) && (currentFeaturedOptionId === null || selectedOption?.id !== currentFeaturedOptionId);
 
   const onAddManualImageUrl = useCallback(() => {
     const sourceUrl = manualImageUrl.trim();

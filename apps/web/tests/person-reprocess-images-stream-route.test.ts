@@ -244,7 +244,7 @@ describe("person reprocess-images stream proxy route", () => {
           evt.data.is_terminal === true
       )
     ).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
   });
 
   it("returns terminal SSE error payload when backend fails", async () => {
