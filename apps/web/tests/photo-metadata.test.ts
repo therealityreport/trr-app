@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  formatPhotoSourceLabel,
   mapPhotoToMetadata,
   mapSeasonAssetToMetadata,
   resolveMetadataDimensions,
@@ -49,6 +50,11 @@ describe("mapPhotoToMetadata", () => {
     expect(result.sourceBadgeColor).toBe("#f5c518");
     expect(result.dimensions).toEqual({ width: 800, height: 600 });
     expect(result.people).toEqual(["John Doe", "Jane Doe"]);
+  });
+
+  it("normalizes source labels for NBCUMV and Getty", () => {
+    expect(formatPhotoSourceLabel("nbcumv")).toBe("NBCUMV");
+    expect(formatPhotoSourceLabel("getty")).toBe("Getty");
   });
 
   it("decodes IMDb episode entities and parses numeric-string season metadata", () => {
@@ -137,6 +143,41 @@ describe("mapPhotoToMetadata", () => {
     expect(result.dimensions).toBeNull();
     expect(result.people).toEqual([]);
     expect(result.sourceBadgeColor).toBe("#6b7280");
+  });
+
+  it("uses nested Getty and NBCUMV metadata blocks for provenance", () => {
+    const result = mapPhotoToMetadata({
+      id: "nbcumv-1",
+      person_id: "p1",
+      source: "nbcumv",
+      url: "https://lightbox-thumbnails.s3.us-west-2.amazonaws.com/NUP_209993/thumb.jpg",
+      hosted_url: "https://cdn.example.com/media/nbcumv-1.jpg",
+      caption: "WATCH WHAT HAPPENS LIVE WITH ANDY COHEN -- Pictured: Lisa Barlow",
+      width: 2000,
+      height: 3000,
+      context_type: null,
+      season: null,
+      people_names: ["Lisa Barlow"],
+      title_names: ["Watch What Happens Live with Andy Cohen"],
+      metadata: {
+        nbcumv: {
+          lbx_headline: "Watch What Happens Live With Andy Cohen - Season 23",
+          location: "https://lightbox-thumbnails.s3.us-west-2.amazonaws.com/NUP_209993/thumb.jpg",
+        },
+        getty: {
+          detail_url: "https://www.gettyimages.com/detail/news-photo/example/2264300032",
+          title: "Mac Forehand",
+        },
+      },
+      fetched_at: null,
+    });
+
+    expect(result.sourceBadgeColor).toBe("#0ea5e9");
+    expect(result.originalSourcePageUrl).toBe(
+      "https://www.gettyimages.com/detail/news-photo/example/2264300032",
+    );
+    expect(result.originalSourceLabel).toBe("GETTY");
+    expect(result.sourcePageTitle).toBe("Mac Forehand");
   });
 
   it("parses face crops from photo payload", () => {
@@ -787,7 +828,7 @@ describe("mapPhotoToMetadata", () => {
     expect(result.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg");
     expect(result.originalSourceFileUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg");
     expect(result.originalSourcePageUrl).toBeNull();
-    expect(result.originalSourceLabel).toBe("STATIC.WIKIA.NOCOOKIE.NET");
+    expect(result.originalSourceLabel).toBe("FANDOM");
     expect(result.isS3Mirrored).toBe(true);
   });
 
@@ -991,7 +1032,7 @@ describe("mapSeasonAssetToMetadata", () => {
     expect(meta.originalImageUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
     expect(meta.originalSourceFileUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
     expect(meta.originalSourcePageUrl).toBeNull();
-    expect(meta.originalSourceLabel).toBe("STATIC.WIKIA.NOCOOKIE.NET");
+    expect(meta.originalSourceLabel).toBe("FANDOM");
     expect(meta.isS3Mirrored).toBe(true);
   });
 

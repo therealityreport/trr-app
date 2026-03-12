@@ -18,7 +18,7 @@ import {
 } from "@/lib/admin/run-session";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
-import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
+import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
 import {
@@ -1309,20 +1309,18 @@ function AdminRedditWindowPostsPageContent() {
       })
     : redditHref;
   const buildPostDetailsHref = useCallback(
-    (postId: string): string | null => {
+    (thread: Pick<DiscoveryThread, "reddit_post_id" | "title" | "author">): string | null => {
       if (!context) return null;
-      const normalizedPostId = postId.trim();
+      const normalizedPostId = thread.reddit_post_id.trim();
       if (!normalizedPostId) return null;
-      const query = new URLSearchParams();
-      query.set("community_id", context.communityId);
-      query.set("season_id", context.seasonId);
       return buildShowRedditCommunityWindowPostUrl({
         showSlug: context.showSlug,
         communitySlug: context.communitySlug,
         seasonNumber: context.seasonNumber,
         windowKey: toCanonicalWindowToken(context.containerKey),
         postId: normalizedPostId,
-        query,
+        title: thread.title,
+        author: thread.author,
       });
     },
     [context],
@@ -1339,6 +1337,37 @@ function AdminRedditWindowPostsPageContent() {
       }),
     [communityHref, context?.seasonNumber, context?.showName, redditHref, seasonHref, showHref],
   );
+  const seasonLinks = SEASON_TABS.map((tab) => ({
+    key: tab.tab,
+    label: tab.label,
+    href: context
+      ? buildSeasonAdminUrl({
+          showSlug: context.showSlug,
+          seasonNumber: context.seasonNumber,
+          tab: tab.tab,
+        })
+      : null,
+    isActive: tab.tab === "social",
+  }));
+  const socialLinks = SOCIAL_TABS.map((tab) => ({
+    key: tab.view,
+    label: tab.label,
+    href:
+      context && tab.view === "reddit"
+        ? buildShowRedditUrl({
+            showSlug: context.showSlug,
+            seasonNumber: context.seasonNumber,
+          })
+        : context
+          ? buildSeasonAdminUrl({
+              showSlug: context.showSlug,
+              seasonNumber: context.seasonNumber,
+              tab: "social",
+              socialView: tab.view,
+            })
+          : null,
+    isActive: tab.view === "reddit",
+  }));
 
   if (checking) {
     return (
@@ -1359,86 +1388,49 @@ function AdminRedditWindowPostsPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <SocialAdminPageHeader
-        breadcrumbs={breadcrumbs}
-        title={context ? `r/${context.subreddit}` : "Reddit Analytics"}
-        backHref={showHref}
-        backLabel="Back"
-        bodyClassName="px-6 py-6"
-      />
-
-      <div className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto max-w-6xl px-6">
-          <nav className="flex flex-wrap gap-2 py-4" aria-label="Season tabs">
-            {SEASON_TABS.map((tab) => {
-              const href = context
-                ? buildSeasonAdminUrl({
-                    showSlug: context.showSlug,
-                    seasonNumber: context.seasonNumber,
-                    tab: tab.tab,
-                  })
-                : null;
-              const isActive = tab.tab === "social";
-              const classes = `rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                isActive
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-              }`;
-              if (!href) {
-                return (
-                  <span key={tab.tab} className={classes}>
-                    {tab.label}
-                  </span>
-                );
-              }
-              return (
-                <a key={tab.tab} href={href} className={classes}>
-                  {tab.label}
-                </a>
-              );
-            })}
-          </nav>
-          <nav className="flex flex-wrap gap-2 pb-4" aria-label="Social analytics tabs">
-            {SOCIAL_TABS.map((tab) => {
-              const href =
-                context && tab.view === "reddit"
-                  ? buildShowRedditUrl({
-                      showSlug: context.showSlug,
-                      seasonNumber: context.seasonNumber,
-                    })
-                  : context
-                    ? buildSeasonAdminUrl({
-                        showSlug: context.showSlug,
-                        seasonNumber: context.seasonNumber,
-                        tab: "social",
-                        socialView: tab.view,
-                      })
-                    : null;
-              const isActive = tab.view === "reddit";
-              const classes = `rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
-                isActive
-                  ? "border-zinc-800 bg-zinc-800 text-white"
-                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-              }`;
-              if (!href) {
-                return (
-                  <span key={tab.view} className={classes}>
-                    {tab.label}
-                  </span>
-                );
-              }
-              return (
-                <a key={tab.view} href={href} className={classes}>
-                  {tab.label}
-                </a>
-              );
-            })}
-          </nav>
-        </div>
-      </div>
-
-      <main className="mx-auto max-w-6xl space-y-4 px-6 py-8">
+    <RedditAdminShell
+      breadcrumbs={breadcrumbs}
+      title={context ? `r/${context.subreddit}` : "Reddit Analytics"}
+      backHref={showHref}
+      seasonLinks={seasonLinks}
+      socialLinks={socialLinks}
+      hero={
+        context ? (
+          <section className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">Window Overview</p>
+                <h2 className="text-2xl font-semibold text-zinc-950">Discussion window dashboard</h2>
+                <p className="text-sm font-medium text-zinc-900">Window period: {context.periodLabel}</p>
+                <p className="max-w-3xl text-sm text-zinc-600">
+                  Track the posts captured for this discussion window, then jump into per-post detail sync when you need comments, media, and match context.
+                </p>
+              </div>
+              <div className="grid min-w-[280px] gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Tracked Flair</p>
+                  <p className="mt-2 text-2xl font-semibold text-zinc-950">
+                    {fmtNum(discovery?.totals?.tracked_flair_rows)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Matched</p>
+                  <p className="mt-2 text-2xl font-semibold text-zinc-950">
+                    {fmtNum(discovery?.totals?.matched_rows)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Fetched</p>
+                  <p className="mt-2 text-2xl font-semibold text-zinc-950">
+                    {fmtNum(discovery?.totals?.fetched_rows)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null
+      }
+    >
         {contextLoading && (
           <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600 shadow-sm">
             {resolverStageMessage(resolverStage)}
@@ -1629,7 +1621,7 @@ function AdminRedditWindowPostsPageContent() {
                         </p>
                         <div className="space-y-2">
                           {showFlairPosts.map((thread) => {
-                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            const detailsHref = buildPostDetailsHref(thread);
                             return (
                             <article key={thread.reddit_post_id} className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
                               <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-zinc-900 hover:underline">
@@ -1673,7 +1665,7 @@ function AdminRedditWindowPostsPageContent() {
                         </p>
                         <div className="space-y-2">
                           {scanMatched.map((thread) => {
-                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            const detailsHref = buildPostDetailsHref(thread);
                             return (
                             <article key={thread.reddit_post_id} className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
                               <div className="flex items-start justify-between gap-2">
@@ -1750,7 +1742,7 @@ function AdminRedditWindowPostsPageContent() {
                         </p>
                         <div className="space-y-2">
                           {otherFlairMatched.map((thread) => {
-                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            const detailsHref = buildPostDetailsHref(thread);
                             return (
                             <article key={thread.reddit_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                               <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-zinc-900 hover:underline">
@@ -1794,7 +1786,7 @@ function AdminRedditWindowPostsPageContent() {
                         </p>
                         <div className="space-y-2">
                           {untyped.map((thread) => {
-                            const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                            const detailsHref = buildPostDetailsHref(thread);
                             return (
                             <article key={thread.reddit_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                               <a href={thread.url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-zinc-900 hover:underline">
@@ -1835,7 +1827,7 @@ function AdminRedditWindowPostsPageContent() {
             ) : (
               <div className="space-y-2">
                 {discovery.threads.map((thread) => {
-                  const detailsHref = buildPostDetailsHref(thread.reddit_post_id);
+                  const detailsHref = buildPostDetailsHref(thread);
                   return (
                   <article key={thread.reddit_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                     <a
@@ -1879,8 +1871,7 @@ function AdminRedditWindowPostsPageContent() {
             )}
           </section>
         )}
-      </main>
-    </div>
+    </RedditAdminShell>
   );
 }
 

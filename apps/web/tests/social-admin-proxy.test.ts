@@ -14,6 +14,7 @@ vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
 }));
 
 import {
+  fetchSocialBackendJson,
   fetchSeasonBackendJson,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
@@ -111,9 +112,8 @@ describe("social-admin-proxy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("uses seasonIdHint only when it matches canonical season resolution", async () => {
+  it("uses seasonIdHint directly when it is a valid UUID (skips canonical lookup)", async () => {
     const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
-    getSeasonByShowAndNumberMock.mockResolvedValue({ id: hintedSeasonId });
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `http://backend.local/api/v1${path}`,
     );
@@ -125,7 +125,7 @@ describe("social-admin-proxy", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    const payload = await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+    const payload = await fetchSeasonBackendJson("show-hint-1", "7", "/analytics", {
       queryString: "source_scope=bravo",
       seasonIdHint: hintedSeasonId,
       fallbackError: "Failed to fetch social analytics",
@@ -134,15 +134,13 @@ describe("social-admin-proxy", () => {
     });
 
     expect(payload).toEqual({ ok: true });
-    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
+    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics?source_scope=bravo`);
   });
 
-  it("ignores seasonIdHint when it mismatches canonical season resolution", async () => {
+  it("uses seasonIdHint even when canonical differs (no verification against DB)", async () => {
     const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
-    const canonicalSeasonId = "22222222-2222-4222-8222-222222222222";
-    getSeasonByShowAndNumberMock.mockResolvedValue({ id: canonicalSeasonId });
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `http://backend.local/api/v1${path}`,
     );
@@ -154,18 +152,23 @@ describe("social-admin-proxy", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+    await fetchSeasonBackendJson("show-hint-2", "8", "/analytics", {
       seasonIdHint: hintedSeasonId,
       fallbackError: "Failed to fetch social analytics",
       retries: 0,
       timeoutMs: 1000,
     });
 
-    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${canonicalSeasonId}/analytics`);
+    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(0);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics`);
   });
 
   it("falls back to season lookup when seasonIdHint is invalid", async () => {
+    getSeasonByShowAndNumberMock.mockResolvedValue({ id: "resolved-season-id" });
+    getBackendApiUrlMock.mockImplementation(
+      (path: string) => `http://backend.local/api/v1${path}`,
+    );
+
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -173,7 +176,7 @@ describe("social-admin-proxy", () => {
     } as Response);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+    await fetchSeasonBackendJson("show-hint-3", "9", "/analytics", {
       seasonIdHint: "bad-season-id",
       fallbackError: "Failed to fetch social analytics",
       retries: 0,
@@ -219,5 +222,80 @@ describe("social-admin-proxy", () => {
     expect(payload.code).toBe("BACKEND_UNREACHABLE");
     expect(payload.retryable).toBe(true);
     expect(payload.upstream_status).toBe(500);
+  });
+
+  it("falls back to SUPABASE_SERVICE_ROLE_KEY when TRR-specific key is absent", async () => {
+    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "fallback-token";
+    getBackendApiUrlMock.mockImplementation((path: string) => `http://backend.local/api/v1${path}`);
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const payload = await fetchSocialBackendJson("/ingest/queue-status", {
+      fallbackError: "Failed to fetch queue status",
+      retries: 0,
+      timeoutMs: 1000,
+    });
+
+    expect(payload).toEqual({ ok: true });
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer fallback-token");
+  });
+
+  it("maps missing backend configuration to BACKEND_UNREACHABLE", async () => {
+    getBackendApiUrlMock.mockReturnValue(null);
+
+    let thrown: unknown;
+    try {
+      await fetchSocialBackendJson("/ingest/queue-status", {
+        fallbackError: "Failed to fetch queue status",
+        retries: 0,
+        timeoutMs: 1000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const response = socialProxyErrorResponse(thrown, "[test] backend missing");
+    const payload = (await response.json()) as { code?: string; retryable?: boolean };
+
+    expect(response.status).toBe(502);
+    expect(payload.code).toBe("BACKEND_UNREACHABLE");
+    expect(payload.retryable).toBe(true);
+  });
+
+  it("surfaces retry-after metadata for rate-limited upstream responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: { get: (name: string) => (name.toLowerCase() === "retry-after" ? "0" : null) },
+      json: async () => ({ error: "rate limited" }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    let thrown: unknown;
+    try {
+      await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+        fallbackError: "Failed to fetch social analytics",
+        retries: 0,
+        timeoutMs: 1000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const response = socialProxyErrorResponse(thrown, "[test] rate limited");
+    const payload = (await response.json()) as { code?: string; retryable?: boolean; retry_after_seconds?: number };
+
+    expect(response.status).toBe(429);
+    expect(payload.code).toBe("UPSTREAM_ERROR");
+    expect(payload.retryable).toBe(true);
+    expect(payload.retry_after_seconds).toBe(0);
+    expect(response.headers.get("retry-after")).toBe("0");
   });
 });

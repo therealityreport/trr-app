@@ -25,8 +25,38 @@ describe("person refresh request-id diagnostics wiring", () => {
     expect(pageContents).toContain("target_cast_photo_ids");
     expect(pageContents).toContain("target_media_link_ids");
     expect(pageContents).toContain("scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined");
-    expect(pageContents).toContain("No filtered images to reprocess.");
-    expect(pageContents).toContain("No filtered images to sync.");
+    expect(pageContents).toContain("No filtered images to reprocess${effectiveGalleryImportSuffix}.");
+    expect(pageContents).toContain("No filtered images to sync${effectiveGalleryImportSuffix}.");
+  });
+
+  it("uses effective gallery import context for refresh and reprocess stream payloads", () => {
+    expect(pageContents).toContain("resolvePersonGalleryImportContext");
+    expect(pageContents).toContain("show_id: effectiveGalleryImportContext.showId ?? undefined");
+    expect(pageContents).toContain("show_name: effectiveGalleryImportContext.showName ?? undefined");
+    expect(pageContents).toContain("show_name: effectiveGalleryImportContext.showName || undefined");
+    expect(pageContents).toContain("Import target:");
+  });
+
+  it("defaults person gallery scope to all instead of route-show-only imports", () => {
+    expect(pageContents).toContain('const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>("all")');
+  });
+
+  it("keeps Get Images ingestion-focused and leaves full reprocessing to Refresh Details", () => {
+    expect(pageContents).toContain('const pipelineMode: PersonRefreshPipelineMode = "ingest"');
+    expect(pageContents).toContain("const perSourceLimit =");
+    expect(pageContents).toContain("limit_per_source: perSourceLimit");
+    expect(pageContents).toContain("skip_auto_count: true");
+    expect(pageContents).toContain("skip_word_detection: true");
+    expect(pageContents).toContain("skip_centering: true");
+    expect(pageContents).toContain("skip_resize: true");
+    expect(pageContents).toContain("skip_prune: true");
+    expect(pageContents).toContain("Connecting to backend stream for source sync and mirroring");
+    expect(pageContents).toContain("source sync + mirror only");
+    expect(pageContents).toContain("Run full Refresh Details now?");
+  });
+
+  it("treats duplicate operation event sequence failures as non-retryable", () => {
+    expect(pageContents).toContain("admin_operation_events_op_seq_unique|duplicate key value violates unique constraint");
   });
 
   it("renders refresh logs with request-id prefix", () => {

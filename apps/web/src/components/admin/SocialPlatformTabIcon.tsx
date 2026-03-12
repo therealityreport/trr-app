@@ -9,7 +9,8 @@ export type SocialPlatformTabIconKey =
   | "twitter"
   | "youtube"
   | "facebook"
-  | "threads";
+  | "threads"
+  | "reddit";
 
 const ICON_TONES: Record<SocialPlatformTabIconKey, string> = {
   overview: "border-zinc-300 bg-zinc-100 text-zinc-700",
@@ -19,6 +20,7 @@ const ICON_TONES: Record<SocialPlatformTabIconKey, string> = {
   youtube: "border-red-200 bg-red-100 text-red-700",
   facebook: "border-blue-200 bg-blue-100 text-blue-700",
   threads: "border-neutral-400 bg-neutral-100 text-neutral-800",
+  reddit: "border-orange-200 bg-orange-100 text-orange-700",
 };
 
 const renderIcon = (tab: SocialPlatformTabIconKey): ReactNode => {
@@ -71,6 +73,14 @@ const renderIcon = (tab: SocialPlatformTabIconKey): ReactNode => {
     return (
       <svg viewBox="0 0 16 16" className="h-3 w-3" fill="currentColor" aria-hidden="true">
         <path d="M8 2.1c-2.7 0-4.4 1.6-4.4 4 0 2.2 1.4 3.7 3.5 3.7 1.7 0 2.9-.9 3.1-2.3-.5-.1-1-.2-1.4-.2-.2.8-.8 1.3-1.7 1.3-1.1 0-1.8-.9-1.8-2.3 0-1.6 1.1-2.8 2.7-2.8 1.3 0 2.2.7 2.7 2.1-.6 0-1.2.1-1.7.2-.1.4-.2.8-.2 1.2 0 1.9 1.3 3.1 3.1 3.1 1.8 0 3-1.2 3-3 0-2.8-2.5-5-5.9-5Zm3.1 7.2c-.7 0-1.3-.4-1.3-1.2 0-.2 0-.4.1-.6.8-.2 1.7-.3 2.6-.3-.1 1.3-.6 2.1-1.4 2.1Z" />
+      </svg>
+    );
+  }
+
+  if (tab === "reddit") {
+    return (
+      <svg viewBox="0 0 16 16" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+        <path d="M11.7 6.2c.5 0 .9.4.9.9 0 .3-.1.5-.3.7.2.4.3.8.3 1.2 0 1.8-1.9 3.2-4.6 3.2s-4.6-1.4-4.6-3.2c0-.4.1-.8.3-1.2-.2-.2-.3-.4-.3-.7 0-.5.4-.9.9-.9.3 0 .6.2.8.4 1-.6 2.1-.9 3.3-.9.4 0 .8 0 1.1.1l.6-2 1.7.4-.1.6-1.2-.3-.4 1.4c.9.1 1.8.4 2.5.8.2-.2.5-.4.8-.4ZM6.2 8.3a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4Zm3.6 0a.7.7 0 1 0 0-1.4.7.7 0 0 0 0 1.4Zm-3 1.2c.3.3.8.5 1.2.5s.9-.2 1.2-.5l.4.4c-.4.4-1 .7-1.6.7s-1.2-.3-1.6-.7l.4-.4Z" />
       </svg>
     );
   }

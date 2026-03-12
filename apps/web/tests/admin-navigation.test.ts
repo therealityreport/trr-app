@@ -13,22 +13,24 @@ describe("admin navigation config", () => {
       "Brands",
       "Users",
       "Groups",
+      "Docs",
       "UI Design System",
       "Settings",
     ]);
 
     expect(ADMIN_NAV_ITEMS.map((item) => item.href)).toEqual([
-      "/admin/dev-dashboard",
+      "/dev-dashboard",
       "/shows",
       "/people",
-      "/admin/games",
-      "/admin/surveys",
-      "/admin/social-media",
+      "/games",
+      "/surveys",
+      "/social-media",
       "/brands",
-      "/admin/users",
-      "/admin/groups",
-      "/admin/fonts",
-      "/admin/settings",
+      "/users",
+      "/groups",
+      "/docs",
+      "/design-system/fonts",
+      "/settings",
     ]);
   });
 

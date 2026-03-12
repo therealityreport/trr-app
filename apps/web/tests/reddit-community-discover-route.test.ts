@@ -214,6 +214,8 @@ describe("/api/admin/reddit/communities/[communityId]/discover route", () => {
           run_id: "run-123",
           status: "queued",
         },
+        execution_owner: "remote_worker",
+        execution_mode_canonical: "remote",
       })
       .mockResolvedValueOnce({
         discovery: DISCOVERY_RESULT,
@@ -239,6 +241,8 @@ describe("/api/admin/reddit/communities/[communityId]/discover route", () => {
     expect(payload.warning).toContain("Refresh queued");
     expect(payload.run).toEqual({
       run_id: "run-123",
+      execution_mode_canonical: "remote",
+      execution_owner: "remote_worker",
       status: "queued",
     });
     expect(fetchSocialBackendJsonMock).toHaveBeenNthCalledWith(

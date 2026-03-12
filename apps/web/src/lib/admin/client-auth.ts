@@ -24,6 +24,49 @@ function isPreferredUserMatch(currentUser: User | null, preferredUser: User | nu
   return currentUser.uid === preferredUser.uid;
 }
 
+async function waitForPreferredUserMatch(
+  preferredUser: User | null | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  if (!preferredUser?.uid) return;
+  if (isPreferredUserMatch(auth.currentUser, preferredUser)) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribe = () => {};
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      unsubscribe();
+      resolve();
+    };
+
+    const handleUser = (currentUser: User | null) => {
+      if (isPreferredUserMatch(currentUser, preferredUser)) {
+        finish();
+      }
+    };
+
+    timeoutId = setTimeout(finish, timeoutMs);
+
+    try {
+      const authWithTokenListener = auth as typeof auth & {
+        onIdTokenChanged?: (nextOrObserver: (user: User | null) => void) => () => void;
+      };
+      if (typeof authWithTokenListener.onIdTokenChanged === "function") {
+        unsubscribe = authWithTokenListener.onIdTokenChanged(handleUser);
+      } else {
+        unsubscribe = auth.onAuthStateChanged(handleUser);
+      }
+    } catch {
+      finish();
+    }
+  });
+}
+
 function getAdminAuthReadyTimeoutMs(): number {
   const rawTimeout = process.env.NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS;
   if (!rawTimeout) return DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS;
@@ -141,7 +184,9 @@ export async function getClientAuthHeaders(
       ? options.tokenRetryDelaysMs
       : [...DEFAULT_TOKEN_RETRY_DELAYS_MS];
 
+  const authReadyTimeoutMs = getAdminAuthReadyTimeoutMs();
   await waitForAuthStateReadyWithTimeout();
+  await waitForPreferredUserMatch(options?.preferredUser, authReadyTimeoutMs);
 
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     const currentUser = auth.currentUser;

@@ -12,8 +12,14 @@ import {
   DESIGN_SYSTEM_CDN_FONT_OPTIONS,
   DESIGN_SYSTEM_COLORS_STORAGE_KEY,
 } from "@/lib/admin/design-system-tokens";
+import type { DesignSystemSubtabId } from "@/lib/admin/design-system-routing";
 import { extractPrimaryFontToken, resolveCloudfrontCdnFont } from "@/lib/fonts/cdn-fonts";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
+import {
+  getRhoslcS6CastImagePath,
+  RHOSLC_S6_CAST_MEMBERS,
+  RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL,
+} from "@/lib/surveys/rhoslc-assets";
 import type { SurveyRankingItem } from "@/lib/surveys/types";
 import MultiSelectPills from "@/components/survey/MultiSelectPills";
 
@@ -134,6 +140,15 @@ interface SurveyQuestionDefaultsState {
 
 interface QuestionsTabProps {
   baseColors?: string[];
+  sectionFilter?: DesignSystemSubtabId | null;
+}
+
+interface AdminFormCatalogEntry {
+  key: string;
+  displayName: string;
+  description: string;
+  componentPath: string;
+  usage: string;
 }
 
 const TEMPLATE_EDITOR_STORAGE_PREFIX = "trr.questions-tab.template-editor.v2";
@@ -268,31 +283,22 @@ function mkQ(
   };
 }
 
-const RHOSLC_S6_CAST_OPTIONS: Array<{ key: string; text: string; metadata: { imagePath: string } }> = [
-  { key: "angie", text: "Angie Katsanevas", metadata: { imagePath: "/images/cast/rhoslc-s6/angie.png" } },
-  { key: "britani", text: "Britani Bateman", metadata: { imagePath: "/images/cast/rhoslc-s6/britani.png" } },
-  { key: "bronwyn", text: "Bronwyn Newport", metadata: { imagePath: "/images/cast/rhoslc-s6/bronwyn.png" } },
-  { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } },
-  { key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } },
-  { key: "mary", text: "Mary Cosby", metadata: { imagePath: "/images/cast/rhoslc-s6/mary.png" } },
-  { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } },
-  { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } },
-];
+const RHOSLC_S6_CAST_OPTIONS: Array<{ key: string; text: string; metadata: { imagePath: string } }> =
+  RHOSLC_S6_CAST_MEMBERS.map((member) => ({
+    key: member.id,
+    text: member.fullName,
+    metadata: { imagePath: member.imagePath },
+  }));
 
 const RHOSLC_S6_REUNION_OPTIONS: Array<{
   key: string;
   text: string;
   metadata: { imagePath: string; castRole: "main" | "friend_of" };
-}> = [
-  { key: "angie", text: "Angie Katsanevas", metadata: { imagePath: "/images/cast/rhoslc-s6/angie.png", castRole: "main" } },
-  { key: "bronwyn", text: "Bronwyn Newport", metadata: { imagePath: "/images/cast/rhoslc-s6/bronwyn.png", castRole: "main" } },
-  { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png", castRole: "main" } },
-  { key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png", castRole: "main" } },
-  { key: "mary", text: "Mary Cosby", metadata: { imagePath: "/images/cast/rhoslc-s6/mary.png", castRole: "main" } },
-  { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png", castRole: "main" } },
-  { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png", castRole: "main" } },
-  { key: "britani", text: "Britani Bateman", metadata: { imagePath: "/images/cast/rhoslc-s6/britani.png", castRole: "friend_of" } },
-];
+}> = RHOSLC_S6_CAST_MEMBERS.map((member) => ({
+  key: member.id,
+  text: member.fullName,
+  metadata: { imagePath: member.imagePath, castRole: member.castRole },
+}));
 
 /* ------------------------------------------------------------------ */
 /*  Catalog data – real survey questions with multiple examples         */
@@ -310,7 +316,7 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "Rank the Taglines", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_taglines", "Rank the Taglines", "single_choice", { uiVariant: "rank-text-fields" }, [{ key: "answer_1", text: "Answer Choice 1" }, { key: "answer_2", text: "Answer Choice 2" }, { key: "answer_3", text: "Selected Answer/Hovered Answer" }, { key: "answer_4", text: "Answer Choice 4" }]), mockValue: "answer_3" },
   ]},
   { key: "image-select", displayName: "Image Select (Grid)", description: "Grid of circular image buttons for cast/image-based selection.", componentPath: "components/survey/SingleSelectInput.tsx (grid)", category: "survey", examples: [
-    { label: "Cast Member Select", source: "RHOSLC S6 Survey", mockQuestion: mkQ("cast_img", "Which RHOSLC cast member had the best confessional look?", "single_choice", { uiVariant: "image-multiple-choice" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: "/images/cast/rhoslc-s6/heather.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }, { key: "whitney", text: "Whitney Rose", metadata: { imagePath: "/images/cast/rhoslc-s6/whitney.png" } }]), mockValue: null },
+    { label: "Cast Member Select", source: "RHOSLC S6 Survey", mockQuestion: mkQ("cast_img", "Which RHOSLC cast member had the best confessional look?", "single_choice", { uiVariant: "image-multiple-choice" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: getRhoslcS6CastImagePath("lisa") } }, { key: "heather", text: "Heather Gay", metadata: { imagePath: getRhoslcS6CastImagePath("heather") } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: getRhoslcS6CastImagePath("meredith") } }, { key: "whitney", text: "Whitney Rose", metadata: { imagePath: getRhoslcS6CastImagePath("whitney") } }]), mockValue: null },
   ]},
   { key: "single-select-cast", displayName: "Single Select Cast (Superlative)", description: "Single-choice cast-circle selector for superlative prompts.", componentPath: "components/survey/SingleSelectCastInput.tsx", category: "survey", examples: [
     { label: "Who was the Funniest?", source: "RHOSLC S6 Survey", mockQuestion: mkQ("who_funniest", "Who was the Funniest this season?", "single_choice", { uiVariant: "cast-single-select", columns: 4, componentBackgroundColor: "#5D3167", placeholderShapeColor: "#EEEEEF", placeholderShapeBorderColor: "#DCDDDF", selectedOptionBorderColor: "#FFFFFF", questionTextColor: "#FFFFFF", questionTextFontFamily: "\"Rude Slab Condensed\", var(--font-sans), sans-serif", questionTextLineHeight: 0.95, questionTextLetterSpacing: 0.01 }, RHOSLC_S6_CAST_OPTIONS), mockValue: null },
@@ -325,13 +331,13 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "Free Text Response", source: "General Survey", mockQuestion: mkQ("thoughts", "What would you like to see next season?", "free_text", { uiVariant: "text-entry", placeholder: "Share your thoughts...", inputType: "text" }), mockValue: "" },
   ]},
   { key: "whose-side", displayName: "Whose Side (Head-to-Head)", description: "Two-choice comparison with VS divider and optional neutral option.", componentPath: "components/survey/TwoChoiceCast.tsx", category: "survey", examples: [
-    { label: "Feud: Lisa vs Meredith", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_lm", "Whose side are you on in the Lisa vs. Meredith feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neutral" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: "/images/cast/rhoslc-s6/lisa.png" } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: "/images/cast/rhoslc-s6/meredith.png" } }]), mockValue: null },
+    { label: "Feud: Lisa vs Meredith", source: "RHOSLC S6 Survey", mockQuestion: mkQ("feud_lm", "Whose side are you on in the Lisa vs. Meredith feud?", "single_choice", { uiVariant: "two-choice-slider", neutralOption: "Neutral" }, [{ key: "lisa", text: "Lisa Barlow", metadata: { imagePath: getRhoslcS6CastImagePath("lisa") } }, { key: "meredith", text: "Meredith Marks", metadata: { imagePath: getRhoslcS6CastImagePath("meredith") } }]), mockValue: null },
   ]},
   { key: "matrix-likert", displayName: "Matrix / Likert Scale", description: "Statement-based agree/disagree bars with a 5-point sentiment scale.", componentPath: "components/survey/MatrixLikertInput.tsx", category: "survey", examples: [
     { label: "Agree / Disagree", source: "RHOSLC S6 Survey", mockQuestion: mkQ("agree", "Heather and Whitney are telling the truth about Meredith on the Plane.", "likert", { uiVariant: "agree-likert-scale", promptText: "How much do you agree with the following statement:", rows: [{ id: "s1", label: "Heather and Whitney are telling the truth about Meredith on the Plane." }] }, [{ key: "strongly_disagree", text: "Strongly Disagree" }, { key: "somewhat_disagree", text: "Somewhat Disagree" }, { key: "neutral", text: "Neither" }, { key: "somewhat_agree", text: "Somewhat Agree" }, { key: "strongly_agree", text: "Strongly Agree" }]), mockValue: {} },
   ]},
   { key: "cast-decision", displayName: "Cast Decision Card", description: "Single-cast decision card for verdict-style prompts (Keep/Fire/Demote, Bring Back/Keep Gone).", componentPath: "components/survey/CastDecisionCardInput.tsx", category: "survey", examples: [
-    { label: "Cast Verdict (Keep/Fire/Demote)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("verdict", "For each cast member, should Bravo keep, demote, or fire them?", "likert", { uiVariant: "cast-decision-card", choices: [{ value: "fire", label: "Fire" }, { value: "demote", label: "Demote" }, { value: "keep", label: "Keep" }], rows: [{ id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" }, { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" }] }, [{ key: "fire", text: "Fire" }, { key: "demote", text: "Demote" }, { key: "keep", text: "Keep" }]), mockValue: {} },
+    { label: "Cast Verdict (Keep/Fire/Demote)", source: "RHOSLC S6 Survey", mockQuestion: mkQ("verdict", "For each cast member, should Bravo keep, demote, or fire them?", "likert", { uiVariant: "cast-decision-card", choices: [{ value: "fire", label: "Fire" }, { value: "demote", label: "Demote" }, { value: "keep", label: "Keep" }], rows: [{ id: "whitney", label: "Whitney Rose", img: getRhoslcS6CastImagePath("whitney") }, { id: "lisa", label: "Lisa Barlow", img: getRhoslcS6CastImagePath("lisa") }, { id: "heather", label: "Heather Gay", img: getRhoslcS6CastImagePath("heather") }, { id: "meredith", label: "Meredith Marks", img: getRhoslcS6CastImagePath("meredith") }] }, [{ key: "fire", text: "Fire" }, { key: "demote", text: "Demote" }, { key: "keep", text: "Keep" }]), mockValue: {} },
     { label: "Ex-Wives: Bring Back / Keep Gone", source: "Legacy Cast Survey", mockQuestion: mkQ("exwives", "Should these former cast members return?", "likert", { uiVariant: "cast-decision-card", choices: [{ value: "bring_back", label: "Bring Back" }, { value: "keep_gone", label: "Keep Gone" }], rows: [{ id: "monica", label: "Monica Garcia" }, { id: "jen", label: "Jen Shah" }] }, [{ key: "bring_back", text: "Bring Back" }, { key: "keep_gone", text: "Keep Gone" }]), mockValue: {} },
   ]},
   { key: "poster-rankings", displayName: "Poster Rankings", description: "Drag-and-drop ranked season/poster slots with an unassigned bank.", componentPath: "components/survey/PosterRankingsInput.tsx", category: "survey", examples: [
@@ -345,13 +351,13 @@ const SURVEY_CATALOG: CatalogEntry[] = [
     { label: "RHOSLC Cast Ranking", source: "RHOSLC S6 Survey", mockQuestion: mkQ("rank_rhoslc", "Rank the Cast of RHOSLC S6.", "ranking", { uiVariant: "person-rankings", lineLabelTop: "ICONIC", lineLabelBottom: "SNOOZE" }, RHOSLC_S6_CAST_OPTIONS), mockValue: [] },
   ]},
   { key: "two-axis-grid", displayName: "Two-Axis Grid (2D Map)", description: "Draggable tokens on a 2D grid with labeled axes. Snap-to-grid.", componentPath: "components/survey/TwoAxisGridInput.tsx", category: "survey", examples: [
-    { label: "Cast Perception Map", source: "RHOSLC S6 Survey", mockQuestion: mkQ("perception", "Place each housewife on the grid", "likert", { uiVariant: "two-axis-grid", extent: 3, xLabelLeft: "VILLAIN", xLabelRight: "HERO", yLabelTop: "ENTERTAINING", yLabelBottom: "BORING", rows: [{ id: "lisa", label: "Lisa B.", img: "/images/cast/rhoslc-s6/lisa.png" }, { id: "heather", label: "Heather G.", img: "/images/cast/rhoslc-s6/heather.png" }, { id: "meredith", label: "Meredith M.", img: "/images/cast/rhoslc-s6/meredith.png" }] }), mockValue: {} },
+    { label: "Cast Perception Map", source: "RHOSLC S6 Survey", mockQuestion: mkQ("perception", "Place each housewife on the grid", "likert", { uiVariant: "two-axis-grid", extent: 3, xLabelLeft: "VILLAIN", xLabelRight: "HERO", yLabelTop: "ENTERTAINING", yLabelBottom: "BORING", rows: [{ id: "lisa", label: "Lisa B.", img: getRhoslcS6CastImagePath("lisa") }, { id: "heather", label: "Heather G.", img: getRhoslcS6CastImagePath("heather") }, { id: "meredith", label: "Meredith M.", img: getRhoslcS6CastImagePath("meredith") }] }), mockValue: {} },
   ]},
 ];
 
 const ARCHIVED_SURVEY_CATALOG: CatalogEntry[] = [
   { key: "numeric-slider", displayName: "Numeric Slider", description: "Horizontal range slider with min/max labels for cast or subject ratings.", componentPath: "components/survey/SliderInput.tsx", category: "survey", examples: [
-    { label: "Entertainment Factor", source: "Cast Rating Survey", mockQuestion: mkQ("slider_ent", "How entertaining was Lisa Barlow this episode?", "numeric", { uiVariant: "numeric-scale-slider", min: 0, max: 100, step: 1, minLabel: "Boring", maxLabel: "Entertaining", subject: { name: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" } }), mockValue: 65 },
+    { label: "Entertainment Factor", source: "Cast Rating Survey", mockQuestion: mkQ("slider_ent", "How entertaining was Lisa Barlow this episode?", "numeric", { uiVariant: "numeric-scale-slider", min: 0, max: 100, step: 1, minLabel: "Boring", maxLabel: "Entertaining", subject: { name: "Lisa Barlow", img: getRhoslcS6CastImagePath("lisa") } }), mockValue: 65 },
   ]},
 ];
 
@@ -376,20 +382,64 @@ const AUTH_CATALOG: CatalogEntry[] = [
 /*  Standalone / custom survey components                               */
 /* ------------------------------------------------------------------ */
 
-const RHOSLC_CAST: SurveyRankingItem[] = [
-  { id: "angie", label: "Angie Katsanevas", img: "/images/cast/rhoslc-s6/angie.png" },
-  { id: "britani", label: "Britani Bateman", img: "/images/cast/rhoslc-s6/britani.png" },
-  { id: "bronwyn", label: "Bronwyn Newport", img: "/images/cast/rhoslc-s6/bronwyn.png" },
-  { id: "heather", label: "Heather Gay", img: "/images/cast/rhoslc-s6/heather.png" },
-  { id: "lisa", label: "Lisa Barlow", img: "/images/cast/rhoslc-s6/lisa.png" },
-  { id: "mary", label: "Mary Cosby", img: "/images/cast/rhoslc-s6/mary.png" },
-  { id: "meredith", label: "Meredith Marks", img: "/images/cast/rhoslc-s6/meredith.png" },
-  { id: "whitney", label: "Whitney Rose", img: "/images/cast/rhoslc-s6/whitney.png" },
-];
+const RHOSLC_CAST: SurveyRankingItem[] = RHOSLC_S6_CAST_MEMBERS.map((member) => ({
+  id: member.id,
+  label: member.fullName,
+  img: member.imagePath,
+}));
 
 const STANDALONE_CATALOG: CatalogEntry[] = [
   { key: "icon-rating", displayName: "Icon Rating (Snowflake)", description: "Partial-fill icon rating using any masked SVG. Click or drag across icons. Supports half-values and text input. Used with snowflakes for RHOSLC.", componentPath: "components/survey/IconRatingInput.tsx", category: "standalone" },
   { key: "flashback-ranker", displayName: "Flashback Ranker (Timeline)", description: "Drag cast members from the bench onto a timeline line (classic mode).", componentPath: "components/flashback-ranker.tsx", category: "standalone" },
+];
+
+const ADMIN_FORM_CATALOG: AdminFormCatalogEntry[] = [
+  {
+    key: "people-search-multiselect",
+    displayName: "People Search Multi-Select",
+    description: "Searchable admin field for adding and removing people selections in edit flows.",
+    componentPath: "components/admin/PeopleSearchMultiSelect.tsx",
+    usage: "Admin forms",
+  },
+  {
+    key: "question-builder",
+    displayName: "Question Builder",
+    description: "Structured admin form block for authoring survey questions and options.",
+    componentPath: "components/admin/QuestionBuilder.tsx",
+    usage: "Survey authoring",
+  },
+  {
+    key: "survey-questions-editor",
+    displayName: "Survey Questions Editor",
+    description: "Full CRUD admin editor for normalized survey questions, row labels, image URLs, and option metadata.",
+    componentPath: "components/admin/SurveyQuestionsEditor.tsx",
+    usage: "Survey authoring",
+  },
+  {
+    key: "image-scrape-drawer",
+    displayName: "Image Scrape Drawer",
+    description: "Drawer-based multi-field admin workflow with search inputs, labels, targets, and import actions.",
+    componentPath: "components/admin/ImageScrapeDrawer.tsx",
+    usage: "Asset ingestion",
+  },
+  {
+    key: "admin-modal",
+    displayName: "Admin Modal",
+    description: "Shared admin modal shell used for confirm, edit, and selection workflows.",
+    componentPath: "components/admin/AdminModal.tsx",
+    usage: "Overlay forms",
+  },
+];
+
+const QUESTION_FORM_PLACEHOLDERS = [
+  {
+    title: "Validation Summary Pattern",
+    description: "Forms show inline validation today, but there is no reusable error-summary component documented in the system.",
+  },
+  {
+    title: "Empty Form State",
+    description: "Admin editors and survey forms use page-specific empty states rather than a shared blank-form treatment.",
+  },
 ];
 
 const PREVIEW_VIEWPORTS: Array<{ key: PreviewViewport; label: string }> = [
@@ -2863,10 +2913,10 @@ function StandaloneFieldPreview({
           <IconRatingInput
             value={rating}
             onChange={setRating}
-            min={1}
+            min={0}
             max={5}
             step={0.5}
-            iconSrc="/icons/snowflake-solid-ice-7.svg"
+            iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL}
             iconCount={5}
             sizePx={42}
             fillColor="#0EA5E9"
@@ -2899,7 +2949,7 @@ function StandaloneFieldPreview({
 /*  Questions Tab                                                      */
 /* ------------------------------------------------------------------ */
 
-export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
+export default function QuestionsTab({ baseColors, sectionFilter = null }: QuestionsTabProps) {
   const [storedBaseColors, setStoredBaseColors] = useState<string[]>([]);
   const [surveyDefaults, setSurveyDefaults] = useState<SurveyQuestionDefaultsState>(() => ({
     mobile: { ...DEFAULT_SURVEY_STYLE_MOBILE },
@@ -2993,11 +3043,20 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
     }
   }, [selectedPreviewSource]);
 
-  const totalCount = SURVEY_CATALOG.length + AUTH_CATALOG.length + STANDALONE_CATALOG.length + ARCHIVED_SURVEY_CATALOG.length;
+  const totalCount =
+    SURVEY_CATALOG.length +
+    AUTH_CATALOG.length +
+    STANDALONE_CATALOG.length +
+    ADMIN_FORM_CATALOG.length +
+    ARCHIVED_SURVEY_CATALOG.length;
+  const showSurveySections = sectionFilter === null || sectionFilter === "survey";
+  const showAuthSection = sectionFilter === null || sectionFilter === "auth";
+  const showAdminSection = sectionFilter === null || sectionFilter === "admin";
 
   return (
     <div className="space-y-10">
       {/* Survey Questions Section */}
+      {showSurveySections ? (
       <section>
         <div className="flex items-center gap-3 mb-6">
           <h2 className="text-lg font-bold text-zinc-900">Survey Questions</h2>
@@ -3028,8 +3087,10 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
       {/* Standalone / Custom Survey Components Section */}
+      {showSurveySections ? (
       <section>
         <div className="flex items-center gap-3 mb-6">
           <h2 className="text-lg font-bold text-zinc-900">Custom Survey Components</h2>
@@ -3046,8 +3107,10 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
           ))}
         </div>
       </section>
+      ) : null}
 
       {/* Auth / Signup Fields Section */}
+      {showAuthSection ? (
       <section>
         <div className="flex items-center gap-3 mb-6">
           <h2 className="text-lg font-bold text-zinc-900">Auth / Signup Fields</h2>
@@ -3064,8 +3127,42 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
           ))}
         </div>
       </section>
+      ) : null}
+
+      {/* Admin Form Patterns Section */}
+      {showAdminSection ? (
+      <section>
+        <div className="flex items-center gap-3 mb-6">
+          <h2 className="text-lg font-bold text-zinc-900">Admin Forms & Editors</h2>
+          <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-sky-800">
+            {ADMIN_FORM_CATALOG.length}
+          </span>
+          <span className="text-xs text-zinc-400">
+            Search, modal, drawer, and CRUD patterns used by the admin panel
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-6">
+          {ADMIN_FORM_CATALOG.map((entry) => (
+            <article key={entry.key} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+              <div className="mb-2 flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-zinc-900">{entry.displayName}</h3>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                  {entry.usage}
+                </span>
+              </div>
+              <p className="mb-3 text-sm text-zinc-600">{entry.description}</p>
+              <p className="text-xs text-zinc-500">
+                <span className="font-semibold text-zinc-700">Source:</span>{" "}
+                <code>{entry.componentPath}</code>
+              </p>
+            </article>
+          ))}
+        </div>
+      </section>
+      ) : null}
 
       {/* Archived Survey Templates */}
+      {showSurveySections ? (
       <section>
         <details className="group rounded-2xl border border-zinc-200 bg-zinc-50/70">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
@@ -3096,6 +3193,24 @@ export default function QuestionsTab({ baseColors }: QuestionsTabProps) {
             </div>
           </div>
         </details>
+      </section>
+      ) : null}
+
+      <section className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="text-sm font-bold text-zinc-900">Blank Containers</h2>
+          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            Missing Form Patterns
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {QUESTION_FORM_PLACEHOLDERS.map((entry) => (
+            <div key={entry.title} className="rounded-xl border border-zinc-200 bg-white p-3">
+              <p className="text-sm font-semibold text-zinc-900">{entry.title}</p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">{entry.description}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       <p className="text-center text-xs text-zinc-300">{totalCount} components cataloged</p>

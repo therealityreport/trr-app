@@ -150,6 +150,11 @@ const normalizePosterUrl = (value: unknown): string | null => {
   return null;
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const COVERED_SHOWS_FETCH_RETRY_DELAYS_MS = [300, 900] as const;
+const isCoveredShowsRetryableError = (message: string) =>
+  message === "Not authenticated" || message === "unauthorized" || message === "forbidden";
+
 export default function TrrShowsPage() {
   const { user, userKey, checking, hasAccess } = useAdminGuard();
   const [query, setQuery] = useState("");
@@ -169,6 +174,7 @@ export default function TrrShowsPage() {
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
   const [coveredShowIds, setCoveredShowIds] = useState<Set<string>>(new Set());
   const [loadingCovered, setLoadingCovered] = useState(true);
+  const [coveredShowsError, setCoveredShowsError] = useState<string | null>(null);
   const [addingShowId, setAddingShowId] = useState<string | null>(null);
   const [removingShowId, setRemovingShowId] = useState<string | null>(null);
 
@@ -176,26 +182,49 @@ export default function TrrShowsPage() {
     (input: RequestInfo | URL, init?: RequestInit) =>
       fetchAdminWithAuth(input, init, {
         preferredUser: user,
+        allowDevAdminBypass: true,
       }),
     [user],
   );
 
   // Fetch covered shows
   const fetchCoveredShows = useCallback(async () => {
+    setLoadingCovered(true);
+    setCoveredShowsError(null);
     try {
-      const response = await fetchWithAuth("/api/admin/covered-shows");
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to fetch covered shows");
+      for (let attempt = 0; attempt <= COVERED_SHOWS_FETCH_RETRY_DELAYS_MS.length; attempt += 1) {
+        try {
+          const response = await fetchWithAuth("/api/admin/covered-shows");
+          const data = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            shows?: CoveredShow[];
+          };
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to fetch covered shows");
+          }
+          const shows = Array.isArray(data.shows) ? data.shows : [];
+          setCoveredShows(shows);
+          setCoveredShowIds(new Set(shows.map((show) => show.trr_show_id)));
+          setCoveredShowsError(null);
+          return;
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to fetch covered shows";
+          const shouldRetry =
+            attempt < COVERED_SHOWS_FETCH_RETRY_DELAYS_MS.length &&
+            isCoveredShowsRetryableError(message);
+          if (shouldRetry) {
+            await sleep(COVERED_SHOWS_FETCH_RETRY_DELAYS_MS[attempt] ?? 300);
+            continue;
+          }
+
+          console.error("Failed to fetch covered shows:", err);
+          setCoveredShows([]);
+          setCoveredShowIds(new Set());
+          setCoveredShowsError(message);
+          return;
+        }
       }
-      const data = await response.json();
-      setCoveredShows(data.shows ?? []);
-      setCoveredShowIds(new Set((data.shows ?? []).map((s: CoveredShow) => s.trr_show_id)));
-    } catch (err) {
-      if (err instanceof Error && err.message === "Not authenticated") {
-        return;
-      }
-      console.error("Failed to fetch covered shows:", err);
     } finally {
       setLoadingCovered(false);
     }
@@ -581,6 +610,26 @@ export default function TrrShowsPage() {
             </section>
           )}
 
+          {coveredShowsError && (
+            <section className="mb-8 rounded-2xl border border-red-200 bg-red-50 p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-red-800">Covered Shows Unavailable</p>
+                  <p className="text-sm text-red-700">{coveredShowsError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void fetchCoveredShows();
+                  }}
+                  className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+                >
+                  Retry
+                </button>
+              </div>
+            </section>
+          )}
+
           {/* Shows (editorial coverage) */}
           <section className="mb-8 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-center justify-between">
@@ -599,6 +648,11 @@ export default function TrrShowsPage() {
               <div className="flex items-center justify-center py-8">
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-900 border-t-transparent" />
               </div>
+            ) : coveredShowsError ? (
+              <p className="text-sm text-zinc-500">
+                Covered shows could not be loaded. Use Retry above once admin auth and
+                the local app database connection are ready.
+              </p>
             ) : coveredShows.length === 0 ? (
               <p className="text-sm text-zinc-500">
                 No shows added yet. Search above and click &quot;Add&quot; to add a show

@@ -1,3 +1,6 @@
+import { buildRedditDetailSlug } from "@/lib/admin/reddit-detail-slug";
+import { slugifyToken } from "@/lib/slugify";
+
 export type ShowAdminTab =
   | "details"
   | "settings"
@@ -720,12 +723,7 @@ export function parsePersonRouteState(
 }
 
 export function toPersonSlug(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+  return slugifyToken(value);
 }
 
 export function buildPersonRouteSlug(input: {
@@ -996,7 +994,11 @@ export function buildShowRedditCommunityWindowPostUrl(input: {
   communitySlug: string;
   seasonNumber: number | string;
   windowKey: string;
-  postId: string;
+  postId?: string;
+  detailSlug?: string | null;
+  title?: string | null;
+  author?: string | null;
+  collision?: boolean;
   query?: URLSearchParams;
 }): string {
   const windowHref = buildShowRedditCommunityWindowUrl({
@@ -1005,11 +1007,23 @@ export function buildShowRedditCommunityWindowPostUrl(input: {
     seasonNumber: input.seasonNumber,
     windowKey: input.windowKey,
   });
-  const postId = input.postId.trim();
-  if (!postId) return windowHref;
+  const explicitDetailSlug = String(input.detailSlug ?? "").trim();
+  const derivedDetailSlug =
+    explicitDetailSlug ||
+    ((String(input.title ?? "").trim() || String(input.author ?? "").trim()) &&
+      buildRedditDetailSlug({
+        title: input.title,
+        author: input.author,
+        postId: input.postId,
+        collision: input.collision,
+      })) ||
+    "";
+  const fallbackPostId = String(input.postId ?? "").trim();
+  const detailSegment = derivedDetailSlug || fallbackPostId;
+  if (!detailSegment) return windowHref;
   const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
   nextQuery.delete("social_platform");
-  return appendQuery(`${windowHref}/post/${encodeURIComponent(postId)}`, nextQuery);
+  return appendQuery(`${windowHref}/${encodeURIComponent(detailSegment)}`, nextQuery);
 }
 
 export function buildShowRedditCommunityAnalyticsUrl(input: {

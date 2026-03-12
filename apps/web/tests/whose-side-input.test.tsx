@@ -124,8 +124,8 @@ describe("TwoChoiceCast", () => {
 
   it("uses selected glow styling and desaturates the unselected portrait", () => {
     const question = makeQuestion();
-    question.options[0]!.metadata = { imagePath: "/images/cast/rhoslc-s6/lisa.png" };
-    question.options[1]!.metadata = { imagePath: "/images/cast/rhoslc-s6/heather.png" };
+    question.options[0]!.metadata = { imagePath: "/images/shows/rhoslc/season-6/LIsa.png" };
+    question.options[1]!.metadata = { imagePath: "/images/shows/rhoslc/season-6/Heather.png" };
 
     const { rerender } = render(
       <TwoChoiceCast

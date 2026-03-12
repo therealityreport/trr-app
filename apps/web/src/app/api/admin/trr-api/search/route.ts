@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { buildPersonRouteSlug } from "@/lib/admin/show-admin-routes";
+import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import {
   searchEpisodes,
   searchPeopleWithShowContext,
@@ -47,7 +48,12 @@ export async function GET(request: NextRequest) {
       shows: shows.map((show) => ({
         id: show.id,
         name: show.name,
-        slug: show.canonical_slug || show.slug,
+        slug: resolvePreferredShowRouteSlug({
+          alternativeNames: show.alternative_names,
+          canonicalSlug: show.canonical_slug,
+          slug: show.slug,
+          fallback: show.name,
+        }),
       })),
       people: people.map((person) => ({
         id: person.id,

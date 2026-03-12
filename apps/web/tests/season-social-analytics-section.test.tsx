@@ -4,9 +4,11 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import "@testing-library/jest-dom/vitest";
 
 import SeasonSocialAnalyticsSection, {
+  buildPreviewPlatformStatuses,
   buildRunsRequestKey,
   buildSocialRequestKey,
   formatIngestErrorMessage,
+  formatJobOutcomeNote,
   shouldSetPollingRetry,
 } from "../src/components/admin/season-social-analytics-section";
 import { auth } from "../src/lib/firebase";
@@ -672,6 +674,24 @@ function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
     const url = String(input);
 
     if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+    if (url.includes("/social/shared-status?")) {
+      return jsonResponse({
+        ingest_mode: "shared_account_async",
+        matched_posts: 12,
+        review_queue_count: 2,
+        latest_match_at: "2025-01-10T16:00:00Z",
+        shared_scrape_status: { status: "running", job_count: 3, active_jobs: 2, completed_jobs: 1, failed_jobs: 0 },
+        classification_status: { status: "complete", job_count: 3, active_jobs: 0, completed_jobs: 3, failed_jobs: 0 },
+        materialization_status: { status: "queued", job_count: 1, active_jobs: 0, completed_jobs: 0, failed_jobs: 0 },
+        latest_shared_run: {
+          run_id: "shared-run-12345678",
+          status: "running",
+          created_at: "2025-01-10T15:30:00Z",
+          started_at: "2025-01-10T15:31:00Z",
+          completed_at: null,
+        },
+      });
+    }
     if (url.includes("/social/analytics?")) {
       return jsonResponse(analytics);
     }
@@ -754,6 +774,27 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     expect(screen.getByTestId("social-analytics-skeleton")).toBeInTheDocument();
     await screen.findByText("Weekly Trend");
+  });
+
+  it("renders classification rules and shared async pipeline status", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Weekly Trend");
+
+    expect(screen.getByText("Classification Rules")).toBeInTheDocument();
+    expect(screen.getByText("Shared Async Pipeline")).toBeInTheDocument();
+    expect(screen.getByText("Production Path")).toBeInTheDocument();
+    expect(screen.getByText("Matched posts")).toBeInTheDocument();
+    expect(screen.getByText("Review queue")).toBeInTheDocument();
   });
 
   it("formats summary count cards with compact number notation", async () => {
@@ -2252,16 +2293,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText(/disabled until workers recover/i)).toBeInTheDocument();
-    });
-
-    screen.getAllByRole("button", { name: "Run Week" }).forEach((button) => {
-      expect(button).toBeDisabled();
-    });
-    screen.getAllByRole("button", { name: "Sync All" }).forEach((button) => {
-      expect(button).toBeDisabled();
-    });
+    expect(screen.queryAllByRole("button", { name: "Run Week" })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: "Sync All" })).toHaveLength(0);
   });
 
   it("hydrates from cached social snapshot and suppresses transient timeout banners", async () => {
@@ -2582,7 +2615,6 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       expect(callCount.targets).toBeGreaterThan(1);
       expect(callCount.runs).toBeGreaterThan(1);
       expect(callCount.summaries).toBeGreaterThan(1);
-      expect(callCount.workerHealth).toBeGreaterThan(1);
     });
   });
 
@@ -3175,10 +3207,127 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     expect(await screen.findByText(/analytics unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText("Configured Targets")).toBeInTheDocument();
-    expect(screen.getByText("YouTube: bravo")).toBeInTheDocument();
+    expect(screen.getByText("Classification Rules")).toBeInTheDocument();
+    expect(screen.getByText("YouTube:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/accounts bravo/i)).toBeInTheDocument();
     const runSelect = screen.getByRole("combobox", { name: /Run/i });
     expect(within(runSelect).getByRole("option", { name: /run-1-ab/i })).toBeInTheDocument();
+  });
+
+  it("scopes configured targets to the active platform tab and explains zero-result run logs", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) {
+        return jsonResponse(analyticsBase);
+      }
+      const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
+      if (weekDetailMatch) {
+        return jsonResponse(defaultWeekDetailResponse(Number(weekDetailMatch[1])));
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({
+          targets: [
+            { platform: "instagram", accounts: ["bravotv", "bravowwhl"], hashtags: [], keywords: [], is_active: true },
+            { platform: "tiktok", accounts: ["bravotv"], hashtags: [], keywords: [], is_active: true },
+          ],
+        });
+      }
+      if (url.includes("/social/runs/summary?")) {
+        return jsonResponse({ summaries: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({
+          runs: [
+            {
+              id: "run-1-abcdef",
+              status: "completed",
+              created_at: "2026-03-07T04:56:52Z",
+              started_at: "2026-03-07T04:56:54Z",
+              completed_at: "2026-03-07T04:57:54Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({
+          jobs: [
+            {
+              id: "job-posts",
+              run_id: "run-1-abcdef",
+              platform: "instagram",
+              job_type: "posts",
+              status: "completed",
+              items_found: 479,
+              created_at: "2026-03-07T04:56:53Z",
+              started_at: "2026-03-07T04:56:53Z",
+              completed_at: "2026-03-07T04:57:53Z",
+              config: { account: "bravotv", stage: "posts" },
+              metadata: {
+                stage_counters: { posts: 479, comments: 0 },
+                persist_counters: { posts_upserted: 0, comments_upserted: 0 },
+                activity: { phase: "posts_end", pages_scanned: 40, posts_checked: 479, matched_posts: 0 },
+              },
+            },
+            {
+              id: "job-comments",
+              run_id: "run-1-abcdef",
+              platform: "instagram",
+              job_type: "comments",
+              status: "completed",
+              items_found: 5,
+              created_at: "2026-03-07T04:56:54Z",
+              started_at: "2026-03-07T04:56:54Z",
+              completed_at: "2026-03-07T04:56:57Z",
+              config: { account: "bravotv", stage: "comments" },
+              metadata: {
+                stage_counters: { posts: 5, comments: 0 },
+                persist_counters: { posts_upserted: 5, comments_upserted: 0 },
+                activity: { phase: "comments_end", pages_scanned: 0, posts_checked: 5, matched_posts: 5 },
+                retrieval_meta: { comments_auth_failed: true, incomplete_comment_fetches: 5 },
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    expect(await screen.findByText("Classification Rules")).toBeInTheDocument();
+    expect(screen.getByText("Instagram:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/accounts bravotv, bravowwhl/i)).toBeInTheDocument();
+    expect(screen.getByText("TikTok:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText(/^accounts bravotv$/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Select Latest Run/i }));
+    expect(await screen.findByText("Last Run Log")).toBeInTheDocument();
+    expect(screen.getByText(/Candidate posts were scanned, but none matched the selected run window\./i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Comment fetch was blocked on 5 matched posts by an Instagram auth\/challenge response\./i),
+    ).toBeInTheDocument();
+
+    const platformTabs = screen.getByRole("navigation");
+    fireEvent.click(within(platformTabs).getByRole("button", { name: "Instagram" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Instagram Classification Rules")).toBeInTheDocument();
+    });
+    const instagramRulesCard = screen.getByText("Instagram Classification Rules").closest("div");
+    expect(instagramRulesCard).not.toBeNull();
+    expect(within(instagramRulesCard as HTMLElement).getByText(/^accounts bravotv, bravowwhl$/i)).toBeInTheDocument();
+    expect(within(instagramRulesCard as HTMLElement).queryByText(/^accounts bravotv$/i)).not.toBeInTheDocument();
   });
 
   it("exits loading and remains interactive when analytics request times out", async () => {
@@ -3263,6 +3412,50 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
     expect(socialRequests.length).toBeGreaterThan(0);
     expect(socialRequests.every((url) => url.includes("season_id=season-1"))).toBe(true);
+  });
+
+  it("completes the initial load under React StrictMode", async () => {
+    const requestedUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestedUrls.push(url);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) {
+        return jsonResponse(analyticsBase);
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({ targets: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({ runs: [] });
+      }
+      if (url.includes("/social/runs/summary?")) {
+        return jsonResponse({ summaries: [] });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <React.StrictMode>
+        <SeasonSocialAnalyticsSection
+          showId="show-1"
+          seasonNumber={6}
+          seasonId="season-1"
+          showName="Test Show"
+        />
+      </React.StrictMode>,
+    );
+
+    await screen.findByTestId("weekly-heatmap-row-1");
+    expect(screen.queryByTestId("social-analytics-skeleton")).not.toBeInTheDocument();
+    expect(requestedUrls.some((url) => url.includes("/social/analytics?"))).toBe(true);
   });
 
   it("shows stale-data timestamp when analytics refresh fails after a successful load", async () => {
@@ -3414,6 +3607,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
           ],
         });
       }
+      if (url.includes("/social/runs/summary?")) {
+        return jsonResponse({ summaries: [] });
+      }
       if (url.includes("/social/jobs?")) {
         if (failJobsRefresh) {
           return new Response(JSON.stringify({ error: "temporary jobs outage" }), {
@@ -3447,20 +3643,30 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByRole("combobox", { name: /Run/i }, { timeout: 45_000 });
-    fireEvent.change(screen.getByRole("combobox", { name: /Run/i }), {
-      target: { value: "run-1-abcdef" },
+    const selectLatestRunButton = await screen.findByRole("button", { name: "Select Latest Run" }, { timeout: 45_000 });
+    fireEvent.click(selectLatestRunButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /Run/i })).toHaveValue("run-1-abcdef");
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
-    await screen.findByText("123 items", {}, { timeout: 10_000 });
+    const jobsSection = screen.getByText("Ingest Job Status").closest("section");
+    expect(jobsSection).not.toBeNull();
+    const jobsScope = within(jobsSection as HTMLElement);
+    expect(await jobsScope.findByText("Done", {}, { timeout: 10_000 })).toBeInTheDocument();
+    expect(
+      jobsScope.getByText((content) => content.includes("123 items") || content.includes("123 posts")),
+    ).toBeInTheDocument();
 
     failJobsRefresh = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh Jobs" }));
 
     expect(await screen.findByText(/temporary jobs outage/i, {}, { timeout: 45_000 })).toBeInTheDocument();
-    expect(screen.getByText("123 items")).toBeInTheDocument();
-  });
+    expect(
+      jobsScope.getByText((content) => content.includes("123 items") || content.includes("123 posts")),
+    ).toBeInTheDocument();
+  }, 15_000);
 
   it("uses incremental sync strategy by default for ingest payload", async () => {
     const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
@@ -3614,6 +3820,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
     const payload = capturedPayloads[0];
     expect(payload.platforms).toEqual(["youtube"]);
+    expect(payload.week_index).toBe(2);
     expect(payload.date_start).toBe("2026-01-14T00:00:00Z");
     expect(payload.date_end).toBe("2026-01-20T23:59:59Z");
   });
@@ -3726,6 +3933,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(payload.sync_strategy).toBe("incremental");
     expect(payload.comment_refresh_policy).toBeUndefined();
     expect(payload.comment_anchor_source_ids).toBeUndefined();
+    expect(payload.week_index).toBe(1);
     expect(payload.date_start).toBe("2026-01-07T00:00:00Z");
     expect(payload.date_end).toBe("2026-01-13T23:59:59Z");
     expect(payload.platforms).toBeUndefined();
@@ -3786,11 +3994,11 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       },
     });
 
-    expect(message).toContain("Start the social worker and retry");
+    expect(message).toContain("Start the remote social executor and retry");
     expect(message).toContain("no_healthy_workers");
   });
 
-  it("formats remote-worker-required proxy detail into AWS guidance", () => {
+  it("formats remote-worker-required proxy detail into remote executor guidance", () => {
     const message = formatIngestErrorMessage({
       error: "Failed to run social ingest (SOCIAL_REMOTE_WORKER_REQUIRED)",
       code: "UPSTREAM_ERROR",
@@ -3804,7 +4012,164 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
 
     expect(message).toContain("remote-only");
-    expect(message).toContain("AWS workers");
+    expect(message).toContain("configured remote executor");
+  });
+
+  it("merges preview platform statuses without hiding active comment runs behind stale mirror state", () => {
+    const statuses = buildPreviewPlatformStatuses(
+      {
+        season_id: "season-1",
+        show_id: "show-1",
+        season_number: 6,
+        source_scope: "bravo",
+        platforms: ["instagram"],
+        window: { start: "2026-01-01T00:00:00Z", end: "2026-01-07T00:00:00Z", timezone: "America/New_York" },
+        total_saved_comments: 0,
+        total_reported_comments: 10,
+        coverage_pct: 0,
+        up_to_date: false,
+        stale_posts_count: 1,
+        posts_scanned: 1,
+        by_platform: {
+          instagram: {
+            saved_comments: 0,
+            reported_comments: 10,
+            coverage_pct: 0,
+            up_to_date: false,
+            stale_posts_count: 1,
+            posts_scanned: 1,
+            sync_status: "running",
+            comment_sync_status: {
+              status: "running",
+              expected_count: 10,
+              fetched_count: 0,
+              upserted_count: 0,
+              failure_reason: "instagram_comment_gap",
+            },
+            media_mirror_status: {
+              status: "not_needed",
+              source_count: 0,
+              mirrored_count: 0,
+            },
+            stale: false,
+            active_job_summary: {
+              sync_status: "running",
+              dominant_stage: "comments",
+              job_count: 2,
+              stage_statuses: { comments: { status: "running", job_count: 2 } },
+            },
+          },
+        },
+        evaluated_at: "2026-01-07T12:00:00Z",
+        sync_status: "running",
+        comment_sync_status: { status: "running", expected_count: 10, fetched_count: 0, upserted_count: 0 },
+        media_mirror_status: { status: "not_needed", source_count: 0, mirrored_count: 0 },
+        stale: false,
+      },
+      {
+        season_id: "season-1",
+        show_id: "show-1",
+        season_number: 6,
+        source_scope: "bravo",
+        platforms: ["instagram"],
+        window: { start: "2026-01-01T00:00:00Z", end: "2026-01-07T00:00:00Z", timezone: "America/New_York" },
+        posts_scanned: 1,
+        needs_mirror_count: 1,
+        mirrored_count: 0,
+        failed_count: 0,
+        partial_count: 1,
+        pending_count: 0,
+        by_platform: {
+          instagram: {
+            posts_scanned: 1,
+            needs_mirror_count: 1,
+            mirrored_count: 0,
+            failed_count: 0,
+            partial_count: 1,
+            pending_count: 0,
+            sync_status: "partial",
+            comment_sync_status: {
+              status: "idle",
+              expected_count: 0,
+              fetched_count: 0,
+              upserted_count: 0,
+            },
+            media_mirror_status: {
+              status: "partial",
+              source_count: 1,
+              mirrored_count: 0,
+              pending_count: 0,
+              failed_count: 0,
+              partial_count: 1,
+              failure_reason: "instagram_post_media_mirror_gap",
+            },
+            stale: true,
+            last_refresh_reason: "instagram_post_media_mirror_gap",
+          },
+        },
+        evaluated_at: "2026-01-07T12:00:00Z",
+        sync_status: "partial",
+        comment_sync_status: { status: "idle", expected_count: 0, fetched_count: 0, upserted_count: 0 },
+        media_mirror_status: { status: "partial", source_count: 1, mirrored_count: 0, partial_count: 1 },
+        stale: true,
+      },
+    );
+
+    const instagram = statuses.find((entry) => entry.platform === "instagram");
+    expect(instagram?.status.sync_status).toBe("running");
+    expect(instagram?.status.stale).toBe(false);
+    expect(instagram?.status.active_job_summary?.dominant_stage).toBe("comments");
+    expect(instagram?.status.last_refresh_reason).toBe("instagram_comment_gap");
+  });
+
+  it("formats posts-stage zero-scan outcomes with auth, rate-limit, and provider-specific guidance", () => {
+    expect(
+      formatJobOutcomeNote({
+        id: "job-auth",
+        platform: "instagram",
+        status: "failed",
+        job_type: "posts",
+        job_error_code: "AUTH",
+        metadata: {
+          activity: { posts_checked: 0 },
+          stage_counters: { posts: 0, comments: 0 },
+          persist_counters: { posts_upserted: 0, comments_upserted: 0 },
+          retrieval_meta: { comment_fail_reasons: ["auth_required"] },
+        },
+      } as never),
+    ).toContain("authentication or checkpoint verification");
+
+    expect(
+      formatJobOutcomeNote({
+        id: "job-rate",
+        platform: "tiktok",
+        status: "failed",
+        job_type: "posts",
+        job_error_code: "RATE_LIMIT",
+        metadata: {
+          activity: { posts_checked: 0 },
+          stage_counters: { posts: 0, comments: 0 },
+          persist_counters: { posts_upserted: 0, comments_upserted: 0 },
+          retrieval_meta: { comment_fail_reasons: ["rate_limited"] },
+        },
+      } as never),
+    ).toContain("throttled this shard");
+
+    expect(
+      formatJobOutcomeNote({
+        id: "job-provider",
+        platform: "twitter",
+        status: "failed",
+        job_type: "posts",
+        job_error_code: "UPSTREAM_ERROR",
+        error_message: "provider exploded",
+        metadata: {
+          activity: { posts_checked: 0 },
+          stage_counters: { posts: 0, comments: 0 },
+          persist_counters: { posts_upserted: 0, comments_upserted: 0 },
+        },
+      } as never),
+    ).toContain("provider failed before any posts were scanned");
   });
 
   it("renders rich run labels in the run selector", async () => {

@@ -51,7 +51,7 @@ type SearchResponse = {
 
 const DEFAULT_LIMIT = 12;
 const SEARCH_DEBOUNCE_MS = 250;
-const MIN_SEARCH_QUERY = 2;
+const MIN_SEARCH_QUERY = 3;
 
 function PersonCard({ person }: { person: PeopleHomeItem }) {
   const href = buildPersonAdminUrl({

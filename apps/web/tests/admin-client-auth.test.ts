@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   let currentUser: { getIdToken: ReturnType<typeof vi.fn> } | null = null;
   let bypassEnabled = false;
+  let idTokenListeners: Array<(user: { getIdToken: ReturnType<typeof vi.fn> } | null) => void> = [];
 
   return {
     setCurrentUser(user: { getIdToken: ReturnType<typeof vi.fn> } | null) {
@@ -11,6 +12,12 @@ const mocks = vi.hoisted(() => {
     getCurrentUser() {
       return currentUser;
     },
+    emitCurrentUser(user: { getIdToken: ReturnType<typeof vi.fn> } | null) {
+      currentUser = user;
+      for (const listener of idTokenListeners) {
+        listener(user);
+      }
+    },
     setBypassEnabled(value: boolean) {
       bypassEnabled = value;
     },
@@ -18,6 +25,15 @@ const mocks = vi.hoisted(() => {
       return bypassEnabled;
     },
     authStateReady: vi.fn(() => Promise.resolve()),
+    onIdTokenChanged(callback: (user: { getIdToken: ReturnType<typeof vi.fn> } | null) => void) {
+      idTokenListeners.push(callback);
+      return () => {
+        idTokenListeners = idTokenListeners.filter((listener) => listener !== callback);
+      };
+    },
+    resetListeners() {
+      idTokenListeners = [];
+    },
   };
 });
 
@@ -28,6 +44,8 @@ vi.mock("@/lib/firebase", () => ({
     },
     authStateReady: (...args: unknown[]) =>
       (mocks.authStateReady as (...inner: unknown[]) => unknown)(...args),
+    onIdTokenChanged: (...args: unknown[]) =>
+      (mocks.onIdTokenChanged as (...inner: unknown[]) => unknown)(...args),
   },
 }));
 
@@ -67,6 +85,7 @@ describe("admin client auth helper", () => {
     mocks.authStateReady.mockReset();
     mocks.authStateReady.mockResolvedValue(undefined);
     mocks.setCurrentUser(null);
+    mocks.resetListeners();
     mocks.setBypassEnabled(false);
   });
 
@@ -143,6 +162,28 @@ describe("admin client auth helper", () => {
     expect(getIdToken).toHaveBeenNthCalledWith(1, false);
     expect(getIdToken).toHaveBeenNthCalledWith(2, false);
     expect(getIdToken).toHaveBeenNthCalledWith(3, false);
+  });
+
+  it("waits for the preferred user to land in auth before reading the token", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("NEXT_PUBLIC_ADMIN_AUTH_READY_TIMEOUT_MS", "50");
+    const getIdToken = vi.fn().mockResolvedValue("preferred-token");
+    const preferredUser = { uid: "admin-uid" } as { uid: string };
+
+    const pending = getClientAuthHeaders({
+      preferredUser: preferredUser as never,
+      tokenRetryDelaysMs: [0],
+      forceRefreshOnFinalAttempt: false,
+    });
+
+    await actMicrotasks();
+    mocks.emitCurrentUser({ uid: "admin-uid", getIdToken } as never);
+    await actMicrotasks();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(pending).resolves.toMatchObject({ Authorization: "Bearer preferred-token" });
+    expect(getIdToken).toHaveBeenCalledTimes(1);
+    expect(getIdToken).toHaveBeenCalledWith(false);
   });
 
   it("forces refresh on the final token retry attempt", async () => {
@@ -227,3 +268,8 @@ describe("admin client auth helper", () => {
     expectAuthorizationHeader(headers, "dev-admin-bypass");
   });
 });
+
+async function actMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}

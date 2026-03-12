@@ -195,6 +195,9 @@ interface BasePost {
   thumbnail_url?: string | null;
   cover_source?: string | null;
   cover_source_confidence?: string | null;
+  metadata_error?: string | null;
+  topic_path?: string | null;
+  status?: PlatformStatusPayload | null;
   user?: PostUserSummary | null;
   owner_profile_pic_url?: string | null;
   hosted_owner_profile_pic_url?: string | null;
@@ -278,6 +281,63 @@ interface ThreadsPost extends BasePost {
 
 type AnyPost = InstagramPost | TikTokPost | YouTubePost | TwitterPost | FacebookPost | ThreadsPost;
 
+interface CommentSyncStatusPayload {
+  status: "idle" | "queued" | "running" | "partial" | "complete" | "failed" | "not_attempted" | "unknown";
+  expected_count?: number;
+  fetched_count?: number;
+  upserted_count?: number;
+  failure_reason?: string | null;
+}
+
+interface MediaMirrorStatusPayload {
+  status:
+    | "not_needed"
+    | "pending"
+    | "queued"
+    | "running"
+    | "partial"
+    | "complete"
+    | "failed"
+    | "not_attempted"
+    | "unknown";
+  source_count?: number;
+  mirrored_count?: number;
+  failed_count?: number;
+  pending_count?: number;
+  partial_count?: number;
+  last_job_id?: string | null;
+  failure_reason?: string | null;
+}
+
+interface ActiveJobSummaryPayload {
+  sync_status?: "queued" | "running";
+  dominant_stage?: "posts" | "comments" | "media_mirror" | "comment_media_mirror" | null;
+  job_count?: number;
+  stage_statuses?: Partial<
+    Record<
+      "posts" | "comments" | "media_mirror" | "comment_media_mirror",
+      { status?: "queued" | "running"; job_count?: number }
+    >
+  >;
+}
+
+interface PlatformStatusPayload {
+  sync_status: "idle" | "queued" | "running" | "partial" | "complete" | "failed";
+  comment_sync_status?: CommentSyncStatusPayload | null;
+  media_mirror_status?: MediaMirrorStatusPayload | null;
+  active_job_summary?: ActiveJobSummaryPayload | null;
+  last_refresh_at?: string | null;
+  last_refresh_reason?: string | null;
+  stale?: boolean;
+  worker_run_id?: string | null;
+}
+
+interface VisiblePlatformStatusCard {
+  platform: string;
+  status: PlatformStatusPayload;
+  postCount: number;
+}
+
 interface PlatformData {
   posts: AnyPost[];
   totals: {
@@ -285,6 +345,7 @@ interface PlatformData {
     total_comments: number;
     total_engagement: number;
   };
+  status?: PlatformStatusPayload | null;
 }
 
 interface WeekDetailResponse {
@@ -303,6 +364,7 @@ interface WeekDetailResponse {
   };
   source_scope: string;
   platforms: Record<string, PlatformData>;
+  status_by_platform?: Record<string, PlatformStatusPayload>;
   totals: {
     posts: number;
     total_comments: number;
@@ -518,6 +580,8 @@ interface RunProgressStagePayload {
   jobs_completed: number;
   jobs_failed: number;
   jobs_active: number;
+  jobs_running?: number;
+  jobs_waiting?: number;
   scraped_count: number;
   saved_count: number;
 }
@@ -616,6 +680,8 @@ interface StageProgressSnapshot {
   completed: number;
   failed: number;
   active: number;
+  running: number;
+  waiting: number;
   scraped: number;
   saved: number;
 }
@@ -894,6 +960,7 @@ const WEEK_DETAIL_METRICS_PAGE_LIMIT = 100;
 const WEEK_DETAIL_METRICS_MAX_PAGES = 500;
 const REQUEST_TIMEOUT_MS = {
   weekDetail: 50_000,
+  weekSummary: 40_000,
   weekDetailRefresh: 90_000,
   weekDetailYoutubeRefresh: 120_000,
   ingestKickoff: 210_000,
@@ -995,6 +1062,22 @@ const fetchWithTimeout = async (
       externalSignal.removeEventListener("abort", onExternalAbort);
     }
   }
+};
+
+const registerInFlightRequest = (
+  requestMap: Map<string, Promise<Response>>,
+  requestKey: string,
+  requestPromise: Promise<Response>,
+): Promise<Response> => {
+  requestMap.set(requestKey, requestPromise);
+  void requestPromise
+    .finally(() => {
+      if (requestMap.get(requestKey) === requestPromise) {
+        requestMap.delete(requestKey);
+      }
+    })
+    .catch(() => {});
+  return requestPromise;
 };
 
 const isTransientDevRestartMessage = (message: string | null | undefined): boolean => {
@@ -1105,6 +1188,89 @@ const toLocalDateToken = (iso: string | null | undefined): string | null => {
   return `${values.year}-${values.month}-${values.day}`;
 };
 
+const parseDateToken = (value: string): { year: number; month: number; day: number } | null => {
+  const match = DATE_TOKEN_RE.exec(value);
+  if (!match) return null;
+  return {
+    year: Number(match[0].slice(0, 4)),
+    month: Number(match[0].slice(5, 7)),
+    day: Number(match[0].slice(8, 10)),
+  };
+};
+
+const getTimeZoneOffsetMs = (timestampMs: number, timeZone: string): number => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestampMs));
+  const values: Record<string, number> = {};
+  for (const part of parts) {
+    if (part.type === "literal") continue;
+    values[part.type] = Number(part.value);
+  }
+  const zonedAsUtc = Date.UTC(
+    values.year ?? 0,
+    (values.month ?? 1) - 1,
+    values.day ?? 1,
+    values.hour ?? 0,
+    values.minute ?? 0,
+    values.second ?? 0,
+  );
+  return zonedAsUtc - timestampMs;
+};
+
+const toZonedUtcIso = (
+  parts: { year: number; month: number; day: number },
+  time: { hour: number; minute: number; second: number; millisecond?: number },
+): string => {
+  const baseUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    time.hour,
+    time.minute,
+    time.second,
+    time.millisecond ?? 0,
+  );
+  const firstOffset = getTimeZoneOffsetMs(baseUtc, SOCIAL_TIME_ZONE);
+  let correctedUtc = baseUtc - firstOffset;
+  const secondOffset = getTimeZoneOffsetMs(correctedUtc, SOCIAL_TIME_ZONE);
+  if (secondOffset !== firstOffset) {
+    correctedUtc = baseUtc - secondOffset;
+  }
+  return new Date(correctedUtc).toISOString();
+};
+
+const addDays = (
+  parts: { year: number; month: number; day: number },
+  days: number,
+): { year: number; month: number; day: number } => {
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days, 12, 0, 0));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+};
+
+const buildIsoDayRange = (dayLocal: string): { dateStart: string; dateEnd: string } | null => {
+  const parsed = parseDateToken(dayLocal);
+  if (!parsed) return null;
+  const dateStart = toZonedUtcIso(parsed, { hour: 0, minute: 0, second: 0, millisecond: 0 });
+  const nextDay = addDays(parsed, 1);
+  const nextDateStart = toZonedUtcIso(nextDay, { hour: 0, minute: 0, second: 0, millisecond: 0 });
+  return {
+    dateStart,
+    dateEnd: new Date(Date.parse(nextDateStart) - 1).toISOString(),
+  };
+};
+
 const toDayFilterLabel = (token: string | null): string | null => {
   if (!token || !DATE_TOKEN_RE.test(token)) return null;
   const [yearRaw, monthRaw, dayRaw] = token.split("-");
@@ -1213,6 +1379,10 @@ function getActualCommentsForPost(platform: string, post: AnyPost): number {
 function getSavedCommentsForPost(post: AnyPost): number {
   const value = Number(post.total_comments_available ?? 0);
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function getDisplayedSavedCommentsForPost(platform: string, post: AnyPost): number {
+  return Math.min(getSavedCommentsForPost(post), getActualCommentsForPost(platform, post));
 }
 
 function formatSavedVsActualComments(saved: number, actual: number): string {
@@ -1938,7 +2108,10 @@ function buildSocialStats(platform: string, post: AnyPost): SocialStatsItem[] {
     { label: "Engagement", value: fmtNum(Number(post.engagement ?? 0)) },
     {
       label: platform === "twitter" || platform === "threads" ? "Replies" : "Comments",
-      value: formatSavedVsActualComments(getSavedCommentsForPost(post), getActualCommentsForPost(platform, post)),
+      value: formatSavedVsActualComments(
+        getDisplayedSavedCommentsForPost(platform, post),
+        getActualCommentsForPost(platform, post),
+      ),
     },
   ];
 
@@ -2982,8 +3155,9 @@ function getStageStatus(stage: StageProgressSnapshot): {
 } {
   if (stage.total <= 0) {
     return {
-      label: stage.active > 0 ? "Running" : "Waiting",
-      toneClass: stage.active > 0 ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600",
+      label: stage.running > 0 ? "Running" : stage.waiting > 0 ? "Queued" : "Waiting",
+      toneClass:
+        stage.running > 0 ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600",
     };
   }
   const finished = stage.completed + stage.failed;
@@ -2996,7 +3170,7 @@ function getStageStatus(stage: StageProgressSnapshot): {
     }
     return { label: "Done", toneClass: "bg-emerald-100 text-emerald-700" };
   }
-  if (stage.active > 0) {
+  if (stage.running > 0) {
     return { label: "Running", toneClass: "bg-blue-100 text-blue-700" };
   }
   return { label: "Queued", toneClass: "bg-gray-100 text-gray-600" };
@@ -3004,6 +3178,94 @@ function getStageStatus(stage: StageProgressSnapshot): {
 
 function formatRunStatus(status: SocialRun["status"]): string {
   return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+}
+
+function formatPlatformSyncStatus(status: string | null | undefined, postCount = 1): string {
+  const normalized = String(status ?? "").trim();
+  if (postCount <= 0 && !["queued", "running"].includes(normalized.toLowerCase())) return "No posts";
+  if (!normalized) return "Idle";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1).replace(/_/g, " ");
+}
+
+function getPlatformSyncTone(status: string | null | undefined, stale = false, postCount = 1): string {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (postCount <= 0 && !["queued", "running"].includes(normalized)) return "bg-zinc-100 text-zinc-600";
+  if (normalized === "failed") return "bg-red-100 text-red-700";
+  if (normalized === "running" || normalized === "queued") return "bg-blue-100 text-blue-700";
+  if (normalized === "partial" || stale) return "bg-amber-100 text-amber-700";
+  if (normalized === "complete") return "bg-emerald-100 text-emerald-700";
+  return "bg-zinc-100 text-zinc-600";
+}
+
+const ACTIVE_JOB_STAGE_ORDER: Array<NonNullable<ActiveJobSummaryPayload["dominant_stage"]>> = [
+  "posts",
+  "comments",
+  "media_mirror",
+  "comment_media_mirror",
+];
+
+function formatActiveJobSummary(summary: ActiveJobSummaryPayload | null | undefined): string | null {
+  if (!summary?.sync_status) return null;
+  const stageLabel = String(summary.dominant_stage ?? "sync").replaceAll("_", " ");
+  const jobCount = Number(summary.job_count ?? 0);
+  const countLabel = Number.isFinite(jobCount) && jobCount > 0 ? ` · ${fmtNum(jobCount)} jobs` : "";
+  const stageStatuses = Object.entries(summary.stage_statuses ?? {})
+    .filter((entry): entry is [string, { status?: "queued" | "running"; job_count?: number }] => Boolean(entry[0]))
+    .sort(
+      ([stageA], [stageB]) =>
+        ACTIVE_JOB_STAGE_ORDER.indexOf(stageA as (typeof ACTIVE_JOB_STAGE_ORDER)[number]) -
+        ACTIVE_JOB_STAGE_ORDER.indexOf(stageB as (typeof ACTIVE_JOB_STAGE_ORDER)[number]),
+    )
+    .map(([stage, payload]) => {
+      const stageJobCount = Number(payload?.job_count ?? 0);
+      const countSuffix = Number.isFinite(stageJobCount) && stageJobCount > 0 ? ` ${fmtNum(stageJobCount)}` : "";
+      return `${formatPlatformSyncStatus(payload?.status)} ${stage.replaceAll("_", " ")}${countSuffix}`;
+    });
+  const detailLabel = stageStatuses.length > 1 ? ` · ${stageStatuses.join(", ")}` : "";
+  return `${formatPlatformSyncStatus(summary.sync_status)} ${stageLabel}${countLabel}${detailLabel}`;
+}
+
+function formatPlatformStatusSummary(status: PlatformStatusPayload | null | undefined, postCount = 1): string {
+  const syncStatus = String(status?.sync_status ?? "").trim().toLowerCase();
+  if (postCount <= 0 && ["partial", "failed"].includes(syncStatus)) {
+    return "Previous sync attempts for this week did not complete cleanly";
+  }
+  if (postCount <= 0 && !["queued", "running"].includes(syncStatus)) return "No posts in this week window";
+  if (postCount <= 0) return "Sync in progress for this week window";
+  if (!status) return "No status available";
+  const commentSaved = status.comment_sync_status?.upserted_count ?? 0;
+  const commentExpected = status.comment_sync_status?.expected_count ?? 0;
+  const mirrorReady = status.media_mirror_status?.mirrored_count ?? 0;
+  const mirrorTotal = status.media_mirror_status?.source_count ?? 0;
+  const displayedCommentSaved = commentExpected > 0 ? Math.min(commentSaved, commentExpected) : commentSaved;
+  const displayedMirrorReady = mirrorTotal > 0 ? Math.min(mirrorReady, mirrorTotal) : mirrorReady;
+  const commentText =
+    commentExpected > 0 ? `Comments ${fmtNum(displayedCommentSaved)}/${fmtNum(commentExpected)}` : "Comments n/a";
+  const mirrorText =
+    mirrorTotal > 0 ? `Mirror ${fmtNum(displayedMirrorReady)}/${fmtNum(mirrorTotal)}` : "Mirror n/a";
+  return `${commentText} · ${mirrorText}`;
+}
+
+function hasPlatformSyncInFlight(status: PlatformStatusPayload | null | undefined): boolean {
+  const normalized = String(status?.sync_status ?? "").trim().toLowerCase();
+  return normalized === "queued" || normalized === "running";
+}
+
+function getPlatformStatusPostCount(response: WeekDetailResponse, platform: string): number {
+  return Math.max(0, Number(response.platforms?.[platform]?.totals?.posts ?? 0));
+}
+
+function getVisiblePlatformStatuses(
+  response: WeekDetailResponse | null,
+  platformFilter: PlatformFilter,
+): VisiblePlatformStatusCard[] {
+  if (!response?.status_by_platform) return [];
+  const selectedPlatforms = platformFilter === "all" ? PLATFORM_KEYS : [platformFilter];
+  return selectedPlatforms.flatMap((platform) => {
+    const status = response.status_by_platform?.[platform];
+    if (!status) return [];
+    return [{ platform, status, postCount: getPlatformStatusPostCount(response, platform) }];
+  });
 }
 
 const MAX_THREADED_COMMENT_DEPTH = 128;
@@ -3743,10 +4005,11 @@ function PostStatsDrawer({
 function EngagementRow({ platform, post }: { platform: string; post: AnyPost }) {
   const items: { label: string; value: string }[] = [];
   const savedComments = getSavedCommentsForPost(post);
+  const displayedSavedComments = getDisplayedSavedCommentsForPost(platform, post);
   const actualComments = getActualCommentsForPost(platform, post);
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
   const commentFormatter = platform === "twitter" ? fmtExactNum : fmtNum;
-  const commentsValue = `${commentFormatter(savedComments)}/${commentFormatter(actualComments)}${
+  const commentsValue = `${commentFormatter(displayedSavedComments)}/${commentFormatter(actualComments)}${
     commentsCoverageIncomplete ? "*" : ""
   }`;
 
@@ -3855,6 +4118,7 @@ function PostCard({
   const durationSeconds = getNum(post, "duration_seconds");
   const actualComments = getActualCommentsForPost(platform, post);
   const savedComments = getSavedCommentsForPost(post);
+  const displayedSavedComments = getDisplayedSavedCommentsForPost(platform, post);
   const commentsCoverageIncomplete = isCommentsCoverageIncomplete(savedComments, actualComments);
   const thumbnailUrl = getPostThumbnailUrl(platform, post);
   const platformIconKey = getPlatformIconKey(platform);
@@ -3866,6 +4130,8 @@ function PostCard({
   const captionAuthorLabel = formatHandleLabel(post.author) || "@unknown";
   const normalizedCaptionText = normalizeCaptionPreviewText(platform, post.text);
   const topic = platform === "threads" ? getStr(post, "topic") : "";
+  const postStatus = post.status ?? null;
+  const postStatusTone = getPlatformSyncTone(postStatus?.sync_status, Boolean(postStatus?.stale));
 
   return (
     <>
@@ -4025,6 +4291,40 @@ function PostCard({
             <span className="font-medium text-gray-500">Topic</span>: {topic.trim().length > 0 ? topic : "-"}
           </div>
         )}
+        {(postStatus || post.metadata_error) && (
+          <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
+            {postStatus && (
+              <>
+                <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${postStatusTone}`}>
+                  {formatPlatformSyncStatus(postStatus.sync_status)}
+                </span>
+                {postStatus.comment_sync_status && (
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 ${getPlatformSyncTone(
+                      postStatus.comment_sync_status.status,
+                    )}`}
+                  >
+                    Comment sync {formatPlatformSyncStatus(postStatus.comment_sync_status.status)}
+                  </span>
+                )}
+                {postStatus.media_mirror_status && (
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 ${getPlatformSyncTone(
+                      postStatus.media_mirror_status.status,
+                    )}`}
+                  >
+                    Mirror {formatPlatformSyncStatus(postStatus.media_mirror_status.status)}
+                  </span>
+                )}
+              </>
+            )}
+            {post.metadata_error && (
+              <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-red-700">
+                Metadata {post.metadata_error}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Engagement metrics */}
         <EngagementRow platform={platform} post={post} />
@@ -4040,7 +4340,7 @@ function PostCard({
               Post Details
               {actualComments > 0 && (
                 <span className="ml-1 opacity-70">
-                  · {formatSavedVsActualComments(savedComments, actualComments)}
+                  · {formatSavedVsActualComments(displayedSavedComments, actualComments)}
                   {commentsCoverageIncomplete ? "*" : ""} comments
                 </span>
               )}
@@ -4210,6 +4510,8 @@ export default function WeekDetailPage() {
   const weekMetricsContextRef = useRef("");
   const weekDetailInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
   const weekSummaryInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
+  const syncWorkerHealthInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
+  const syncWeekLiveHealthInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
   const [weekOverviewLoadedKey, setWeekOverviewLoadedKey] = useState<string | null>(null);
   const syncSessionStateRef = useRef<{
     dateStart: string;
@@ -4447,6 +4749,45 @@ export default function WeekDetailPage() {
     return dayFilterFromQuery;
   }, [data, dayFilterFromQuery]);
 
+  const appendSyncRunScopeParams = useCallback(
+    (
+      params: URLSearchParams,
+      options?: {
+        platforms?: Array<Exclude<PlatformFilter, "all">> | null;
+        dateStart?: string | null;
+        dateEnd?: string | null;
+      },
+    ) => {
+      const scopedPlatforms = options?.platforms ?? (platformFilter !== "all" ? [platformFilter] : null);
+      if (scopedPlatforms && scopedPlatforms.length > 0) {
+        for (const platform of scopedPlatforms) {
+          params.append("platforms", platform);
+        }
+      }
+      const scopedDateStart = options?.dateStart ?? null;
+      const scopedDateEnd = options?.dateEnd ?? null;
+      if (scopedDateStart && scopedDateEnd) {
+        params.set("date_start", scopedDateStart);
+        params.set("date_end", scopedDateEnd);
+        return;
+      }
+      if (activeDayFilter) {
+        const dayRange = buildIsoDayRange(activeDayFilter);
+        if (dayRange) {
+          params.set("date_start", dayRange.dateStart);
+          params.set("date_end", dayRange.dateEnd);
+        }
+        return;
+      }
+      params.set("week_index", String(weekIndexInt));
+      if (data?.week?.start && data.week.end) {
+        params.set("date_start", data.week.start);
+        params.set("date_end", data.week.end);
+      }
+    },
+    [activeDayFilter, data?.week?.end, data?.week?.start, platformFilter, weekIndexInt],
+  );
+
   const recentShowLabel = useMemo(() => {
     const showName = data?.season.show_name?.trim();
     return showName || humanizeSlug(showSlugForRouting);
@@ -4626,21 +4967,19 @@ export default function WeekDetailPage() {
         const requestKey = `GET ${url}`;
         let inFlight = weekDetailInFlightRef.current.get(requestKey);
         if (!inFlight) {
-          inFlight = fetchWithTimeout(
-            url,
-            {
-              headers,
-              cache: "no-store",
-            },
-            REQUEST_TIMEOUT_MS.weekDetail,
-            "Week detail request timed out",
+          inFlight = registerInFlightRequest(
+            weekDetailInFlightRef.current,
+            requestKey,
+            fetchWithTimeout(
+              url,
+              {
+                headers,
+                cache: "no-store",
+              },
+              REQUEST_TIMEOUT_MS.weekDetail,
+              "Week detail request timed out",
+            ),
           );
-          weekDetailInFlightRef.current.set(requestKey, inFlight);
-          void inFlight.finally(() => {
-            if (weekDetailInFlightRef.current.get(requestKey) === inFlight) {
-              weekDetailInFlightRef.current.delete(requestKey);
-            }
-          });
         }
         const rawRes = await inFlight;
         const res = typeof rawRes.clone === "function" ? rawRes.clone() : rawRes;
@@ -4752,21 +5091,19 @@ export default function WeekDetailPage() {
       const requestKey = `GET ${url}`;
       let inFlight = weekSummaryInFlightRef.current.get(requestKey);
       if (!inFlight) {
-        inFlight = fetchWithTimeout(
-          url,
-          {
-            headers,
-            cache: "no-store",
-          },
-          20_000,
-          "Week detail summary request timed out",
+        inFlight = registerInFlightRequest(
+          weekSummaryInFlightRef.current,
+          requestKey,
+          fetchWithTimeout(
+            url,
+            {
+              headers,
+              cache: "no-store",
+            },
+            REQUEST_TIMEOUT_MS.weekSummary,
+            "Week detail summary request timed out",
+          ),
         );
-        weekSummaryInFlightRef.current.set(requestKey, inFlight);
-        void inFlight.finally(() => {
-          if (weekSummaryInFlightRef.current.get(requestKey) === inFlight) {
-            weekSummaryInFlightRef.current.delete(requestKey);
-          }
-        });
       }
       const rawRes = await inFlight;
       const res = typeof rawRes.clone === "function" ? rawRes.clone() : rawRes;
@@ -5113,6 +5450,11 @@ export default function WeekDetailPage() {
       if (resolvedSeasonId) {
         runsParams.set("season_id", resolvedSeasonId);
       }
+      appendSyncRunScopeParams(runsParams, {
+        platforms,
+        dateStart,
+        dateEnd,
+      });
       const response = await fetchWithTimeout(
         `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runsParams.toString()}`,
         { headers, cache: "no-store" },
@@ -5190,7 +5532,14 @@ export default function WeekDetailPage() {
       const jobs = Math.max(0, totalJobs, completedJobs + failedJobs + activeJobs);
       return { runId: recoveredRun.id, jobs };
     },
-    [hasValidNumericPathParams, resolvedSeasonId, seasonNumber, showIdForApi, sourceScope],
+    [
+      appendSyncRunScopeParams,
+      hasValidNumericPathParams,
+      resolvedSeasonId,
+      seasonNumber,
+      showIdForApi,
+      sourceScope,
+    ],
   );
 
   const queueSyncPass = useCallback(
@@ -5235,8 +5584,16 @@ export default function WeekDetailPage() {
             : (["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"] as Array<
                 Exclude<PlatformFilter, "all">
               >);
+        const singlePlatform = requestedPlatforms.length === 1;
+        const singlePlatformTarget = singlePlatform ? requestedPlatforms[0] : null;
         const igTikTokOnly = requestedPlatforms.every((platform) => platform === "instagram" || platform === "tiktok");
-        const shardOptimizedPass = pass === 1 && igTikTokOnly;
+        const shardOptimizedPass = pass === 1 && (igTikTokOnly || singlePlatform);
+        const singleRunnerPass = pass === 1 && (singlePlatform || igTikTokOnly);
+        const optimizedWindowShardHours = singleRunnerPass
+          ? singlePlatformTarget === "instagram" || singlePlatformTarget === "tiktok"
+            ? 12
+            : 24
+          : 4;
         return {
           source_scope: sourceScope,
           max_posts_per_target: 0,
@@ -5245,9 +5602,9 @@ export default function WeekDetailPage() {
           fetch_replies: !igTikTokOnly,
           ingest_mode: ingestMode,
           sync_strategy: "incremental",
-          runner_strategy: shardOptimizedPass ? "single_runner" : "adaptive_dual_runner",
-          runner_count: shardOptimizedPass ? 1 : 2,
-          window_shard_hours: shardOptimizedPass ? 12 : 4,
+          runner_strategy: singleRunnerPass ? "single_runner" : "adaptive_dual_runner",
+          runner_count: singleRunnerPass ? 1 : 2,
+          window_shard_hours: shardOptimizedPass ? optimizedWindowShardHours : 4,
           day_weight_profile: "rhoslc_default",
           priority_mode: "episode_peak_weighted",
           allow_inline_dev_fallback: false,
@@ -5412,7 +5769,7 @@ export default function WeekDetailPage() {
   );
 
   const fetchManualAttachRunCandidates = useCallback(async () => {
-    if (!hasValidNumericPathParams || !showIdForApi || !seasonNumber || !isAdmin) {
+    if (!hasValidNumericPathParams || !showIdForApi || !seasonNumber || !isAdmin || syncingComments) {
       setManualAttachRuns([]);
       return;
     }
@@ -5425,6 +5782,7 @@ export default function WeekDetailPage() {
       if (resolvedSeasonId) {
         runsParams.set("season_id", resolvedSeasonId);
       }
+      appendSyncRunScopeParams(runsParams);
       const response = await fetchWithTimeout(
         `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runsParams.toString()}`,
         { headers, cache: "no-store" },
@@ -5449,6 +5807,7 @@ export default function WeekDetailPage() {
       setManualAttachRuns([]);
     }
   }, [
+    appendSyncRunScopeParams,
     getSyncRunRequestHeaders,
     hasValidNumericPathParams,
     isAdmin,
@@ -5457,6 +5816,7 @@ export default function WeekDetailPage() {
     selectedManualAttachRunId,
     showIdForApi,
     sourceScope,
+    syncingComments,
     syncRunId,
   ]);
 
@@ -5640,22 +6000,52 @@ export default function WeekDetailPage() {
 
   const fetchSyncWorkerHealth = useCallback(async () => {
     const headers = await getSyncRunRequestHeaders();
-    const params = new URLSearchParams();
-    if (resolvedSeasonId) {
-      params.set("season_id", resolvedSeasonId);
+    const url = "/api/admin/trr-api/social/ingest/health-dot";
+    const requestKey = `GET ${url}`;
+    let inFlight = syncWorkerHealthInFlightRef.current.get(requestKey);
+    if (!inFlight) {
+      inFlight = registerInFlightRequest(
+        syncWorkerHealthInFlightRef.current,
+        requestKey,
+        fetchWithTimeout(
+          url,
+          { headers, cache: "no-store" },
+          REQUEST_TIMEOUT_MS.workerHealth,
+          "Social worker health request timed out",
+        ),
+      );
     }
-    const response = await fetchWithTimeout(
-      `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest/worker-health${params.toString() ? `?${params.toString()}` : ""}`,
-      { headers, cache: "no-store" },
-      REQUEST_TIMEOUT_MS.workerHealth,
-      "Social worker health request timed out",
-    );
+    const rawResponse = await inFlight;
+    const response = typeof rawResponse.clone === "function" ? rawResponse.clone() : rawResponse;
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
       throw new Error(body.error ?? "Failed to fetch social worker health");
     }
-    return await parseResponseJson<WorkerHealthPayload>(response, "Failed to fetch social worker health");
-  }, [getSyncRunRequestHeaders, resolvedSeasonId, seasonNumber, showIdForApi]);
+    const payload = await parseResponseJson<Record<string, unknown>>(response, "Failed to fetch social worker health");
+    const workers =
+      payload.workers && typeof payload.workers === "object"
+        ? (payload.workers as Record<string, unknown>)
+        : null;
+    return {
+      queue_enabled: typeof payload.queue_enabled === "boolean" ? payload.queue_enabled : false,
+      healthy:
+        typeof workers?.healthy === "boolean"
+          ? workers.healthy
+          : typeof payload.healthy === "boolean"
+            ? payload.healthy
+            : false,
+      healthy_workers:
+        typeof workers?.healthy_workers === "number"
+          ? workers.healthy_workers
+          : typeof payload.healthy_workers === "number"
+            ? payload.healthy_workers
+            : 0,
+      reason:
+        typeof payload.reason === "string" && payload.reason.trim().length > 0
+          ? payload.reason
+          : null,
+    } satisfies WorkerHealthPayload;
+  }, [getSyncRunRequestHeaders]);
 
   const fetchSyncWeekLiveHealth = useCallback(async () => {
     if (!hasValidNumericPathParams) return null;
@@ -5670,12 +6060,23 @@ export default function WeekDetailPage() {
     if (resolvedSeasonId) {
       params.set("season_id", resolvedSeasonId);
     }
-    const response = await fetchWithTimeout(
-      `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}/live-health?${params.toString()}`,
-      { headers, cache: "no-store" },
-      REQUEST_TIMEOUT_MS.weekLiveHealth,
-      "Week live health request timed out",
-    );
+    const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}/live-health?${params.toString()}`;
+    const requestKey = `GET ${url}`;
+    let inFlight = syncWeekLiveHealthInFlightRef.current.get(requestKey);
+    if (!inFlight) {
+      inFlight = registerInFlightRequest(
+        syncWeekLiveHealthInFlightRef.current,
+        requestKey,
+        fetchWithTimeout(
+          url,
+          { headers, cache: "no-store" },
+          REQUEST_TIMEOUT_MS.weekLiveHealth,
+          "Week live health request timed out",
+        ),
+      );
+    }
+    const rawResponse = await inFlight;
+    const response = typeof rawResponse.clone === "function" ? rawResponse.clone() : rawResponse;
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
       throw new Error(body.error ?? "Failed to fetch week live health");
@@ -5837,13 +6238,13 @@ export default function WeekDetailPage() {
   ]);
 
   useEffect(() => {
-    if (!hasValidNumericPathParams || !isAdmin) return;
+    if (!hasValidNumericPathParams || !isAdmin || syncingComments) return;
     void fetchManualAttachRunCandidates();
     const intervalId = window.setInterval(() => {
       void fetchManualAttachRunCandidates();
     }, 20_000);
     return () => window.clearInterval(intervalId);
-  }, [fetchManualAttachRunCandidates, hasValidNumericPathParams, isAdmin]);
+  }, [fetchManualAttachRunCandidates, hasValidNumericPathParams, isAdmin, syncingComments]);
 
   useEffect(() => {
     if (!syncRunId || !syncingComments) return;
@@ -6325,6 +6726,11 @@ export default function WeekDetailPage() {
     return entries;
   }, [activeDayFilter, platformFilter, summaryPostsByPlatform]);
 
+  const visiblePlatformStatuses = useMemo(
+    () => getVisiblePlatformStatuses(displayData, platformFilter),
+    [displayData, platformFilter],
+  );
+
   const uniquePostTokenSummary = useMemo(() => {
     const collaborators = new Map<string, string>();
     const tags = new Map<string, string>();
@@ -6590,8 +6996,15 @@ export default function WeekDetailPage() {
     if (metricsPostsByPlatform) {
       const totalComments = summaryPosts.reduce((sum, { platform, post }) => sum + getActualCommentsForPost(platform, post), 0);
       const totalLikes = summaryPosts.reduce((sum, { post }) => sum + Math.max(0, Number(getNum(post, "likes") || 0)), 0);
+      const authoritativePosts =
+        platformFilter === "all"
+          ? allTabTotalPosts
+          : Math.max(
+              0,
+              Number(platformTotalsByPlatform?.[platformFilter] ?? displayData.platforms[platformFilter]?.totals?.posts ?? 0),
+            );
       return {
-        posts: summaryPosts.length,
+        posts: authoritativePosts,
         total_comments: totalComments,
         total_likes: totalLikes,
       };
@@ -6631,7 +7044,32 @@ export default function WeekDetailPage() {
     return pd?.totals
       ? { posts: pd.totals.posts, total_comments: pd.totals.total_comments, total_likes: sumLikes(pd.posts ?? []) }
       : { posts: 0, total_comments: 0, total_likes: 0 };
-  }, [activeDayFilter, allTabTotalPosts, displayData, metricsPostsByPlatform, platformFilter, summaryPosts]);
+  }, [
+    activeDayFilter,
+    allTabTotalPosts,
+    displayData,
+    metricsPostsByPlatform,
+    platformFilter,
+    platformTotalsByPlatform,
+    summaryPosts,
+  ]);
+
+  const syncLiveSummaryTotals = useMemo(() => {
+    if (!syncingComments) return null;
+    const rows = syncWeekLiveHealth?.day_account_rows ?? [];
+    if (rows.length === 0) return null;
+    let posts = 0;
+    let totalComments = 0;
+    let totalLikes = 0;
+    for (const row of rows) {
+      if (platformFilter !== "all" && row.platform !== platformFilter) continue;
+      if (activeDayFilter && row.day !== activeDayFilter) continue;
+      posts += Math.max(0, Number(row.posts ?? 0));
+      totalComments += Math.max(0, Number(row.comments ?? 0));
+      totalLikes += Math.max(0, Number(row.likes ?? 0));
+    }
+    return { posts, total_comments: totalComments, total_likes: totalLikes };
+  }, [activeDayFilter, platformFilter, syncWeekLiveHealth?.day_account_rows, syncingComments]);
 
   const platformFilteredMetrics = useMemo(() => {
     const config = PLATFORM_SUMMARY_CONFIG[platformFilter];
@@ -6653,6 +7091,21 @@ export default function WeekDetailPage() {
     }
     return sums;
   }, [platformFilter, summaryPosts]);
+
+  const displayedPlatformMetrics = useMemo(() => {
+    const merged = { ...platformFilteredMetrics };
+    if (!syncingComments || !syncLiveSummaryTotals) return merged;
+    if (Object.prototype.hasOwnProperty.call(merged, "likes")) {
+      merged.likes = Math.max(merged.likes ?? 0, syncLiveSummaryTotals.total_likes);
+    }
+    if (Object.prototype.hasOwnProperty.call(merged, "comments_count")) {
+      merged.comments_count = Math.max(merged.comments_count ?? 0, syncLiveSummaryTotals.total_comments);
+    }
+    if (Object.prototype.hasOwnProperty.call(merged, "comments_normalized")) {
+      merged.comments_normalized = Math.max(merged.comments_normalized ?? 0, syncLiveSummaryTotals.total_comments);
+    }
+    return merged;
+  }, [platformFilteredMetrics, syncLiveSummaryTotals, syncingComments]);
 
   const activeSortLabel = useMemo(() => {
     return SORT_OPTIONS.find((option) => option.key === sortField)?.label ?? "selected metric";
@@ -6749,6 +7202,8 @@ export default function WeekDetailPage() {
           completed: Number(bucket.jobs_completed ?? 0),
           failed: Number(bucket.jobs_failed ?? 0),
           active: Number(bucket.jobs_active ?? 0),
+          running: Number(bucket.jobs_running ?? 0),
+          waiting: Number(bucket.jobs_waiting ?? 0),
           scraped: Number(bucket.scraped_count ?? 0),
           saved: Number(bucket.saved_count ?? 0),
         };
@@ -6764,13 +7219,19 @@ export default function WeekDetailPage() {
           completed: 0,
           failed: 0,
           active: 0,
+          running: 0,
+          waiting: 0,
           scraped: 0,
           saved: 0,
         };
         current.total += 1;
         if (job.status === "completed") current.completed += 1;
         else if (job.status === "failed") current.failed += 1;
-        else if (ACTIVE_RUN_STATUSES.has(job.status)) current.active += 1;
+        else if (ACTIVE_RUN_STATUSES.has(job.status)) {
+          current.active += 1;
+          if (job.status === "running") current.running += 1;
+          else current.waiting += 1;
+        }
         const stageCounters = getJobStageCounters(job);
         current.scraped += stageCounters ? stageCounters.posts + stageCounters.comments : Number(job.items_found ?? 0);
         const persistCounters = getJobPersistCounters(job);
@@ -6784,7 +7245,16 @@ export default function WeekDetailPage() {
 
     for (const requiredStage of ["posts", "comments", "media_mirror", "comment_media_mirror", "other"]) {
       if (!byStage[requiredStage]) {
-        byStage[requiredStage] = { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 };
+        byStage[requiredStage] = {
+          total: 0,
+          completed: 0,
+          failed: 0,
+          active: 0,
+          running: 0,
+          waiting: 0,
+          scraped: 0,
+          saved: 0,
+        };
       }
     }
     return byStage;
@@ -6800,7 +7270,7 @@ export default function WeekDetailPage() {
     };
     return Object.entries(syncStageProgress)
       .filter(([stage, stats]) => {
-        if (stats.total > 0 || stats.active > 0 || stats.scraped > 0 || stats.saved > 0) return true;
+        if (stats.total > 0 || stats.running > 0 || stats.waiting > 0 || stats.scraped > 0 || stats.saved > 0) return true;
         return stage === "posts" || stage === "comments";
       })
       .sort(([left], [right]) => {
@@ -6815,35 +7285,38 @@ export default function WeekDetailPage() {
     const summary = syncRunProgress?.summary ?? syncRun?.summary_normalized ?? syncRun?.summary ?? {};
     const fallbackCompleted = syncJobs.filter((job) => job.status === "completed").length;
     const fallbackFailed = syncJobs.filter((job) => job.status === "failed").length;
-    const fallbackActive = syncJobs.filter((job) => ACTIVE_RUN_STATUSES.has(job.status)).length;
+    const fallbackRunning = syncJobs.filter((job) => job.status === "running").length;
+    const fallbackWaiting = syncJobs.filter(
+      (job) => job.status === "queued" || job.status === "pending" || job.status === "retrying" || job.status === "cancelling",
+    ).length;
     const fallbackTotal = syncJobs.length;
     const stageStats = Object.values(syncStageProgress);
-    const stageActive = stageStats.reduce((sum, stage) => sum + stage.active, 0);
+    const stageRunning = stageStats.reduce((sum, stage) => sum + stage.running, 0);
+    const stageWaiting = stageStats.reduce((sum, stage) => sum + stage.waiting, 0);
     const stageItems = stageStats.reduce((sum, stage) => sum + stage.scraped, 0);
     const stageTelemetry = stageStats.reduce((sum, stage) => sum + stage.scraped + stage.saved, 0);
     const completedFromSummary = Number(summary.completed_jobs ?? Number.NaN);
     const failedFromSummary = Number(summary.failed_jobs ?? Number.NaN);
     const totalFromSummary = Number(summary.total_jobs ?? Number.NaN);
-    const activeFromSummary = Number(summary.active_jobs ?? Number.NaN);
     const completed = Number.isFinite(completedFromSummary)
       ? Math.max(0, Math.max(completedFromSummary, fallbackCompleted))
       : Math.max(0, fallbackCompleted);
     const failed = Number.isFinite(failedFromSummary)
       ? Math.max(0, Math.max(failedFromSummary, fallbackFailed))
       : Math.max(0, fallbackFailed);
-    const active = Number.isFinite(activeFromSummary) && activeFromSummary > 0
-      ? Math.max(0, activeFromSummary)
-      : Math.max(0, Math.max(fallbackActive, stageActive));
+    const running = Math.max(0, Math.max(fallbackRunning, stageRunning));
+    const waiting = Math.max(0, Math.max(fallbackWaiting, stageWaiting));
+    const active = running;
     const totalBase = Number.isFinite(totalFromSummary) && totalFromSummary > 0 ? totalFromSummary : fallbackTotal;
-    const total = Math.max(totalBase, completed + failed + active);
+    const total = Math.max(totalBase, completed + failed + running + waiting);
     const itemsFromSummary = Number(summary.items_found_total ?? Number.NaN);
     const items = Number.isFinite(itemsFromSummary) ? Math.max(0, Math.max(itemsFromSummary, stageItems)) : stageItems;
     const finished = completed + failed;
     const basePct = total > 0 ? Math.round((finished / total) * 100) : syncingComments ? 1 : 100;
-    const liveBoost = active > 0 ? Math.min(35, Math.max(1, Math.round(Math.log10(stageTelemetry + 10) * 8))) : 0;
+    const liveBoost = running > 0 ? Math.min(35, Math.max(1, Math.round(Math.log10(stageTelemetry + 10) * 8))) : 0;
     const pct =
       total > 0
-        ? active > 0
+        ? running > 0
           ? Math.min(99, Math.max(basePct, basePct + liveBoost))
           : Math.min(100, basePct)
         : syncingComments
@@ -6854,6 +7327,8 @@ export default function WeekDetailPage() {
       failed,
       total,
       active,
+      running,
+      waiting,
       items,
       finished,
       pct: Math.max(0, Math.min(100, pct)),
@@ -6876,6 +7351,10 @@ export default function WeekDetailPage() {
     if (lanes.length > 0) return lanes;
     return syncRunnerCount >= 2 ? ["A", "B"] : ["A"];
   }, [syncRunProgress?.worker_runtime?.scheduler_lanes, syncRunnerCount]);
+
+  const syncScheduleModeLabel = useMemo(() => {
+    return syncRunnerCount >= 2 ? `Dual-lane schedule (${syncRunnerCount} lanes)` : "Single-lane schedule";
+  }, [syncRunnerCount]);
 
   const syncActiveWorkersNow = useMemo(() => {
     return Number(syncRunProgress?.worker_runtime?.active_workers_now ?? 0);
@@ -6902,7 +7381,7 @@ export default function WeekDetailPage() {
           handle,
           handleLabel: formatHandleLabel(handle),
           runnerLanes: [...syncRuntimeLanes],
-          totals: { total: 0, completed: 0, failed: 0, active: 0, scraped: 0, saved: 0 },
+          totals: { total: 0, completed: 0, failed: 0, active: 0, running: 0, waiting: 0, scraped: 0, saved: 0 },
           stages: [],
         };
         const stageSnapshot: HandleStageProgressSnapshot = {
@@ -6911,6 +7390,8 @@ export default function WeekDetailPage() {
           completed: Number(entry.jobs_completed ?? 0),
           failed: Number(entry.jobs_failed ?? 0),
           active: Number(entry.jobs_active ?? 0),
+          running: Number(entry.jobs_running ?? 0),
+          waiting: Number(entry.jobs_waiting ?? 0),
           scraped: Number(entry.scraped_count ?? 0),
           saved: Number(entry.saved_count ?? 0),
         };
@@ -6918,6 +7399,8 @@ export default function WeekDetailPage() {
         existing.totals.completed += stageSnapshot.completed;
         existing.totals.failed += stageSnapshot.failed;
         existing.totals.active += stageSnapshot.active;
+        existing.totals.running += stageSnapshot.running;
+        existing.totals.waiting += stageSnapshot.waiting;
         existing.totals.scraped += stageSnapshot.scraped;
         existing.totals.saved += stageSnapshot.saved;
         existing.stages.push(stageSnapshot);
@@ -6961,7 +7444,14 @@ export default function WeekDetailPage() {
     return [];
   }, [syncRunProgress?.recent_log]);
 
-  const displayedTotals = filteredTotals;
+  const displayedTotals = useMemo(() => {
+    if (!syncingComments || !syncLiveSummaryTotals) return filteredTotals;
+    return {
+      posts: Math.max(filteredTotals.posts, syncLiveSummaryTotals.posts),
+      total_comments: Math.max(filteredTotals.total_comments, syncLiveSummaryTotals.total_comments),
+      total_likes: Math.max(filteredTotals.total_likes, syncLiveSummaryTotals.total_likes),
+    };
+  }, [filteredTotals, syncLiveSummaryTotals, syncingComments]);
 
   const syncAccountsByPlatform = useMemo(() => {
     const byPlatform = new Map<string, Set<string>>();
@@ -6983,12 +7473,17 @@ export default function WeekDetailPage() {
   }, [syncRunProgress?.per_handle]);
 
   const syncWeekDayAccountRows = useMemo(() => {
-    return [...(syncWeekLiveHealth?.day_account_rows ?? [])].sort((left, right) => {
+    const scopedRows = (syncWeekLiveHealth?.day_account_rows ?? []).filter((row) => {
+      if (platformFilter !== "all" && row.platform !== platformFilter) return false;
+      if (activeDayFilter && row.day !== activeDayFilter) return false;
+      return true;
+    });
+    return [...scopedRows].sort((left, right) => {
       if (left.day !== right.day) return left.day.localeCompare(right.day);
       if (left.platform !== right.platform) return left.platform.localeCompare(right.platform);
       return left.account.localeCompare(right.account);
     });
-  }, [syncWeekLiveHealth?.day_account_rows]);
+  }, [activeDayFilter, platformFilter, syncWeekLiveHealth?.day_account_rows]);
 
   const syncWeekAssetRows = useMemo(() => {
     const order: Record<string, number> = {
@@ -7004,6 +7499,13 @@ export default function WeekDetailPage() {
     });
   }, [syncWeekLiveHealth?.asset_health]);
 
+  useEffect(() => {
+    if (!syncRunId || !syncWeekLiveHealth) return;
+    void fetchSyncWeekLiveHealth().catch(() => {
+      // Keep historical sync panels resilient when live-health refresh is temporarily unavailable.
+    });
+  }, [fetchSyncWeekLiveHealth, platformFilter, syncRunId, syncWeekLiveHealth]);
+
   const syncStepStatus = useMemo(() => {
     const queueStatus = (() => {
       if (!syncRun) {
@@ -7018,7 +7520,7 @@ export default function WeekDetailPage() {
       if (TERMINAL_RUN_STATUSES.has(syncRun.status)) {
         return { label: "Done", toneClass: "bg-emerald-100 text-emerald-700" };
       }
-      if (syncProgress.active > 0) {
+      if (syncProgress.running > 0) {
         return { label: "Running", toneClass: "bg-blue-100 text-blue-700" };
       }
       return { label: "Queued", toneClass: "bg-gray-100 text-gray-600" };
@@ -7028,7 +7530,7 @@ export default function WeekDetailPage() {
       stages[stageKey] = getStageStatus(stage);
     }
     return { queue: queueStatus, stages };
-  }, [syncProgress.active, syncRun, syncStageProgress]);
+  }, [syncProgress.running, syncRun, syncStageProgress]);
 
   const buildSeasonTabHref = useCallback(
     (tabId: SeasonTabId): string => {
@@ -7423,7 +7925,7 @@ export default function WeekDetailPage() {
                   </div>
                   <div className="mt-1 text-gray-600">
                     {syncRun
-                      ? `${formatRunStatus(syncRun.status)}${syncProgress.active > 0 ? ` · ${syncProgress.active} active` : ""}`
+                      ? `${formatRunStatus(syncRun.status)}${syncProgress.running > 0 ? ` · ${syncProgress.running} running` : ""}${syncProgress.waiting > 0 ? ` · ${syncProgress.waiting} queued` : ""}`
                       : "Queued"}
                   </div>
                 </div>
@@ -7442,7 +7944,8 @@ export default function WeekDetailPage() {
                     </div>
                     <div className="mt-0.5 text-gray-500 tabular-nums">
                       {stage.completed + stage.failed}/{stage.total || "?"} jobs
-                      {stage.active > 0 ? ` · ${stage.active} active` : ""}
+                      {stage.running > 0 ? ` · ${stage.running} running` : ""}
+                      {stage.waiting > 0 ? ` · ${stage.waiting} queued` : ""}
                       {stage.failed > 0 ? ` · ${stage.failed} failed` : ""}
                     </div>
                   </div>
@@ -7578,8 +8081,7 @@ export default function WeekDetailPage() {
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900">Per-Handle Job Progress</h3>
                   <p className="text-xs text-gray-500">
-                    {syncRunnerCount >= 2 ? `Dual-runner mode (${syncRunnerCount} workers)` : "Single-runner mode (1 worker)"} ·
-                    {" "}lanes {syncRuntimeLanes.join(", ")} · {fmtNum(syncActiveWorkersNow)} active workers now
+                    {syncScheduleModeLabel} · lanes {syncRuntimeLanes.join(", ")} · {fmtNum(syncActiveWorkersNow)} workers currently running jobs
                   </p>
                 </div>
               </div>
@@ -7606,7 +8108,8 @@ export default function WeekDetailPage() {
                       </p>
                       <p className="mt-1 text-[11px] tabular-nums text-gray-600">
                         {card.totals.completed + card.totals.failed}/{card.totals.total || "?"} complete
-                        {card.totals.active > 0 ? ` · ${card.totals.active} active` : ""}
+                        {card.totals.running > 0 ? ` · ${card.totals.running} running` : ""}
+                        {card.totals.waiting > 0 ? ` · ${card.totals.waiting} queued` : ""}
                         {` · ${fmtNum(card.totals.scraped)} scraped`}
                         {card.totals.saved > 0 ? ` · ${fmtNum(card.totals.saved)} saved` : ""}
                       </p>
@@ -7622,7 +8125,8 @@ export default function WeekDetailPage() {
                               </span>
                             </div>
                             <div className="mt-0.5 text-[11px] tabular-nums text-gray-500">
-                              {stage.active > 0 ? `${stage.active} active · ` : ""}
+                              {stage.running > 0 ? `${stage.running} running · ` : ""}
+                              {stage.waiting > 0 ? `${stage.waiting} queued · ` : ""}
                               {fmtNum(stage.scraped)} scraped
                               {stage.saved > 0 ? ` · ${fmtNum(stage.saved)} saved` : ""}
                             </div>
@@ -7638,8 +8142,50 @@ export default function WeekDetailPage() {
           )}
 
           {/* Summary bar - Row 1: Numeric metrics (platform-specific) */}
+          {visiblePlatformStatuses.length > 0 && (
+            <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {visiblePlatformStatuses.map(({ platform, status, postCount }) => (
+                <div key={`platform-status-${platform}`} className="rounded-lg border border-gray-200 bg-white p-4">
+                  {(() => {
+                    const syncInFlight = hasPlatformSyncInFlight(status);
+                    return (
+                      <>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-gray-900">{PLATFORM_LABELS[platform] ?? platform}</span>
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${getPlatformSyncTone(status.sync_status, Boolean(status.stale), postCount)}`}>
+                      {formatPlatformSyncStatus(status.sync_status, postCount)}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-600">{formatPlatformStatusSummary(status, postCount)}</p>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    {postCount <= 0 && !syncInFlight
+                      ? ["partial", "failed"].includes(String(status.sync_status ?? "").trim().toLowerCase())
+                        ? "Prior refresh attempts exist for the selected week"
+                        : "No post refresh activity in selected week"
+                      : postCount <= 0
+                        ? "Sync in progress for selected week"
+                      : status.last_refresh_at
+                        ? `Last refresh ${fmtDateTime(status.last_refresh_at)}`
+                        : "No refresh timestamp"}
+                  </p>
+                  {formatActiveJobSummary(status.active_job_summary) && (
+                    <p className="mt-1 text-[11px] text-gray-600">{formatActiveJobSummary(status.active_job_summary)}</p>
+                  )}
+                  {(postCount > 0 || syncInFlight) && (status.last_refresh_reason || status.worker_run_id) && (
+                    <p className="mt-1 text-[11px] text-gray-500">
+                      {status.last_refresh_reason ? `Reason: ${status.last_refresh_reason}` : "Reason: n/a"}
+                      {status.worker_run_id ? ` · Run ${status.worker_run_id.slice(0, 8)}` : ""}
+                    </p>
+                  )}
+                      </>
+                    );
+                  })()}
+                </div>
+              ))}
+            </div>
+          )}
           <div className={SUMMARY_ROW1_GRID[platformFilter]}>
-            <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
+            <div className="bg-white border border-gray-200 rounded-lg p-4 text-center" data-testid="week-summary-posts">
               <div className="text-2xl font-bold text-gray-900">
                 {fmtNum(displayedTotals.posts)}
               </div>
@@ -7648,7 +8194,7 @@ export default function WeekDetailPage() {
             {PLATFORM_SUMMARY_CONFIG[platformFilter].metrics.map((metric) => (
               <div key={metric.key} className="bg-white border border-gray-200 rounded-lg p-4 text-center">
                 <div className="text-2xl font-bold text-gray-900">
-                  {fmtNum(platformFilteredMetrics[metric.key] ?? 0)}
+                  {fmtNum(displayedPlatformMetrics[metric.key] ?? 0)}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">{metric.label}</div>
               </div>

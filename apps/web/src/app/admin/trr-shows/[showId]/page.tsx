@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useDeferredValue, useEffect, useState, useCallback, useRef, useMemo, type ReactNode } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -12,6 +12,16 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import AdminModal from "@/components/admin/AdminModal";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
+import {
+  Editable,
+  EditableArea,
+  EditableCancel,
+  EditableInput,
+  EditablePreview,
+  EditableSubmit,
+  EditableToolbar,
+  EditableTrigger,
+} from "@/components/ui/editable";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import SeasonSocialAnalyticsSection, {
   type PlatformTab,
@@ -147,13 +157,23 @@ import {
 import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
 import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
+import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
   buildHostFaviconUrl,
   getHostnameFromUrl,
-  isFandomLinkKind,
+  isFandomSeedUrl,
+  isLikelyPageUrl,
+  isSocialLinkKind,
+  normalizeLinkKind,
   parsePersonNameFromLink,
   resolveLinkPageTitle,
+  resolveLinkSiteTitle,
+  resolveShowPageDisplayTitle,
 } from "@/lib/admin/show-page/link-display";
+import {
+  buildLinkDiscoveryProgressSummary,
+  type LinkDiscoveryProgressSummary,
+} from "@/lib/admin/show-page/link-discovery-progress";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -435,22 +455,53 @@ type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
 
 type HealthStatus = "ready" | "missing" | "stale";
 type PersonLinkSourceKey = "bravo" | "imdb" | "tmdb" | "wikipedia" | "wikidata" | "fandom";
-type PersonLinkSourceState = "found" | "missing";
+type PersonLinkSourceState = "missing" | "unvalidated";
+type LinkSourceBadgeKind =
+  | PersonLinkSourceKey
+  | "official"
+  | "google_news"
+  | "instagram"
+  | "tiktok"
+  | "x"
+  | "youtube"
+  | "threads"
+  | "facebook"
+  | "reddit"
+  | "tvdb"
+  | "tvmaze"
+  | "trakt"
+  | "freebase"
+  | "google_kg"
+  | "ratinggraph"
+  | "x_topic"
+  | "other";
 
 type PersonLinkSourceSummary = {
   key: PersonLinkSourceKey;
   label: string;
   state: PersonLinkSourceState;
   url: string | null;
-  urls: { url: string; label: string; iconUrl?: string | null }[];
   link: EntityLink | null;
 };
 
-type PersonAdditionalLinkPill = {
+type ShowSocialLinkPill = {
   id: string;
+  sourceKind: LinkSourceBadgeKind;
+  sourceLabel: string;
+  text: string;
+  url: string;
+  link: EntityLink;
+};
+
+type PersonApprovedLinkPill = {
+  id: string;
+  sourceKind: LinkSourceBadgeKind;
+  sourceLabel: string;
+  text: string;
   label: string;
   url: string;
-  iconUrl?: string | null;
+  iconUrl: string | null;
+  link: EntityLink;
 };
 
 type PersonLinkCoverageCard = {
@@ -458,20 +509,21 @@ type PersonLinkCoverageCard = {
   personName: string;
   seasons: number[];
   approvedLinkCount: number;
-  sources: PersonLinkSourceSummary[];
-  additionalApprovedLinks: PersonAdditionalLinkPill[];
+  approvedLinks: PersonApprovedLinkPill[];
+  missingSources: PersonLinkSourceSummary[];
 };
 
 type SeasonCoverageLinkPill = {
   id: string;
   url: string;
-  text: string;
-  iconUrl?: string | null;
+  sourceKind: LinkSourceBadgeKind;
+  sourceLabel: string;
+  iconUrl: string | null;
+  link: EntityLink;
 };
 
 type SeasonUrlCoverageRow = {
   seasonNumber: number;
-  totalLinks: number;
   links: SeasonCoverageLinkPill[];
 };
 
@@ -651,14 +703,6 @@ const isTrustedShowBrandLogoAsset = (asset: SeasonAsset): boolean => {
   if (originalHost && TRUSTED_SHOW_LOGO_SOURCE_HOSTS.has(originalHost)) return true;
 
   return false;
-};
-
-const ENTITY_LINK_GROUP_LABELS: Record<EntityLinkGroup, string> = {
-  official: "Official",
-  social: "Social",
-  knowledge: "Knowledge",
-  cast_announcements: "Cast Announcements",
-  other: "Other",
 };
 
 const PERSON_LINK_SOURCE_DEFINITIONS: Array<{ key: PersonLinkSourceKey; label: string }> = [
@@ -913,6 +957,453 @@ function PersonSourceLogo({ sourceKey }: { sourceKey: PersonLinkSourceKey }) {
   return <span className={`${baseClass} border-zinc-300 bg-[#f3f4f6] text-zinc-800`}>Fandom</span>;
 }
 
+const PAGE_LINK_SOURCE_ORDER: LinkSourceBadgeKind[] = [
+  "official",
+  "bravo",
+  "fandom",
+  "wikipedia",
+  "wikidata",
+  "imdb",
+  "tmdb",
+  "tvdb",
+  "tvmaze",
+  "trakt",
+  "ratinggraph",
+  "freebase",
+  "google_kg",
+  "x_topic",
+  "google_news",
+  "instagram",
+  "tiktok",
+  "x",
+  "youtube",
+  "threads",
+  "facebook",
+  "reddit",
+  "other",
+];
+
+const PAGE_LINK_SOURCE_LABELS: Record<LinkSourceBadgeKind, string> = {
+  official: "Official",
+  google_news: "Google News",
+  bravo: "Bravo TV",
+  fandom: "Fandom",
+  wikipedia: "Wikipedia",
+  wikidata: "Wikidata",
+  imdb: "IMDb",
+  tmdb: "TMDb",
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  x: "X",
+  youtube: "YouTube",
+  threads: "Threads",
+  facebook: "Facebook",
+  reddit: "Reddit",
+  tvdb: "TVDB",
+  tvmaze: "TVmaze",
+  trakt: "Trakt",
+  freebase: "Freebase",
+  google_kg: "Google KG",
+  ratinggraph: "RatingGraph",
+  x_topic: "X Topic",
+  other: "Link",
+};
+
+const getLinkSourceBadgeKind = (link: EntityLink): LinkSourceBadgeKind => {
+  const normalizedKind = normalizeLinkKind(link.link_kind);
+  const sourceKey = classifyPersonLinkSource(normalizedKind);
+  if (sourceKey) return sourceKey;
+  if (isSocialLinkKind(normalizedKind)) {
+    if (normalizedKind === "x") return "x";
+    return normalizedKind as LinkSourceBadgeKind;
+  }
+  if (normalizedKind === "official_page" || normalizedKind === "network_blog" || normalizedKind === "cast_announcement") {
+    const host = getHostnameFromUrl(link.url)?.toLowerCase() ?? "";
+    if (host.includes("bravotv.com")) return "bravo";
+    return "official";
+  }
+  if (normalizedKind === "tvdb") return "tvdb";
+  if (normalizedKind === "tvmaze") return "tvmaze";
+  if (normalizedKind === "trakt") return "trakt";
+  if (normalizedKind === "freebase") return "freebase";
+  if (normalizedKind === "google_kg") return "google_kg";
+  if (normalizedKind === "ratinggraph") return "ratinggraph";
+  if (normalizedKind === "x_topic") return "x_topic";
+  if (normalizedKind === "google_news_url") return "google_news";
+  return "other";
+};
+
+const getSourceBadgeOrder = (kind: LinkSourceBadgeKind): number => {
+  const index = PAGE_LINK_SOURCE_ORDER.indexOf(kind);
+  return index === -1 ? PAGE_LINK_SOURCE_ORDER.length : index;
+};
+
+const getLinkSourceLabel = (link: EntityLink): string => {
+  const badgeKind = getLinkSourceBadgeKind(link);
+  if (badgeKind === "fandom") {
+    return resolveLinkSiteTitle(link) || PAGE_LINK_SOURCE_LABELS.fandom;
+  }
+  if (badgeKind === "official" || badgeKind === "bravo") {
+    const host = getHostnameFromUrl(link.url)?.toLowerCase() ?? "";
+    if (host.includes("bravotv.com")) return "Bravo TV";
+  }
+  return PAGE_LINK_SOURCE_LABELS[badgeKind] || String(link.label || link.link_kind || "Link").trim() || "Link";
+};
+
+const getShowPageLinkTitle = (link: EntityLink, showName: string): string => {
+  return resolveShowPageDisplayTitle(link, showName);
+};
+
+const decodeHandleToken = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const normalizeSocialHandleValue = (value: string): string | null => {
+  const decoded = decodeHandleToken(value).trim();
+  if (!decoded) return null;
+  const handleMatch = decoded.match(/@[\w.]+/);
+  if (handleMatch) {
+    return `@${handleMatch[0].replace(/^@+/, "")}`;
+  }
+  const normalized = decoded.replace(/^@+/, "").trim();
+  if (!normalized) return null;
+  return `@${normalized}`;
+};
+
+const extractSocialHandleFromUrl = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const handle = segments.at(-1) ?? "";
+    return normalizeSocialHandleValue(handle);
+  } catch {
+    return null;
+  }
+};
+
+const getApprovedLinkText = (link: EntityLink, fallbackTitle: string): string => {
+  const badgeKind = getLinkSourceBadgeKind(link);
+  if (isSocialLinkKind(badgeKind)) {
+    const normalizedUrlHandle = extractSocialHandleFromUrl(link.url);
+    if (normalizedUrlHandle) return normalizedUrlHandle;
+    const rawLabel = String(link.label || "").trim();
+    const normalizedLabelHandle = normalizeSocialHandleValue(rawLabel);
+    if (normalizedLabelHandle) return normalizedLabelHandle;
+    return rawLabel.startsWith("@") ? rawLabel : link.url;
+  }
+  return (
+    resolveLinkPageTitle(link) ||
+    String(link.label || "").trim() ||
+    fallbackTitle
+  );
+};
+
+const getCastMemberLinkText = (link: EntityLink, personName: string): string => {
+  const badgeKind = getLinkSourceBadgeKind(link);
+  if (isSocialLinkKind(badgeKind)) {
+    return getApprovedLinkText(link, personName);
+  }
+  return personName;
+};
+
+const getCastMemberNameSourcePriority = (link: EntityLink): number => {
+  const normalizedKind = normalizeLinkKind(link.link_kind);
+  if (normalizedKind === "bravo_profile") return 0;
+  if (normalizedKind === "wikipedia") return 1;
+  if (normalizedKind === "fandom") return 2;
+  if (normalizedKind === "wikidata") return 3;
+  if (normalizedKind === "imdb") return 4;
+  if (normalizedKind === "tmdb") return 5;
+  if (isSocialLinkKind(normalizedKind)) return 99;
+  if (normalizedKind === "freebase" || normalizedKind === "google_kg") return 98;
+  return 50;
+};
+
+const resolveCastMemberNameFromLinks = (
+  links: EntityLink[],
+  rosterName: string | null | undefined
+): string => {
+  const normalizedRosterName = String(rosterName || "").trim();
+  if (normalizedRosterName) return normalizedRosterName;
+
+  const rankedCandidates = links
+    .map((link) => ({
+      link,
+      name: parsePersonNameFromLink(link),
+      statusPriority: normalizeEntityLinkStatus(link.status) === "approved" ? 0 : 1,
+      sourcePriority: getCastMemberNameSourcePriority(link),
+    }))
+    .filter((candidate): candidate is typeof candidate & { name: string } => Boolean(candidate.name))
+    .sort((a, b) => {
+      const statusDiff = a.statusPriority - b.statusPriority;
+      if (statusDiff !== 0) return statusDiff;
+      const sourceDiff = a.sourcePriority - b.sourcePriority;
+      if (sourceDiff !== 0) return sourceDiff;
+      const shorterDiff = a.name.length - b.name.length;
+      if (shorterDiff !== 0) return shorterDiff;
+      return a.name.localeCompare(b.name);
+    });
+
+  return rankedCandidates[0]?.name || "Unknown Person";
+};
+
+const isRenderableSeasonPageLink = (link: EntityLink): boolean => {
+  if (normalizeEntityLinkStatus(link.status) !== "approved") return false;
+  if (link.entity_type !== "season" && !(typeof link.season_number === "number" && link.season_number > 0)) return false;
+  const normalizedKind = normalizeLinkKind(link.link_kind);
+  if (isSocialLinkKind(normalizedKind)) return false;
+  if (normalizedKind === "cast_announcement" || normalizedKind === "network_blog") return false;
+  if (isFandomSeedUrl(link.url)) return false;
+  return isLikelyPageUrl(link.url);
+};
+
+const isRenderableShowPageLink = (link: EntityLink): boolean => {
+  if (normalizeEntityLinkStatus(link.status) !== "approved") return false;
+  if (link.entity_type !== "show" || Number(link.season_number || 0) > 0) return false;
+  const normalizedKind = normalizeLinkKind(link.link_kind);
+  if (link.link_group === "social" || isSocialLinkKind(normalizedKind)) return false;
+  if (normalizedKind === "cast_announcement") return false;
+  if (isFandomSeedUrl(link.url)) return false;
+  return isLikelyPageUrl(link.url);
+};
+
+const toSocialPlatformIconKey = (kind: LinkSourceBadgeKind): SocialPlatformTabIconKey | null => {
+  if (kind === "instagram" || kind === "tiktok" || kind === "youtube" || kind === "threads" || kind === "facebook" || kind === "reddit") {
+    return kind;
+  }
+  if (kind === "x") return "twitter";
+  return null;
+};
+
+const usesBrandIconOnly = (kind: LinkSourceBadgeKind): boolean =>
+  Boolean(
+    toSocialPlatformIconKey(kind) ||
+      kind === "imdb" ||
+      kind === "tmdb" ||
+      kind === "bravo" ||
+      kind === "wikipedia" ||
+      kind === "wikidata"
+  );
+
+function SourceBadge({
+  kind,
+  label,
+  iconUrl,
+  iconOnly = false,
+}: {
+  kind: LinkSourceBadgeKind;
+  label: string;
+  iconUrl?: string | null;
+  iconOnly?: boolean;
+}) {
+  const socialIconKey = toSocialPlatformIconKey(kind);
+  if (socialIconKey) {
+    return (
+      <span className="inline-flex items-center justify-center">
+        <SocialPlatformTabIcon tab={socialIconKey} />
+        {!iconOnly ? <span className="sr-only">{label}</span> : null}
+      </span>
+    );
+  }
+
+  if (kind === "imdb") return <PersonSourceLogo sourceKey="imdb" />;
+  if (kind === "tmdb") return <PersonSourceLogo sourceKey="tmdb" />;
+  if (kind === "bravo") return <PersonSourceLogo sourceKey="bravo" />;
+  if (kind === "wikipedia") return <PersonSourceLogo sourceKey="wikipedia" />;
+  if (kind === "wikidata") return <PersonSourceLogo sourceKey="wikidata" />;
+  if (kind === "fandom") {
+    if (iconUrl) {
+      return (
+        <span className="inline-flex items-center gap-1">
+          <Image
+            src={iconUrl}
+            alt=""
+            width={14}
+            height={14}
+            className="h-3.5 w-3.5 shrink-0 rounded-sm"
+            unoptimized
+          />
+          {!iconOnly ? <span className="text-xs font-semibold text-zinc-700">{label}</span> : null}
+        </span>
+      );
+    }
+    return iconOnly ? <PersonSourceLogo sourceKey="fandom" /> : <span className="text-xs font-semibold text-zinc-700">{label}</span>;
+  }
+
+  const baseClass =
+    "inline-flex h-5 min-w-[2.1rem] items-center justify-center rounded border px-1 text-[10px] font-bold uppercase tracking-[0.08em]";
+  const tokenText = (() => {
+    if (kind === "official") return "Site";
+    if (kind === "tvdb") return "TVDB";
+    if (kind === "tvmaze") return "TVM";
+    if (kind === "trakt") return "Trakt";
+    if (kind === "freebase") return "FB";
+    if (kind === "google_kg") return "GKG";
+    if (kind === "ratinggraph") return "RG";
+    if (kind === "x_topic") return "X";
+    if (kind === "google_news") return "News";
+    return label.slice(0, 6) || "Link";
+  })();
+  return <span className={`${baseClass} border-zinc-300 bg-zinc-100 text-zinc-700`}>{tokenText}</span>;
+}
+
+function SocialHandlePill({ pill }: { pill: ShowSocialLinkPill }) {
+  return (
+    <a
+      href={pill.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex max-w-full items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+      title={pill.url}
+    >
+      <SourceBadge
+        kind={pill.sourceKind}
+        label={pill.sourceLabel}
+        iconOnly={true}
+      />
+      <span className="truncate">{pill.text}</span>
+    </a>
+  );
+}
+
+function LinkDiscoveryStatusCard({ progress }: { progress: LinkDiscoveryProgressSummary }) {
+  return (
+    <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-3 text-blue-900">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-blue-700">Refresh in progress</p>
+          <p className="text-sm font-semibold text-blue-950">{progress.headline}</p>
+          {progress.detail ? <p className="mt-1 text-xs text-blue-800">{progress.detail}</p> : null}
+        </div>
+        {progress.elapsedLabel ? (
+          <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">
+            {progress.elapsedLabel}
+          </span>
+        ) : null}
+      </div>
+      {(progress.stageElapsedLabel || progress.targetSummary || progress.stageProgressLabel) && (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-blue-800">
+          {progress.stageElapsedLabel ? <span>{progress.stageElapsedLabel}</span> : null}
+          {progress.targetSummary ? <span>{progress.targetSummary}</span> : null}
+          {progress.stageProgressLabel ? <span>{progress.stageProgressLabel}</span> : null}
+        </div>
+      )}
+      {progress.currentTargetLabel ? (
+        <p className="mt-2 text-xs font-medium text-blue-900">Current target: {progress.currentTargetLabel}</p>
+      ) : null}
+      {progress.metrics.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {progress.metrics.map((metric) => (
+            <span
+              key={`${metric.label}-${metric.value}`}
+              className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800"
+            >
+              {metric.label}: {metric.value}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InlineEditableLinkUrl({
+  linkId,
+  url,
+  label,
+  saving,
+  onSubmit,
+  children,
+  actions,
+  containerClassName,
+  canEdit = true,
+}: {
+  linkId: string;
+  url: string;
+  label?: string;
+  saving: boolean;
+  onSubmit: (linkId: string, nextUrl: string) => Promise<void>;
+  children?: ReactNode;
+  actions?: ReactNode;
+  containerClassName?: string;
+  canEdit?: boolean;
+}) {
+  return (
+    <Editable value={url} placeholder="https://example.com" onSubmit={(nextUrl) => onSubmit(linkId, nextUrl)}>
+      <div className={containerClassName ? `${containerClassName} space-y-2` : "space-y-2"}>
+        {(children || actions) && (
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">{children}</div>
+            <div className="flex shrink-0 items-center gap-2">
+              {canEdit ? (
+                <EditableTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    className="rounded border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                    aria-label={label ? `Edit URL for ${label}` : "Edit link URL"}
+                  >
+                    Edit URL
+                  </button>
+                </EditableTrigger>
+              ) : null}
+              {actions}
+            </div>
+          </div>
+        )}
+        {!children && !actions && canEdit && (
+          <div className="flex justify-end">
+            <EditableTrigger asChild>
+              <button
+                type="button"
+                disabled={saving}
+                className="rounded border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                aria-label={label ? `Edit URL for ${label}` : "Edit link URL"}
+              >
+                Edit URL
+              </button>
+            </EditableTrigger>
+          </div>
+        )}
+        <EditableArea className="space-y-1">
+          <EditablePreview className="hidden" />
+          <EditableInput
+            type="url"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            className="min-h-9 rounded-lg text-xs"
+          />
+        </EditableArea>
+        <EditableToolbar className="pt-1">
+          <EditableSubmit asChild>
+            <button
+              type="button"
+              disabled={saving}
+              className="rounded border border-zinc-300 bg-zinc-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save URL"}
+            </button>
+          </EditableSubmit>
+          <EditableCancel asChild>
+            <button
+              type="button"
+              disabled={saving}
+              className="rounded border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </EditableCancel>
+        </EditableToolbar>
+      </div>
+    </Editable>
+  );
+}
+
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null;
@@ -950,6 +1441,15 @@ const formatSnapshotAgeLabel = (timestampMs: number): string => {
   if (diffHours < 24) return `${diffHours}h ago`;
   const diffDays = Math.floor(diffHours / 24);
   return `${diffDays}d ago`;
+};
+
+const isHttpUrlValue = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 };
 
 const withSnapshotAgeSuffix = (warning: string | null, timestampMs: number | null): string | null => {
@@ -1029,15 +1529,7 @@ const formatBravoSocialLabel = (key: string): string => {
 };
 
 const extractBravoSocialHandle = (url: string): string | null => {
-  try {
-    const parsed = new URL(url);
-    const segments = parsed.pathname.split("/").filter(Boolean);
-    const handle = segments.at(-1) ?? "";
-    if (!handle) return null;
-    return handle.startsWith("@") ? handle : `@${handle}`;
-  } catch {
-    return null;
-  }
+  return extractSocialHandleFromUrl(url);
 };
 
 const BRAVO_IMPORT_IMAGE_KIND_OPTIONS: Array<{ value: BravoImportImageKind; label: string }> = [
@@ -1716,7 +2208,7 @@ export default function TrrShowDetailPage() {
   const [showLinks, setShowLinks] = useState<EntityLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
   const [linksRefreshing, setLinksRefreshing] = useState(false);
-  const [linksRefreshProgress, setLinksRefreshProgress] = useState<string | null>(null);
+  const [linksRefreshProgress, setLinksRefreshProgress] = useState<LinkDiscoveryProgressSummary | null>(null);
   const [linksError, setLinksError] = useState<string | null>(null);
   const [linksLoadTimedOut, setLinksLoadTimedOut] = useState(false);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
@@ -1725,11 +2217,11 @@ export default function TrrShowDetailPage() {
   const [showLogoSyncNotice, setShowLogoSyncNotice] = useState<string | null>(null);
   const [linkBulkInput, setLinkBulkInput] = useState("");
   const [linkBulkSaving, setLinkBulkSaving] = useState(false);
-  const [googleNewsLinkId, setGoogleNewsLinkId] = useState<string | null>(null);
-  const [googleNewsUrl, setGoogleNewsUrl] = useState("");
-  const [googleNewsSaving, setGoogleNewsSaving] = useState(false);
-  const [googleNewsError, setGoogleNewsError] = useState<string | null>(null);
-  const [googleNewsNotice, setGoogleNewsNotice] = useState<string | null>(null);
+  const [, setGoogleNewsLinkId] = useState<string | null>(null);
+  const [, setGoogleNewsUrl] = useState("");
+  const [, setGoogleNewsError] = useState<string | null>(null);
+  const [, setGoogleNewsNotice] = useState<string | null>(null);
+  const [savingLinkIds, setSavingLinkIds] = useState<Record<string, boolean>>({});
   const [roleRenameDraft, setRoleRenameDraft] = useState<RoleRenameDraft | null>(null);
   const [roleRenameSaving, setRoleRenameSaving] = useState(false);
   const [castRoleEditDraft, setCastRoleEditDraft] = useState<CastRoleEditDraft | null>(null);
@@ -2139,16 +2631,6 @@ export default function TrrShowDetailPage() {
       socialPlatformTab,
     ]
   );
-
-  useEffect(() => {
-    if (!hasUnsavedDetailsChanges) return;
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [hasUnsavedDetailsChanges]);
 
   useEffect(() => {
     if (activeTab !== "cast") return;
@@ -3751,7 +4233,16 @@ export default function TrrShowDetailPage() {
       setLinksError(null);
       setLinksLoadTimedOut(false);
       setLinksRefreshing(true);
-      setLinksRefreshProgress("Refreshing links: scanning show, season, and cast sources...");
+      setLinksRefreshProgress(
+        buildLinkDiscoveryProgressSummary(
+          {
+            stage: "starting",
+            current_stage: "starting",
+            message: "Refreshing links: scanning show, season, and cast sources...",
+          },
+          LINK_DISCOVERY_STAGE_LABELS
+        )
+      );
       try {
         const headers = await getAuthHeaders();
         let completePayload: Record<string, unknown> | null = null;
@@ -3764,24 +4255,7 @@ export default function TrrShowDetailPage() {
             if (!payload || typeof payload !== "object") return;
             const eventPayload = payload as Record<string, unknown>;
             if (event === "progress") {
-              const stage = typeof eventPayload.stage === "string" ? eventPayload.stage : "refresh";
-              const stageLabel = resolveStageLabel(stage, LINK_DISCOVERY_STAGE_LABELS);
-              const elapsedMs = parseProgressNumber(eventPayload.elapsed_ms);
-              const rows = parseProgressNumber(eventPayload.rows);
-              const heartbeat = eventPayload.heartbeat === true;
-              const messageRaw = typeof eventPayload.message === "string" ? eventPayload.message : null;
-              const fallbackStageLabel = stageLabel ?? "Working";
-              let progressMessage = messageRaw || `${fallbackStageLabel}: in progress`;
-              if (!messageRaw) {
-                progressMessage = fallbackStageLabel;
-              }
-              if (rows !== null && rows >= 0) {
-                progressMessage = `${progressMessage} (${rows} rows)`;
-              }
-              if (heartbeat && elapsedMs !== null && elapsedMs >= 0) {
-                progressMessage = `${progressMessage} · ${Math.round(elapsedMs / 1000)}s elapsed`;
-              }
-              setLinksRefreshProgress(progressMessage);
+              setLinksRefreshProgress(buildLinkDiscoveryProgressSummary(eventPayload, LINK_DISCOVERY_STAGE_LABELS));
               return;
             }
             if (event === "error") {
@@ -4079,6 +4553,57 @@ export default function TrrShowDetailPage() {
     }
   }, [fetchShowLinks, getAuthHeaders, linkBulkInput, showId]);
 
+  const updateShowLinkUrl = useCallback(
+    async (linkId: string, nextUrl: string) => {
+      if (!showId) return;
+      const trimmedUrl = nextUrl.trim();
+      if (!trimmedUrl) {
+        setLinksLoadTimedOut(false);
+        setLinksError("Link URL is required.");
+        return;
+      }
+      if (!isHttpUrlValue(trimmedUrl)) {
+        setLinksLoadTimedOut(false);
+        setLinksError("Enter a valid URL.");
+        return;
+      }
+
+      setLinksError(null);
+      setLinksLoadTimedOut(false);
+      setLinksNotice(null);
+      setSavingLinkIds((previous) => ({ ...previous, [linkId]: true }));
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/links/${linkId}`,
+          {
+            method: "PATCH",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ url: trimmedUrl }),
+          },
+          SETTINGS_MUTATION_TIMEOUT_MS
+        );
+        const data = (await response.json().catch(() => ({}))) as { error?: string; detail?: string; url?: string };
+        if (!response.ok) {
+          throw new Error(data.error || data.detail || "Failed to update link");
+        }
+        setLinksNotice("Link updated.");
+        await fetchShowLinks();
+      } catch (err) {
+        setLinksLoadTimedOut(false);
+        setLinksError(err instanceof Error ? err.message : "Failed to update link");
+        throw err;
+      } finally {
+        setSavingLinkIds((previous) => {
+          const next = { ...previous };
+          delete next[linkId];
+          return next;
+        });
+      }
+    },
+    [fetchShowLinks, getAuthHeaders, showId]
+  );
+
   const deleteShowLink = useCallback(
     async (linkId: string) => {
       if (!showId) return;
@@ -4104,86 +4629,6 @@ export default function TrrShowDetailPage() {
     },
     [fetchShowLinks, getAuthHeaders, showId]
   );
-
-  const saveGoogleNewsLink = useCallback(async () => {
-    if (!showId) return;
-    const trimmedUrl = googleNewsUrl.trim();
-    if (!trimmedUrl) {
-      setGoogleNewsError("Google News URL is required.");
-      return;
-    }
-    let parsed: URL;
-    try {
-      parsed = new URL(trimmedUrl);
-    } catch {
-      setGoogleNewsError("Enter a valid URL.");
-      return;
-    }
-    if (!parsed.hostname.includes("news.google.com")) {
-      setGoogleNewsError("Google News URL must use news.google.com.");
-      return;
-    }
-
-    setGoogleNewsSaving(true);
-    setGoogleNewsError(null);
-    setGoogleNewsNotice(null);
-    try {
-      const headers = await getAuthHeaders();
-      if (googleNewsLinkId) {
-        const response = await fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showId}/links/${googleNewsLinkId}`,
-          {
-            method: "PATCH",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              url: trimmedUrl,
-              label: "Google News URL",
-              link_group: "official",
-              link_kind: "google_news_url",
-              status: "approved",
-            }),
-          },
-          SETTINGS_MUTATION_TIMEOUT_MS,
-        );
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to update Google News URL");
-        }
-      } else {
-        const response = await fetchWithTimeout(
-          `/api/admin/trr-api/shows/${showId}/links`,
-          {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              entity_type: "show",
-              entity_id: showId,
-              link_group: "official",
-              link_kind: "google_news_url",
-              label: "Google News URL",
-              url: trimmedUrl,
-              season_number: 0,
-              status: "approved",
-              source: "manual",
-              metadata: {},
-            }),
-          },
-          SETTINGS_MUTATION_TIMEOUT_MS,
-        );
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to create Google News URL");
-        }
-      }
-      setGoogleNewsNotice("Saved Google News URL.");
-      setNewsGoogleUrlMissing(false);
-      await fetchShowLinks();
-    } catch (err) {
-      setGoogleNewsError(err instanceof Error ? err.message : "Failed to save Google News URL");
-    } finally {
-      setGoogleNewsSaving(false);
-    }
-  }, [fetchShowLinks, getAuthHeaders, googleNewsLinkId, googleNewsUrl, showId]);
 
   const fetchShowRoles = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
@@ -6387,33 +6832,6 @@ export default function TrrShowDetailPage() {
   }, [activeTab, fetchShowLinks, hasAccess, showId]);
 
   useEffect(() => {
-    const candidates = showLinks.filter(
-      (link) =>
-        link.entity_type === "show" &&
-        link.link_kind === "google_news_url" &&
-        Number(link.season_number || 0) === 0
-    );
-    if (candidates.length === 0) {
-      setGoogleNewsLinkId(null);
-      setGoogleNewsUrl("");
-      return;
-    }
-    const rankStatus = (status: EntityLinkStatus): number => {
-      if (status === "approved") return 0;
-      if (status === "pending") return 1;
-      return 2;
-    };
-    const sorted = [...candidates].sort((a, b) => {
-      const statusDiff = rankStatus(normalizeEntityLinkStatus(a.status)) - rankStatus(normalizeEntityLinkStatus(b.status));
-      if (statusDiff !== 0) return statusDiff;
-      return (b.updated_at || "").localeCompare(a.updated_at || "");
-    });
-    const selected = sorted[0] ?? null;
-    setGoogleNewsLinkId(selected?.id ?? null);
-    setGoogleNewsUrl(selected?.url ?? "");
-  }, [showLinks]);
-
-  useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "cast" && activeTab !== "settings")) return;
     const autoLoadKey = `${showId}:roles`;
     if (showRolesAutoLoadAttemptedRef.current === autoLoadKey) return;
@@ -7009,187 +7427,161 @@ export default function TrrShowDetailPage() {
     [newsFacets.seasons]
   );
 
-  const settingsLinkSections = useMemo(() => {
-    const showPageLinks: EntityLink[] = [];
-    const seasonPageLinks: EntityLink[] = [];
-    const castMemberLinks: EntityLink[] = [];
+  const settingsLinkSections = useMemo(
+    () =>
+      [
+        {
+          key: "social-links",
+          title: "Social Links",
+          description:
+            "Show-level handles routed from submitted Instagram, TikTok, X, YouTube, Threads, Facebook, and Reddit links.",
+        },
+        {
+          key: "show-pages",
+          title: "Show Pages",
+          description:
+            "Validated show-level pages. Fandom community roots stay internal and only page URLs render here.",
+        },
+        {
+          key: "season-pages",
+          title: "Season Pages",
+          description:
+            "Validated season pages only. Cast-announcement, social, and non-page links are excluded.",
+        },
+        {
+          key: "cast-member-pages",
+          title: "Cast Member Pages",
+          description: showIsBravo
+            ? "Cast-member profile links (BravoTV, Fandom, Wikipedia, IMDb, TMDb, and related pages)."
+            : "Cast-member profile links (Fandom, Wikipedia, IMDb, TMDb, and related pages). Bravo appears only when a Bravo profile link exists.",
+        },
+      ] as const,
+    [showIsBravo]
+  );
+  const socialLinksSection = settingsLinkSections[0];
+  const showPagesSection = settingsLinkSections[1];
+  const seasonPagesSection = settingsLinkSections[2];
+  const castMemberPagesSection = settingsLinkSections[3];
 
-    for (const link of showLinks) {
-      if (link.entity_type === "person") {
-        castMemberLinks.push(link);
-        continue;
-      }
-      if (link.entity_type === "season" || link.link_group === "cast_announcements" || link.season_number > 0) {
-        seasonPageLinks.push(link);
-        continue;
-      }
-      showPageLinks.push(link);
-    }
-
-    const sortLinks = (links: EntityLink[]) =>
-      [...links].sort((a, b) => {
-        if (a.season_number !== b.season_number) return b.season_number - a.season_number;
-        return (a.label || a.url).localeCompare(b.label || b.url);
-      });
-
-    return [
-      {
-        key: "show-pages",
-        title: "Show Pages",
-        description: "Show wiki/fandom pages, IMDb/TMDb show links, BravoTV show pages, and other show-level URLs.",
-        links: sortLinks(showPageLinks),
-      },
-      {
-        key: "season-pages",
-        title: "Season Pages",
-        description: "Season wiki pages and official season/cast announcement links.",
-        links: sortLinks(seasonPageLinks),
-      },
-      {
-        key: "cast-member-pages",
-        title: "Cast Member Pages",
-        description: showIsBravo
-          ? "Cast-member profile links (BravoTV, Fandom, Wikipedia, IMDb, TMDb, and related pages)."
-          : "Cast-member profile links (Fandom, Wikipedia, IMDb, TMDb, and related pages). Bravo appears only when a Bravo profile link exists.",
-        links: sortLinks(castMemberLinks),
-      },
-    ] as const;
-  }, [showIsBravo, showLinks]);
-
-  const showFandomSeedLinks = useMemo(() => {
-    const seeds = showLinks
-      .filter(
-        (link) =>
-          link.entity_type === "show" &&
-          Number(link.season_number || 0) === 0 &&
-          isFandomLinkKind(link.link_kind) &&
-          normalizeEntityLinkStatus(link.status) === "approved"
-      )
+  const showSocialLinks = useMemo<ShowSocialLinkPill[]>(() => {
+    const socialLinks = showLinks
+      .filter((link) => {
+        if (normalizeEntityLinkStatus(link.status) !== "approved") return false;
+        if (link.entity_type !== "show" || Number(link.season_number || 0) > 0) return false;
+        return link.link_group === "social" || isSocialLinkKind(link.link_kind);
+      })
       .map((link) => {
-        const url = String(link.url || "").trim();
-        const title = resolveLinkPageTitle(link) || String(link.label || "Fandom").trim();
-        const host = getHostnameFromUrl(url) || "";
+        const sourceKind = getLinkSourceBadgeKind(link);
         return {
           id: link.id,
-          url,
-          title,
-          host,
-          iconUrl: buildHostFaviconUrl(url),
+          sourceKind,
+          sourceLabel: getLinkSourceLabel(link),
+          text: getApprovedLinkText(link, show?.name ?? "Show"),
+          url: String(link.url || "").trim(),
+          link,
         };
       })
-      .filter((seed) => seed.url.length > 0);
-    const byUrl = new Map<string, (typeof seeds)[number]>();
-    for (const seed of seeds) {
-      const key = seed.url.toLowerCase();
-      if (!byUrl.has(key)) byUrl.set(key, seed);
-    }
-    return Array.from(byUrl.values()).sort((a, b) => {
-      if (a.host !== b.host) return a.host.localeCompare(b.host);
-      return a.title.localeCompare(b.title);
+      .filter((link) => link.url.length > 0);
+
+    const deduped = Array.from(
+      new Map(socialLinks.map((link) => [`${link.sourceKind}::${link.url.toLowerCase()}`, link] as const)).values()
+    );
+
+    return deduped.sort((a, b) => {
+      const orderDiff = getSourceBadgeOrder(a.sourceKind) - getSourceBadgeOrder(b.sourceKind);
+      if (orderDiff !== 0) return orderDiff;
+      const textDiff = a.text.localeCompare(b.text);
+      if (textDiff !== 0) return textDiff;
+      return a.url.localeCompare(b.url);
     });
-  }, [showLinks]);
+  }, [show?.name, showLinks]);
 
-  const overviewExternalIdLinks = useMemo(() => {
-    return showLinks
-      .filter(
-        (link) =>
-          link.entity_type === "show" &&
-          Number(link.season_number || 0) === 0 &&
-          link.link_group !== "social" &&
-          link.link_kind !== "cast_announcement"
-      )
-      .sort((a, b) => (a.label || a.url).localeCompare(b.label || b.url));
-  }, [showLinks]);
+  const showPageLinks = useMemo(() => {
+    return [...showLinks]
+      .filter((link) => isRenderableShowPageLink(link))
+      .sort((a, b) => {
+        const orderDiff = getSourceBadgeOrder(getLinkSourceBadgeKind(a)) - getSourceBadgeOrder(getLinkSourceBadgeKind(b));
+        if (orderDiff !== 0) return orderDiff;
+        const titleDiff = getShowPageLinkTitle(a, show?.name ?? "Show").localeCompare(
+          getShowPageLinkTitle(b, show?.name ?? "Show")
+        );
+        if (titleDiff !== 0) return titleDiff;
+        return a.url.localeCompare(b.url);
+      });
+  }, [show?.name, showLinks]);
 
-  const overviewSocialHandleLinks = useMemo(() => {
-    return showLinks
-      .filter(
-        (link) =>
-          link.entity_type === "show" &&
-          Number(link.season_number || 0) === 0 &&
-          link.link_group === "social"
-      )
-      .sort((a, b) => (a.label || a.url).localeCompare(b.label || b.url));
-  }, [showLinks]);
+  const overviewExternalIdLinks = useMemo(() => showPageLinks, [showPageLinks]);
+
+  const overviewSocialHandleLinks = useMemo(() => showSocialLinks, [showSocialLinks]);
 
   const seasonUrlCoverageRows = useMemo<SeasonUrlCoverageRow[]>(() => {
     const seasonNumberById = new Map<string, number>();
-    const seasonNumbers = new Set<number>();
     for (const season of seasons) {
       if (season.season_number > 0) {
         seasonNumberById.set(season.id, season.season_number);
-        seasonNumbers.add(season.season_number);
       }
     }
 
-    const linksBySeasonNumber = new Map<number, EntityLink[]>();
+    const linksBySeasonNumber = new Map<number, SeasonCoverageLinkPill[]>();
     for (const link of showLinks) {
-      if (normalizeEntityLinkStatus(link.status) !== "approved") continue;
+      if (!isRenderableSeasonPageLink(link)) continue;
+
       let seasonNumber = Number(link.season_number || 0);
       if (seasonNumber <= 0 && link.entity_type === "season") {
         seasonNumber = seasonNumberById.get(String(link.entity_id || "")) ?? 0;
       }
       if (seasonNumber <= 0) continue;
-      seasonNumbers.add(seasonNumber);
-      const existing = linksBySeasonNumber.get(seasonNumber);
-      if (existing) {
-        existing.push(link);
-      } else {
-        linksBySeasonNumber.set(seasonNumber, [link]);
-      }
+
+      const sourceKind = getLinkSourceBadgeKind(link);
+      const entry: SeasonCoverageLinkPill = {
+        id: link.id,
+        url: String(link.url || "").trim(),
+        sourceKind,
+        sourceLabel: getLinkSourceLabel(link),
+        iconUrl: sourceKind === "fandom" ? buildHostFaviconUrl(link.url) : null,
+        link,
+      };
+
+      const existing = linksBySeasonNumber.get(seasonNumber) ?? [];
+      existing.push(entry);
+      linksBySeasonNumber.set(seasonNumber, existing);
     }
 
-    const sortedSeasonNumbers = [...seasonNumbers].sort((a, b) => b - a);
-    return sortedSeasonNumbers.map((seasonNumber) => {
-      const seasonLinks = linksBySeasonNumber.get(seasonNumber) ?? [];
-      const sortedLinks = [...seasonLinks].sort((a, b) => {
-        const aLabel = String(a.label || a.link_kind || "").trim().toLowerCase();
-        const bLabel = String(b.label || b.link_kind || "").trim().toLowerCase();
-        if (aLabel !== bLabel) return aLabel.localeCompare(bLabel);
-        return a.url.localeCompare(b.url);
-      });
-      const seen = new Set<string>();
-      const links: SeasonCoverageLinkPill[] = [];
-      for (const link of sortedLinks) {
-        const dedupeKey = `${link.link_kind.toLowerCase()}::${link.url.trim().toLowerCase()}`;
-        if (!link.url || seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-        const isFandom = isFandomLinkKind(link.link_kind);
-        const pageTitle = resolveLinkPageTitle(link);
-        const label = isFandom
-          ? pageTitle || String(link.label || "Fandom").trim()
-          : String(link.label || link.link_kind || "Link").trim();
-        const host = getHostnameFromUrl(link.url);
-        links.push({
-          id: link.id,
-          url: link.url,
-          text: isFandom ? label : host ? `${label} · ${host}` : label,
-          iconUrl: isFandom ? buildHostFaviconUrl(link.url) : null,
+    return Array.from(linksBySeasonNumber.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([seasonNumber, links]) => {
+        const deduped = Array.from(
+          new Map(
+            links.map((link) => [
+              `${String(link.link.link_kind || "").trim().toLowerCase()}::${link.url.toLowerCase()}`,
+              link,
+            ] as const)
+          ).values()
+        ).sort((a, b) => {
+          const orderDiff = getSourceBadgeOrder(a.sourceKind) - getSourceBadgeOrder(b.sourceKind);
+          if (orderDiff !== 0) return orderDiff;
+          const labelDiff = a.sourceLabel.localeCompare(b.sourceLabel);
+          if (labelDiff !== 0) return labelDiff;
+          return a.url.localeCompare(b.url);
         });
-      }
-      return {
-        seasonNumber,
-        totalLinks: links.length,
-        links,
-      };
-    });
+
+        return {
+          seasonNumber,
+          links: deduped,
+        };
+      });
   }, [seasons, showLinks]);
 
   const castMemberLinkCoverageCards = useMemo<PersonLinkCoverageCard[]>(() => {
     const personLinks = showLinks.filter((link) => link.entity_type === "person");
     if (personLinks.length === 0) return [];
 
-    const personNameById = new Map<string, string>();
+    const rosterNameById = new Map<string, string>();
     for (const member of cast) {
       const name = String(member.full_name || member.cast_member_name || "").trim();
-      if (member.person_id && name && !personNameById.has(member.person_id)) {
-        personNameById.set(member.person_id, name);
+      if (member.person_id && name && !rosterNameById.has(member.person_id)) {
+        rosterNameById.set(member.person_id, name);
       }
-    }
-    for (const link of personLinks) {
-      if (!link.entity_id || personNameById.has(link.entity_id)) continue;
-      const parsedName = parsePersonNameFromLink(link);
-      if (parsedName) personNameById.set(link.entity_id, parsedName);
     }
 
     const linksByPerson = new Map<string, EntityLink[]>();
@@ -7206,6 +7598,8 @@ export default function TrrShowDetailPage() {
 
     const cards: PersonLinkCoverageCard[] = [];
     for (const [personId, links] of linksByPerson.entries()) {
+      const personName = resolveCastMemberNameFromLinks(links, rosterNameById.get(personId));
+
       const linksBySource = new Map<PersonLinkSourceKey, EntityLink[]>();
       const seasonSet = new Set<number>();
       for (const link of links) {
@@ -7214,115 +7608,84 @@ export default function TrrShowDetailPage() {
         }
         const sourceKey = classifyPersonLinkSource(link.link_kind);
         if (!sourceKey) continue;
-        const sourceLinks = linksBySource.get(sourceKey);
-        if (sourceLinks) {
-          sourceLinks.push(link);
+        const existing = linksBySource.get(sourceKey);
+        if (existing) {
+          existing.push(link);
         } else {
           linksBySource.set(sourceKey, [link]);
         }
       }
 
-      const sources = PERSON_LINK_SOURCE_DEFINITIONS.map<PersonLinkSourceSummary>((definition) => {
-        const sourceLinks = linksBySource.get(definition.key) ?? [];
-        const selected = pickPreferredPersonSourceLink(definition.key, sourceLinks);
-        const approvedPills: { url: string; label: string; iconUrl?: string | null }[] = [];
-        for (const link of sourceLinks) {
-          if (normalizeEntityLinkStatus(link.status) !== "approved") continue;
-          const url = String(link.url || "").trim();
-          if (!url) continue;
-          const isFandom = definition.key === "fandom";
-          const pageTitle = isFandom ? resolveLinkPageTitle(link) : null;
-          approvedPills.push({
-            url,
-            label: isFandom ? pageTitle || url : url,
-            iconUrl: isFandom ? buildHostFaviconUrl(url) : null,
-          });
-        }
-        const approvedUrls = Array.from(
-          new Map(
-            approvedPills.map((pill) => [`${pill.url.trim().toLowerCase()}`, pill] as const)
-          ).values()
-        );
-        if (!selected) {
-          return {
-            key: definition.key,
-            label: definition.label,
-            state: "missing",
-            url: null,
-            urls: [],
-            link: null,
-          };
-        }
-
-        const normalizedStatus = normalizeEntityLinkStatus(selected.status);
-        if (normalizedStatus === "approved" && approvedUrls.length > 0) {
-          return {
-            key: definition.key,
-            label: definition.label,
-            state: "found",
-            url: approvedUrls[0]?.url ?? null,
-            urls: approvedUrls,
-            link: selected,
-          };
-        }
-        return {
-          key: definition.key,
-          label: definition.label,
-          state: "missing",
-          url: null,
-          urls: [],
-          link: selected,
-        };
-      });
-
-      const personName =
-        personNameById.get(personId) ||
-        parsePersonNameFromLink(links[0]) ||
-        "Unknown Person";
-
-      const approvedLinkKeys = new Set(
-        links
-          .filter((link) => normalizeEntityLinkStatus(link.status) === "approved")
-          .map((link) => {
-            const normalizedUrl = String(link.url || "").trim().toLowerCase();
-            const normalizedKind = String(link.link_kind || "").trim().toLowerCase();
-            return `${normalizedKind}::${normalizedUrl}`;
-          })
-          .filter((value) => value !== "::")
-      );
-
-      const additionalLinkMap = new Map<string, PersonAdditionalLinkPill>();
+      const approvedLinkMap = new Map<string, PersonApprovedLinkPill>();
       for (const link of links) {
         if (normalizeEntityLinkStatus(link.status) !== "approved") continue;
-        const sourceKey = classifyPersonLinkSource(link.link_kind);
-        if (sourceKey) continue;
         const rawUrl = String(link.url || "").trim();
         if (!rawUrl) continue;
         const dedupeKey = `${String(link.link_kind || "").trim().toLowerCase()}::${rawUrl.toLowerCase()}`;
-        if (additionalLinkMap.has(dedupeKey)) continue;
-        const host = getHostnameFromUrl(rawUrl);
-        const labelBase = String(link.label || link.link_kind || "Link").trim();
-        additionalLinkMap.set(dedupeKey, {
+        if (approvedLinkMap.has(dedupeKey)) continue;
+        const sourceKind = getLinkSourceBadgeKind(link);
+        approvedLinkMap.set(dedupeKey, {
           id: link.id,
+          sourceKind,
+          sourceLabel: getLinkSourceLabel(link),
+          text: getCastMemberLinkText(link, personName),
+          label: String(link.label || link.link_kind || "Link").trim(),
           url: rawUrl,
-          label: host ? `${labelBase} · ${host}` : labelBase,
+          iconUrl: sourceKind === "fandom" ? buildHostFaviconUrl(rawUrl) : null,
+          link,
         });
       }
-      const additionalApprovedLinks = Array.from(additionalLinkMap.values()).sort((a, b) =>
-        a.label.localeCompare(b.label)
-      );
 
-      const visibleSources = showIsBravo
-        ? sources
-        : sources.filter((source) => source.key !== "bravo" || source.state !== "missing");
+      const approvedLinks = Array.from(approvedLinkMap.values()).sort((a, b) => {
+        const orderDiff = getSourceBadgeOrder(a.sourceKind) - getSourceBadgeOrder(b.sourceKind);
+        if (orderDiff !== 0) return orderDiff;
+        const textDiff = a.text.localeCompare(b.text);
+        if (textDiff !== 0) return textDiff;
+        return a.url.localeCompare(b.url);
+      });
+
+      const missingSources = PERSON_LINK_SOURCE_DEFINITIONS.flatMap<PersonLinkSourceSummary>((definition) => {
+        const sourceLinks = linksBySource.get(definition.key) ?? [];
+        const selected = pickPreferredPersonSourceLink(definition.key, sourceLinks);
+        if (!selected) {
+          if (!showIsBravo && definition.key === "bravo") return [];
+          return [
+            {
+              key: definition.key,
+              label: definition.label,
+              state: "missing",
+              url: null,
+              link: null,
+            },
+          ];
+        }
+
+        if (normalizeEntityLinkStatus(selected.status) === "approved") {
+          return [];
+        }
+
+        if (!showIsBravo && definition.key === "bravo") {
+          return [];
+        }
+
+        return [
+          {
+            key: definition.key,
+            label: definition.label,
+            state: "unvalidated",
+            url: String(selected.url || "").trim() || null,
+            link: selected,
+          },
+        ];
+      });
 
       cards.push({
         personId,
         personName,
         seasons: [...seasonSet].sort((a, b) => a - b),
-        approvedLinkCount: approvedLinkKeys.size,
-        sources: visibleSources,
-        additionalApprovedLinks,
+        approvedLinkCount: approvedLinks.length,
+        approvedLinks,
+        missingSources,
       });
     }
 
@@ -10386,7 +10749,7 @@ export default function TrrShowDetailPage() {
     operationsInboxItems.push({
       id: "google-news-url-missing",
       title: "Google News URL missing",
-      detail: "Add Google News URL in Show Settings to enable Google sync in the News tab.",
+      detail: "Add a Google News topic URL in Show Settings links to enable Google sync in the News tab.",
       onClick: () => setTab("settings"),
     });
   }
@@ -12081,14 +12444,12 @@ export default function TrrShowDetailPage() {
                 linksNotice ||
                 rolesError ||
                 rolesWarning ||
-                googleNewsError ||
-                googleNewsNotice ||
                 showLogoSyncError ||
                 showLogoSyncNotice) && (
                 <div className="mb-4 text-sm space-y-2">
                   <p
                     className={`${
-                      linksError || rolesError || googleNewsError || showLogoSyncError
+                      linksError || rolesError || showLogoSyncError
                         ? linksLoadTimedOut || rolesLoadTimedOut
                           ? "text-amber-700"
                           : "text-red-600"
@@ -12097,11 +12458,9 @@ export default function TrrShowDetailPage() {
                   >
                     {linksError ||
                       rolesError ||
-                      googleNewsError ||
                       showLogoSyncError ||
                       rolesWarning ||
                       linksNotice ||
-                      googleNewsNotice ||
                       showLogoSyncNotice}
                   </p>
                   {linksError && linksLoadTimedOut && (
@@ -12126,39 +12485,6 @@ export default function TrrShowDetailPage() {
               )}
 
               <div className="space-y-6">
-                <section>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Google News Feed</h4>
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <p className="mb-2 text-xs text-zinc-500">
-                      Configure the show-level Google News topic URL used by auto-sync in the News tab.
-                    </p>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <input
-                        value={googleNewsUrl}
-                        onChange={(event) => setGoogleNewsUrl(event.target.value)}
-                        placeholder="https://news.google.com/topics/..."
-                        className="min-w-[320px] flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void saveGoogleNewsLink()}
-                        disabled={googleNewsSaving}
-                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
-                      >
-                        {googleNewsSaving ? "Saving..." : "Save URL"}
-                      </button>
-                    </div>
-                    {(googleNewsError || googleNewsNotice) && (
-                      <p className={`mt-2 text-sm ${googleNewsError ? "text-red-600" : "text-zinc-500"}`}>
-                        {googleNewsError || googleNewsNotice}
-                      </p>
-                    )}
-                    {googleNewsLinkId && (
-                      <p className="mt-2 text-xs text-zinc-500">Linked as `google_news_url` (show-level).</p>
-                    )}
-                  </div>
-                </section>
-
                 <section>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">Role Catalog</h4>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
@@ -12234,60 +12560,22 @@ export default function TrrShowDetailPage() {
                     </div>
                   </div>
                   {linksRefreshing && linksRefreshProgress && (
-                    <p className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">
-                      {"Refresh in progress: "}
-                      {linksRefreshProgress}
-                    </p>
+                    <LinkDiscoveryStatusCard progress={linksRefreshProgress} />
                   )}
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                     <div className="mb-4 rounded-lg border border-zinc-200 bg-white p-3">
                       <p className="text-xs text-zinc-500">
                         Paste one or more URLs or handles. The classifier auto-assigns show vs season vs cast-member
                         links and routes social handles (Instagram/TikTok/X/YouTube/Threads/Facebook/Reddit) into
-                        social links.
+                        social links, with show pages, season pages, cast-member pages, and Google News topic URLs
+                        routed into the matching sections below.
                       </p>
-                      {showFandomSeedLinks.length > 0 && (
-                        <div className="mt-2">
-                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                            Active Fandom Seeds
-                          </p>
-                          <div className="flex flex-wrap gap-1">
-                            {showFandomSeedLinks.map((seed) => (
-                              <a
-                                key={`show-fandom-seed-${seed.id}-${seed.url}`}
-                                href={seed.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium text-zinc-700 hover:bg-zinc-100"
-                                title={seed.url}
-                              >
-                                {seed.iconUrl ? (
-                                  <Image
-                                    src={seed.iconUrl}
-                                    alt=""
-                                    width={12}
-                                    height={12}
-                                    className="h-3 w-3 shrink-0 rounded-sm"
-                                    unoptimized
-                                  />
-                                ) : null}
-                                <span className="truncate">{seed.title}</span>
-                                {seed.host ? (
-                                  <span className="shrink-0 text-[9px] uppercase tracking-[0.1em] text-zinc-500">
-                                    {seed.host}
-                                  </span>
-                                ) : null}
-                              </a>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                       <textarea
                         value={linkBulkInput}
                         onChange={(event) => setLinkBulkInput(event.target.value)}
                         rows={4}
                         placeholder={
-                          "https://thetraitors.fandom.com/wiki/The_Traitors_(US)\nhttps://www.themoviedb.org/tv/204761/season/2\ninstagram:@thetraitorsus"
+                          "https://thetraitors.fandom.com/wiki/The_Traitors_(US)\nhttps://news.google.com/topics/CAAqKAgKIiJDQkFTRXdvTkwyY3ZNVEZvYlhBeGVtUndNQklDWlc0b0FBUAE?ceid=US:en&oc=3\ninstagram:@thetraitorsus"
                         }
                         className="mt-2 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
                       />
@@ -12308,269 +12596,319 @@ export default function TrrShowDetailPage() {
                       <p className="text-sm text-zinc-500">No links yet. Run discovery to populate this list.</p>
                     ) : (
                       <div className="space-y-5">
-                        {settingsLinkSections.map((section) => (
-                          <div key={section.key} className="space-y-2">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                                {section.title}
-                              </p>
-                              <p className="text-xs text-zinc-500">{section.description}</p>
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                              {socialLinksSection.title}
+                            </p>
+                            <p className="text-xs text-zinc-500">{socialLinksSection.description}</p>
+                          </div>
+                          {showSocialLinks.length === 0 ? (
+                            <p className="text-sm text-zinc-500">No show-level social handles discovered yet.</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {showSocialLinks.map((pill) => (
+                                <InlineEditableLinkUrl
+                                  key={`settings-social-link-${pill.id}`}
+                                  linkId={pill.link.id}
+                                  url={pill.url}
+                                  label={pill.text}
+                                  saving={Boolean(savingLinkIds[pill.link.id])}
+                                  onSubmit={updateShowLinkUrl}
+                                  containerClassName="rounded-md border border-zinc-200 bg-white px-3 py-2"
+                                  actions={
+                                    <button
+                                      type="button"
+                                      onClick={() => void deleteShowLink(pill.link.id)}
+                                      className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
+                                    >
+                                      Delete
+                                    </button>
+                                  }
+                                >
+                                  <a
+                                    href={pill.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-blue-700 hover:underline"
+                                    title={pill.url}
+                                  >
+                                    <SourceBadge kind={pill.sourceKind} label={pill.sourceLabel} iconOnly={true} />
+                                    <span className="truncate text-zinc-900">{pill.text}</span>
+                                  </a>
+                                </InlineEditableLinkUrl>
+                              ))}
                             </div>
-                            {section.key === "cast-member-pages" ? (
-                              castMemberLinkCoverageCards.length === 0 ? (
-                                <p className="text-sm text-zinc-500">No cast-member links in this category yet.</p>
-                              ) : (
-                                <div className="space-y-3">
-                                  {castMemberLinkCoverageCards.map((card) => (
-                                    <div
-                                      key={`person-link-coverage-${card.personId}`}
-                                      className="rounded-lg border border-zinc-200 bg-white p-3"
-                                    >
-                                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                        <p className="text-sm font-semibold text-zinc-900">{card.personName}</p>
-                                        <div className="flex flex-wrap items-center gap-1">
-                                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                                            {card.approvedLinkCount} approved
-                                          </span>
-                                          {card.seasons.length > 0 && (
-                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                              Seasons {card.seasons.map((season) => `S${season}`).join(", ")}
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <div className="grid gap-2">
-                                        {card.sources.map((source) => {
-                                          const isFound = source.state === "found";
-                                          const stateLabel =
-                                            source.state === "found"
-                                              ? "Found"
-                                              : "Missing";
-                                          return (
-                                            <div
-                                              key={`person-link-source-${card.personId}-${source.key}`}
-                                              className={`rounded-md border px-2 py-2 ${
-                                                isFound
-                                                  ? "border-emerald-200 bg-emerald-50"
-                                                  : "border-red-200 bg-red-50"
-                                              }`}
-                                            >
-                                              <div className="mb-1 flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2">
-                                                  <PersonSourceLogo sourceKey={source.key} />
-                                                  <span className="text-xs font-semibold text-zinc-800">
-                                                    {source.label}
-                                                  </span>
-                                                </div>
-                                                <span
-                                                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                                    isFound
-                                                      ? "bg-emerald-100 text-emerald-700"
-                                                      : "bg-red-100 text-red-700"
-                                                  }`}
-                                                >
-                                                  {stateLabel}
-                                                </span>
-                                              </div>
+                          )}
+                        </div>
 
-                                              {isFound && source.urls.length > 0 ? (
-                                                <div className="flex flex-wrap gap-1">
-                                                  {source.urls.map((approvedUrl) => (
-                                                    <a
-                                                      key={`person-link-source-url-${card.personId}-${source.key}-${approvedUrl.url}`}
-                                                      href={approvedUrl.url}
-                                                      target="_blank"
-                                                      rel="noopener noreferrer"
-                                                      className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100"
-                                                      title={approvedUrl.url}
-                                                    >
-                                                      {approvedUrl.iconUrl ? (
-                                                        <Image
-                                                          src={approvedUrl.iconUrl}
-                                                          alt=""
-                                                          width={12}
-                                                          height={12}
-                                                          className="h-3 w-3 shrink-0 rounded-sm"
-                                                          unoptimized
-                                                        />
-                                                      ) : null}
-                                                      <span className="truncate">{approvedUrl.label}</span>
-                                                    </a>
-                                                  ))}
-                                                </div>
-                                              ) : (
-                                                <p className="truncate text-xs text-red-700">
-                                                  No validated source URL found
-                                                </p>
-                                              )}
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                              {showPagesSection.title}
+                            </p>
+                            <p className="text-xs text-zinc-500">{showPagesSection.description}</p>
+                          </div>
+                          {showPageLinks.length === 0 ? (
+                            <p className="text-sm text-zinc-500">No links in this category yet.</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {showPageLinks.map((link) => {
+                                const sourceKind = getLinkSourceBadgeKind(link);
+                                const sourceLabel = getLinkSourceLabel(link);
+                                const linkTitle = getShowPageLinkTitle(link, show?.name ?? "Show");
+                                const iconUrl = sourceKind === "fandom" ? buildHostFaviconUrl(link.url) : null;
+                                return (
+                                  <InlineEditableLinkUrl
+                                    key={`settings-link-show-pages-${link.id}`}
+                                    linkId={link.id}
+                                    url={link.url}
+                                    label={linkTitle}
+                                    saving={Boolean(savingLinkIds[link.id])}
+                                    onSubmit={updateShowLinkUrl}
+                                    containerClassName="rounded-md border border-zinc-200 bg-white px-3 py-2"
+                                    actions={
+                                      <button
+                                        type="button"
+                                        onClick={() => void deleteShowLink(link.id)}
+                                        className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
+                                      >
+                                        Delete
+                                      </button>
+                                    }
+                                  >
+                                    <a
+                                      href={link.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-blue-700 hover:underline"
+                                    >
+                                      <SourceBadge
+                                        kind={sourceKind}
+                                        label={sourceLabel}
+                                        iconUrl={iconUrl}
+                                        iconOnly={usesBrandIconOnly(sourceKind)}
+                                      />
+                                      <span className="shrink-0 text-zinc-300">|</span>
+                                      <span className="truncate text-zinc-900">{linkTitle}</span>
+                                    </a>
+                                  </InlineEditableLinkUrl>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
 
-                                              {source.link && (
-                                                <div className="mt-2 flex flex-wrap gap-1">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => void deleteShowLink(source.link!.id)}
-                                                    className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700"
-                                                  >
-                                                    Delete
-                                                  </button>
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                      {card.additionalApprovedLinks.length > 0 && (
-                                        <div className="mt-2">
-                                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                            Other Verified Links
-                                          </p>
-                                          <div className="flex flex-wrap gap-1">
-                                            {card.additionalApprovedLinks.map((link) => (
-                                              <a
-                                                key={`person-additional-link-${card.personId}-${link.id}-${link.url}`}
-                                                href={link.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="max-w-full truncate rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium text-zinc-700 hover:bg-zinc-100"
-                                                title={link.url}
-                                              >
-                                                {link.label}
-                                              </a>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )
-                            ) : section.key === "season-pages" ? (
-                              seasonUrlCoverageRows.length === 0 ? (
-                                <p className="text-sm text-zinc-500">No season-scoped validated links yet.</p>
-                              ) : (
-                                <div className="space-y-2">
-                                  {seasonUrlCoverageRows.map((row) => (
-                                    <div
-                                      key={`settings-season-pages-${row.seasonNumber}`}
-                                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2"
-                                    >
-                                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                                        Season {row.seasonNumber}
-                                      </p>
-                                      {row.links.length === 0 ? (
-                                        <p className="mt-1 text-sm text-zinc-500">No validated season links yet.</p>
-                                      ) : (
-                                        <div className="mt-2 flex flex-wrap gap-2">
-                                          {row.links.map((link) => (
-                                            <a
-                                              key={`settings-season-link-pill-${row.seasonNumber}-${link.id}`}
-                                              href={link.url}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                              title={link.url}
-                                            >
-                                              {link.iconUrl ? (
-                                                <Image
-                                                  src={link.iconUrl}
-                                                  alt=""
-                                                  width={14}
-                                                  height={14}
-                                                  className="h-3.5 w-3.5 shrink-0 rounded-sm"
-                                                  unoptimized
-                                                />
-                                              ) : null}
-                                              <span className="truncate">{link.text}</span>
-                                            </a>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              )
-                            ) : section.links.length === 0 ? (
-                              <p className="text-sm text-zinc-500">No links in this category yet.</p>
-                            ) : (
-                              <div className="space-y-1">
-                                {section.links.map((link) => {
-                                  const isPersonBravoProfile =
-                                    link.entity_type === "person" && link.link_kind === "bravo_profile";
-                                  const isFandom = isFandomLinkKind(link.link_kind);
-                                  const linkDisplayLabel = isFandom
-                                    ? resolveLinkPageTitle(link) || String(link.label || "Fandom").trim()
-                                    : link.label || link.url;
-                                  const linkIconUrl = isFandom ? buildHostFaviconUrl(link.url) : null;
-                                  return (
-                                    <div
-                                      key={`settings-link-${section.key}-${link.id}`}
-                                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5"
-                                    >
-                                      <div className="min-w-0 flex-1">
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                              {seasonPagesSection.title}
+                            </p>
+                            <p className="text-xs text-zinc-500">{seasonPagesSection.description}</p>
+                          </div>
+                          {seasonUrlCoverageRows.length === 0 ? (
+                            <p className="text-sm text-zinc-500">No season-scoped validated links yet.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {seasonUrlCoverageRows.map((row) => (
+                                <div
+                                  key={`settings-season-pages-${row.seasonNumber}`}
+                                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2"
+                                >
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="text-sm font-semibold text-zinc-900">Season {row.seasonNumber}</p>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {row.links.map((link) => (
                                         <a
+                                          key={`settings-season-link-pill-${row.seasonNumber}-${link.id}`}
                                           href={link.url}
                                           target="_blank"
                                           rel="noopener noreferrer"
-                                          className="inline-flex max-w-full items-center gap-1 truncate text-sm font-medium text-blue-700 hover:underline"
+                                          className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                          title={`${link.sourceLabel} | ${resolveLinkPageTitle(link.link) || `Season ${row.seasonNumber}`}`}
                                         >
-                                          {linkIconUrl ? (
-                                            <Image
-                                              src={linkIconUrl}
-                                              alt=""
-                                              width={14}
-                                              height={14}
-                                              className="h-3.5 w-3.5 shrink-0 rounded-sm"
-                                              unoptimized
-                                            />
-                                          ) : null}
-                                          <span className="truncate">{linkDisplayLabel}</span>
+                                          <SourceBadge
+                                            kind={link.sourceKind}
+                                            label={link.sourceLabel}
+                                            iconUrl={link.iconUrl}
+                                            iconOnly={true}
+                                          />
                                         </a>
-                                        <div className="mt-1 flex flex-wrap items-center gap-1">
-                                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                            {link.link_kind}
-                                          </span>
-                                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                            {ENTITY_LINK_GROUP_LABELS[link.link_group]}
-                                          </span>
-                                          {link.season_number > 0 && (
-                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                              Season {link.season_number}
-                                            </span>
-                                          )}
-                                          {link.entity_type !== "show" && (
-                                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                              {link.entity_type}
-                                            </span>
-                                          )}
-                                          {typeof link.metadata?.publisher_host === "string" &&
-                                            link.metadata.publisher_host.trim().length > 0 && (
-                                              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
-                                                {link.metadata.publisher_host.trim()}
-                                              </span>
-                                            )}
-                                          {isPersonBravoProfile && (
-                                            <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
-                                              Bravo Person Profile
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <div className="flex flex-wrap items-center gap-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => void deleteShowLink(link.id)}
-                                          className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700"
-                                        >
-                                          Delete
-                                        </button>
-                                      </div>
+                                      ))}
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            )}
+                                  </div>
+                                  <div className="mt-3 grid gap-2">
+                                    {row.links.map((link) => (
+                                      <InlineEditableLinkUrl
+                                        key={`settings-season-link-editor-${row.seasonNumber}-${link.id}`}
+                                        linkId={link.link.id}
+                                        url={link.url}
+                                        label={`${link.sourceLabel} season page`}
+                                        saving={Boolean(savingLinkIds[link.link.id])}
+                                        onSubmit={updateShowLinkUrl}
+                                        containerClassName="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2"
+                                        actions={
+                                          <button
+                                            type="button"
+                                            onClick={() => void deleteShowLink(link.link.id)}
+                                            className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"
+                                          >
+                                            Delete
+                                          </button>
+                                        }
+                                      >
+                                        <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
+                                          <SourceBadge
+                                            kind={link.sourceKind}
+                                            label={link.sourceLabel}
+                                            iconUrl={link.iconUrl}
+                                            iconOnly={usesBrandIconOnly(link.sourceKind)}
+                                          />
+                                          <span>{link.sourceLabel}</span>
+                                        </div>
+                                      </InlineEditableLinkUrl>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                              {castMemberPagesSection.title}
+                            </p>
+                            <p className="text-xs text-zinc-500">{castMemberPagesSection.description}</p>
                           </div>
-                        ))}
+                          {castMemberLinkCoverageCards.length === 0 ? (
+                            <p className="text-sm text-zinc-500">No cast-member links in this category yet.</p>
+                          ) : (
+                            <div className="space-y-3">
+                              {castMemberLinkCoverageCards.map((card) => (
+                                <div
+                                  key={`person-link-coverage-${card.personId}`}
+                                  className="rounded-lg border border-zinc-200 bg-white p-3"
+                                >
+                                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-sm font-semibold text-zinc-900">{card.personName}</p>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                                        {card.approvedLinkCount} approved
+                                      </span>
+                                      {card.seasons.length > 0 && (
+                                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                                          Seasons {card.seasons.map((season) => `S${season}`).join(", ")}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {card.approvedLinks.length === 0 ? (
+                                    <p className="text-sm text-zinc-500">No validated links for this person yet.</p>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                      {card.approvedLinks.map((approvedLink) => (
+                                        <InlineEditableLinkUrl
+                                          key={`person-approved-link-${card.personId}-${approvedLink.id}`}
+                                          linkId={approvedLink.link.id}
+                                          url={approvedLink.url}
+                                          label={approvedLink.text}
+                                          saving={Boolean(savingLinkIds[approvedLink.link.id])}
+                                          onSubmit={updateShowLinkUrl}
+                                          containerClassName="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
+                                          actions={
+                                            <button
+                                              type="button"
+                                              onClick={() => void deleteShowLink(approvedLink.link.id)}
+                                              className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"
+                                            >
+                                              Delete
+                                            </button>
+                                          }
+                                        >
+                                          <a
+                                            href={approvedLink.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex min-w-0 max-w-full items-center gap-2 text-xs font-semibold text-zinc-700 hover:text-blue-700"
+                                            title={approvedLink.url}
+                                          >
+                                            <SourceBadge
+                                              kind={approvedLink.sourceKind}
+                                              label={approvedLink.sourceLabel}
+                                              iconUrl={approvedLink.iconUrl}
+                                              iconOnly={usesBrandIconOnly(approvedLink.sourceKind)}
+                                            />
+                                            <span className="truncate">{approvedLink.text}</span>
+                                          </a>
+                                        </InlineEditableLinkUrl>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {card.missingSources.length > 0 && (
+                                    <details className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                                      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                        Missing / Unvalidated Sources
+                                      </summary>
+                                      <div className="mt-3 space-y-2">
+                                        {card.missingSources.map((source) => (
+                                          <InlineEditableLinkUrl
+                                            key={`person-link-source-${card.personId}-${source.key}`}
+                                            linkId={source.link?.id ?? `missing-${card.personId}-${source.key}`}
+                                            url={source.link?.url ?? source.url ?? ""}
+                                            label={source.label}
+                                            saving={source.link ? Boolean(savingLinkIds[source.link.id]) : false}
+                                            onSubmit={updateShowLinkUrl}
+                                            containerClassName="rounded-md border border-amber-200 bg-white px-3 py-2"
+                                            canEdit={Boolean(source.link)}
+                                            actions={
+                                              source.link ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => source.link && void deleteShowLink(source.link.id)}
+                                                  className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700"
+                                                >
+                                                  Delete
+                                                </button>
+                                              ) : null
+                                            }
+                                          >
+                                            <div className="space-y-2">
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <PersonSourceLogo sourceKey={source.key} />
+                                                <span className="text-xs font-semibold text-zinc-800">
+                                                  {source.label}
+                                                </span>
+                                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                                                  {source.state === "unvalidated" ? "Unvalidated" : "Missing"}
+                                                </span>
+                                              </div>
+                                              <p className="text-xs text-zinc-600">No validated source URL found</p>
+                                              {source.url ? (
+                                                <a
+                                                  href={source.url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="inline-flex max-w-full truncate text-xs font-medium text-blue-700 hover:underline"
+                                                  title={source.url}
+                                                >
+                                                  {source.url}
+                                                </a>
+                                              ) : null}
+                                            </div>
+                                          </InlineEditableLinkUrl>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -12752,16 +13090,23 @@ export default function TrrShowDetailPage() {
                       type="show"
                     />
                     {overviewExternalIdLinks.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
+                      <div className="space-y-2">
                         {overviewExternalIdLinks.map((link) => (
                           <a
                             key={`overview-external-id-link-${link.id}`}
                             href={link.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                            className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
                           >
-                            {link.label || link.link_kind}
+                            <SourceBadge
+                              kind={getLinkSourceBadgeKind(link)}
+                              label={getLinkSourceLabel(link)}
+                              iconUrl={getLinkSourceBadgeKind(link) === "fandom" ? buildHostFaviconUrl(link.url) : null}
+                              iconOnly={usesBrandIconOnly(getLinkSourceBadgeKind(link))}
+                            />
+                            <span className="text-zinc-300">|</span>
+                            <span className="truncate">{getShowPageLinkTitle(link, show.name)}</span>
                           </a>
                         ))}
                       </div>
@@ -12781,16 +13126,8 @@ export default function TrrShowDetailPage() {
                       <p className="text-sm text-zinc-500">No show-level social handles discovered yet.</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        {overviewSocialHandleLinks.map((link) => (
-                          <a
-                            key={`overview-social-link-${link.id}`}
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                          >
-                            {link.label || link.link_kind}
-                          </a>
+                        {overviewSocialHandleLinks.map((pill) => (
+                          <SocialHandlePill key={`overview-social-link-${pill.id}`} pill={pill} />
                         ))}
                       </div>
                     )}
@@ -12814,17 +13151,22 @@ export default function TrrShowDetailPage() {
                           {row.links.length === 0 ? (
                             <p className="mt-1 text-sm text-zinc-500">No validated season-scoped URLs discovered.</p>
                           ) : (
-                            <div className="mt-2 flex flex-wrap gap-2">
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
                               {row.links.map((link) => (
                                 <a
                                   key={`overview-season-url-pill-${row.seasonNumber}-${link.id}`}
                                   href={link.url}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                  title={link.url}
+                                  className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                  title={`${link.sourceLabel} | ${resolveLinkPageTitle(link.link) || `Season ${row.seasonNumber}`}`}
                                 >
-                                  {link.text}
+                                  <SourceBadge
+                                    kind={link.sourceKind}
+                                    label={link.sourceLabel}
+                                    iconUrl={link.iconUrl}
+                                    iconOnly={true}
+                                  />
                                 </a>
                               ))}
                             </div>

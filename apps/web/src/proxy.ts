@@ -10,6 +10,11 @@ const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "auth",
   "brands",
   "bravodle",
+  "dev-dashboard",
+  "docs",
+  "design-system",
+  "games",
+  "groups",
   "hub",
   "login",
   "privacy-policy",
@@ -17,11 +22,13 @@ const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "profile",
   "realations",
   "realitease",
+  "social-media",
   "shows",
   "surveys",
   "terms-of-sale",
   "terms-of-service",
   "test-auth",
+  "users",
 ]);
 const ROOT_SHOW_ROUTE_SECOND_SEGMENTS = new Set([
   "overview",
@@ -170,12 +177,30 @@ function isAdminUiPath(pathname: string): boolean {
   return (
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
+    pathname === "/design-system" ||
+    pathname.startsWith("/design-system/") ||
     pathname === "/people" ||
     pathname.startsWith("/people/") ||
     pathname === "/brands" ||
     pathname.startsWith("/brands/") ||
+    pathname === "/dev-dashboard" ||
+    pathname.startsWith("/dev-dashboard/") ||
+    pathname === "/docs" ||
+    pathname.startsWith("/docs/") ||
     pathname === "/shows" ||
     pathname.startsWith("/shows/") ||
+    pathname === "/games" ||
+    pathname.startsWith("/games/") ||
+    pathname === "/groups" ||
+    pathname.startsWith("/groups/") ||
+    pathname === "/settings" ||
+    pathname.startsWith("/settings/") ||
+    pathname === "/social-media" ||
+    pathname.startsWith("/social-media/") ||
+    pathname === "/surveys" ||
+    pathname.startsWith("/surveys/") ||
+    pathname === "/users" ||
+    pathname.startsWith("/users/") ||
     isRootShowUiPath(pathname)
   );
 }

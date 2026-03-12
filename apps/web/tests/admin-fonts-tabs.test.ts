@@ -1,22 +1,63 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTabHref, getTabFromQuery } from "@/app/admin/fonts/_components/tab-routing";
+import {
+  buildDesignSystemHref,
+  getDesignSystemTabFromLegacyQuery,
+  resolveDesignSystemRoute,
+} from "@/lib/admin/design-system-routing";
 
-describe("admin fonts tab routing", () => {
-  it("resolves tab query values including buttons", () => {
-    expect(getTabFromQuery(null)).toBe("fonts");
-    expect(getTabFromQuery("colors")).toBe("colors");
-    expect(getTabFromQuery("buttons")).toBe("buttons");
-    expect(getTabFromQuery("questions-forms")).toBe("questions");
-    expect(getTabFromQuery("nyt-occurrences")).toBe("nyt-occurrences");
-    expect(getTabFromQuery("unknown")).toBe("fonts");
+describe("design system routing", () => {
+  it("maps legacy query values to canonical tab slugs", () => {
+    expect(getDesignSystemTabFromLegacyQuery(null)).toBe("fonts");
+    expect(getDesignSystemTabFromLegacyQuery("colors")).toBe("colors");
+    expect(getDesignSystemTabFromLegacyQuery("buttons")).toBe("buttons");
+    expect(getDesignSystemTabFromLegacyQuery("questions")).toBe("questions-forms");
+    expect(getDesignSystemTabFromLegacyQuery("questions-forms")).toBe("questions-forms");
+    expect(getDesignSystemTabFromLegacyQuery("nyt-occurrences")).toBe("nyt-occurrences");
+    expect(getDesignSystemTabFromLegacyQuery("unknown")).toBe("fonts");
   });
 
-  it("builds hrefs for all top-level tabs", () => {
-    expect(buildTabHref("fonts")).toBe("/admin/fonts");
-    expect(buildTabHref("colors")).toBe("/admin/fonts?tab=colors");
-    expect(buildTabHref("buttons")).toBe("/admin/fonts?tab=buttons");
-    expect(buildTabHref("questions")).toBe("/admin/fonts?tab=questions-forms");
-    expect(buildTabHref("nyt-occurrences")).toBe("/admin/fonts?tab=nyt-occurrences");
+  it("builds canonical hrefs for tabs and subtabs", () => {
+    expect(buildDesignSystemHref("fonts")).toBe("/design-system/fonts");
+    expect(buildDesignSystemHref("colors")).toBe("/design-system/colors");
+    expect(buildDesignSystemHref("buttons")).toBe("/design-system/buttons");
+    expect(buildDesignSystemHref("questions-forms")).toBe("/design-system/questions-forms");
+    expect(buildDesignSystemHref("questions-forms", "admin")).toBe(
+      "/design-system/questions-forms/admin",
+    );
+    expect(buildDesignSystemHref("components", "layout")).toBe("/design-system/components/layout");
+    expect(buildDesignSystemHref("icons-illustrations", "logos")).toBe(
+      "/design-system/icons-illustrations/logos",
+    );
+  });
+
+  it("normalizes unknown tabs and invalid subtabs back to canonical routes", () => {
+    expect(resolveDesignSystemRoute("fonts", null)).toEqual({
+      tab: "fonts",
+      subtab: null,
+      isCanonical: true,
+      canonicalHref: "/design-system/fonts",
+    });
+
+    expect(resolveDesignSystemRoute("questions-forms", ["admin"])).toEqual({
+      tab: "questions-forms",
+      subtab: "admin",
+      isCanonical: true,
+      canonicalHref: "/design-system/questions-forms/admin",
+    });
+
+    expect(resolveDesignSystemRoute("unknown", ["admin"])).toEqual({
+      tab: "fonts",
+      subtab: null,
+      isCanonical: false,
+      canonicalHref: "/design-system/fonts",
+    });
+
+    expect(resolveDesignSystemRoute("components", ["unknown"])).toEqual({
+      tab: "components",
+      subtab: null,
+      isCanonical: false,
+      canonicalHref: "/design-system/components",
+    });
   });
 });

@@ -4,8 +4,8 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
+import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import RedditSourcesManager, { type RedditCommunityContext } from "@/components/admin/reddit-sources-manager";
-import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
 import {
@@ -215,6 +215,43 @@ export default function RedditCommunityViewPage() {
     }
     return showName;
   })();
+  const seasonLinks = SEASON_TABS.map((tab) => ({
+    key: tab.tab,
+    label: tab.label,
+    href:
+      hasSeasonContext && showSlug
+        ? buildSeasonAdminUrl({
+            showSlug,
+            seasonNumber: seasonNumber!,
+            tab: tab.tab,
+          })
+        : null,
+    isActive: tab.tab === "social",
+  }));
+  const socialLinks = SOCIAL_TABS.map((tab) => ({
+    key: tab.view,
+    label: tab.label,
+    href:
+      hasSeasonContext && showSlug
+        ? tab.view === "reddit"
+          ? buildShowRedditUrl({
+              showSlug,
+              seasonNumber,
+            })
+          : buildSeasonAdminUrl({
+              showSlug,
+              seasonNumber: seasonNumber!,
+              tab: "social",
+              socialView: tab.view,
+            })
+        : showSlug && tab.view === "reddit"
+          ? buildShowRedditUrl({
+              showSlug,
+              seasonNumber,
+            })
+          : null,
+    isActive: tab.view === "reddit",
+  }));
 
   if (checking) {
     return (
@@ -251,108 +288,54 @@ export default function RedditCommunityViewPage() {
 
   return (
     <ClientOnly>
-      <div className="min-h-screen bg-zinc-50">
-        <SocialAdminPageHeader
-          breadcrumbs={breadcrumbItems}
-          title={pageTitle}
-          backHref={effectiveBackHref}
-          backLabel="Back"
-          bodyClassName="px-6 py-6"
-        />
-
-        <div className="border-b border-zinc-200 bg-white">
-          <div className="mx-auto max-w-6xl px-6">
-            <nav className="flex flex-wrap gap-2 py-4" aria-label="Season tabs">
-              {SEASON_TABS.map((tab) => {
-                const href =
-                  hasSeasonContext && showSlug
-                    ? buildSeasonAdminUrl({
-                        showSlug,
-                        seasonNumber: seasonNumber!,
-                        tab: tab.tab,
-                      })
-                    : null;
-                const isActive = tab.tab === "social";
-                const classes = `rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                  isActive
-                    ? "border-zinc-900 bg-zinc-900 text-white"
-                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                }`;
-                if (!href) {
-                  return (
-                    <span key={tab.tab} className={classes}>
-                      {tab.label}
-                    </span>
-                  );
-                }
-                return (
-                  <a key={tab.tab} href={href} className={classes}>
-                    {tab.label}
-                  </a>
-                );
-              })}
-            </nav>
-            <nav className="flex flex-wrap gap-2 pb-4" aria-label="Social analytics tabs">
-              {SOCIAL_TABS.map((tab) => {
-                const href =
-                  hasSeasonContext && showSlug
-                    ? tab.view === "reddit"
-                      ? buildShowRedditUrl({
-                          showSlug,
-                          seasonNumber,
-                        })
-                      : buildSeasonAdminUrl({
-                          showSlug,
-                          seasonNumber: seasonNumber!,
-                          tab: "social",
-                          socialView: tab.view,
-                        })
-                    : showSlug && tab.view === "reddit"
-                      ? buildShowRedditUrl({
-                          showSlug,
-                          seasonNumber,
-                        })
-                      : null;
-                const isActive = tab.view === "reddit";
-                const classes = `rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
-                  isActive
-                    ? "border-zinc-800 bg-zinc-800 text-white"
-                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                }`;
-                if (!href) {
-                  return (
-                    <span key={tab.view} className={classes}>
-                      {tab.label}
-                    </span>
-                  );
-                }
-                return (
-                  <a key={tab.view} href={href} className={classes}>
-                    {tab.label}
-                  </a>
-                );
-              })}
-            </nav>
-          </div>
-        </div>
-
-        <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
-          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <RedditSourcesManager
-              mode="global"
-              showSlug={showSlug ?? undefined}
-              seasonId={canonicalSeasonId}
-              seasonNumber={canonicalSeasonNumber}
-              initialCommunityId={initialCommunityKey}
-              hideCommunityList
-              backHref={redditHref}
-              episodeDiscussionsPlacement="inline"
-              enableEpisodeSync
-              onCommunityContextChange={setCommunityContext}
-            />
+      <RedditAdminShell
+        breadcrumbs={breadcrumbItems}
+        title={pageTitle}
+        backHref={effectiveBackHref}
+        seasonLinks={seasonLinks}
+        socialLinks={socialLinks}
+        hero={
+          <section className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-600">Reddit Coverage</p>
+                <h2 className="text-2xl font-semibold text-zinc-950">Community operations dashboard</h2>
+                <p className="text-sm font-medium text-zinc-900">{pageTitle}</p>
+                <p className="max-w-3xl text-sm text-zinc-600">
+                  Review flair coverage, season windows, and episode discussion capture for this subreddit from one place.
+                </p>
+              </div>
+              <div className="grid min-w-[240px] gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Season Scope</p>
+                  <p className="mt-2 text-lg font-semibold text-zinc-900">
+                    {canonicalSeasonNumber ? `Season ${canonicalSeasonNumber}` : "All Seasons"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Navigation</p>
+                  <p className="mt-2 text-lg font-semibold text-zinc-900">{showSlug ?? "Show Route"}</p>
+                </div>
+              </div>
+            </div>
           </section>
-        </main>
-      </div>
+        }
+      >
+        <section className="rounded-3xl border border-zinc-200/80 bg-white/95 p-6 shadow-sm">
+          <RedditSourcesManager
+            mode="global"
+            showSlug={showSlug ?? undefined}
+            seasonId={canonicalSeasonId}
+            seasonNumber={canonicalSeasonNumber}
+            initialCommunityId={initialCommunityKey}
+            hideCommunityList
+            backHref={redditHref}
+            episodeDiscussionsPlacement="inline"
+            enableEpisodeSync
+            onCommunityContextChange={setCommunityContext}
+          />
+        </section>
+      </RedditAdminShell>
     </ClientOnly>
   );
 }

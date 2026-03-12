@@ -18,3 +18,4 @@ None.
 ## Recent Activity
 
 - February 10, 2026: Added admin proxy routes and wired UI buttons for list sync and per-show refresh targets.
+- March 5, 2026: Fixed `/admin/trr-shows` covered-shows list behavior so transient auth/load failures no longer masquerade as an empty editorial coverage table. The page now retries transient `Not authenticated` misses, surfaces a real load error with Retry action, and no longer claims `No shows added yet` when rows already exist in `admin.covered_shows`.

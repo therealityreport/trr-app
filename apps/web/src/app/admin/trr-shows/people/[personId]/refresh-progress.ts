@@ -63,6 +63,8 @@ const SOURCE_LABEL_BY_ID: Record<string, string> = {
   tmdb: "TMDb",
   fandom: "Fandom",
   fandom_gallery: "Fandom Gallery",
+  nbcumv: "NBCUMV",
+  getty: "Getty",
 };
 
 function normalizeKey(value: string | null | undefined): string | null {
@@ -375,7 +377,7 @@ export function updateSyncProgressTracker(
   };
 }
 
-export type PersonRefreshPipelineMode = "refresh" | "reprocess";
+export type PersonRefreshPipelineMode = "ingest" | "refresh" | "reprocess";
 
 export type PersonRefreshPipelineStepId =
   | "profiles"
@@ -414,12 +416,12 @@ interface PersonRefreshPipelineStepDefinition {
 }
 
 const REFRESH_PIPELINE_STEPS: PersonRefreshPipelineStepDefinition[] = [
-  { id: "profiles", label: "Profiles", modes: new Set(["refresh"]) },
-  { id: "source_sync", label: "Source Sync", modes: new Set(["refresh"]) },
-  { id: "metadata_enrichment", label: "Metadata", modes: new Set(["refresh"]) },
-  { id: "upserting", label: "Saving Photos", modes: new Set(["refresh"]) },
-  { id: "metadata_repair", label: "Fixing IMDb Details", modes: new Set(["refresh", "reprocess"]) },
-  { id: "mirroring", label: "S3 Mirroring", modes: new Set(["refresh"]) },
+  { id: "profiles", label: "Profiles", modes: new Set(["ingest", "refresh"]) },
+  { id: "source_sync", label: "Source Sync", modes: new Set(["ingest", "refresh"]) },
+  { id: "metadata_enrichment", label: "Metadata", modes: new Set(["ingest", "refresh"]) },
+  { id: "upserting", label: "Saving Photos", modes: new Set(["ingest", "refresh"]) },
+  { id: "metadata_repair", label: "Fixing IMDb Details", modes: new Set(["ingest", "refresh", "reprocess"]) },
+  { id: "mirroring", label: "S3 Mirroring", modes: new Set(["ingest", "refresh"]) },
   { id: "pruning", label: "Pruning", modes: new Set(["refresh"]) },
   { id: "auto_count", label: "Tagging (Face Boxes + Identity)", modes: new Set(["refresh", "reprocess"]) },
   { id: "word_id", label: "Text Overlay", modes: new Set(["refresh", "reprocess"]) },
@@ -451,7 +453,11 @@ function messageIndicatesSkip(message: string): boolean {
 }
 
 function messageIndicatesFailure(message: string): boolean {
-  const cleaned = message.replace(/\(0 failed\)/gi, "");
+  const cleaned = message
+    .replace(/\(0 failed\)/gi, "")
+    .replace(/\(\s*failed\s+0\s*\)/gi, "")
+    .replace(/\bfailed\s+0\b/gi, "")
+    .replace(/\b0\s+failed\b/gi, "");
   return /\b(fail(ed|ure)?|error|paused|unavailable)\b/i.test(cleaned);
 }
 
@@ -643,7 +649,7 @@ export function finalizePersonRefreshPipelineSteps(
     next[index] = { ...next[index], ...update };
   };
 
-  if (mode === "refresh") {
+  if (mode === "ingest" || mode === "refresh") {
     updateStep("source_sync", {
       status: "completed",
       result: `Fetched ${photosFetched.toLocaleString()} photos`,
@@ -670,10 +676,12 @@ export function finalizePersonRefreshPipelineSteps(
           ? `Hosted ${photosMirrored.toLocaleString()} assets (${photosMirrorFailed.toLocaleString()} failed)`
           : "Not run",
     });
-    updateStep("pruning", {
-      status: photosPruned > 0 ? "completed" : next.find((step) => step.id === "pruning")?.status ?? "skipped",
-      result: `Pruned ${photosPruned.toLocaleString()} orphaned objects`,
-    });
+    if (mode === "refresh") {
+      updateStep("pruning", {
+        status: photosPruned > 0 ? "completed" : next.find((step) => step.id === "pruning")?.status ?? "skipped",
+        result: `Pruned ${photosPruned.toLocaleString()} orphaned objects`,
+      });
+    }
   } else {
     updateStep("metadata_repair", {
       status:

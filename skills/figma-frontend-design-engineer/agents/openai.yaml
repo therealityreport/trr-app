@@ -1,0 +1,4 @@
+interface:
+  display_name: "Figma Frontend Design Engineer (TRR-APP)"
+  short_description: "Repo-local canonical owner for TRR-APP Figma-driven design-to-code implementation and parity audits."
+  default_prompt: "Use $figma-frontend-design-engineer to implement this TRR-APP Figma-driven UI with parity checks."

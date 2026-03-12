@@ -19,6 +19,7 @@ export type SocialProxyErrorBody = {
   error: string;
   code?: ProxyErrorCode;
   retryable?: boolean;
+  retry_after_seconds?: number;
   trace_id?: string;
   upstream_status?: number;
   upstream_detail?: unknown;
@@ -29,6 +30,7 @@ class SocialProxyError extends Error {
   status: number;
   code: ProxyErrorCode;
   retryable: boolean;
+  retryAfterSeconds?: number;
   traceId?: string;
   upstreamStatus?: number;
   upstreamDetail?: unknown;
@@ -40,6 +42,7 @@ class SocialProxyError extends Error {
       status: number;
       code: ProxyErrorCode;
       retryable?: boolean;
+      retryAfterSeconds?: number;
       traceId?: string;
       upstreamStatus?: number;
       upstreamDetail?: unknown;
@@ -50,6 +53,7 @@ class SocialProxyError extends Error {
     this.status = options.status;
     this.code = options.code;
     this.retryable = Boolean(options.retryable);
+    this.retryAfterSeconds = options.retryAfterSeconds;
     this.traceId = options.traceId;
     this.upstreamStatus = options.upstreamStatus;
     this.upstreamDetail = options.upstreamDetail;
@@ -75,13 +79,25 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 
 export const SOCIAL_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_SHORT_TIMEOUT_MS", 25_000);
 export const SOCIAL_PROXY_DEFAULT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_DEFAULT_TIMEOUT_MS", 45_000);
+export const SOCIAL_PROXY_LONG_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_LONG_TIMEOUT_MS", 90_000);
+const SEASON_ID_RESOLUTION_CACHE_TTL_MS = readPositiveIntEnv(
+  "TRR_SOCIAL_PROXY_SEASON_ID_CACHE_TTL_MS",
+  5 * 60 * 1000,
+);
+const SEASON_ID_RESOLUTION_CACHE_MAX_ENTRIES = readPositiveIntEnv(
+  "TRR_SOCIAL_PROXY_SEASON_ID_CACHE_MAX_ENTRIES",
+  512,
+);
+
+const seasonIdResolutionCache = new Map<string, { seasonId: string; expiresAt: number }>();
+const seasonIdResolutionInFlight = new Map<string, Promise<string>>();
 
 const getServiceRoleKey = (): string => {
-  const value = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+  const value = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!value) {
     throw new Error("Backend auth not configured");
   }
-  return value;
+  return value.trim();
 };
 
 const normalizeBackendErrorMessage = (data: Record<string, unknown>, fallback: string): string => {
@@ -122,7 +138,21 @@ const sleep = async (ms: number): Promise<void> => {
 };
 
 const isRetryableUpstreamStatus = (status: number): boolean => {
-  return status === 502 || status === 503 || status === 504;
+  return status === 429 || status === 502 || status === 503 || status === 504;
+};
+
+const parseRetryAfterSeconds = (value: string | null): number | undefined => {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsedSeconds = Number.parseInt(trimmed, 10);
+  if (Number.isFinite(parsedSeconds) && parsedSeconds >= 0) {
+    return Math.min(parsedSeconds, 300);
+  }
+  const retryDate = Date.parse(trimmed);
+  if (Number.isNaN(retryDate)) return undefined;
+  const deltaSeconds = Math.ceil((retryDate - Date.now()) / 1000);
+  return Math.max(0, Math.min(deltaSeconds, 300));
 };
 
 const hasDnsOrTransportFaultText = (value: string): boolean => {
@@ -213,6 +243,12 @@ const toProxyError = (error: unknown, fallbackTraceId?: string): SocialProxyErro
     if (error.message === "seasonNumber is invalid") {
       return new SocialProxyError(error.message, { status: 400, code: "BAD_REQUEST", traceId: fallbackTraceId });
     }
+    if (error.message === "Backend API not configured") {
+      return new SocialProxyError(
+        "TRR-Backend is not configured. Confirm TRR_API_URL is set for the app runtime.",
+        { status: 502, code: "BACKEND_UNREACHABLE", retryable: true, traceId: fallbackTraceId },
+      );
+    }
     return new SocialProxyError(error.message, { status: 500, code: "INTERNAL_ERROR", traceId: fallbackTraceId });
   }
   return new SocialProxyError("failed", { status: 500, code: "INTERNAL_ERROR", traceId: fallbackTraceId });
@@ -227,6 +263,35 @@ const UUID_PATTERN =
 
 const isUuid = (value: string | null | undefined): value is string =>
   typeof value === "string" && UUID_PATTERN.test(value);
+
+const buildSeasonResolutionCacheKey = (showId: string, seasonNumberRaw: string): string =>
+  `${showId.trim().toLowerCase()}:${seasonNumberRaw.trim()}`;
+
+const getCachedSeasonId = (cacheKey: string): string | null => {
+  const cached = seasonIdResolutionCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    seasonIdResolutionCache.delete(cacheKey);
+    return null;
+  }
+  return cached.seasonId;
+};
+
+const setCachedSeasonId = (cacheKey: string, seasonId: string): void => {
+  seasonIdResolutionCache.set(cacheKey, {
+    seasonId,
+    expiresAt: Date.now() + SEASON_ID_RESOLUTION_CACHE_TTL_MS,
+  });
+  if (seasonIdResolutionCache.size <= SEASON_ID_RESOLUTION_CACHE_MAX_ENTRIES) {
+    return;
+  }
+  const entriesByExpiry = [...seasonIdResolutionCache.entries()].sort(
+    (left, right) => left[1].expiresAt - right[1].expiresAt,
+  );
+  for (const [key] of entriesByExpiry.slice(0, seasonIdResolutionCache.size - SEASON_ID_RESOLUTION_CACHE_MAX_ENTRIES)) {
+    seasonIdResolutionCache.delete(key);
+  }
+};
 
 type FetchWithRetryOptions = {
   method?: string;
@@ -301,6 +366,7 @@ async function fetchBackend(
       const upstreamDetail = readUpstreamDetail(data);
       const upstreamDetailCode = readUpstreamDetailCode(data);
       const normalizedMessage = normalizeBackendErrorMessage(data, options.fallbackError);
+      const retryAfterSeconds = parseRetryAfterSeconds(response.headers?.get?.("retry-after") ?? null);
       const hasDnsOrTransportFault =
         hasDnsOrTransportFaultText(normalizedMessage) || hasDnsOrTransportFaultDetail(upstreamDetail);
       const responseTraceId =
@@ -312,6 +378,7 @@ async function fetchBackend(
               status: 502,
               code: "BACKEND_UNREACHABLE",
               retryable: true,
+              retryAfterSeconds,
               traceId: responseTraceId,
               upstreamStatus: response.status,
               upstreamDetail,
@@ -322,6 +389,7 @@ async function fetchBackend(
             status: response.status,
             code: "UPSTREAM_ERROR",
             retryable: isRetryableUpstreamStatus(response.status),
+            retryAfterSeconds,
             traceId: responseTraceId,
             upstreamStatus: response.status,
             upstreamDetail,
@@ -330,7 +398,11 @@ async function fetchBackend(
       if (!proxyError.retryable || attempt >= maxAttempts) {
         throw proxyError;
       }
-      await sleep(150 * 2 ** (attempt - 1));
+      const retryDelayMs =
+        proxyError.retryAfterSeconds !== undefined && proxyError.retryAfterSeconds > 0
+          ? proxyError.retryAfterSeconds * 1000
+          : 150 * 2 ** (attempt - 1);
+      await sleep(retryDelayMs);
     } catch (error) {
       const proxyError = toProxyError(error, traceId);
       if (!proxyError.retryable || attempt >= maxAttempts) {
@@ -344,15 +416,37 @@ async function fetchBackend(
 }
 
 export const resolveSeasonId = async (showId: string, seasonNumberRaw: string): Promise<string> => {
+  const cacheKey = buildSeasonResolutionCacheKey(showId, seasonNumberRaw);
+  const cachedSeasonId = getCachedSeasonId(cacheKey);
+  if (cachedSeasonId) {
+    return cachedSeasonId;
+  }
+  const inFlight = seasonIdResolutionInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
   const seasonNumber = Number.parseInt(seasonNumberRaw, 10);
   if (!Number.isFinite(seasonNumber)) {
     throw new Error("seasonNumber is invalid");
   }
-  const season = await getSeasonByShowAndNumber(showId, seasonNumber);
-  if (!season?.id) {
-    throw new Error("season not found");
+  const lookupPromise = (async () => {
+    const season = await getSeasonByShowAndNumber(showId, seasonNumber);
+    if (!season?.id) {
+      throw new Error("season not found");
+    }
+    setCachedSeasonId(cacheKey, season.id);
+    return season.id;
+  })();
+  seasonIdResolutionInFlight.set(cacheKey, lookupPromise);
+  try {
+    return await lookupPromise;
+  } finally {
+    const activePromise = seasonIdResolutionInFlight.get(cacheKey);
+    if (activePromise === lookupPromise) {
+      seasonIdResolutionInFlight.delete(cacheKey);
+    }
   }
-  return season.id;
 };
 
 export const buildSeasonBackendUrl = async (
@@ -361,9 +455,16 @@ export const buildSeasonBackendUrl = async (
   seasonPath: string,
   seasonIdHint?: string | null,
 ): Promise<string> => {
-  const resolvedSeasonId = await resolveSeasonId(showId, seasonNumberRaw);
   const hintedSeasonId = isUuid(seasonIdHint) ? seasonIdHint : null;
-  const seasonId = hintedSeasonId && hintedSeasonId === resolvedSeasonId ? hintedSeasonId : resolvedSeasonId;
+  const cacheKey = buildSeasonResolutionCacheKey(showId, seasonNumberRaw);
+  const cachedSeasonId = getCachedSeasonId(cacheKey);
+  const seasonId =
+    hintedSeasonId ??
+    cachedSeasonId ??
+    (await resolveSeasonId(showId, seasonNumberRaw));
+  if (hintedSeasonId) {
+    setCachedSeasonId(cacheKey, hintedSeasonId);
+  }
   const normalizedSeasonPath = seasonPath.startsWith("/") ? seasonPath : `/${seasonPath}`;
   const backendUrl = getBackendApiUrl(`/admin/socials/seasons/${seasonId}${normalizedSeasonPath}`);
   if (!backendUrl) {
@@ -455,6 +556,9 @@ export const socialProxyErrorResponse = (
   if (proxyError.traceId) {
     body.trace_id = proxyError.traceId;
   }
+  if (proxyError.retryAfterSeconds !== undefined) {
+    body.retry_after_seconds = proxyError.retryAfterSeconds;
+  }
   if (proxyError.upstreamStatus) {
     body.upstream_status = proxyError.upstreamStatus;
   }
@@ -464,5 +568,6 @@ export const socialProxyErrorResponse = (
   if (proxyError.upstreamDetailCode) {
     body.upstream_detail_code = proxyError.upstreamDetailCode;
   }
-  return NextResponse.json(body, { status: proxyError.status });
+  const headers = proxyError.retryAfterSeconds !== undefined ? { "retry-after": String(proxyError.retryAfterSeconds) } : undefined;
+  return NextResponse.json(body, { status: proxyError.status, headers });
 };

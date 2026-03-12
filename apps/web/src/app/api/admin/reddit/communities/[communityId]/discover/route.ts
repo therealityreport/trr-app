@@ -1055,7 +1055,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       retries: 1,
     });
 
-    const run = started.run as RedditRunPayload | undefined;
+    const run = {
+      ...(started.run as RedditRunPayload | undefined),
+      execution_owner:
+        typeof started.execution_owner === "string" && started.execution_owner.trim()
+          ? started.execution_owner.trim()
+          : ((started.run as RedditRunPayload | undefined)?.execution_owner ?? null),
+      execution_mode_canonical:
+        typeof started.execution_mode_canonical === "string" && started.execution_mode_canonical.trim()
+          ? started.execution_mode_canonical.trim()
+          : ((started.run as RedditRunPayload | undefined)?.execution_mode_canonical ?? null),
+    } as RedditRunPayload | undefined;
     if (!run?.run_id) {
       throw new Error("Failed to start reddit refresh run");
     }

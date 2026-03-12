@@ -81,6 +81,20 @@ describe("admin host proxy", () => {
     );
   });
 
+  it("redirects /design-system requests on public host to admin origin", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/design-system/components/layout");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "http://admin.localhost:3000/design-system/components/layout",
+    );
+  });
+
   it("redirects /shows requests on public host to admin origin", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -93,6 +107,38 @@ describe("admin host proxy", () => {
     expect(response.headers.get("location")).toBe(
       "http://admin.localhost:3000/shows/rhoslc/s6/social/reddit",
     );
+  });
+
+  it("redirects /games requests on public host to admin origin", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://localhost:3000/games");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/games");
+  });
+
+  it.each([
+    "/dev-dashboard",
+    "/docs",
+    "/groups",
+    "/settings",
+    "/social-media",
+    "/surveys",
+    "/users",
+  ])("redirects %s requests on public host to admin origin", (pathname) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(`http://localhost:3000${pathname}`);
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`http://admin.localhost:3000${pathname}`);
   });
 
   it("redirects /people routes on public host to admin origin", () => {
@@ -119,6 +165,18 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("http://admin.localhost:3000/people");
+  });
+
+  it("allows /docs on the canonical admin host", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/docs");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("redirects root show routes on public host to admin origin", () => {
@@ -218,6 +276,19 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
+  it("allows design-system routes on admin host", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/design-system/questions-forms/admin");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("allows /shows routes on admin host", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
@@ -309,6 +380,19 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin");
+  });
+
+  it("does not redirect design-system routes to /admin when strict routing is enabled", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_APP_HOSTS = "localhost";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "true";
+
+    const request = new NextRequest("http://admin.localhost:3000/design-system/icons-illustrations");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("still redirects /admin UI paths to canonical origin even when host is allowlisted for admin API", () => {

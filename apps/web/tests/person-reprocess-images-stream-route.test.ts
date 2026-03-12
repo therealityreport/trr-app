@@ -134,7 +134,7 @@ describe("person reprocess-images stream proxy route", () => {
       target_media_link_ids: ["link-1"],
       sources: ["imdb", "tmdb"],
     };
-    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url === BACKEND_HEALTH_URL) {
         return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
@@ -244,7 +244,7 @@ describe("person reprocess-images stream proxy route", () => {
           evt.data.is_terminal === true
       )
     ).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
   });
 
   it("returns terminal SSE error payload when backend fails", async () => {

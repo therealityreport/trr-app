@@ -3379,6 +3379,280 @@ describe("WeekDetailPage thumbnails", () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(true);
   });
 
+  it("keeps the posts summary metric aligned with authoritative week summary totals", async () => {
+    const metricsPayload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        youtube: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+      },
+      totals: { posts: 14, total_comments: 100, total_engagement: 1000 },
+      pagination: { limit: 100, offset: 0, returned: 14, total: 14, has_more: false },
+    };
+    const summaryPayload = {
+      week: weekPayload.week,
+      season: weekPayload.season,
+      source_scope: "bravo",
+      platforms: {
+        instagram: { total_posts: 5, totals: { posts: 5 } },
+        tiktok: { total_posts: 4, totals: { posts: 4 } },
+        youtube: { total_posts: 1, totals: { posts: 1 } },
+        twitter: { total_posts: 2, totals: { posts: 2 } },
+        facebook: { total_posts: 1, totals: { posts: 1 } },
+        threads: { total_posts: 2, totals: { posts: 2 } },
+      },
+      totals: { posts: 15, total_comments: 100, total_engagement: 1000 },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return { ok: true, status: 200, json: async () => summaryPayload } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        const query = new URLSearchParams(url.split("?")[1] ?? "");
+        if (query.get("post_limit") === "100") {
+          return { ok: true, status: 200, json: async () => metricsPayload } as Response;
+        }
+        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId("week-summary-posts")).getByText("15")).toBeInTheDocument();
+    });
+  });
+
+  it("renders zero-post platform status cards as no-post coverage instead of stale partial health", async () => {
+    const payload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        youtube: {
+          ...weekPayload.platforms.youtube,
+          posts: [],
+          totals: { posts: 0, total_comments: 0, total_engagement: 0 },
+        },
+      },
+      status_by_platform: {
+        youtube: {
+          sync_status: "partial",
+          comment_sync_status: { expected_count: 220, upserted_count: 220, status: "partial" },
+          media_mirror_status: { source_count: 1, mirrored_count: 0, status: "partial" },
+          last_refresh_reason: "youtube_comment_gap",
+        },
+      },
+    };
+    const summaryPayload = {
+      week: payload.week,
+      season: payload.season,
+      source_scope: "bravo",
+      platforms: {
+        instagram: { total_posts: 1, totals: { posts: 1 } },
+        tiktok: { total_posts: 1, totals: { posts: 1 } },
+        youtube: { total_posts: 0, totals: { posts: 0 } },
+        twitter: { total_posts: 0, totals: { posts: 0 } },
+        facebook: { total_posts: 0, totals: { posts: 0 } },
+        threads: { total_posts: 0, totals: { posts: 0 } },
+      },
+      totals: { posts: 2, total_comments: 22, total_engagement: 220 },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return { ok: true, status: 200, json: async () => summaryPayload } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => payload } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const youtubeCard = screen.getAllByText("YouTube")[1]?.closest("div.rounded-lg");
+    expect(youtubeCard).not.toBeNull();
+    expect(within(youtubeCard as HTMLDivElement).getByText("No posts")).toBeInTheDocument();
+    expect(
+      within(youtubeCard as HTMLDivElement).getByText("Previous sync attempts for this week did not complete cleanly"),
+    ).toBeInTheDocument();
+    expect(
+      within(youtubeCard as HTMLDivElement).getByText("Prior refresh attempts exist for the selected week"),
+    ).toBeInTheDocument();
+    expect(within(youtubeCard as HTMLDivElement).queryByText(/Reason:/i)).not.toBeInTheDocument();
+  });
+
+  it("renders zero-post platform status cards as in-flight when sync jobs are still running", async () => {
+    const payload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        youtube: {
+          ...weekPayload.platforms.youtube,
+          posts: [],
+          totals: { posts: 0, total_comments: 0, total_engagement: 0 },
+        },
+      },
+      status_by_platform: {
+        youtube: {
+          sync_status: "running",
+          comment_sync_status: { expected_count: 0, upserted_count: 0, status: "idle" },
+          media_mirror_status: { source_count: 0, mirrored_count: 0, status: "not_needed" },
+          last_refresh_reason: "posts_running",
+          worker_run_id: "run-live-1234",
+          active_job_summary: {
+            sync_status: "running",
+            dominant_stage: "posts",
+            job_count: 2,
+            stage_statuses: { posts: { status: "running", job_count: 2 } },
+          },
+        },
+      },
+    };
+    const summaryPayload = {
+      week: payload.week,
+      season: payload.season,
+      source_scope: "bravo",
+      platforms: {
+        instagram: { total_posts: 1, totals: { posts: 1 } },
+        tiktok: { total_posts: 1, totals: { posts: 1 } },
+        youtube: { total_posts: 0, totals: { posts: 0 } },
+        twitter: { total_posts: 0, totals: { posts: 0 } },
+        facebook: { total_posts: 0, totals: { posts: 0 } },
+        threads: { total_posts: 0, totals: { posts: 0 } },
+      },
+      totals: { posts: 2, total_comments: 22, total_engagement: 220 },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return { ok: true, status: 200, json: async () => summaryPayload } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => payload } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const youtubeCard = screen.getAllByText("YouTube")[1]?.closest("div.rounded-lg");
+    expect(youtubeCard).not.toBeNull();
+    expect(within(youtubeCard as HTMLDivElement).getByText("Running")).toBeInTheDocument();
+    expect(within(youtubeCard as HTMLDivElement).getByText("Sync in progress for this week window")).toBeInTheDocument();
+    expect(within(youtubeCard as HTMLDivElement).getByText("Sync in progress for selected week")).toBeInTheDocument();
+    expect(within(youtubeCard as HTMLDivElement).getByText("Running posts · 2 jobs")).toBeInTheDocument();
+    expect(within(youtubeCard as HTMLDivElement).getByText("Reason: posts_running · Run run-live")).toBeInTheDocument();
+    expect(within(youtubeCard as HTMLDivElement).queryByText("No posts in this week window")).not.toBeInTheDocument();
+  });
+
+  it("renders status-tone pills for post comment sync and mirror states", async () => {
+    const payload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        instagram: {
+          ...weekPayload.platforms.instagram,
+          posts: [
+            {
+              ...weekPayload.platforms.instagram.posts[0],
+              status: {
+                sync_status: "partial",
+                comment_sync_status: {
+                  status: "partial",
+                  expected_count: 10,
+                  fetched_count: 4,
+                  upserted_count: 4,
+                },
+                media_mirror_status: {
+                  status: "running",
+                  source_count: 1,
+                  mirrored_count: 0,
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return { ok: true, status: 200, json: async () => payload } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => payload } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const commentPill = screen.getByText("Comment sync Partial");
+    const mirrorPill = screen.getByText("Mirror Running");
+    expect(commentPill.className).toContain("bg-amber-100");
+    expect(commentPill.className).toContain("text-amber-700");
+    expect(mirrorPill.className).toContain("bg-blue-100");
+    expect(mirrorPill.className).toContain("text-blue-700");
+  });
+
+  it("clamps post comment coverage labels to the reported total", async () => {
+    const payload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        instagram: {
+          ...weekPayload.platforms.instagram,
+          posts: [
+            {
+              ...weekPayload.platforms.instagram.posts[0],
+              total_comments_available: 12,
+              comments_count: 10,
+            },
+          ],
+        },
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            week: payload.week,
+            season: payload.season,
+            source_scope: "bravo",
+            platforms: {
+              instagram: { total_posts: 1, totals: { posts: 1, total_comments: 10, total_engagement: 100 } },
+            },
+            totals: { posts: 1, total_comments: 10, total_engagement: 100 },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        return { ok: true, status: 200, json: async () => payload } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    expect(screen.getByRole("button", { name: /Post Details· 10\/10 comments/i })).toBeInTheDocument();
+  });
+
   it("forces RHOSLC instagram sync payload to include BravoTV + BravoWWHL and #RHOSLC", async () => {
     mockSearch.value = "source_scope=bravo&social_platform=instagram";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

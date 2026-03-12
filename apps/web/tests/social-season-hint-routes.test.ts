@@ -9,12 +9,14 @@ const {
   socialProxyErrorResponseMock,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS_MOCK,
   SOCIAL_PROXY_SHORT_TIMEOUT_MS_MOCK,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS_MOCK,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   fetchSeasonBackendJsonMock: vi.fn(),
   socialProxyErrorResponseMock: vi.fn(),
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS_MOCK: 15_000,
   SOCIAL_PROXY_SHORT_TIMEOUT_MS_MOCK: 12_000,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS_MOCK: 90_000,
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -26,6 +28,7 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   socialProxyErrorResponse: socialProxyErrorResponseMock,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS_MOCK,
   SOCIAL_PROXY_SHORT_TIMEOUT_MS: SOCIAL_PROXY_SHORT_TIMEOUT_MS_MOCK,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS: SOCIAL_PROXY_LONG_TIMEOUT_MS_MOCK,
 }));
 
 import { GET as getJobs } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/jobs/route";
@@ -221,7 +224,7 @@ describe("social routes season_id hint forwarding", () => {
       expect.objectContaining({
         seasonIdHint: seasonId,
         retries: 0,
-        timeoutMs: 15_000,
+        timeoutMs: 90_000,
       }),
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };
@@ -284,7 +287,7 @@ describe("social routes season_id hint forwarding", () => {
       expect.objectContaining({
         seasonIdHint: seasonId,
         retries: 0,
-        timeoutMs: 25_000,
+        timeoutMs: 40_000,
       }),
     );
     const options = fetchSeasonBackendJsonMock.mock.calls[0]?.[3] as { queryString?: string };

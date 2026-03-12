@@ -9,6 +9,7 @@ import FlashbackRanker from "@/components/flashback-ranker";
 import IconRatingInput from "@/components/survey/IconRatingInput";
 import { useSurveyManager } from "@/lib/surveys/manager";
 import { RHOSLC_EPISODE_ID, RHOSLC_SEASON_ID, RHOSLC_SHOW_ID, RHOSLC_SURVEY_ID } from "@/lib/surveys/config";
+import { RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL } from "@/lib/surveys/rhoslc-assets";
 import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse } from "@/lib/surveys/types";
 import "@/styles/realitease-fonts.css";
 
@@ -29,7 +30,7 @@ const CAST_MEMBERS: SurveyRankingItem[] = [
   { id: "danna", label: "Danna Bui-Negrete", img: "" },
 ];
 
-const SNOWFLAKE_ICON_SRC = "/icons/snowflake-solid-ice-7.svg";
+const SNOWFLAKE_ICON_SRC = RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL;
 
 export default function RhoslcSurveyPlayPage() {
   const router = useRouter();
@@ -323,12 +324,12 @@ export default function RhoslcSurveyPlayPage() {
             <h2 className="font-rude-slab text-3xl font-bold uppercase tracking-wide text-rose-900">
               Rate the season
             </h2>
-            <p className="max-w-2xl text-sm text-rose-700">Pick 1 to 5 snowflakes. Halves are allowed.</p>
+            <p className="max-w-2xl text-sm text-rose-700">Pick 0.0 to 5.0 snowflakes. Halves are allowed.</p>
             <IconRatingInput
               ref={ratingRowRef}
               value={seasonRating}
               onChange={handleSeasonRatingChange}
-              min={1}
+              min={0}
               max={5}
               step={0.5}
               iconSrc={SNOWFLAKE_ICON_SRC}

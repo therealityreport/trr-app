@@ -2,64 +2,64 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-describe("show settings links fandom visibility", () => {
-  it("renders show pages section from persisted links and includes fandom copy", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
+describe("show settings links UI structure", () => {
+  const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+  const contents = fs.readFileSync(filePath, "utf8");
 
+  it("defines explicit settings sections and removes fandom seeds from the add box", () => {
+    expect(contents).toMatch(/title: "Social Links"/);
     expect(contents).toMatch(/title: "Show Pages"/);
-    expect(contents).toMatch(/Show wiki\/fandom pages/);
-    expect(contents).toMatch(/links: sortLinks\(showPageLinks\)/);
-    expect(contents).toMatch(/No links in this category yet\./);
-    expect(contents).toMatch(/Add Link\(s\)/);
-    expect(contents).toMatch(/Paste one or more URLs or handles/);
+    expect(contents).toMatch(/title: "Season Pages"/);
+    expect(contents).toMatch(/title: "Cast Member Pages"/);
+    expect(contents).toMatch(/showSocialLinks = useMemo/);
+    expect(contents).not.toMatch(/Active Fandom Seeds/);
+    expect(contents).toMatch(/isFandomSeedUrl/);
+    expect(contents).not.toMatch(/Google News Feed/);
+    expect(contents).toMatch(/Google News topic URLs/);
   });
 
-  it("renders overview metadata sections and keeps cast announcements out of show-wide external IDs", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
-
-    expect(contents).toMatch(/External IDs/);
-    expect(contents).toMatch(/Social Handles/);
-    expect(contents).toMatch(/Season URL Coverage/);
-    expect(contents).toMatch(/link\.link_kind !== "cast_announcement"/);
+  it("renders show and season pages from page-centric helpers", () => {
+    expect(contents).toMatch(/isRenderableShowPageLink/);
+    expect(contents).toMatch(/getShowPageLinkTitle/);
+    expect(contents).toMatch(/resolveShowPageDisplayTitle/);
+    expect(contents).toMatch(/SourceBadge/);
+    expect(contents).toMatch(/usesBrandIconOnly/);
+    expect(contents).toMatch(/No season-scoped validated links yet\./);
+    expect(contents).toMatch(/iconOnly=\{true\}/);
+    expect(contents).not.toMatch(/Show wiki\/fandom pages/);
   });
 
-  it("uses a single refresh control and a single in-flight links progress stream", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
-
-    expect(contents).toMatch(/runShowLinkDiscovery/);
-    expect(contents).toMatch(/\{linksRefreshing \? "Refreshing Links\.\.\." : "Refresh Links"\}/);
-    expect(contents).toMatch(/linksRefreshing && linksRefreshProgress/);
-    expect(contents).toMatch(/\/links\/discover\/stream/);
-    expect(contents).not.toMatch(/\/links\/discover["']/);
-    expect(contents).toMatch(/\/links\?view=active/);
-    expect(contents).not.toMatch(/Discovering\.\.\./);
+  it("flattens cast member links and moves missing sources into an accordion", () => {
+    expect(contents).toMatch(/approvedLinks,/);
+    expect(contents).toMatch(/missingSources,/);
+    expect(contents).toMatch(/const getCastMemberLinkText = \(link: EntityLink, personName: string\): string =>/);
+    expect(contents).toMatch(/const resolveCastMemberNameFromLinks = \(/);
+    expect(contents).toMatch(/Missing \/ Unvalidated Sources/);
+    expect(contents).toMatch(/No validated source URL found/);
+    expect(contents).not.toMatch(/source\.urls\.map/);
+    expect(contents).not.toMatch(/Other Verified Links/);
   });
 
-  it("keeps wikipedia and wikidata distinct and renders multi-url cast source pills", () => {
-    const pagePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const pageContents = fs.readFileSync(pagePath, "utf8");
-    const constantsPath = path.resolve(__dirname, "../src/lib/admin/show-page/constants.ts");
-    const constantsContents = fs.readFileSync(constantsPath, "utf8");
+  it("uses shared social-handle text normalization and keeps the compact pill in details", () => {
+    expect(contents).toMatch(/function SocialHandlePill/);
+    expect(contents).toMatch(/const extractSocialHandleFromUrl = \(url: string\): string \| null =>/);
+    expect(contents).toMatch(/const normalizeSocialHandleValue = \(value: string\): string \| null =>/);
+    expect(contents).toMatch(/key=\{`settings-social-link-\$\{pill\.id\}`\}/);
+    expect(contents).toMatch(/<span className="truncate text-zinc-900">\{pill\.text\}<\/span>/);
+    expect(contents).toMatch(/<SocialHandlePill key=\{`overview-social-link-/);
+    expect(contents).toMatch(/overviewSocialHandleLinks = useMemo\(\(\) => showSocialLinks/);
+  });
 
-    expect(pageContents).toMatch(/key: "wikipedia", label: "Wikipedia"/);
-    expect(pageContents).toMatch(/key: "wikidata", label: "Wikidata"/);
-    expect(pageContents).toMatch(/source\.urls\.map/);
-    expect(pageContents).toMatch(/approvedUrl\.iconUrl/);
-    expect(pageContents).toMatch(/resolveLinkPageTitle/);
-    expect(pageContents).toMatch(/buildHostFaviconUrl/);
-    expect(pageContents).toMatch(/link\.iconUrl/);
-    expect(pageContents).toMatch(/if \(kind === "wikidata"\) return "wikidata";/);
-    expect(pageContents).not.toMatch(/kind\.includes\("knowledge"\)/);
-    expect(pageContents).toMatch(/approvedLinkCount/);
-    expect(pageContents).toMatch(/Other Verified Links/);
-    expect(pageContents).toMatch(/cards\.sort\(\(a, b\) => \{/);
-    expect(pageContents).toMatch(/b\.approvedLinkCount - a\.approvedLinkCount/);
-    expect(constantsContents).toMatch(/key: "wikipedia", label: "Wikipedia"/);
-    expect(constantsContents).toMatch(/key: "wikidata", label: "Wikidata"/);
-    expect(pageContents).not.toMatch(/Knowledge Graph/);
-    expect(constantsContents).not.toMatch(/Knowledge Graph/);
+  it("makes persisted settings links editable with the shared editable component", () => {
+    expect(contents).toMatch(/from "@\/components\/ui\/editable"/);
+    expect(contents).toMatch(/function InlineEditableLinkUrl/);
+    expect(contents).toMatch(/function LinkDiscoveryStatusCard/);
+    expect(contents).toMatch(/buildLinkDiscoveryProgressSummary/);
+    expect(contents).toMatch(/const updateShowLinkUrl = useCallback/);
+    expect(contents).toMatch(/method: "PATCH"/);
+    expect(contents).toMatch(/<InlineEditableLinkUrl/);
+    expect(contents).toMatch(/Edit URL/);
+    expect(contents).toMatch(/Save URL/);
+    expect(contents).toMatch(/containerClassName="rounded-md border border-zinc-200 bg-white px-3 py-2"/);
   });
 });

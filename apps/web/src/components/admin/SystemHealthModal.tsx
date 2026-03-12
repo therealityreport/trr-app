@@ -11,6 +11,7 @@ type WorkerEntry = {
   status: string;
   run_id?: string | null;
   current_job_id?: string | null;
+  supported_platforms?: string[] | null;
   metadata?: Record<string, unknown> | null;
   last_seen_at: string | null;
   is_healthy: boolean;
@@ -25,6 +26,16 @@ type WorkerHealth = {
   active_workers: number;
   total_workers: number;
   stale_after_seconds: number;
+  by_stage?: Record<string, { total: number; healthy: number; fresh: number }>;
+  by_platform?: Record<string, { total: number; healthy: number; fresh: number }>;
+  executor_backend?: string | null;
+  dispatch_enabled?: boolean;
+  dispatcher_heartbeat_fresh?: boolean;
+  active_invocations?: number;
+  oldest_queued_age_seconds?: number | null;
+  stale_running_count?: number;
+  last_dispatch_success_at?: string | null;
+  last_dispatch_error?: string | null;
   workers: WorkerEntry[];
   reason: string | null;
 };
@@ -67,6 +78,7 @@ type WorkerDetail = {
     current_job_id: string | null;
     started_at: string | null;
     last_seen_at: string | null;
+    supported_platforms?: string[] | null;
     metadata: Record<string, unknown>;
     is_healthy: boolean;
   };
@@ -91,6 +103,9 @@ type WorkerDetail = {
     run_id: string | null;
     status: string | null;
     source_scope: string | null;
+    execution_owner?: string | null;
+    execution_mode_canonical?: string | null;
+    execution_backend_canonical?: string | null;
     created_at: string | null;
     started_at: string | null;
     completed_at: string | null;
@@ -130,13 +145,27 @@ type DebugJobResult = {
 
 type QueueStatus = {
   queue_enabled: boolean;
+  remote_plane?: {
+    execution_mode_canonical?: string | null;
+    execution_owner?: string | null;
+    execution_backend_canonical?: string | null;
+    remote_job_plane_enforced?: boolean;
+  };
   workers: WorkerHealth;
   queue: {
     by_status: Record<string, number>;
+    by_stage?: Record<string, Record<string, number>>;
+    by_stage_platform?: Record<string, Record<string, Record<string, number>>>;
     runs_by_status?: Record<string, number>;
     runs_total?: number;
     by_platform: Record<string, Record<string, number>>;
     by_job_type: Record<string, Record<string, number>>;
+    stale_claims?: {
+      total: number;
+      by_reason: Record<string, number>;
+      by_platform: Record<string, number>;
+      by_stage: Record<string, number>;
+    };
     recent_failures: FailureEntry[];
     stuck_jobs: StuckJobEntry[];
     stuck_jobs_total: number;
@@ -171,7 +200,8 @@ type SharedHealthSubscriber = {
 
 const POLL_INTERVAL_MS = 5_000;
 const FOLLOWER_CHECK_INTERVAL_MS = 5_000;
-const FETCH_TIMEOUT_MS = 12_000;
+const HEALTH_DOT_FETCH_TIMEOUT_MS = 12_000;
+const QUEUE_STATUS_FETCH_TIMEOUT_MS = 30_000;
 const STARTUP_JITTER_MIN_MS = 200;
 const STARTUP_JITTER_MAX_MS = 1_800;
 const LEASE_DURATION_MS = 45_000;
@@ -186,8 +216,6 @@ const DEBUG_JOB_URL_BASE = "/api/admin/trr-api/social/ingest/jobs";
 const LEASE_STORAGE_KEY = "trr:admin:health-dot:leader:v1";
 const SNAPSHOT_STORAGE_KEY = "trr:admin:health-dot:snapshot:v1";
 const BROADCAST_CHANNEL_NAME = "trr-admin-health-dot";
-
-const STATUS_ORDER = ["running", "pending", "queued", "retrying", "cancelled", "completed", "failed"] as const;
 
 type LeaderLease = {
   tabId: string;
@@ -214,9 +242,6 @@ function healthState(data: HealthDotStatus | null, error: string | null): Health
   if (!data) return "loading";
   if (!data.queue_enabled) return "down";
   if (!data.workers.healthy) return "degraded";
-  const pending = (data.queue.by_status.pending ?? 0) + (data.queue.by_status.queued ?? 0);
-  const failed = data.queue.by_status.failed ?? 0;
-  if (failed > 0 && failed > pending) return "degraded";
   return "healthy";
 }
 
@@ -261,6 +286,514 @@ function relativeTime(iso: string | null): string {
 function truncate(value: string | null, max: number): string {
   if (!value) return "-";
   return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function normalizeFetchErrorMessage(error: unknown, fallback = "Fetch failed"): string {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return error.message || "Request timed out";
+  }
+  if (error instanceof Error) {
+    const normalized = error.message.trim().toLowerCase();
+    if (
+      normalized.includes("signal is aborted without reason") ||
+      normalized.includes("aborted without reason") ||
+      normalized.includes("request aborted")
+    ) {
+      return "Request timed out";
+    }
+    return error.message || fallback;
+  }
+  return fallback;
+}
+
+type WorkerOrigin = "aws" | "local" | "unknown";
+
+type SummaryCardTone = "neutral" | "good" | "warn" | "bad";
+
+type SummaryCardViewModel = {
+  title: string;
+  value: string;
+  detail: string;
+  tone?: SummaryCardTone;
+};
+
+type WorkerStageCardViewModel = {
+  key: string;
+  label: string;
+  countsLabel: string;
+};
+
+type LiveWorkerRowViewModel = {
+  worker: WorkerEntry;
+  origin: WorkerOrigin;
+  roleLabel: string;
+  hostLabel: string;
+  currentRunLabel: string | null;
+  platformLabel: string | null;
+  rawIdLabel: string;
+};
+
+type QueueBreakdownRowViewModel = {
+  key: string;
+  label: string;
+  running: number;
+  waiting: number;
+  failed: number;
+  completed: number;
+};
+
+type ProblemFailureViewModel = {
+  id: string;
+  platformLabel: string;
+  stageLabel: string;
+  runLabel: string | null;
+  ageLabel: string;
+  summary: string;
+  rawDetail: string | null;
+};
+
+type SystemHealthViewModel = {
+  statusSummary: string;
+  summaryCards: SummaryCardViewModel[];
+  executionOwnerLabel: string;
+  executionBackendLabel: string;
+  executionModeLabel: string;
+  executionPolicyLabel: string;
+  workerStageCards: WorkerStageCardViewModel[];
+  staleClaimsSummary: string;
+  queueStatusCards: SummaryCardViewModel[];
+  queueBreakdownByPlatform: QueueBreakdownRowViewModel[];
+  queueBreakdownByStage: QueueBreakdownRowViewModel[];
+  workersSummaryLabel: string;
+  olderWorkerCheckinsHiddenLabel: string | null;
+  nonAwsWorkersHiddenLabel: string | null;
+  liveWorkers: LiveWorkerRowViewModel[];
+  recentFailureSummary: string;
+  recentFailures: ProblemFailureViewModel[];
+};
+
+function preferAwsWorkerRows(backend: string | null | undefined): boolean {
+  return String(backend ?? "").trim().toLowerCase() !== "modal";
+}
+
+function resolveWorkerOrigin(worker: WorkerEntry): WorkerOrigin {
+  const workerId = String(worker.worker_id || "").trim();
+  const hostFromWorkerId = workerId.split(":")[1]?.trim().toLowerCase() ?? "";
+  const metadataHostname = String(worker.metadata?.hostname ?? "")
+    .trim()
+    .toLowerCase();
+  const host = metadataHostname || hostFromWorkerId;
+  if (!host) return "unknown";
+  if (host.endsWith(".ec2.internal")) return "aws";
+  if (host === "localhost" || host.endsWith(".local")) return "local";
+  return "unknown";
+}
+
+function titleCaseWords(value: string): string {
+  return value
+    .split(/[\s_/-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function formatStageLabel(stage: string): string {
+  const normalized = String(stage || "").trim().toLowerCase();
+  switch (normalized) {
+    case "posts":
+      return "Posts";
+    case "comments":
+      return "Comments";
+    case "media_mirror":
+      return "Media mirror";
+    case "comment_media_mirror":
+      return "Comment media mirror";
+    default:
+      return titleCaseWords(normalized || "Unknown stage");
+  }
+}
+
+function formatWorkerRoleLabel(stage: string): string {
+  return `${formatStageLabel(stage)} worker`;
+}
+
+function formatSupportedPlatformsLabel(platforms: string[] | null | undefined): string | null {
+  if (!platforms || platforms.length === 0) return null;
+  return platforms.map((platform) => titleCaseWords(platform)).join(", ");
+}
+
+function formatWorkerActivityLabel(worker: WorkerEntry): string {
+  const role = formatStageLabel(worker.stage).toLowerCase();
+  const runLabel = worker.run_id ? `run ${truncate(worker.run_id, 8)}` : null;
+  const normalizedStatus = String(worker.status || "").trim().toLowerCase();
+  switch (normalizedStatus) {
+    case "working":
+      return runLabel ? `Working on ${role} jobs for ${runLabel}.` : `Working on ${role} jobs now.`;
+    case "starting":
+      return `Starting up and getting ready to take ${role} jobs.`;
+    case "idle":
+      return `Idle and waiting for the next ${role} job.`;
+    default:
+      return runLabel
+        ? `${titleCaseWords(normalizedStatus || "unknown")} for ${role} jobs on ${runLabel}.`
+        : `${titleCaseWords(normalizedStatus || "unknown")} for ${role} jobs.`;
+  }
+}
+
+function formatHostname(worker: WorkerEntry): string {
+  const metadataHostname = String(worker.metadata?.hostname ?? "").trim();
+  const workerIdHost = String(worker.worker_id ?? "").split(":")[1]?.trim() ?? "";
+  const host = metadataHostname || workerIdHost;
+  if (!host) return "Unknown host";
+  return host;
+}
+
+function formatExecutionOwnerLabel(owner: string | null | undefined): string {
+  switch (String(owner ?? "").trim().toLowerCase()) {
+    case "remote_worker":
+      return "Remote executor";
+    case "api":
+    case "api_server":
+      return "API server";
+    default:
+      return owner ? titleCaseWords(owner) : "Unknown";
+  }
+}
+
+function formatExecutionBackendLabel(backend: string | null | undefined): string {
+  switch (String(backend ?? "").trim().toLowerCase()) {
+    case "modal":
+      return "Modal";
+    case "legacy_worker":
+      return "Legacy worker";
+    case "local":
+      return "Local API";
+    default:
+      return backend ? titleCaseWords(backend) : "Unknown";
+  }
+}
+
+function formatExecutionModeLabel(mode: string | null | undefined): string {
+  switch (String(mode ?? "").trim().toLowerCase()) {
+    case "remote":
+      return "Remote";
+    case "local":
+      return "Local";
+    default:
+      return mode ? titleCaseWords(mode) : "Unknown";
+  }
+}
+
+function formatStuckReasonLabel(reason: string | null | undefined): string {
+  const normalized = String(reason ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "running_stale_heartbeat":
+      return "Worker stopped reporting progress";
+    case "retrying_stale_timeout":
+      return "Retry timed out before progress resumed";
+    case "pending_stale_timeout":
+      return "Job waited too long without starting";
+    case "queued_stale_timeout":
+      return "Job stayed queued too long";
+    default:
+      return reason ? titleCaseWords(reason) : "Unknown issue";
+  }
+}
+
+function formatAgeSeconds(seconds: number | null | undefined): string {
+  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+  if (safeSeconds < 3600) return `${Math.floor(safeSeconds / 60)}m`;
+  return `${Math.floor(safeSeconds / 3600)}h ${Math.floor((safeSeconds % 3600) / 60)}m`;
+}
+
+function formatFailureSummary(failure: FailureEntry): { summary: string; rawDetail: string | null } {
+  const raw = failure.error_message ?? failure.last_error_code ?? failure.last_error_class ?? null;
+  if (!raw) {
+    return { summary: "Unknown failure", rawDetail: null };
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (normalized.includes("stale_heartbeat_timeout")) {
+    return {
+      summary: "Worker stopped reporting progress",
+      rawDetail: raw,
+    };
+  }
+  return {
+    summary: truncate(raw, 120),
+    rawDetail: raw,
+  };
+}
+
+function formatPhaseLabel(phase: string | null | undefined): string {
+  const normalized = String(phase ?? "").trim().toLowerCase();
+  if (!normalized) return "No phase reported";
+  return titleCaseWords(normalized);
+}
+
+function formatRunStatusLabel(status: string | null | undefined): string {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (!normalized) return "unknown";
+  if (normalized === "running") return "running";
+  if (normalized === "queued") return "queued";
+  if (normalized === "completed") return "completed";
+  if (normalized === "failed") return "failed";
+  if (normalized === "cancelled") return "cancelled";
+  return normalized.replace(/_/g, " ");
+}
+
+function formatRunSummary(detail: WorkerDetail | null): string {
+  if (!detail?.run) return "No run is attached to this worker right now.";
+  const summary = detail.run.summary ?? {};
+  const totalJobs = Math.max(0, Number(summary.total_jobs ?? 0));
+  const completedJobs = Math.max(0, Number(summary.completed_jobs ?? 0));
+  const failedJobs = Math.max(0, Number(summary.failed_jobs ?? 0));
+  const activeJobs = Math.max(0, Number(summary.active_jobs ?? 0));
+  const itemsFound = Math.max(0, Number(summary.items_found_total ?? 0));
+  const runLabel = detail.run.run_id ? `Run ${truncate(detail.run.run_id, 8)}` : "This run";
+  const statusLabel = formatRunStatusLabel(detail.run.status);
+
+  if (totalJobs <= 0 && completedJobs <= 0 && failedJobs <= 0 && activeJobs <= 0 && itemsFound <= 0) {
+    return `${runLabel} is ${statusLabel}. Detailed job counts are not available yet.`;
+  }
+
+  const progressBits = [`${completedJobs.toLocaleString()} of ${Math.max(totalJobs, completedJobs + failedJobs).toLocaleString()} jobs complete`];
+  if (activeJobs > 0) progressBits.push(`${activeJobs.toLocaleString()} still active`);
+  if (failedJobs > 0) progressBits.push(`${failedJobs.toLocaleString()} failed`);
+  if (itemsFound > 0) progressBits.push(`${itemsFound.toLocaleString()} items scraped`);
+  return `${runLabel} is ${statusLabel}. ${progressBits.join(" · ")}.`;
+}
+
+function formatCurrentTaskSummary(detail: WorkerDetail | null): string {
+  if (!detail?.current_job) {
+    return detail?.run?.run_id
+      ? `Attached to run ${truncate(detail.run.run_id, 8)} but not actively processing a job right now.`
+      : "Not actively processing a job right now.";
+  }
+  const platform = titleCaseWords(detail.current_job.platform || "unknown");
+  const stage = formatStageLabel(detail.current_job.stage || detail.current_job.job_type || "");
+  const handle = detail.current_job.account_handle ? ` for ${detail.current_job.account_handle}` : "";
+  return `Currently processing ${platform} ${stage.toLowerCase()}${handle}.`;
+}
+
+function modalHealthLabel(state: HealthState): string {
+  switch (state) {
+    case "healthy":
+      return "Healthy";
+    case "degraded":
+      return "Needs Attention";
+    case "down":
+    case "error":
+      return "Down";
+    case "loading":
+      return "Loading";
+  }
+}
+
+function summaryToneClass(tone: SummaryCardTone | undefined): string {
+  switch (tone) {
+    case "good":
+      return "border-emerald-200 bg-emerald-50/70";
+    case "warn":
+      return "border-amber-200 bg-amber-50/70";
+    case "bad":
+      return "border-red-200 bg-red-50/70";
+    case "neutral":
+    default:
+      return "border-zinc-200 bg-zinc-50/80";
+  }
+}
+
+function buildQueueBreakdownRows(
+  breakdown: Record<string, Record<string, number>> | undefined,
+  formatter: (key: string) => string,
+): QueueBreakdownRowViewModel[] {
+  return Object.keys(breakdown ?? {})
+    .sort()
+    .map((key) => {
+      const counts = breakdown?.[key] ?? {};
+      return {
+        key,
+        label: formatter(key),
+        running: counts.running ?? 0,
+        waiting: (counts.pending ?? 0) + (counts.queued ?? 0) + (counts.retrying ?? 0),
+        failed: counts.failed ?? 0,
+        completed: counts.completed ?? 0,
+      };
+    });
+}
+
+function modalQueueHealthState(queueStatus: QueueStatus): HealthState {
+  if (!queueStatus.queue_enabled) return "down";
+  if (queueStatus.queue.error) return "error";
+
+  const healthyWorkers = Number(queueStatus.workers.healthy_workers ?? 0);
+  const workersHealthy = Boolean(queueStatus.workers.healthy);
+  if (!workersHealthy || healthyWorkers <= 0) {
+    return "degraded";
+  }
+
+  const likelyStuckCount = Number(queueStatus.queue.stuck_jobs_total ?? 0);
+  const staleClaimsCount = Number(queueStatus.queue.stale_claims?.total ?? 0);
+  if (likelyStuckCount > 0 || staleClaimsCount > 0) {
+    return "degraded";
+  }
+
+  return "healthy";
+}
+
+function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState): SystemHealthViewModel {
+  const runsByStatus = queueStatus.queue.runs_by_status ?? queueStatus.queue.by_status ?? {};
+  const runStatuses = {
+    running: runsByStatus.running ?? 0,
+    queued: (runsByStatus.queued ?? 0) + (runsByStatus.pending ?? 0),
+    retrying: runsByStatus.retrying ?? 0,
+    failed: runsByStatus.failed ?? 0,
+    completed: runsByStatus.completed ?? 0,
+    cancelled: runsByStatus.cancelled ?? 0,
+  };
+  const jobStatuses = queueStatus.queue.by_status ?? {};
+  const jobRunning = jobStatuses.running ?? 0;
+  const recentFailureCount = queueStatus.queue.recent_failures.length;
+  const likelyStuckCount = queueStatus.queue.stuck_jobs_total ?? 0;
+  const healthyWorkers = queueStatus.workers.healthy_workers ?? 0;
+  const freshWorkers = queueStatus.workers.fresh_workers ?? 0;
+  const totalWorkers = queueStatus.workers.total_workers ?? 0;
+  const activeInvocations = Number(queueStatus.workers.active_invocations ?? 0);
+  const staleRunningCount = Number(queueStatus.workers.stale_running_count ?? 0);
+  const staleClaims = queueStatus.queue.stale_claims;
+  const oldestQueuedAgeSeconds =
+    typeof queueStatus.workers.oldest_queued_age_seconds === "number"
+      ? queueStatus.workers.oldest_queued_age_seconds
+      : null;
+
+  let statusSummary = "Workers are available and the queue looks stable.";
+  if (!queueStatus.queue_enabled) {
+    statusSummary = "Social sync is turned off right now.";
+  } else if (state === "loading") {
+    statusSummary = "Checking workers and queue activity now.";
+  } else if (state === "error" || state === "down") {
+    statusSummary = "Health details could not be loaded.";
+  } else if (likelyStuckCount > 0) {
+    statusSummary = "Workers are online, but some jobs likely need intervention.";
+  } else if (recentFailureCount > 0) {
+    statusSummary = "Workers are available, but there are recent failures to review.";
+  } else if (jobRunning > 0 || runStatuses.running > 0) {
+    statusSummary = "Workers are online and jobs are moving.";
+  }
+
+  const summaryCards: SummaryCardViewModel[] = [
+    {
+      title: "Overall Status",
+      value: modalHealthLabel(state),
+      detail: statusSummary,
+      tone: state === "healthy" ? "good" : state === "loading" ? "neutral" : state === "degraded" ? "warn" : "bad",
+    },
+    {
+      title: "Work Happening Now",
+      value: `${jobRunning.toLocaleString()} jobs running`,
+      detail: `${runStatuses.queued.toLocaleString()} runs queued · ${runStatuses.running.toLocaleString()} runs running`,
+      tone: jobRunning > 0 || runStatuses.running > 0 ? "good" : runStatuses.queued > 0 ? "neutral" : "neutral",
+    },
+    {
+      title: "Worker Availability",
+      value: `${freshWorkers.toLocaleString()} recent executor heartbeats online`,
+      detail: `${healthyWorkers.toLocaleString()} healthy · ${totalWorkers.toLocaleString()} recorded`,
+      tone: healthyWorkers > 0 ? "good" : "bad",
+    },
+    {
+      title: "Attention Needed",
+      value: `${likelyStuckCount.toLocaleString()} likely stuck jobs`,
+      detail: `${recentFailureCount.toLocaleString()} recent failures`,
+      tone: likelyStuckCount > 0 ? "bad" : recentFailureCount > 0 ? "warn" : "good",
+    },
+  ];
+
+  const workerStageCards = Object.entries(queueStatus.workers.by_stage ?? {}).map(([stage, counts]) => ({
+    key: stage,
+    label: `${formatStageLabel(stage)} workers`,
+    countsLabel: `${counts.healthy.toLocaleString()} healthy · ${counts.fresh.toLocaleString()} seen recently · ${counts.total.toLocaleString()} recorded`,
+  }));
+
+  const queueStatusCards: SummaryCardViewModel[] = [
+    { title: "Running", value: String(runStatuses.running), detail: "Runs actively executing" },
+    { title: "Queued", value: String(runStatuses.queued), detail: "Runs waiting to start" },
+    { title: "Retrying", value: String(runStatuses.retrying), detail: "Runs waiting for another attempt" },
+    { title: "Failed", value: String(runStatuses.failed), detail: "Runs that ended with errors", tone: runStatuses.failed > 0 ? "warn" : "neutral" },
+    { title: "Completed", value: String(runStatuses.completed), detail: "Runs finished successfully", tone: runStatuses.completed > 0 ? "good" : "neutral" },
+    { title: "Cancelled", value: String(runStatuses.cancelled), detail: "Runs stopped manually or by policy" },
+    { title: "Invocations", value: String(activeInvocations), detail: "Active remote executions" },
+    {
+      title: "Oldest queued",
+      value: oldestQueuedAgeSeconds == null ? "n/a" : formatAgeSeconds(oldestQueuedAgeSeconds),
+      detail: "Oldest queued or retrying work item",
+      tone: oldestQueuedAgeSeconds != null && oldestQueuedAgeSeconds > 900 ? "warn" : "neutral",
+    },
+    {
+      title: "Stale running",
+      value: String(staleRunningCount),
+      detail: "Running jobs beyond their lease window",
+      tone: staleRunningCount > 0 ? "warn" : "neutral",
+    },
+  ];
+
+  const liveWorkers = queueStatus.workers.workers.map((worker) => {
+    const origin = resolveWorkerOrigin(worker);
+    return {
+      worker,
+      origin,
+      roleLabel: formatWorkerRoleLabel(worker.stage),
+      hostLabel: formatHostname(worker),
+      currentRunLabel: worker.run_id ? `Current run ${truncate(worker.run_id, 8)}` : null,
+      platformLabel:
+        worker.supported_platforms && worker.supported_platforms.length > 0
+          ? `Can work on ${worker.supported_platforms.join(", ")}`
+          : null,
+      rawIdLabel: worker.worker_id,
+    };
+  });
+
+  const recentFailures = queueStatus.queue.recent_failures.slice(0, 20).map((failure) => {
+    const formatted = formatFailureSummary(failure);
+    return {
+      id: failure.id,
+      platformLabel: titleCaseWords(failure.platform),
+      stageLabel: formatStageLabel(failure.job_type),
+      runLabel: failure.run_id ? `Run ${truncate(failure.run_id, 8)}` : null,
+      ageLabel: relativeTime(failure.created_at),
+      summary: formatted.summary,
+      rawDetail: formatted.rawDetail,
+    };
+  });
+
+  return {
+    statusSummary,
+    summaryCards,
+    executionOwnerLabel: `Execution owner: ${formatExecutionOwnerLabel(queueStatus.remote_plane?.execution_owner)}`,
+    executionBackendLabel: `Execution backend: ${formatExecutionBackendLabel(
+      queueStatus.remote_plane?.execution_backend_canonical ?? queueStatus.workers.executor_backend,
+    )}`,
+    executionModeLabel: `Execution mode: ${formatExecutionModeLabel(queueStatus.remote_plane?.execution_mode_canonical)}`,
+    executionPolicyLabel: queueStatus.remote_plane?.remote_job_plane_enforced
+      ? "Local execution is disabled"
+      : "Local execution is allowed",
+    workerStageCards,
+    staleClaimsSummary: staleClaims
+      ? `${staleClaims.total.toLocaleString()} stale claimed jobs`
+      : "0 stale claimed jobs",
+    queueStatusCards,
+    queueBreakdownByPlatform: buildQueueBreakdownRows(queueStatus.queue.by_platform, (key) => titleCaseWords(key)),
+    queueBreakdownByStage: buildQueueBreakdownRows(queueStatus.queue.by_stage, (key) => formatStageLabel(key)),
+    workersSummaryLabel: `${healthyWorkers.toLocaleString()} healthy · ${freshWorkers.toLocaleString()} seen recently · ${totalWorkers.toLocaleString()} recorded`,
+    olderWorkerCheckinsHiddenLabel:
+      queueStatus.workers.stale_hidden_count > 0
+        ? `${queueStatus.workers.stale_hidden_count.toLocaleString()} older worker check-ins hidden`
+        : null,
+    nonAwsWorkersHiddenLabel: null,
+    liveWorkers,
+    recentFailureSummary: `${recentFailureCount.toLocaleString()} recent failures`,
+    recentFailures,
+  };
 }
 
 class SharedHealthDotPoller {
@@ -515,7 +1048,10 @@ class SharedHealthDotPoller {
     this.inFlight = true;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeoutId = setTimeout(
+      () => controller.abort(new DOMException("Request timed out", "AbortError")),
+      HEALTH_DOT_FETCH_TIMEOUT_MS,
+    );
 
     try {
       this.writeLease(Date.now() + LEASE_DURATION_MS);
@@ -549,7 +1085,7 @@ class SharedHealthDotPoller {
         { broadcast: true },
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Fetch failed";
+      const message = normalizeFetchErrorMessage(error);
       this.publish(
         {
           data: this.snapshot.data,
@@ -638,7 +1174,10 @@ function useQueueStatusModal(options: { isOpen: boolean }) {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeout = setTimeout(
+      () => controller.abort(new DOMException("Request timed out", "AbortError")),
+      QUEUE_STATUS_FETCH_TIMEOUT_MS,
+    );
 
     try {
       const response = await fetchAdminWithAuth(
@@ -656,7 +1195,7 @@ function useQueueStatusModal(options: { isOpen: boolean }) {
       setError(null);
       setLastFetched(new Date());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fetch failed");
+      setError(normalizeFetchErrorMessage(err));
     } finally {
       clearTimeout(timeout);
       inFlightRef.current = false;
@@ -723,57 +1262,140 @@ function SectionHeader({ children }: { children: ReactNode }) {
   return <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">{children}</h4>;
 }
 
-function QueueSummaryTable({ byStatus }: { byStatus: Record<string, number> }) {
-  const entries = STATUS_ORDER
-    .filter((status) => (byStatus[status] ?? 0) > 0)
-    .map((status) => [status, byStatus[status] ?? 0] as const);
-  if (entries.length === 0) return <p className="text-sm text-zinc-400">No runs in queue</p>;
-
+function SummaryCards({ cards, columns = 4 }: { cards: SummaryCardViewModel[]; columns?: 2 | 3 | 4 | 6 }) {
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-      {entries.map(([status, count]) => (
-        <div key={status} className="flex items-center justify-between">
-          <StatusBadge status={status} />
-          <span className="tabular-nums text-sm font-medium text-zinc-900">{count.toLocaleString()}</span>
+    <div
+      className={`grid gap-3 ${
+        columns === 6
+          ? "grid-cols-2 md:grid-cols-3 xl:grid-cols-6"
+          : columns === 3
+            ? "grid-cols-1 md:grid-cols-3"
+            : columns === 2
+              ? "grid-cols-1 md:grid-cols-2"
+              : "grid-cols-1 md:grid-cols-2 xl:grid-cols-4"
+      }`}
+    >
+      {cards.map((card) => (
+        <div key={card.title} className={`rounded-xl border p-3 ${summaryToneClass(card.tone)}`}>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{card.title}</p>
+          <p className="mt-2 text-lg font-semibold text-zinc-950">{card.value}</p>
+          <p className="mt-1 text-sm text-zinc-600">{card.detail}</p>
         </div>
       ))}
     </div>
   );
 }
 
-function PlatformBreakdownTable({ byPlatform }: { byPlatform: Record<string, Record<string, number>> }) {
-  const platforms = Object.keys(byPlatform).sort();
-  if (platforms.length === 0) return null;
+function QueueBreakdownTable({
+  rows,
+  emptyMessage,
+}: {
+  rows: QueueBreakdownRowViewModel[];
+  emptyMessage: string;
+}) {
+  if (rows.length === 0) return <p className="text-sm text-zinc-400">{emptyMessage}</p>;
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-xl border border-zinc-200">
       <table className="w-full text-left text-sm">
-        <thead>
+        <thead className="bg-zinc-50">
           <tr className="border-b border-zinc-200 text-xs text-zinc-500">
-            <th className="pb-1.5 pr-3 font-medium">Platform</th>
-            <th className="pb-1.5 px-3 font-medium text-right">Run</th>
-            <th className="pb-1.5 px-3 font-medium text-right">Pend</th>
-            <th className="pb-1.5 px-3 font-medium text-right">Fail</th>
-            <th className="pb-1.5 pl-3 font-medium text-right">Done</th>
+            <th className="pb-1.5 pt-2 pr-3 pl-3 font-medium">Category</th>
+            <th className="pb-1.5 pt-2 px-3 font-medium text-right">Running now</th>
+            <th className="pb-1.5 pt-2 px-3 font-medium text-right">Waiting</th>
+            <th className="pb-1.5 pt-2 px-3 font-medium text-right">Failed</th>
+            <th className="pb-1.5 pt-2 pl-3 pr-3 font-medium text-right">Completed</th>
           </tr>
         </thead>
         <tbody>
-          {platforms.map((platform) => {
-            const counts = byPlatform[platform] ?? {};
-            return (
-              <tr key={platform} className="border-b border-zinc-100">
-                <td className="py-1.5 pr-3 font-medium capitalize text-zinc-900">{platform}</td>
-                <td className="py-1.5 px-3 tabular-nums text-right text-zinc-700">{counts.running ?? 0}</td>
-                <td className="py-1.5 px-3 tabular-nums text-right text-zinc-700">
-                  {(counts.pending ?? 0) + (counts.queued ?? 0) + (counts.retrying ?? 0)}
-                </td>
-                <td className="py-1.5 px-3 tabular-nums text-right text-red-600">{counts.failed ?? 0}</td>
-                <td className="py-1.5 pl-3 tabular-nums text-right text-zinc-500">{counts.completed ?? 0}</td>
-              </tr>
-            );
-          })}
+          {rows.map((row) => (
+            <tr key={row.key} className="border-b border-zinc-100 last:border-b-0">
+              <td className="py-2 pr-3 pl-3 font-medium text-zinc-900">{row.label}</td>
+              <td className="py-2 px-3 tabular-nums text-right text-zinc-700">{row.running.toLocaleString()}</td>
+              <td className="py-2 px-3 tabular-nums text-right text-zinc-700">{row.waiting.toLocaleString()}</td>
+              <td className="py-2 px-3 tabular-nums text-right text-red-600">{row.failed.toLocaleString()}</td>
+              <td className="py-2 pl-3 pr-3 tabular-nums text-right text-zinc-500">{row.completed.toLocaleString()}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function WorkerPlaneSummary({ viewModel }: { viewModel: SystemHealthViewModel }) {
+  return (
+    <div className="space-y-3 text-sm text-zinc-600">
+      <p className="text-sm text-zinc-600">
+        All long-running sync work is expected to run on the configured remote executor, not in your browser or local app session.
+      </p>
+      <div className="grid gap-2 md:grid-cols-4">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Execution owner</p>
+          <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.executionOwnerLabel.replace("Execution owner: ", "")}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Execution backend</p>
+          <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.executionBackendLabel.replace("Execution backend: ", "")}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Execution mode</p>
+          <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.executionModeLabel.replace("Execution mode: ", "")}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Execution policy</p>
+          <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.executionPolicyLabel}</p>
+        </div>
+      </div>
+      {viewModel.workerStageCards.length > 0 && (
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+          {viewModel.workerStageCards.map((card) => (
+            <div key={card.key} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
+              <p className="font-medium text-zinc-800">{card.label}</p>
+              <p className="mt-1 text-zinc-500">{card.countsLabel}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-xs text-zinc-500">
+        Seen recently means the worker checked in within the expected heartbeat window. Recorded includes older heartbeat history.
+      </p>
+      <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs text-amber-900">
+        <p className="font-medium">{viewModel.staleClaimsSummary}</p>
+      </div>
+    </div>
+  );
+}
+
+function QueueHealthSection({ viewModel }: { viewModel: SystemHealthViewModel }) {
+  const [mode, setMode] = useState<"platform" | "stage">("platform");
+  const rows =
+    mode === "platform" ? viewModel.queueBreakdownByPlatform : viewModel.queueBreakdownByStage;
+
+  return (
+    <div className="space-y-3">
+      <SummaryCards cards={viewModel.queueStatusCards} columns={6} />
+      <p className="text-xs text-zinc-500">Waiting includes queued, pending, and retrying jobs.</p>
+      <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-50 p-1">
+        <button
+          type="button"
+          onClick={() => setMode("platform")}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${mode === "platform" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"}`}
+        >
+          By Platform
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("stage")}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${mode === "stage" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"}`}
+        >
+          By Stage
+        </button>
+      </div>
+      <QueueBreakdownTable
+        rows={rows}
+        emptyMessage={mode === "platform" ? "No platform-level queue data available" : "No stage-level queue data available"}
+      />
     </div>
   );
 }
@@ -786,6 +1408,8 @@ function WorkersList({
   onInspectWorker,
   onDebugJob,
   debugJobLoadingId,
+  workersSummaryLabel,
+  executionBackend,
 }: {
   workers: WorkerEntry[];
   staleAfterSeconds: number;
@@ -794,10 +1418,22 @@ function WorkersList({
   onInspectWorker: (worker: WorkerEntry) => void;
   onDebugJob: (jobId: string) => void;
   debugJobLoadingId: string | null;
+  workersSummaryLabel: string;
+  executionBackend: string | null | undefined;
 }) {
   const [showStaleWorkers, setShowStaleWorkers] = useState(false);
+  const [showOtherWorkers, setShowOtherWorkers] = useState(false);
   const now = Date.now();
-  const freshWorkers = workers.filter((worker) => {
+  const shouldPreferAwsRows = preferAwsWorkerRows(executionBackend);
+  const workersWithOrigin = workers.map((worker) => ({
+    worker,
+    origin: resolveWorkerOrigin(worker),
+  }));
+  const otherWorkerCount = workersWithOrigin.filter(({ origin }) => origin !== "aws").length;
+  const originFilteredWorkers = workersWithOrigin.filter(
+    ({ origin }) => !shouldPreferAwsRows || showOtherWorkers || origin === "aws",
+  );
+  const freshWorkers = originFilteredWorkers.filter(({ worker }) => {
     if (worker.is_healthy) return true;
     if (!worker.last_seen_at) return false;
     const lastSeenMs = new Date(worker.last_seen_at).getTime();
@@ -806,81 +1442,130 @@ function WorkersList({
   });
   const hiddenStaleCount = Math.max(
     0,
-    Number.isFinite(staleHiddenCount) ? staleHiddenCount : workers.length - freshWorkers.length,
+    Number.isFinite(staleHiddenCount) && showOtherWorkers
+      ? staleHiddenCount
+      : originFilteredWorkers.length - freshWorkers.length,
   );
-  const visibleWorkers = showStaleWorkers ? workers : freshWorkers;
-
-  if (visibleWorkers.length === 0) return <p className="text-sm text-zinc-400">No active workers</p>;
+  const visibleWorkers = (showStaleWorkers ? originFilteredWorkers : freshWorkers).map(({ worker, origin }) => ({
+    worker,
+    origin,
+    roleLabel: formatWorkerRoleLabel(worker.stage),
+    hostLabel: formatHostname(worker),
+    currentRunLabel: worker.run_id ? `Current run ${truncate(worker.run_id, 8)}` : null,
+    platformLabel: formatSupportedPlatformsLabel(worker.supported_platforms),
+    activityLabel: formatWorkerActivityLabel(worker),
+  }));
 
   return (
-    <div className="space-y-1.5">
-      {hiddenStaleCount > 0 && (
+    <div className="space-y-3">
+      <p className="text-sm text-zinc-600">
+        Remote executor processes checking the social sync queues. Each card shows what kind of jobs a worker
+        handles, where it is running, and whether it is busy right now.
+      </p>
+      <p className="text-xs text-zinc-500">{workersSummaryLabel}</p>
+      {shouldPreferAwsRows && otherWorkerCount > 0 && (
         <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
           <p>
-            {hiddenStaleCount.toLocaleString()} stale worker heartbeat
-            {hiddenStaleCount === 1 ? "" : "s"} hidden
+            {otherWorkerCount.toLocaleString()} other worker
+            {otherWorkerCount === 1 ? "" : "s"} {showOtherWorkers ? "shown" : "hidden"}
           </p>
           <button
             type="button"
-            onClick={() => setShowStaleWorkers((current) => !current)}
+            onClick={() => setShowOtherWorkers((current) => !current)}
             className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50"
           >
-            {showStaleWorkers ? "Hide stale workers" : "Show stale workers"}
+            {showOtherWorkers ? "Hide other workers" : "Show other workers"}
           </button>
         </div>
       )}
-      {visibleWorkers.map((worker) => (
-        <div key={worker.worker_id} className="flex items-center gap-2 text-sm">
-          <span className={`inline-block h-2 w-2 rounded-full ${worker.is_healthy ? "bg-emerald-500" : "bg-red-400"}`} />
-          <button
-            type="button"
-            onClick={() => onInspectWorker(worker)}
-            disabled={worker.status !== "working"}
-            className={`rounded border px-1.5 py-0.5 font-mono text-xs transition ${
-              worker.status === "working"
-                ? "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                : "cursor-default border-transparent text-zinc-500"
-            } ${selectedWorkerId === worker.worker_id ? "bg-zinc-100" : ""}`}
-          >
-            {worker.worker_id}
-          </button>
-          <span className="text-zinc-400">{worker.stage}</span>
-          {worker.run_id && <span className="font-mono text-xs text-zinc-500">run {truncate(worker.run_id, 8)}</span>}
-          {worker.status === "working" && worker.current_job_id && (
+      {hiddenStaleCount > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs text-amber-900">
+          <div className="flex items-center justify-between gap-2">
+            <p>
+              {hiddenStaleCount.toLocaleString()} older worker check-in
+              {hiddenStaleCount === 1 ? "" : "s"} hidden
+            </p>
             <button
               type="button"
-              onClick={() => onDebugJob(worker.current_job_id as string)}
-              disabled={debugJobLoadingId === worker.current_job_id}
-              className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-              title="Debug this running job"
-              aria-label={`Debug job ${truncate(worker.current_job_id, 8)}`}
+              onClick={() => setShowStaleWorkers((current) => !current)}
+              className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50"
             >
-              {debugJobLoadingId === worker.current_job_id ? "..." : "🐛"}
+              {showStaleWorkers ? "Hide older worker check-ins" : "Show older worker check-ins"}
             </button>
-          )}
-          <span className="ml-auto text-xs text-zinc-400">{relativeTime(worker.last_seen_at)}</span>
+          </div>
         </div>
-      ))}
+      )}
+      {visibleWorkers.length === 0 && <p className="text-sm text-zinc-400">No workers seen recently.</p>}
+      <div className="space-y-2">
+        {visibleWorkers.map(({ worker, origin, roleLabel, hostLabel, currentRunLabel, platformLabel, activityLabel }) => (
+          <div
+            key={worker.worker_id}
+            className={`rounded-xl border px-3 py-3 ${selectedWorkerId === worker.worker_id ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"}`}
+          >
+            <div className="flex items-start gap-3">
+              <span className={`mt-1 inline-block h-2.5 w-2.5 rounded-full ${worker.is_healthy ? "bg-emerald-500" : "bg-amber-500"}`} />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onInspectWorker(worker)}
+                    className="text-left text-sm font-semibold text-zinc-900 hover:text-zinc-700"
+                  >
+                    {roleLabel}
+                  </button>
+                  {origin !== "aws" && (
+                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                      {origin}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-sm text-zinc-600">{hostLabel}</p>
+                <p className="mt-1 text-xs text-zinc-600">{activityLabel}</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Last seen {relativeTime(worker.last_seen_at)}
+                  {currentRunLabel ? ` · ${currentRunLabel}` : ""}
+                </p>
+                {platformLabel && <p className="mt-1 text-xs text-zinc-500">Platforms this worker can pick up: {platformLabel}</p>}
+                <p className="mt-1 text-[11px] text-zinc-400">
+                  Worker ID: <span className="break-all font-mono">{worker.worker_id}</span>
+                </p>
+              </div>
+              {worker.status === "working" && worker.current_job_id && (
+                <button
+                  type="button"
+                  onClick={() => onDebugJob(worker.current_job_id as string)}
+                  disabled={debugJobLoadingId === worker.current_job_id}
+                  className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  title="Debug current job"
+                >
+                  {debugJobLoadingId === worker.current_job_id ? "Debugging..." : "Debug"}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 function RecentFailures({ failures }: { failures: FailureEntry[] }) {
-  if (failures.length === 0) return <p className="text-sm text-zinc-400">No recent failures</p>;
+  if (failures.length === 0) return <p className="text-sm text-zinc-400">No recent error patterns to review.</p>;
 
   return (
     <div className="max-h-48 space-y-2 overflow-y-auto">
       {failures.slice(0, 20).map((failure) => (
         <div key={failure.id} className="rounded-lg border border-red-100 bg-red-50/50 px-3 py-2 text-xs">
           <div className="flex items-center gap-2">
-            <span className="font-medium capitalize text-zinc-900">{failure.platform}</span>
-            <span className="text-zinc-400">{failure.job_type}</span>
+            <span className="font-medium text-zinc-900">{titleCaseWords(failure.platform)}</span>
+            <span className="text-zinc-400">{formatStageLabel(failure.job_type)}</span>
             {failure.run_id && <span className="font-mono text-zinc-500">run {truncate(failure.run_id, 8)}</span>}
             <span className="ml-auto text-zinc-400">{relativeTime(failure.created_at)}</span>
           </div>
-          <p className="mt-0.5 font-mono text-red-700">
-            {truncate(failure.error_message ?? failure.last_error_code ?? failure.last_error_class, 120)}
-          </p>
+          <p className="mt-0.5 text-red-700">{formatFailureSummary(failure).summary}</p>
+          {formatFailureSummary(failure).rawDetail && (
+            <p className="mt-1 font-mono text-red-700">{truncate(formatFailureSummary(failure).rawDetail, 120)}</p>
+          )}
         </div>
       ))}
     </div>
@@ -907,7 +1592,7 @@ function StuckJobs({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">Showing {sectionLabel} stuck jobs</p>
+        <p className="text-xs text-zinc-500">Showing {sectionLabel} likely stuck jobs</p>
         <button
           type="button"
           onClick={() => {
@@ -916,11 +1601,11 @@ function StuckJobs({
           disabled={!canClearAll}
           className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {clearingAll ? "Clearing..." : "Clear all stuck jobs"}
+          {clearingAll ? "Cancelling..." : "Cancel all likely stuck jobs"}
         </button>
       </div>
       {jobs.length === 0 ? (
-        <p className="text-sm text-zinc-400">No stuck jobs detected</p>
+        <p className="text-sm text-zinc-400">No likely stuck jobs detected.</p>
       ) : (
         <div className="max-h-56 space-y-2 overflow-y-auto">
           {jobs.map((job) => {
@@ -928,15 +1613,14 @@ function StuckJobs({
             return (
               <div key={job.id} className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-zinc-900">{truncate(job.id, 8)}</span>
+                  <span className="font-medium text-zinc-900">{titleCaseWords(job.platform)}</span>
+                  <span className="text-zinc-500">{formatStageLabel(job.job_type)}</span>
                   <StatusBadge status={job.status} />
-                  <span className="capitalize text-zinc-500">{job.platform}</span>
-                  <span className="text-zinc-400">{job.job_type}</span>
                   {job.run_id && <span className="font-mono text-zinc-500">run {truncate(job.run_id, 8)}</span>}
                   <span className="ml-auto text-zinc-400">{relativeTime(job.heartbeat_at ?? job.created_at)}</span>
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-zinc-500">
-                  <span>{job.stuck_reason}</span>
+                  <span>{formatStuckReasonLabel(job.stuck_reason)}</span>
                   <span>·</span>
                   <span>{Math.max(0, Number(job.stuck_for_seconds) || 0)}s stuck</span>
                   {job.worker_id && (
@@ -997,34 +1681,73 @@ function WorkerDetailPanel({
 
   return (
     <section className="space-y-2 rounded-xl border border-zinc-200 bg-zinc-50/50 p-3">
-      <SectionHeader>Running Worker Detail</SectionHeader>
+      <SectionHeader>Selected Worker</SectionHeader>
       {loading && <p className="text-sm text-zinc-500">Loading worker detail...</p>}
       {error && <p className="text-sm text-red-700">{error}</p>}
       {detail && (
         <div className="space-y-2 text-xs text-zinc-600">
-          <p className="font-mono text-zinc-700">
-            {detail.worker.worker_id} · {detail.worker.status} · {detail.worker.stage}
-          </p>
-          {detail.run?.run_id && <p className="font-mono">Run ID: {detail.run.run_id}</p>}
-          <p>Currently scraping: {detail.currently_scraping ?? "-"}</p>
+          <div className="rounded-md border border-zinc-200 bg-white p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">What this worker is doing</p>
+            <p className="mt-1 text-sm font-medium text-zinc-900">{formatCurrentTaskSummary(detail)}</p>
+            <p className="mt-2 text-xs text-zinc-600">{formatRunSummary(detail)}</p>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="rounded-md border border-zinc-200 bg-white p-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Worker ID</p>
+              <p className="mt-1 break-all font-mono text-zinc-700">{detail.worker.worker_id}</p>
+            </div>
+            <div className="rounded-md border border-zinc-200 bg-white p-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Worker type</p>
+              <p className="mt-1 text-sm font-medium text-zinc-900">{formatWorkerRoleLabel(detail.worker.stage)}</p>
+            </div>
+            <div className="rounded-md border border-zinc-200 bg-white p-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Run</p>
+              <p className="mt-1 break-all font-mono text-zinc-700">{detail.run?.run_id ?? "-"}</p>
+            </div>
+            <div className="rounded-md border border-zinc-200 bg-white p-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Reported phase</p>
+              <p className="mt-1 text-sm text-zinc-900">{formatPhaseLabel(detail.currently_scraping)}</p>
+            </div>
+          </div>
+          {detail.worker.supported_platforms && detail.worker.supported_platforms.length > 0 && (
+            <p>Platforms this worker can pick up: {formatSupportedPlatformsLabel(detail.worker.supported_platforms)}</p>
+          )}
+          {(detail.run?.execution_owner || detail.run?.execution_backend_canonical || detail.run?.execution_mode_canonical) && (
+            <p>
+              Execution: {formatExecutionOwnerLabel(detail.run?.execution_owner)}
+              {detail.run?.execution_backend_canonical
+                ? ` · ${formatExecutionBackendLabel(detail.run.execution_backend_canonical)}`
+                : ""}
+              {detail.run?.execution_mode_canonical
+                ? ` · ${formatExecutionModeLabel(detail.run.execution_mode_canonical)}`
+                : ""}
+            </p>
+          )}
           {detail.current_job ? (
             <div className="rounded-md border border-zinc-200 bg-white p-2">
-              <p className="font-medium text-zinc-800">
-                {detail.current_job.platform} / {detail.current_job.job_type}
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Current task</p>
+              <p className="mt-1 font-medium text-zinc-800">
+                {titleCaseWords(detail.current_job.platform)} / {formatStageLabel(detail.current_job.job_type)}
               </p>
               <p>Handle: {detail.current_job.account_handle ?? "-"}</p>
               <p>
-                Progress: items {detail.progress_made.items_found}, posts {detail.progress_made.posts_upserted}, comments{" "}
-                {detail.progress_made.comments_upserted}
+                Progress reported: {detail.progress_made.items_found.toLocaleString()} items scraped ·{" "}
+                {detail.progress_made.posts_upserted.toLocaleString()} posts saved ·{" "}
+                {detail.progress_made.comments_upserted.toLocaleString()} comments saved
               </p>
-              <div className="mt-2 flex gap-2">
+              <p>
+                Current job ID: <span className="font-mono">{detail.current_job.id}</span>
+              </p>
+              <div className="mt-3">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Admin-only actions</p>
+                <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => onDebugJob(detail.current_job?.id ?? "")}
                   disabled={!detail.current_job?.id || debugJobLoadingId === detail.current_job?.id}
                   className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {debugJobLoadingId === detail.current_job?.id ? "Debugging..." : "🐛 Debug"}
+                  {debugJobLoadingId === detail.current_job?.id ? "Debugging..." : "Debug current job"}
                 </button>
                 <button
                   type="button"
@@ -1032,8 +1755,9 @@ function WorkerDetailPanel({
                   disabled={!detail.current_job?.id || debugJobLoadingId === detail.current_job?.id}
                   className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Apply Patch
+                  Apply suggested patch
                 </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -1130,6 +1854,14 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
 
   const state = healthState(statusData, queueStatus.error ?? healthDot.error);
   const lastFetched = queueStatus.lastFetched ?? healthDot.lastFetched;
+  const modalState = useMemo(
+    () => (queueStatus.data ? modalQueueHealthState(queueStatus.data) : state),
+    [queueStatus.data, state],
+  );
+  const viewModel = useMemo(
+    () => (queueStatus.data ? buildSystemHealthViewModel(queueStatus.data, modalState) : null),
+    [modalState, queueStatus.data],
+  );
 
   const cancelStuckJobs = useCallback(
     async (jobIds: string[]) => {
@@ -1316,28 +2048,38 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     <AdminModal
       isOpen={isOpen}
       onClose={onClose}
-      title="System Health"
+      title="Social Sync Health"
       panelClassName="relative w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl"
     >
-      <div className="mb-5 flex items-center gap-3">
-        <span className={`inline-block h-3 w-3 rounded-full ${healthDotColor(state)}`} />
-        <span className="text-sm font-semibold text-zinc-900">{healthLabel(state)}</span>
-        {statusData?.queue_enabled === false && (
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Queue disabled</span>
-        )}
-        <span className="ml-auto text-xs text-zinc-400">
-          {lastFetched ? `Updated ${relativeTime(lastFetched.toISOString())}` : "Loading..."}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            queueStatus.refetch();
-            healthDot.refetch();
-          }}
-          className="rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-50"
-        >
-          Refresh
-        </button>
+      <div className="mb-5 flex items-start gap-3">
+        <span className={`mt-1 inline-block h-3 w-3 rounded-full ${healthDotColor(state)}`} />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-zinc-900">{modalHealthLabel(modalState)}</span>
+            {statusData?.queue_enabled === false && (
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Queue disabled</span>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-zinc-600">
+            Shows whether the remote executor is available, whether jobs are moving, and whether anything needs
+            intervention.
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs text-zinc-400">
+            {lastFetched ? `Updated ${relativeTime(lastFetched.toISOString())}` : "Loading..."}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              queueStatus.refetch();
+              healthDot.refetch();
+            }}
+            className="rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-50"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
       <div className="max-h-[calc(90vh-8.5rem)] overflow-y-auto pr-1">
         {(queueStatus.error || healthDot.error) && (
@@ -1361,84 +2103,100 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           <p className="text-sm text-zinc-500">Loading detailed queue and worker diagnostics...</p>
         )}
 
-        {queueStatus.data && (
+        {queueStatus.data && viewModel && (
           <div className="space-y-6">
             <section>
-            <SectionHeader>
-              Workers (healthy/fresh/total: {queueStatus.data.workers.healthy_workers ?? 0}/
-              {queueStatus.data.workers.fresh_workers ?? 0}/{queueStatus.data.workers.total_workers ?? 0})
-            </SectionHeader>
-            <WorkersList
-              workers={queueStatus.data.workers.workers}
-              staleAfterSeconds={queueStatus.data.workers.stale_after_seconds}
-              staleHiddenCount={queueStatus.data.workers.stale_hidden_count}
-              selectedWorkerId={selectedWorkerId}
-              onInspectWorker={(worker) => {
-                void fetchWorkerDetail(worker.worker_id);
-              }}
-              onDebugJob={(jobId) => {
-                void runJobDebug(jobId, false);
-              }}
-              debugJobLoadingId={debugJobLoadingId}
-            />
-            <WorkerDetailPanel
-              selectedWorkerId={selectedWorkerId}
-              detail={workerDetail}
-              loading={workerDetailLoading}
-              error={workerDetailError}
-              debugResult={debugResult}
-              debugError={debugError}
-              debugJobLoadingId={debugJobLoadingId}
-              onDebugJob={(jobId) => {
-                void runJobDebug(jobId, false);
-              }}
-              onApplyPatch={(jobId) => {
-                void runJobDebug(jobId, true);
-              }}
-            />
-          </section>
+              <SummaryCards cards={viewModel.summaryCards} />
+            </section>
 
             <hr className="border-zinc-100" />
 
             <section>
-              <SectionHeader>Run Summary</SectionHeader>
-              <QueueSummaryTable
-                byStatus={queueStatus.data.queue.runs_by_status ?? queueStatus.data.queue.by_status}
+              <SectionHeader>How This Sync Runs</SectionHeader>
+              <WorkerPlaneSummary viewModel={viewModel} />
+            </section>
+
+            <hr className="border-zinc-100" />
+
+            <section>
+              <SectionHeader>Queue Health</SectionHeader>
+              <QueueHealthSection viewModel={viewModel} />
+            </section>
+
+            <hr className="border-zinc-100" />
+
+            <section>
+              <SectionHeader>Live Workers</SectionHeader>
+              <WorkersList
+                workers={queueStatus.data.workers.workers}
+                staleAfterSeconds={queueStatus.data.workers.stale_after_seconds}
+                staleHiddenCount={queueStatus.data.workers.stale_hidden_count}
+                selectedWorkerId={selectedWorkerId}
+                onInspectWorker={(worker) => {
+                  void fetchWorkerDetail(worker.worker_id);
+                }}
+                onDebugJob={(jobId) => {
+                  void runJobDebug(jobId, false);
+                }}
+                debugJobLoadingId={debugJobLoadingId}
+                workersSummaryLabel={viewModel.workersSummaryLabel}
+                executionBackend={queueStatus.data.remote_plane?.execution_backend_canonical ?? queueStatus.data.workers.executor_backend}
+              />
+              <WorkerDetailPanel
+                selectedWorkerId={selectedWorkerId}
+                detail={workerDetail}
+                loading={workerDetailLoading}
+                error={workerDetailError}
+                debugResult={debugResult}
+                debugError={debugError}
+                debugJobLoadingId={debugJobLoadingId}
+                onDebugJob={(jobId) => {
+                  void runJobDebug(jobId, false);
+                }}
+                onApplyPatch={(jobId) => {
+                  void runJobDebug(jobId, true);
+                }}
               />
             </section>
 
             <hr className="border-zinc-100" />
 
             <section>
-              <SectionHeader>Jobs By Platform</SectionHeader>
-              <PlatformBreakdownTable byPlatform={queueStatus.data.queue.by_platform} />
-            </section>
-
-            <hr className="border-zinc-100" />
-
-            <section>
-              <SectionHeader>Stuck Jobs</SectionHeader>
-              <StuckJobs
-                jobs={queueStatus.data.queue.stuck_jobs ?? []}
-                total={queueStatus.data.queue.stuck_jobs_total ?? 0}
-                cancelingJobIds={cancelingJobIds}
-                clearingAll={clearingAll}
-                onCancelJob={cancelSingleStuckJob}
-                onClearAll={clearAllStuckJobs}
-              />
-            </section>
-
-            <hr className="border-zinc-100" />
-
-            <section>
-              <SectionHeader>Recent Failures</SectionHeader>
-              <RecentFailures failures={queueStatus.data.queue.recent_failures} />
+              <SectionHeader>Problems to Review</SectionHeader>
+              <div className="space-y-5">
+                <div>
+                  <p className="text-sm font-medium text-zinc-900">Likely Stuck Jobs</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    These jobs were claimed by a worker but have not reported progress in time.
+                  </p>
+                  <div className="mt-3">
+                    <StuckJobs
+                      jobs={queueStatus.data.queue.stuck_jobs ?? []}
+                      total={queueStatus.data.queue.stuck_jobs_total ?? 0}
+                      cancelingJobIds={cancelingJobIds}
+                      clearingAll={clearingAll}
+                      onCancelJob={cancelSingleStuckJob}
+                      onClearAll={clearAllStuckJobs}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-zinc-900">Recent Error Patterns</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    These are the most recent job failures, grouped in the order they occurred.
+                  </p>
+                  <div className="mt-3">
+                    <RecentFailures failures={queueStatus.data.queue.recent_failures} />
+                  </div>
+                </div>
+              </div>
             </section>
           </div>
         )}
       </div>
       {queueStatus.data && (
         <div className="mt-4 border-t border-zinc-100 pt-4">
+          <SectionHeader>Admin Actions</SectionHeader>
           <button
             type="button"
             onClick={() => {
@@ -1447,10 +2205,10 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
             disabled={cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
             className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel All Active Jobs"}
+            {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel all active jobs"}
           </button>
           <p className="mt-1 text-xs text-zinc-500">
-            Cancels queued, pending, retrying, and running jobs across all runs.
+            Use only if the queue is wedged or you need to stop every active social sync job.
           </p>
         </div>
       )}

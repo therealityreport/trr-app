@@ -33,13 +33,13 @@ describe("show news tab google wiring", () => {
     expect(contents).not.toMatch(/filteredUnifiedNews/);
   });
 
-  it("wires Google News URL settings persistence via entity links", () => {
+  it("routes Google News configuration through the normal show-links UI", () => {
     const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/link_kind:\s*"google_news_url"/);
-    expect(contents).toMatch(/label:\s*"Google News URL"/);
-    expect(contents).toMatch(/entity_type:\s*"show"/);
-    expect(contents).toMatch(/season_number:\s*0/);
+    expect(contents).toMatch(/Google News topic URLs/);
+    expect(contents).toMatch(/news\.google\.com\/topics/);
+    expect(contents).toMatch(/google_news_url/);
+    expect(contents).not.toMatch(/Google News Feed/);
   });
 });

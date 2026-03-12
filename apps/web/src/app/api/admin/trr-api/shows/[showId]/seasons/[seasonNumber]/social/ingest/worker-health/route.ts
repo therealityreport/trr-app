@@ -9,6 +9,37 @@ import { isValidPositiveIntegerString, isValidUuid } from "@/lib/server/validati
 
 export const dynamic = "force-dynamic";
 
+const normalizeWorkerHealthPayload = (value: Record<string, unknown>): Record<string, unknown> => {
+  const workers = value.workers && typeof value.workers === "object"
+    ? (value.workers as Record<string, unknown>)
+    : null;
+  const queueEnabled = typeof value.queue_enabled === "boolean" ? value.queue_enabled : false;
+  const healthy = typeof workers?.healthy === "boolean"
+    ? workers.healthy
+    : typeof value.healthy === "boolean"
+      ? value.healthy
+      : false;
+  const healthyWorkers = typeof workers?.healthy_workers === "number"
+    ? workers.healthy_workers
+    : typeof value.healthy_workers === "number"
+      ? value.healthy_workers
+      : 0;
+  const reason = queueEnabled && !healthy && healthyWorkers <= 0 ? "no_healthy_workers" : null;
+  const checkedAt =
+    typeof value.updated_at === "string" && value.updated_at.trim().length > 0
+      ? value.updated_at
+      : typeof value.checked_at === "string" && value.checked_at.trim().length > 0
+        ? value.checked_at
+        : null;
+  return {
+    queue_enabled: queueEnabled,
+    healthy,
+    healthy_workers: healthyWorkers,
+    reason,
+    checked_at: checkedAt,
+  };
+};
+
 interface RouteParams {
   params: Promise<{ showId: string; seasonNumber: string }>;
 }
@@ -36,12 +67,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const data = await fetchSocialBackendJson("/ingest/worker-health", {
+    const data = await fetchSocialBackendJson("/ingest/health-dot", {
       fallbackError: "Failed to fetch social ingest worker health",
-      retries: 0,
+      retries: 1,
       timeoutMs: SOCIAL_PROXY_SHORT_TIMEOUT_MS,
     });
-    return NextResponse.json(data);
+    return NextResponse.json(normalizeWorkerHealthPayload(data));
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to fetch social ingest worker health");
   }

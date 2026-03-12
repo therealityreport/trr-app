@@ -1,0 +1,5 @@
+interface:
+  display_name: "Senior Frontend (TRR-APP)"
+  short_description: "Repo-local canonical owner for TRR-APP Next.js App Router UI, rendering, interaction, accessibility, and stable-contract frontend implementation."
+  default_prompt: "Use $senior-frontend for this TRR-APP frontend implementation or interaction change."
+

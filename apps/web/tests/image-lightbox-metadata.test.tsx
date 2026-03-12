@@ -134,6 +134,34 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByText("EXAMPLE.COM | Unknown Page")).toBeInTheDocument();
   });
 
+  it("normalizes Getty provenance labels for NBCUMV-backed metadata", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          source: "nbcumv",
+          sourceBadgeColor: "#0ea5e9",
+          sourceUrl: "https://www.gettyimages.com/detail/news-photo/example/2264300032",
+          sourcePageTitle: "Mac Forehand",
+          originalSourceLabel: "GETTY",
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getAllByText("GETTY").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("link", { name: "Mac Forehand" }),
+    ).toHaveAttribute(
+      "href",
+      "https://www.gettyimages.com/detail/news-photo/example/2264300032",
+    );
+  });
+
   it("renders explicit Show field in metadata coverage", () => {
     render(
       <ImageLightbox

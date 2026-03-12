@@ -456,8 +456,12 @@ describe("show-admin-routes", () => {
         seasonNumber: 6,
         windowKey: "e1",
         postId: "1abcde",
+        title: "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Pre Episode Discussion",
+        author: "AutoModerator",
       }),
-    ).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1/post/1abcde");
+    ).toBe(
+      "/rhoslc/social/reddit/BravoRealHousewives/s6/e1/the-real-housewives-of-salt-lake-city-season-6-episode-1-pre-episode-discussion--u-automoderator",
+    );
 
     expect(
       buildShowRedditCommunityAnalyticsUrl({
@@ -561,12 +565,19 @@ describe("show-admin-routes", () => {
   it("slugifies people names and appends person id prefix", () => {
     expect(toPersonSlug("Meredith Marks")).toBe("meredith-marks");
     expect(toPersonSlug("Jax & Brittany")).toBe("jax-and-brittany");
+    expect(toPersonSlug("Sébastien Schmitt")).toBe("sebastien-schmitt");
     expect(
       buildPersonRouteSlug({
         personName: "Meredith Marks",
         personId: "7f528757-5017-4599-8252-c02f0d0736cf",
       })
     ).toBe("meredith-marks--7f528757");
+    expect(
+      buildPersonRouteSlug({
+        personName: "Sébastien Schmitt",
+        personId: "12345678-1234-1234-1234-123456789abc",
+      }),
+    ).toBe("sebastien-schmitt--12345678");
   });
 
   it("cleans legacy person routing query params", () => {

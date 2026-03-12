@@ -113,10 +113,14 @@ function formatSourceBadgeLabel(source: string, sourceUrl?: string | null): stri
   if (!raw) return "unknown";
 
   const lower = raw.toLowerCase();
+  if (lower === "nbcumv") return "NBCUMV";
+  if (lower === "getty") return "Getty";
   if (lower.includes("harvest")) {
     if (sourceUrl) {
       try {
         const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
+        if (hostname.includes("gettyimages.com")) return "GETTY";
+        if (hostname.includes("nbcumv.com")) return "NBCUMV";
         if (hostname) return hostname;
       } catch {
         // Fall through to default fallback.
@@ -147,6 +151,8 @@ function formatSourceBadgeLabel(source: string, sourceUrl?: string | null): stri
 function formatFoundOnSourceLabel(source: string, sourceUrl?: string | null): string {
   const raw = (source || "").trim();
   const lower = raw.toLowerCase();
+  if (lower === "nbcumv") return "NBCUMV";
+  if (lower === "getty") return "GETTY";
   if (lower.includes("fandom")) return "FANDOM";
   if (lower.includes("imdb")) return "IMDB";
   if (lower.includes("tmdb")) return "TMDB";
@@ -154,6 +160,9 @@ function formatFoundOnSourceLabel(source: string, sourceUrl?: string | null): st
   if (sourceUrl) {
     try {
       const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
+      if (hostname.includes("gettyimages.com")) return "GETTY";
+      if (hostname.includes("nbcumv.com")) return "NBCUMV";
+      if (hostname.includes("photobank.nbcuni.com")) return "NBCU PHOTO BANK";
       if (hostname.includes("fandom")) return "FANDOM";
       if (hostname.includes("imdb")) return "IMDB";
       if (hostname.includes("tmdb") || hostname.includes("themoviedb")) return "TMDB";

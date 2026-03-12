@@ -16,6 +16,7 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 
 import { GET as getOptionSources } from "@/app/api/admin/trr-api/brands/logos/options/sources/route";
 import { POST as postOptionDiscover } from "@/app/api/admin/trr-api/brands/logos/options/discover/route";
+import { POST as postOptionSourceQuery } from "@/app/api/admin/trr-api/brands/logos/options/source-query/route";
 import { POST as postOptionSelect } from "@/app/api/admin/trr-api/brands/logos/options/select/route";
 
 describe("brands logo option proxy routes", () => {
@@ -32,7 +33,7 @@ describe("brands logo option proxy routes", () => {
   it("forwards option source requests to backend", async () => {
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/brands/logos/options/sources");
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ sources: [{ source_provider: "wikimedia_commons", total_count: 3, has_more: false }] }), {
+      new Response(JSON.stringify({ sources: [{ source_provider: "wikimedia_commons", total_count: 3, has_more: false, editable: true, refreshable: true, query_kind: "search_term", effective_query_value: "instagram", query_links: ["https://commons.wikimedia.org/example"] }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -62,7 +63,7 @@ describe("brands logo option proxy routes", () => {
   it("forwards discover requests to backend", async () => {
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/brands/logos/options/discover");
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ candidates: [{ id: "candidate:1" }], next_offset: 1, has_more: false }), {
+      new Response(JSON.stringify({ candidates: [{ id: "candidate:1" }], total_count: 1, next_offset: 1, has_more: false }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -81,6 +82,46 @@ describe("brands logo option proxy routes", () => {
     expect(payload.candidates?.[0]?.id).toBe("candidate:1");
     expect(fetchMock).toHaveBeenCalledWith(
       "https://backend.example.com/api/v1/admin/brands/logos/options/discover",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer service-role-secret",
+          "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("forwards source query save requests to backend", async () => {
+    getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/brands/logos/options/source-query");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ source: { source_provider: "logos1000", effective_query_value: "peacock-logo", query_values: ["peacock-logo", "peacock-symbol"] } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const request = new NextRequest("http://localhost/api/admin/trr-api/brands/logos/options/source-query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        target_type: "publication",
+        target_key: "peacocktv.com",
+        target_label: "peacocktv.com",
+        logo_role: "wordmark",
+        source_provider: "logos1000",
+        query_values: ["peacock-logo", "peacock-symbol"],
+      }),
+    });
+    const response = await postOptionSourceQuery(request);
+    const payload = (await response.json()) as { source?: { effective_query_value?: string; query_values?: string[] } };
+
+    expect(response.status).toBe(200);
+    expect(payload.source?.effective_query_value).toBe("peacock-logo");
+    expect(payload.source?.query_values).toEqual(["peacock-logo", "peacock-symbol"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://backend.example.com/api/v1/admin/brands/logos/options/source-query",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -113,4 +154,3 @@ describe("brands logo option proxy routes", () => {
     expect(payload.error).toBe("selection failed");
   });
 });
-

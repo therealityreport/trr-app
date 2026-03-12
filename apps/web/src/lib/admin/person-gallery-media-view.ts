@@ -9,6 +9,16 @@ export type PersonGalleryOtherShowOption = {
   acronym: string | null;
 };
 
+export type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery" | "nbcumv";
+
+export const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
+  "fandom",
+  "fandom-gallery",
+  "imdb",
+  "nbcumv",
+  "tmdb",
+];
+
 export const WWHL_LABEL = "WWHL";
 const TRUSTED_IMDB_SHOW_CONTEXT_SOURCES = new Set([
   "episode_table",
@@ -24,6 +34,17 @@ const STILL_FRAME_IMAGE_TYPES = new Set([
   "episode still",
 ]);
 const EVENT_IMAGE_TYPES = new Set(["event", "events", "premiere", "red_carpet", "red carpet"]);
+
+export function toCanonicalScopedSource(value: string | null | undefined): CanonicalScopedSource | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "imdb") return "imdb";
+  if (normalized === "tmdb") return "tmdb";
+  if (normalized === "fandom") return "fandom";
+  if (normalized === "fandom-gallery") return "fandom-gallery";
+  if (normalized === "nbcumv") return "nbcumv";
+  return null;
+}
 
 export function buildShowAcronym(name: string | null | undefined): string | null {
   if (!name) return null;
@@ -133,6 +154,59 @@ export type PersonPhotoShowBuckets = {
   matchesSelectedOtherShow: boolean;
   matchesUnknownShows: boolean;
 };
+
+export type PersonGalleryImportContext = {
+  showId: string | null;
+  showName: string | null;
+  label: string | null;
+};
+
+export function resolvePersonGalleryImportContext(input: {
+  galleryShowFilter: GalleryShowFilter;
+  routeShow:
+    | {
+        showId: string | null;
+        showName: string | null;
+        label: string | null;
+      }
+    | null
+    | undefined;
+  selectedOtherShow: Pick<PersonGalleryOtherShowOption, "showId" | "showName"> | null;
+  wwhlShow:
+    | {
+        showId: string | null;
+        showName: string | null;
+      }
+    | null
+    | undefined;
+}): PersonGalleryImportContext {
+  if (input.galleryShowFilter === "this-show" && input.routeShow) {
+    return {
+      showId: input.routeShow.showId ?? null,
+      showName: input.routeShow.showName ?? null,
+      label: input.routeShow.label ?? input.routeShow.showName ?? null,
+    };
+  }
+  if (input.galleryShowFilter === "other-shows" && input.selectedOtherShow) {
+    return {
+      showId: input.selectedOtherShow.showId ?? null,
+      showName: input.selectedOtherShow.showName ?? null,
+      label: input.selectedOtherShow.showName ?? null,
+    };
+  }
+  if (input.galleryShowFilter === "wwhl" && input.wwhlShow) {
+    return {
+      showId: input.wwhlShow.showId ?? null,
+      showName: input.wwhlShow.showName ?? null,
+      label: WWHL_LABEL,
+    };
+  }
+  return {
+    showId: null,
+    showName: null,
+    label: null,
+  };
+}
 
 export function computePersonPhotoShowBuckets(input: {
   photo: TrrPersonPhoto;

@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Route } from "next";
+import Image from "next/image";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { canonicalizeOperationStatus, type CanonicalOperationStatus } from "@/lib/admin/async-handles";
@@ -18,8 +19,9 @@ import {
 } from "@/lib/admin/run-session";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
-import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
+import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { parseRedditDetailSlug } from "@/lib/admin/reddit-detail-slug";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
 import {
   buildSeasonAdminUrl,
@@ -155,11 +157,13 @@ interface PostContext {
   subreddit: string;
   containerKey: string;
   postId: string;
+  detailSlug: string;
 }
 
 type ResolverStage = "init" | "loading_communities" | "loading_seasons" | "finalizing";
 
 type RefreshRunStatus = "queued" | "running" | "cancelling" | "completed" | "partial" | "failed" | "cancelled";
+type PostHeroMetricTab = "score" | "comments" | "media";
 
 interface RefreshRunPayload {
   run_id: string;
@@ -214,6 +218,21 @@ const fmtBytes = (value: number | null | undefined): string => {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+};
+
+const getMediaPreviewUrl = (item: RedditPostMedia): string | null => item.hosted_url ?? item.source_url ?? null;
+
+const isVideoMedia = (item: RedditPostMedia): boolean => {
+  const contentType = item.content_type?.toLowerCase() ?? "";
+  const mediaType = item.media_type?.toLowerCase() ?? "";
+  const previewUrl = getMediaPreviewUrl(item)?.toLowerCase() ?? "";
+  return (
+    contentType.startsWith("video/") ||
+    mediaType.includes("video") ||
+    previewUrl.endsWith(".mp4") ||
+    previewUrl.endsWith(".webm") ||
+    previewUrl.endsWith(".mov")
+  );
 };
 
 const toInt = (value: string | null | undefined): number | null => {
@@ -272,6 +291,7 @@ const parsePostRouteFromPathname = (
   seasonNumber?: number | null;
   windowKey: string | null;
   postId: string | null;
+  detailSlug: string | null;
 } | null => {
   const showSeasonWindow = pathname.match(
     /^\/([^/]+)\/social\/reddit\/([^/]+)\/s(\d{1,3})\/([^/]+)\/post\/([^/]+)$/,
@@ -283,6 +303,21 @@ const parsePostRouteFromPathname = (
       seasonNumber: Number.parseInt(showSeasonWindow[3] ?? "", 10),
       windowKey: decodeURIComponent(showSeasonWindow[4] ?? ""),
       postId: decodeURIComponent(showSeasonWindow[5] ?? ""),
+      detailSlug: null,
+    };
+  }
+
+  const showSeasonWindowCanonical = pathname.match(
+    /^\/([^/]+)\/social\/reddit\/([^/]+)\/s(\d{1,3})\/([^/]+)\/([^/]+)$/,
+  );
+  if (showSeasonWindowCanonical) {
+    return {
+      showId: decodeURIComponent(showSeasonWindowCanonical[1] ?? ""),
+      communitySlug: decodeURIComponent(showSeasonWindowCanonical[2] ?? ""),
+      seasonNumber: Number.parseInt(showSeasonWindowCanonical[3] ?? "", 10),
+      windowKey: decodeURIComponent(showSeasonWindowCanonical[4] ?? ""),
+      postId: null,
+      detailSlug: decodeURIComponent(showSeasonWindowCanonical[5] ?? ""),
     };
   }
 
@@ -294,6 +329,7 @@ const parsePostRouteFromPathname = (
       seasonNumber: null,
       windowKey: decodeURIComponent(showWindow[3] ?? ""),
       postId: decodeURIComponent(showWindow[4] ?? ""),
+      detailSlug: null,
     };
   }
 
@@ -307,6 +343,21 @@ const parsePostRouteFromPathname = (
       communitySlug: decodeURIComponent(showSeasonPrefixWindow[3] ?? ""),
       windowKey: decodeURIComponent(showSeasonPrefixWindow[4] ?? ""),
       postId: decodeURIComponent(showSeasonPrefixWindow[5] ?? ""),
+      detailSlug: null,
+    };
+  }
+
+  const showSeasonPrefixWindowCanonical = pathname.match(
+    /^\/([^/]+)\/s(\d{1,3})\/social\/reddit\/([^/]+)\/([^/]+)\/([^/]+)$/,
+  );
+  if (showSeasonPrefixWindowCanonical) {
+    return {
+      showId: decodeURIComponent(showSeasonPrefixWindowCanonical[1] ?? ""),
+      seasonNumber: Number.parseInt(showSeasonPrefixWindowCanonical[2] ?? "", 10),
+      communitySlug: decodeURIComponent(showSeasonPrefixWindowCanonical[3] ?? ""),
+      windowKey: decodeURIComponent(showSeasonPrefixWindowCanonical[4] ?? ""),
+      postId: null,
+      detailSlug: decodeURIComponent(showSeasonPrefixWindowCanonical[5] ?? ""),
     };
   }
 
@@ -319,6 +370,7 @@ const parsePostRouteFromPathname = (
       windowKey: decodeURIComponent(adminWindow[2] ?? ""),
       postId: decodeURIComponent(adminWindow[3] ?? ""),
       seasonNumber: null,
+      detailSlug: null,
     };
   }
   return null;
@@ -545,6 +597,7 @@ function AdminRedditPostDetailsPageContent() {
     communityId?: string;
     windowKey?: string;
     postId?: string;
+    detailSlug?: string;
   }>();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -579,6 +632,7 @@ function AdminRedditPostDetailsPageContent() {
   const [detailResumeBanner, setDetailResumeBanner] = useState<string | null>(null);
   const [manualAttachRuns, setManualAttachRuns] = useState<RefreshRunPayload[]>([]);
   const [selectedManualAttachRunId, setSelectedManualAttachRunId] = useState("");
+  const [activeHeroMetricTab, setActiveHeroMetricTab] = useState<PostHeroMetricTab>("comments");
   useAdminOperationUnloadGuard();
   const detailRunHeaders = useMemo(
     () => ({ "x-trr-flow-key": detailRunFlowKey }),
@@ -606,8 +660,13 @@ function AdminRedditPostDetailsPageContent() {
 
     try {
       const parsedFromPathname = parsePostRouteFromPathname(pathname);
-      const postId = (params.postId ?? queryPostId ?? parsedFromPathname?.postId ?? "").trim();
-      if (!postId) throw new Error("Invalid or missing post id.");
+      const routePostId = (params.postId ?? queryPostId ?? parsedFromPathname?.postId ?? "").trim();
+      const routeDetailSlug = (
+        params.detailSlug ??
+        parsedFromPathname?.detailSlug ??
+        searchParams.get("detail_slug") ??
+        ""
+      ).trim();
 
       const token = params.windowKey ?? queryWindowKey ?? parsedFromPathname?.windowKey;
       const containerKey = resolveContainerKeyFromWindowToken(token);
@@ -688,6 +747,42 @@ function AdminRedditPostDetailsPageContent() {
       if (!resolvedSeason?.id) throw new Error("Unable to resolve season context for this post.");
       seasonNumber = resolvedSeason.season_number;
 
+      const parsedDetailSlug = parseRedditDetailSlug(routeDetailSlug);
+      const resolveParams = new URLSearchParams({
+        season_id: resolvedSeason.id,
+        window_key: token ?? toCanonicalWindowToken(containerKey),
+      });
+      if (parsedDetailSlug?.titleSlug && parsedDetailSlug.authorSlug) {
+        resolveParams.set("slug", parsedDetailSlug.titleSlug);
+        resolveParams.set("author", parsedDetailSlug.authorSlug);
+        if (parsedDetailSlug.postId) {
+          resolveParams.set("post_id", parsedDetailSlug.postId);
+        }
+      } else if (routePostId) {
+        resolveParams.set("post_id", routePostId);
+      } else {
+        throw new Error("Invalid or missing post identifier.");
+      }
+
+      const resolveResponse = await fetchAdminJsonWithTimeout<{
+        reddit_post_id?: string;
+        detail_slug?: string;
+        error?: string;
+      }>({
+        url: `/api/admin/reddit/communities/${selectedCommunity.id}/posts/resolve?${resolveParams.toString()}`,
+        timeoutMs: 10_000,
+        preferredUser: user,
+        signal: resolveController.signal,
+      });
+      if (!resolveResponse.ok) {
+        throw new Error(resolveResponse.payload.error ?? "Failed to resolve reddit post details route");
+      }
+      const resolvedPostId = String(resolveResponse.payload.reddit_post_id ?? "").trim();
+      const resolvedDetailSlug = String(resolveResponse.payload.detail_slug ?? "").trim();
+      if (!resolvedPostId || !resolvedDetailSlug) {
+        throw new Error("Failed to resolve reddit post details route");
+      }
+
       setResolverStage("finalizing");
       setContext({
         communityId: selectedCommunity.id,
@@ -698,7 +793,8 @@ function AdminRedditPostDetailsPageContent() {
         communitySlug,
         subreddit: selectedCommunity.subreddit,
         containerKey,
-        postId,
+        postId: resolvedPostId,
+        detailSlug: resolvedDetailSlug,
       });
     } catch (resolveError) {
       if (isRequestCancelledError(resolveError)) return;
@@ -721,6 +817,7 @@ function AdminRedditPostDetailsPageContent() {
     hasAccess,
     params.communityId,
     params.communitySlug,
+    params.detailSlug,
     params.postId,
     params.seasonNumber,
     params.showId,
@@ -1140,6 +1237,10 @@ function AdminRedditPostDetailsPageContent() {
   );
 
   useEffect(() => {
+    setActiveHeroMetricTab("comments");
+  }, [post?.reddit_post_id]);
+
+  useEffect(() => {
     if (!context || !hasAccess || !user) return;
     const canonicalPath = buildShowRedditCommunityWindowPostUrl({
       showSlug: context.showSlug,
@@ -1147,11 +1248,11 @@ function AdminRedditPostDetailsPageContent() {
       seasonNumber: context.seasonNumber,
       windowKey: toCanonicalWindowToken(context.containerKey),
       postId: context.postId,
+      detailSlug: context.detailSlug,
     });
     if (pathname !== canonicalPath && canonicalRedirectRef.current !== canonicalPath) {
       canonicalRedirectRef.current = canonicalPath;
       router.replace(canonicalPath as Route);
-      return;
     }
     void loadPostDetails();
   }, [context, hasAccess, loadPostDetails, pathname, router, user]);
@@ -1196,6 +1297,85 @@ function AdminRedditPostDetailsPageContent() {
       }),
     [communityHref, context?.seasonNumber, context?.showName, redditHref, seasonHref, showHref],
   );
+  const savedComments = post?.comment_summary.total_comments ?? 0;
+  const redditComments = post?.num_comments ?? 0;
+  const commentCoveragePercent =
+    redditComments > 0 ? Math.min(100, Math.round((savedComments / redditComments) * 100)) : savedComments > 0 ? 100 : 0;
+  const remainingComments = Math.max(redditComments - savedComments, 0);
+  const mediaCoveragePercent =
+    (post?.media_summary.total_media ?? 0) > 0
+      ? Math.min(
+          100,
+          Math.round(((post?.media_summary.mirrored_media ?? 0) / Math.max(post?.media_summary.total_media ?? 0, 1)) * 100),
+        )
+      : 0;
+  const heroMetricTabs: Array<{ key: PostHeroMetricTab; label: string; value: string }> = [
+    { key: "score", label: "Score", value: fmtNum(post?.score) },
+    { key: "comments", label: "Comments", value: fmtNum(post?.num_comments) },
+    { key: "media", label: "Mirrored Media", value: fmtNum(post?.media_summary?.mirrored_media) },
+  ];
+  const activeMetricSummary = (() => {
+    switch (activeHeroMetricTab) {
+      case "score":
+        return {
+          title: "Engagement snapshot",
+          body:
+            post == null
+              ? "Load the post to inspect Reddit score, ratio, and scrape timing."
+              : `Reddit score is ${fmtNum(post.score)} with an upvote ratio of ${fmtRatio(post.upvote_ratio)}. Last detail scrape ran ${fmtDateTime(post.detail_scraped_at)}.`,
+        };
+      case "media":
+        return {
+          title: "Media mirror status",
+          body:
+            post == null
+              ? "Load the post to inspect mirrored media coverage."
+              : `${fmtNum(post.media_summary.mirrored_media)} of ${fmtNum(post.media_summary.total_media)} media rows are mirrored to hosted storage (${mediaCoveragePercent}% coverage).`,
+        };
+      case "comments":
+      default:
+        return {
+          title: "Comment sync coverage",
+          body:
+            post == null
+              ? "Load the post to compare Reddit comment count with Supabase saved comments."
+              : redditComments === 0
+                ? `Supabase has ${fmtNum(savedComments)} saved comments and Reddit currently reports no comments on the post.`
+                : `${commentCoveragePercent}% saved to Supabase: ${fmtNum(savedComments)} of ${fmtNum(redditComments)} Reddit comments are stored.${remainingComments > 0 ? ` ${fmtNum(remainingComments)} comments are still missing.` : " Supabase is up to date with Reddit."}`,
+        };
+    }
+  })();
+  const seasonLinks = SEASON_TABS.map((tab) => ({
+    key: tab.tab,
+    label: tab.label,
+    href: context
+      ? buildSeasonAdminUrl({
+          showSlug: context.showSlug,
+          seasonNumber: context.seasonNumber,
+          tab: tab.tab,
+        })
+      : null,
+    isActive: tab.tab === "social",
+  }));
+  const socialLinks = SOCIAL_TABS.map((tab) => ({
+    key: tab.view,
+    label: tab.label,
+    href:
+      context && tab.view === "reddit"
+        ? buildShowRedditUrl({
+            showSlug: context.showSlug,
+            seasonNumber: context.seasonNumber,
+          })
+        : context
+          ? buildSeasonAdminUrl({
+              showSlug: context.showSlug,
+              seasonNumber: context.seasonNumber,
+              tab: "social",
+              socialView: tab.view,
+            })
+          : null,
+    isActive: tab.view === "reddit",
+  }));
 
   if (checking) {
     return (
@@ -1216,80 +1396,67 @@ function AdminRedditPostDetailsPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <SocialAdminPageHeader
-        breadcrumbs={breadcrumbs}
-        title={context ? `r/${context.subreddit}` : "Reddit Post Details"}
-        backHref={showHref}
-        backLabel="Back"
-        bodyClassName="px-6 py-6"
-      />
-
-      <div className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto max-w-6xl px-6">
-          <nav className="flex flex-wrap gap-2 py-4" aria-label="Season tabs">
-            {SEASON_TABS.map((tab) => {
-              const href = context
-                ? buildSeasonAdminUrl({
-                    showSlug: context.showSlug,
-                    seasonNumber: context.seasonNumber,
-                    tab: tab.tab,
-                  })
-                : null;
-              const isActive = tab.tab === "social";
-              const classes = `rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                isActive
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-              }`;
-              return href ? (
-                <a key={tab.tab} href={href} className={classes}>
-                  {tab.label}
-                </a>
-              ) : (
-                <span key={tab.tab} className={classes}>
-                  {tab.label}
-                </span>
-              );
-            })}
-          </nav>
-          <nav className="flex flex-wrap gap-2 pb-4" aria-label="Social analytics tabs">
-            {SOCIAL_TABS.map((tab) => {
-              const href =
-                context && tab.view === "reddit"
-                  ? buildShowRedditUrl({
-                      showSlug: context.showSlug,
-                      seasonNumber: context.seasonNumber,
-                    })
-                  : context
-                    ? buildSeasonAdminUrl({
-                        showSlug: context.showSlug,
-                        seasonNumber: context.seasonNumber,
-                        tab: "social",
-                        socialView: tab.view,
-                      })
-                    : null;
-              const isActive = tab.view === "reddit";
-              const classes = `rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
-                isActive
-                  ? "border-zinc-800 bg-zinc-800 text-white"
-                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-              }`;
-              return href ? (
-                <a key={tab.view} href={href} className={classes}>
-                  {tab.label}
-                </a>
-              ) : (
-                <span key={tab.view} className={classes}>
-                  {tab.label}
-                </span>
-              );
-            })}
-          </nav>
-        </div>
-      </div>
-
-      <main className="mx-auto max-w-6xl space-y-4 px-6 py-8">
+    <RedditAdminShell
+      breadcrumbs={breadcrumbs}
+      title={context ? `r/${context.subreddit}` : "Reddit Post Details"}
+      backHref={showHref}
+      seasonLinks={seasonLinks}
+      socialLinks={socialLinks}
+      hero={
+        context ? (
+          <section className="rounded-[28px] border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-700">Post Detail</p>
+                <h2 className="text-2xl font-semibold text-zinc-950">Discussion thread intelligence</h2>
+                {post?.title ? <p className="text-sm font-medium text-zinc-900">Thread title: {post.title}</p> : null}
+                <p className="max-w-3xl text-sm text-zinc-600">
+                  Inspect match context, mirrored media, assignments, and deep-scraped comments for this discussion thread.
+                </p>
+                <div
+                  aria-label="Post summary metrics"
+                  className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700"
+                  role="tabpanel"
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                    {activeMetricSummary.title}
+                  </p>
+                  <p className="mt-2 text-sm text-zinc-700">{activeMetricSummary.body}</p>
+                </div>
+              </div>
+              <div aria-label="Post metric tabs" className="grid min-w-[280px] gap-3 sm:grid-cols-3" role="tablist">
+                {heroMetricTabs.map((tab) => {
+                  const isActive = activeHeroMetricTab === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      aria-selected={isActive}
+                      className={`rounded-2xl border p-4 text-left transition ${
+                        isActive
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:bg-white"
+                      }`}
+                      onClick={() => setActiveHeroMetricTab(tab.key)}
+                      role="tab"
+                      type="button"
+                    >
+                      <p
+                        className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${
+                          isActive ? "text-zinc-300" : "text-zinc-500"
+                        }`}
+                      >
+                        {tab.label}
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold">{tab.value}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        ) : null
+      }
+    >
         {contextLoading && (
           <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600 shadow-sm">
             {resolverStageMessage(resolverStage)}
@@ -1440,68 +1607,9 @@ function AdminRedditPostDetailsPageContent() {
                   {post.text && <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-700">{post.text}</p>}
                 </article>
 
-                <section className="grid gap-4 xl:grid-cols-2">
+                <section className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
                   <article className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <h4 className="mb-2 text-sm font-semibold text-zinc-900">Thread Assignments</h4>
-                    <p className="mb-2 text-xs text-zinc-600">
-                      {fmtNum(post.assigned_threads.length)} assigned thread rows
-                    </p>
-                    {post.assigned_threads.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No assigned thread rows.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {post.assigned_threads.map((thread) => (
-                          <div key={thread.id} className="rounded border border-zinc-200 bg-white px-3 py-2 text-xs">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold text-zinc-900">{thread.title}</span>
-                              <span className="rounded bg-zinc-100 px-2 py-0.5 text-[11px] uppercase tracking-[0.06em] text-zinc-700">
-                                {thread.source_kind}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-zinc-600">
-                              {fmtDateTime(thread.posted_at)} · score {fmtNum(thread.score)} · comments {fmtNum(thread.num_comments)}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-
-                  <article className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <h4 className="mb-2 text-sm font-semibold text-zinc-900">Match Contexts</h4>
-                    <p className="mb-2 text-xs text-zinc-600">
-                      {fmtNum(post.matches.length)} period match rows
-                    </p>
-                    {post.matches.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No match rows found.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {post.matches.map((match) => (
-                          <div key={`${match.period_key}-${match.updated_at}`} className="rounded border border-zinc-200 bg-white px-3 py-2 text-xs">
-                            <p className="font-semibold text-zinc-900">{match.period_key}</p>
-                            <p className="mt-1 text-zinc-600">
-                              show_match {match.is_show_match ? "yes" : "no"} · tracked_flair{" "}
-                              {match.passes_flair_filter ? "yes" : "no"} · score {fmtNum(match.match_score)}
-                            </p>
-                            <p className="mt-1 text-zinc-600">
-                              type {match.match_type ?? "—"} · mode {match.flair_mode ?? "—"} · admin{" "}
-                              {match.admin_approved === null ? "unset" : match.admin_approved ? "approved" : "rejected"}
-                            </p>
-                            {(match.matched_terms.length > 0 || match.matched_cast_terms.length > 0) && (
-                              <p className="mt-1 text-zinc-600">
-                                terms {match.matched_terms.join(", ") || "—"} · cast {match.matched_cast_terms.join(", ") || "—"}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                </section>
-
-                <section className="grid gap-4 xl:grid-cols-2">
-                  <article className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-                    <h4 className="mb-2 text-sm font-semibold text-zinc-900">Media</h4>
+                    <h4 className="mb-2 text-sm font-semibold text-zinc-900">Media Gallery</h4>
                     <p className="mb-2 text-xs text-zinc-600">
                       Total {fmtNum(post.media_summary.total_media)} · Mirrored {fmtNum(post.media_summary.mirrored_media)} · Pending{" "}
                       {fmtNum(post.media_summary.pending_media)} · Failed {fmtNum(post.media_summary.failed_media)}
@@ -1509,26 +1617,76 @@ function AdminRedditPostDetailsPageContent() {
                     {post.media.length === 0 ? (
                       <p className="text-sm text-zinc-500">No media rows.</p>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {post.media.map((item) => (
-                          <div key={item.id} className="rounded border border-zinc-200 bg-white px-3 py-2 text-xs">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold text-zinc-900">{item.media_type ?? "media"}</span>
-                              <span className="rounded bg-zinc-100 px-2 py-0.5 text-[11px] uppercase tracking-[0.06em] text-zinc-700">
-                                {item.status}
-                              </span>
+                          <article key={item.id} className="overflow-hidden rounded-xl border border-zinc-200 bg-white text-xs shadow-sm">
+                            <div className="aspect-[4/3] bg-zinc-100">
+                              {(() => {
+                                const previewUrl = getMediaPreviewUrl(item);
+                                if (!previewUrl) {
+                                  return (
+                                    <div className="flex h-full items-center justify-center text-zinc-500">
+                                      No preview
+                                    </div>
+                                  );
+                                }
+                                if (isVideoMedia(item)) {
+                                  return (
+                                    <video
+                                      className="h-full w-full object-cover"
+                                      controls
+                                      muted
+                                      playsInline
+                                      src={previewUrl}
+                                      preload="metadata"
+                                    />
+                                  );
+                                }
+                                return (
+                                  <Image
+                                    alt={item.media_type ?? "Reddit media preview"}
+                                    className="h-full w-full object-cover"
+                                    fill
+                                    loading="lazy"
+                                    sizes="(max-width: 768px) 100vw, 240px"
+                                    src={previewUrl}
+                                  />
+                                );
+                              })()}
                             </div>
-                            <p className="mt-1 break-all text-zinc-600">source {item.source_url}</p>
-                            {item.hosted_url && (
-                              <p className="mt-1 break-all text-zinc-600">
-                                hosted <a className="text-zinc-900 underline" href={item.hosted_url} target="_blank" rel="noreferrer">{item.hosted_url}</a>
+                            <div className="space-y-2 px-3 py-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-zinc-900">{item.media_type ?? "media"}</span>
+                                <span className="rounded bg-zinc-100 px-2 py-0.5 text-[11px] uppercase tracking-[0.06em] text-zinc-700">
+                                  {item.status}
+                                </span>
+                              </div>
+                              <p className="text-zinc-600">
+                                type {item.content_type ?? "—"} · size {fmtBytes(item.size_bytes)} · created {fmtDateTime(item.created_at)}
                               </p>
-                            )}
-                            <p className="mt-1 text-zinc-600">
-                              type {item.content_type ?? "—"} · size {fmtBytes(item.size_bytes)} · created {fmtDateTime(item.created_at)}
-                            </p>
-                            {item.error_message && <p className="mt-1 text-red-700">{item.error_message}</p>}
-                          </div>
+                              <div className="flex flex-wrap gap-2">
+                                <a
+                                  className="rounded border border-zinc-300 px-2 py-1 font-semibold text-zinc-700 hover:bg-zinc-50"
+                                  href={item.source_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  Source
+                                </a>
+                                {item.hosted_url ? (
+                                  <a
+                                    className="rounded border border-zinc-300 px-2 py-1 font-semibold text-zinc-700 hover:bg-zinc-50"
+                                    href={item.hosted_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Hosted
+                                  </a>
+                                ) : null}
+                              </div>
+                              {item.error_message ? <p className="text-red-700">{item.error_message}</p> : null}
+                            </div>
+                          </article>
                         ))}
                       </div>
                     )}
@@ -1562,7 +1720,7 @@ function AdminRedditPostDetailsPageContent() {
                           style={{ marginLeft: `${Math.min(comment.depth, 8) * 12}px` }}
                         >
                           <p className="font-semibold text-zinc-900">
-                            u/{comment.author ?? "unknown"} · depth {comment.depth} · score {fmtNum(comment.score)}
+                            u/{comment.author ?? "unknown"} · score {fmtNum(comment.score)}
                           </p>
                           <p className="mt-1 whitespace-pre-wrap text-zinc-700">{comment.body || "(empty body)"}</p>
                           <p className="mt-1 text-zinc-500">{fmtDateTime(comment.created_at_utc)}</p>
@@ -1577,8 +1735,7 @@ function AdminRedditPostDetailsPageContent() {
             )}
           </section>
         )}
-      </main>
-    </div>
+    </RedditAdminShell>
   );
 }
 

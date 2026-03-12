@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CANONICAL_SCOPED_SOURCE_ORDER,
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
   computePersonPhotoShowBuckets,
+  resolvePersonGalleryImportContext,
   resolveGalleryShowFilterFallback,
   isLikelyImdbEpisodeCaption,
+  toCanonicalScopedSource,
+  WWHL_LABEL,
 } from "@/lib/admin/person-gallery-media-view";
 import type { TrrPersonPhoto } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -101,6 +105,119 @@ describe("person gallery media view helpers", () => {
     });
 
     expect(buckets.matchesSelectedOtherShow).toBe(true);
+  });
+
+  it("resolves import context for selected other show", () => {
+    expect(
+      resolvePersonGalleryImportContext({
+        galleryShowFilter: "other-shows",
+        routeShow: {
+          showId: "show-1",
+          showName: "The Real Housewives of Salt Lake City",
+          label: "The Real Housewives of Salt Lake City",
+        },
+        selectedOtherShow: {
+          showId: "show-2",
+          showName: "Below Deck",
+        },
+        wwhlShow: {
+          showId: "show-wwhl",
+          showName: "Watch What Happens Live with Andy Cohen",
+        },
+      }),
+    ).toEqual({
+      showId: "show-2",
+      showName: "Below Deck",
+      label: "Below Deck",
+    });
+  });
+
+  it("resolves WWHL import context from WWHL credit", () => {
+    expect(
+      resolvePersonGalleryImportContext({
+        galleryShowFilter: "wwhl",
+        routeShow: null,
+        selectedOtherShow: null,
+        wwhlShow: {
+          showId: "show-wwhl",
+          showName: "Watch What Happens Live with Andy Cohen",
+        },
+      }),
+    ).toEqual({
+      showId: "show-wwhl",
+      showName: "Watch What Happens Live with Andy Cohen",
+      label: WWHL_LABEL,
+    });
+  });
+
+  it("uses route-show import context only for explicit this-show runs", () => {
+    expect(
+      resolvePersonGalleryImportContext({
+        galleryShowFilter: "this-show",
+        routeShow: {
+          showId: "show-1",
+          showName: "The Real Housewives of Salt Lake City",
+          label: "The Real Housewives of Salt Lake City",
+        },
+        selectedOtherShow: {
+          showId: "show-2",
+          showName: "Below Deck",
+        },
+        wwhlShow: {
+          showId: "show-wwhl",
+          showName: "Watch What Happens Live with Andy Cohen",
+        },
+      }),
+    ).toEqual({
+      showId: "show-1",
+      showName: "The Real Housewives of Salt Lake City",
+      label: "The Real Housewives of Salt Lake City",
+    });
+  });
+
+  it("omits import context for all-filter gallery runs", () => {
+    expect(
+      resolvePersonGalleryImportContext({
+        galleryShowFilter: "all",
+        routeShow: {
+          showId: "show-1",
+          showName: "The Real Housewives of Salt Lake City",
+          label: "The Real Housewives of Salt Lake City",
+        },
+        selectedOtherShow: {
+          showId: "show-2",
+          showName: "Below Deck",
+        },
+        wwhlShow: {
+          showId: "show-wwhl",
+          showName: "Watch What Happens Live with Andy Cohen",
+        },
+      }),
+    ).toEqual({
+      showId: null,
+      showName: null,
+      label: null,
+    });
+  });
+
+  it("omits import context when no route or override show exists", () => {
+    expect(
+      resolvePersonGalleryImportContext({
+        galleryShowFilter: "all",
+        routeShow: null,
+        selectedOtherShow: null,
+        wwhlShow: null,
+      }),
+    ).toEqual({
+      showId: null,
+      showName: null,
+      label: null,
+    });
+  });
+
+  it("includes NBCUMV in canonical scoped source normalization", () => {
+    expect(toCanonicalScopedSource("nbcumv")).toBe("nbcumv");
+    expect(CANONICAL_SCOPED_SOURCE_ORDER).toContain("nbcumv");
   });
 
   it("falls back to this-show when selected filter is unavailable", () => {
