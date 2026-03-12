@@ -3261,17 +3261,11 @@ function getVisiblePlatformStatuses(
 ): VisiblePlatformStatusCard[] {
   if (!response?.status_by_platform) return [];
   const selectedPlatforms = platformFilter === "all" ? PLATFORM_KEYS : [platformFilter];
-  return selectedPlatforms
-    .map((platform) => {
-      const status = response.status_by_platform?.[platform];
-      if (!status) return null;
-      return {
-        platform,
-        status,
-        postCount: getPlatformStatusPostCount(response, platform),
-      };
-    })
-    .filter((entry): entry is VisiblePlatformStatusCard => entry !== null);
+  return selectedPlatforms.flatMap((platform) => {
+    const status = response.status_by_platform?.[platform];
+    if (!status) return [];
+    return [{ platform, status, postCount: getPlatformStatusPostCount(response, platform) }];
+  });
 }
 
 const MAX_THREADED_COMMENT_DEPTH = 128;
