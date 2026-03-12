@@ -20,3 +20,7 @@ docs/Repository/generated/
 .envrc
 .mcp.json
 .playwright-mcp/
+
+# Temp/cache
+.tmp/
+apps/web/.cache/
