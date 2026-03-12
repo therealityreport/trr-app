@@ -573,7 +573,7 @@ export const ADMIN_JOB_DOCS: readonly AdminJobDocEntry[] = [
     category: "Social Runs & Queue Operations",
     summary: "Kick off the Bravo-owned shared account ingest from the social admin landing page.",
     pageLabel: "Social Media",
-    pageHref: "/social-media",
+    pageHref: "/social-media" as Route,
     pagePathPattern: "/social-media",
     pageContainerBreadcrumb: ["Admin", "Social Media", "Shared Ingest"],
     currentRuntime: "Modal",

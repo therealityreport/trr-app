@@ -40,8 +40,8 @@ function renderAsChild({ children, onClick, type }: EditableRenderProps): React.
   return React.cloneElement(children, {
     onClick,
     type,
-    ...children.props,
-  });
+    ...(children.props as Record<string, unknown>),
+  } as React.Attributes);
 }
 
 export type EditableProps = {

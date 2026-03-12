@@ -7001,7 +7001,7 @@ export default function WeekDetailPage() {
           ? allTabTotalPosts
           : Math.max(
               0,
-              Number(platformTotalsByPlatform[platformFilter] ?? displayData.platforms[platformFilter]?.totals?.posts ?? 0),
+              Number(platformTotalsByPlatform?.[platformFilter] ?? displayData.platforms[platformFilter]?.totals?.posts ?? 0),
             );
       return {
         posts: authoritativePosts,
