@@ -41,7 +41,7 @@ describe("person gallery detail priority", () => {
   it("person lightbox continues passing detail candidate arrays", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx",
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 

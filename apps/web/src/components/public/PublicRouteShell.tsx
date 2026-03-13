@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import type { Route } from "next";
 
 export type PublicRouteDetail = {
   label: string;
@@ -57,7 +58,7 @@ export default function PublicRouteShell({
             {links.map((link) => (
               <Link
                 key={`${link.href}-${link.label}`}
-                href={link.href}
+                href={link.href as Route}
                 className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-100"
               >
                 {link.label}

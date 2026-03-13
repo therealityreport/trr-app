@@ -9,7 +9,7 @@ describe("gallery fallback telemetry wiring", () => {
   it("tracks recovered/failed/attempted telemetry on show, season, and person pages", () => {
     const showContents = read("../src/app/admin/trr-shows/[showId]/page.tsx");
     const seasonContents = read("../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx");
-    const personContents = read("../src/app/admin/trr-shows/people/[personId]/page.tsx");
+    const personContents = read("../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx");
 
     for (const contents of [showContents, seasonContents, personContents]) {
       expect(contents).toContain("fallbackRecoveredCount");

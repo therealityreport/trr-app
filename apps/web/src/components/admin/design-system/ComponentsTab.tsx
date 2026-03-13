@@ -294,7 +294,7 @@ const AVATAR_INVENTORY: readonly AvatarInventoryEntry[] = [
   },
   {
     name: "Admin Person Crop Chips",
-    sourcePath: "app/admin/trr-shows/people/[personId]/page.tsx",
+    sourcePath: "app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
     usage: "Face-crop preview chips for cast/person image QA, including labeled overlays and missing-crop fallback.",
     states: ["cropped face", "overlay label", "missing image fallback"],
     preview: "person-crops",

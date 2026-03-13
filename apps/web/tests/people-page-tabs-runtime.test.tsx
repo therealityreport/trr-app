@@ -1,7 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import PersonPage from "@/app/admin/trr-shows/people/[personId]/page";
+import PersonPage from "@/app/admin/trr-shows/people/[personId]/PersonPageClient";
 
 const mocks = vi.hoisted(() => {
   const personId = "11111111-2222-3333-4444-555555555555";

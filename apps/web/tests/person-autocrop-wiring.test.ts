@@ -6,7 +6,7 @@ describe("person auto-crop wiring", () => {
   it("wires Auto-Crop stage through base + crop variants with fallback payload", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx",
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -20,7 +20,7 @@ describe("person auto-crop wiring", () => {
   it("triggers preview auto-crop rebuild on star-on and facebank-seed-on", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx",
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 

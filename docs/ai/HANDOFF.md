@@ -1,6 +1,42 @@
 # Session Handoff (TRR-APP)
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
+## Latest Update (2026-03-13 18:12 EDT) — PR 68 build repaired by removing the duplicate person route page and tightening public route typing
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+  - `code-reviewer`
+- mcp_tools_used:
+  - `functions.exec_command`
+  - `functions.apply_patch`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/[[...personTab]]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/[showId]/people/[personId]/[[...personTab]]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/public/PublicRouteShell.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/people-page-tabs-runtime.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/show-bravo-video-thumbnail-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-thumbnail-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-broken-toggle.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-gallery-detail-priority.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/gallery-fallback-telemetry.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-credits-show-scope-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-refresh-request-id-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/person-autocrop-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tsconfig.typecheck.fandom.json`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-system/ComponentsTab.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Moved the large admin person page implementation out of the conflicting route file into `PersonPageClient.tsx` and made the optional catch-all route the only actual page under `/admin/trr-shows/people/[personId]/[[...personTab]]`.
+  - Updated the show-scoped person alias route, tests, typecheck include list, and design-system source pointer to reference the new component entrypoint.
+  - Fixed `PublicRouteShell` typed-route compilation by casting link hrefs to `Route` at the `next/link` boundary.
+- validation_evidence:
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm vitest tests/people-page-tabs-runtime.test.tsx tests/show-bravo-video-thumbnail-wiring.test.ts tests/person-gallery-thumbnail-wiring.test.ts tests/person-gallery-broken-toggle.test.ts tests/person-gallery-detail-priority.test.ts tests/gallery-fallback-telemetry.test.ts tests/person-credits-show-scope-wiring.test.ts tests/person-refresh-request-id-wiring.test.ts tests/person-autocrop-wiring.test.ts --run` (pass; `9 files / 25 tests`)
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm vitest tests/reddit-community-view-page.test.tsx tests/public-route-rewrites.test.ts tests/people-page-tabs-runtime.test.tsx --run` (pass; `3 files / 16 tests`)
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec next build --webpack` (pass)
+- blocked_checks:
+  - GitHub branch CI still needs to rerun after this repair commit is pushed.
 ## Latest Update (2026-03-13 18:04 EDT) — PR 68 stale routing assertions aligned with current branch behavior
 
 - primary_skill: `senior-qa`

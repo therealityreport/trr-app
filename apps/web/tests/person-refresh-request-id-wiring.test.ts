@@ -5,7 +5,7 @@ import path from "node:path";
 describe("person refresh request-id diagnostics wiring", () => {
   const pagePath = path.resolve(
     __dirname,
-    "../src/app/admin/trr-shows/people/[personId]/page.tsx"
+    "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx"
   );
   const pageContents = fs.readFileSync(pagePath, "utf8");
 

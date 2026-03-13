@@ -6,7 +6,7 @@ describe("person gallery thumbnail wiring", () => {
   it("uses 3:4 cards and computed thumbnail positioning", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx",
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
@@ -24,7 +24,7 @@ describe("person gallery thumbnail wiring", () => {
   it("uses candidate-based URL resolution for detail views", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx",
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
