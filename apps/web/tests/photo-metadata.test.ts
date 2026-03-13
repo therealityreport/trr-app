@@ -13,7 +13,7 @@ describe("mapPhotoToMetadata", () => {
       person_id: "p1",
       source: "imdb",
       url: "https://m.media-amazon.com/images/source.jpg",
-      hosted_url: "https://d1fmdyqfafwim3.cloudfront.net/media/example.jpg",
+      hosted_url: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/example.jpg",
       caption: null,
       width: null,
       height: null,
@@ -25,7 +25,29 @@ describe("mapPhotoToMetadata", () => {
       fetched_at: null,
     });
 
-    expect(result.mirrorHostedUrl).toBe("https://d1fmdyqfafwim3.cloudfront.net/media/example.jpg");
+    expect(result.hostedMediaUrl).toBe("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/example.jpg");
+  });
+
+  it("canonicalizes legacy CloudFront hosted urls onto the R2 public host", () => {
+    const result = mapPhotoToMetadata({
+      id: "mirror-legacy-cloudfront",
+      person_id: "p1",
+      source: "imdb",
+      url: "https://m.media-amazon.com/images/source.jpg",
+      hosted_url: "https://d111111abcdef8.cloudfront.net/media/example.jpg",
+      caption: null,
+      width: null,
+      height: null,
+      context_type: null,
+      season: null,
+      people_names: null,
+      title_names: null,
+      metadata: null,
+      fetched_at: null,
+    });
+
+    expect(result.hostedMediaUrl).toBe("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/example.jpg");
+    expect(result.isHostedMedia).toBe(true);
   });
 
   it("maps source to badge color", () => {
@@ -63,7 +85,7 @@ describe("mapPhotoToMetadata", () => {
       person_id: "p1",
       source: "imdb",
       url: "https://m.media-amazon.com/images/sample.jpg",
-      hosted_url: "https://d1fmdyqfafwim3.cloudfront.net/media/sample.jpg",
+      hosted_url: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/sample.jpg",
       caption: "Alan Cumming and Milo Ventimiglia in Milo Ventimiglia &amp; Alan Cumming (2023)",
       width: 1920,
       height: 1080,
@@ -759,7 +781,7 @@ describe("mapPhotoToMetadata", () => {
       fetched_at: null,
     });
 
-    expect(result.s3MirrorFileName).toBe("1234567890.webp");
+    expect(result.hostedMediaFileName).toBe("1234567890.webp");
   });
 
   it("prefers explicit hosted key metadata for s3 mirror filename", () => {
@@ -782,7 +804,7 @@ describe("mapPhotoToMetadata", () => {
       fetched_at: null,
     });
 
-    expect(result.s3MirrorFileName).toBe("cast-portrait.jpg");
+    expect(result.hostedMediaFileName).toBe("cast-portrait.jpg");
   });
 
   it("does not infer s3 mirror filename from source URL when hosted mirror is missing", () => {
@@ -803,8 +825,8 @@ describe("mapPhotoToMetadata", () => {
       fetched_at: null,
     });
 
-    expect(result.isS3Mirrored).toBe(false);
-    expect(result.s3MirrorFileName).toBeNull();
+    expect(result.isHostedMedia).toBe(false);
+    expect(result.hostedMediaFileName).toBeNull();
   });
 
   it("sets originalImageUrl from true source URL instead of hosted mirror URL", () => {
@@ -829,7 +851,7 @@ describe("mapPhotoToMetadata", () => {
     expect(result.originalSourceFileUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/1/1b/lisa.jpg");
     expect(result.originalSourcePageUrl).toBeNull();
     expect(result.originalSourceLabel).toBe("FANDOM");
-    expect(result.isS3Mirrored).toBe(true);
+    expect(result.isHostedMedia).toBe(true);
   });
 
   it("keeps originalImageUrl null when only hosted/mirror URLs exist", () => {
@@ -973,7 +995,7 @@ describe("mapSeasonAssetToMetadata", () => {
       "RHOSLC",
     );
 
-    expect(meta.s3MirrorFileName).toBe("poster-main.png");
+    expect(meta.hostedMediaFileName).toBe("poster-main.png");
   });
 
   it("does not infer season asset s3 mirror filename from non-hosted source fields", () => {
@@ -1001,8 +1023,8 @@ describe("mapSeasonAssetToMetadata", () => {
       "RHOSLC",
     );
 
-    expect(meta.isS3Mirrored).toBe(false);
-    expect(meta.s3MirrorFileName).toBeNull();
+    expect(meta.isHostedMedia).toBe(false);
+    expect(meta.hostedMediaFileName).toBeNull();
   });
 
   it("prefers source_url as originalImageUrl for imported season assets", () => {
@@ -1033,7 +1055,7 @@ describe("mapSeasonAssetToMetadata", () => {
     expect(meta.originalSourceFileUrl).toBe("https://static.wikia.nocookie.net/rhoslc/images/2/2c/meredith.jpg");
     expect(meta.originalSourcePageUrl).toBeNull();
     expect(meta.originalSourceLabel).toBe("FANDOM");
-    expect(meta.isS3Mirrored).toBe(true);
+    expect(meta.isHostedMedia).toBe(true);
   });
 
   it("uses metadata content_type as canonical contentType for season assets", () => {

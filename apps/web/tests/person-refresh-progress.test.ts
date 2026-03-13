@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildOperationDispatchDetailMessage,
   buildProxyConnectDetailMessage,
   buildProxyTerminalErrorMessage,
   buildPersonRefreshDetailMessage,
@@ -22,6 +23,7 @@ describe("person refresh progress mapping", () => {
     expect(mapPersonRefreshStage("fetching")).toBe(PERSON_REFRESH_PHASES.syncing);
     expect(mapPersonRefreshStage("metadata_enrichment")).toBe(PERSON_REFRESH_PHASES.syncing);
     expect(mapPersonRefreshStage("upserting")).toBe(PERSON_REFRESH_PHASES.syncing);
+    expect(mapPersonRefreshStage("nbcumv_import")).toBe(PERSON_REFRESH_PHASES.syncing);
   });
 
   it("maps mirror/count/text stages to requested labels", () => {
@@ -240,7 +242,24 @@ describe("person refresh progress mapping", () => {
       "upserting",
       "metadata_repair",
       "mirroring",
+      "nbcumv_import",
     ]);
+  });
+
+  it("tracks Getty / NBCUMV progress as a dedicated ingest step", () => {
+    const initial = createPersonRefreshPipelineSteps("ingest");
+    const updated = updatePersonRefreshPipelineSteps(initial, {
+      rawStage: "nbcumv_import",
+      message: "Importing NBCUMV press photos...",
+      current: 12,
+      total: 40,
+    });
+
+    const nbcumvStep = updated.find((step) => step.id === "nbcumv_import");
+    expect(nbcumvStep?.label).toBe("Getty / NBCUMV");
+    expect(nbcumvStep?.status).toBe("running");
+    expect(nbcumvStep?.current).toBe(12);
+    expect(nbcumvStep?.total).toBe(40);
   });
 
   it("finalizes step summaries with completed vs failed details", () => {
@@ -358,5 +377,28 @@ describe("person refresh progress mapping", () => {
     const autoCount = finalized.find((step) => step.id === "auto_count");
     expect(autoCount?.status).toBe("completed");
     expect(autoCount?.result).toContain("Reviewed 306 existing rows");
+  });
+
+  it("formats Modal dispatch events for queued operations", () => {
+    expect(
+      buildOperationDispatchDetailMessage({
+        eventType: "dispatched_to_modal",
+        executionOwner: "remote_worker",
+        executionBackendCanonical: "modal",
+        executionModeCanonical: "remote",
+      }),
+    ).toBe("Queued for Modal worker ownership (remote worker · Modal · remote).");
+  });
+
+  it("formats attached operation events for resumed worker-backed refreshes", () => {
+    expect(
+      buildOperationDispatchDetailMessage({
+        eventType: "operation",
+        attached: true,
+        executionOwner: "remote_worker",
+        executionBackendCanonical: "modal",
+        executionModeCanonical: "remote",
+      }),
+    ).toBe("Attached to existing refresh operation (remote worker · Modal · remote).");
   });
 });

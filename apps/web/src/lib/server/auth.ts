@@ -474,10 +474,10 @@ const adminAllowedHosts = resolveAdminAllowedHosts();
 
 function isRequestHostAllowedForAdmin(request: NextRequest): boolean {
   if (!isAdminHostEnforced()) return true;
-  if (adminAllowedHosts.size === 0) return false;
 
   const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
   if (!requestHost) return false;
+  if (adminAllowedHosts.size === 0) return true;
   if (adminAllowedHosts.has(requestHost)) return true;
   if (!isLoopbackHost(requestHost)) return false;
   return Array.from(adminAllowedHosts).some((allowedHost) => isLoopbackHost(allowedHost));

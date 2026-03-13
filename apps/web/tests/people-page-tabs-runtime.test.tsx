@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
     personId,
     showId,
     params: { personId },
-    pathname: `/admin/trr-shows/people/${personId}`,
+    pathname: `/people/${personId}`,
     searchParams: new URLSearchParams(`showId=${showId}`),
     router: { replace },
     replace,
@@ -167,7 +167,7 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
 describe("people page tab runtime behavior", () => {
   beforeEach(() => {
     mocks.params.personId = PERSON_ID;
-    mocks.pathname = `/admin/trr-shows/people/${PERSON_ID}`;
+    mocks.pathname = `/people/${PERSON_ID}`;
     mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}`);
     mocks.replace.mockReset();
     mocks.guardState.checking = false;

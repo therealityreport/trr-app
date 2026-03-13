@@ -1799,8 +1799,10 @@ describe("WeekDetailPage thumbnails", () => {
     expect(tiktokThumb).toHaveAttribute("src", expect.stringContaining("https://images.test/tiktok-still.jpg"));
   });
 
-  it("opens source TikTok video first when hosted media slot is thumbnail-like", async () => {
+  it("opens hosted TikTok still first when no hosted video exists", async () => {
     const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    const hostedStillUrl =
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/tiktok/tiktok-hosted-thumb.jpg";
     (
       payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
         source_media_urls?: string[];
@@ -1812,9 +1814,9 @@ describe("WeekDetailPage thumbnails", () => {
         source_media_urls?: string[];
         hosted_media_urls?: string[];
       }
-    ).hosted_media_urls = ["https://images.test/tiktok-hosted-thumb.jpg"];
+    ).hosted_media_urls = [hostedStillUrl];
     payload.platforms.tiktok.posts[0].media_urls = ["https://video.test/tiktok-source.mp4"];
-    payload.platforms.tiktok.posts[0].thumbnail_url = "https://images.test/tiktok-hosted-thumb.jpg";
+    payload.platforms.tiktok.posts[0].thumbnail_url = hostedStillUrl;
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1836,9 +1838,9 @@ describe("WeekDetailPage thumbnails", () => {
             text: "TikTok post",
             url: "https://tiktok.com/@bravo/video/1",
             posted_at: "2026-01-01T00:00:00.000Z",
-            thumbnail_url: "https://images.test/tiktok-hosted-thumb.jpg",
+            thumbnail_url: hostedStillUrl,
             source_media_urls: ["https://video.test/tiktok-source.mp4"],
-            hosted_media_urls: ["https://images.test/tiktok-hosted-thumb.jpg"],
+            hosted_media_urls: [hostedStillUrl],
             stats: {
               likes: 60,
               comments_count: 12,
@@ -1868,13 +1870,15 @@ describe("WeekDetailPage thumbnails", () => {
       }),
     );
     await waitFor(() => {
-      expect(document.querySelector("video[aria-label='TikTok media']")).not.toBeNull();
+      const image = document.querySelector("img[alt='TikTok media']") as HTMLImageElement | null;
+      expect(image).not.toBeNull();
+      expect(image?.src).toContain(hostedStillUrl);
     });
   });
 
   it("prefers mirrored TikTok hosted video from media_asset_meta over source embeds", async () => {
     const mirroredVideoUrl =
-      "https://d1fmdyqfafwim3.cloudfront.net/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.mp4";
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.mp4";
     const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
     (
       payload.platforms.tiktok.posts[0] as typeof payload.platforms.tiktok.posts[0] & {
@@ -2041,7 +2045,7 @@ describe("WeekDetailPage thumbnails", () => {
         hosted_media_urls?: string[];
       }
     ).hosted_media_urls = [
-      "https://d1fmdyqfafwim3.cloudfront.net/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.html",
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.html",
     ];
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -2067,7 +2071,7 @@ describe("WeekDetailPage thumbnails", () => {
             thumbnail_url: "https://images.test/tt-preview.jpg",
             source_media_urls: ["https://www.tiktok.com/@bravotv/video/7540327205503601933"],
             hosted_media_urls: [
-              "https://d1fmdyqfafwim3.cloudfront.net/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.html",
+              "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/tiktok/7782652f-783a-488b-8860-41b97de32e75/6/week-0/7540327205503601933/media-01.html",
             ],
             stats: {
               likes: 60,
@@ -2178,7 +2182,7 @@ describe("WeekDetailPage thumbnails", () => {
       name: /show metadata|hide metadata/i,
     });
     fireEvent.click(metadataToggle);
-    expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Hosted Media File").length).toBeGreaterThan(0);
   });
 
   it("renders Twitter/X thumbnails when media is available", async () => {
@@ -2507,7 +2511,7 @@ describe("WeekDetailPage thumbnails", () => {
     });
   });
 
-  it("opens Instagram reel video first when hosted media slot contains only a still image", async () => {
+  it("opens hosted Instagram still first when no hosted video exists", async () => {
     const sourceVideoUrl = "https://instagram.fcdn.net/reel-video.mp4";
     const hostedStillUrl = "https://d111111abcdef8.cloudfront.net/social/ig/reel-still.jpg";
     const reelPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
@@ -2605,7 +2609,11 @@ describe("WeekDetailPage thumbnails", () => {
       }),
     );
     await waitFor(() => {
-      expect(document.querySelector("video[aria-label='Instagram media']")).not.toBeNull();
+      const image = document.querySelector("img[alt='Instagram media']") as HTMLImageElement | null;
+      expect(image).not.toBeNull();
+      expect(image?.src).toContain(
+        "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/ig/reel-still.jpg",
+      );
     });
   });
 

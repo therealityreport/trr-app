@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 import { FeaturedLogoDrawer } from "./FeaturedLogoDrawer";
 
@@ -28,9 +29,9 @@ function getLogoVariantUrl(
   variant: ShowLogoVariant,
   getAssetDisplayUrl: (asset: SeasonAsset) => string
 ): string | null {
-  if (variant === "color") return getAssetDisplayUrl(asset);
-  if (variant === "black") return asset.logo_black_url ?? null;
-  if (variant === "white") return asset.logo_white_url ?? null;
+  if (variant === "color") return canonicalizeHostedMediaUrl(getAssetDisplayUrl(asset));
+  if (variant === "black") return canonicalizeHostedMediaUrl(asset.logo_black_url);
+  if (variant === "white") return canonicalizeHostedMediaUrl(asset.logo_white_url);
   return null;
 }
 

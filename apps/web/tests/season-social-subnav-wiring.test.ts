@@ -28,4 +28,17 @@ describe("season social subnav wiring", () => {
     expect(contents).toMatch(/searchParams\.get\("social_view"\)/);
     expect(contents).toMatch(/analyticsView=\{socialAnalyticsView\}/);
   });
+
+  it("keeps the season-specific title in the page header above the analytics section", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/<SocialAdminPageHeader/);
+    expect(contents).toMatch(/showName=\{show\.name\}/);
+    expect(contents).toMatch(/seasonNumber=\{season\.season_number\}/);
+    expect(contents).toMatch(/<SeasonSocialAnalyticsSection/);
+  });
 });

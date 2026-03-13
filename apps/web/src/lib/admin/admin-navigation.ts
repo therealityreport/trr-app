@@ -21,10 +21,11 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "trr-shows",
     title: "Shows",
-    href: "/shows",
+    href: "/admin/shows" as Route,
     description: "Browse the TRR metadata database. View shows, seasons, cast, and create linked surveys.",
     badge: "API",
     hasShowsSubmenu: true,
+    activeMatchPrefixes: ["/admin/shows", "/admin/trr-shows", "/shows"],
   },
   {
     key: "people",
@@ -72,7 +73,6 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
       "/admin/production-companies",
       "/admin/news",
       "/admin/other",
-      "/admin/shows",
       "/admin/networks",
     ],
   },

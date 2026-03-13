@@ -1,8 +1,14 @@
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
+
 const SOCIAL_MEDIA_VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|m3u8|mpd)(\?|$)/i;
+
+const normalizeCandidate = (value: string | null | undefined): string => {
+  return canonicalizeHostedMediaUrl(value) ?? "";
+};
 
 export function isVideoLikeSocialUrl(url: string | null | undefined): boolean {
   if (!url) return false;
-  const normalized = String(url).trim().toLowerCase();
+  const normalized = normalizeCandidate(url).toLowerCase();
   if (!normalized) return false;
   if (SOCIAL_MEDIA_VIDEO_EXT_RE.test(normalized)) return true;
   try {
@@ -15,7 +21,7 @@ export function isVideoLikeSocialUrl(url: string | null | undefined): boolean {
 
 export function pickFirstNonVideoUrl(urls: Array<string | null | undefined>): string | null {
   for (const raw of urls) {
-    const candidate = typeof raw === "string" ? raw.trim() : "";
+    const candidate = normalizeCandidate(raw);
     if (!candidate) continue;
     if (!isVideoLikeSocialUrl(candidate)) return candidate;
   }
@@ -36,12 +42,12 @@ export function selectTwitterThumbnailUrl(input: {
   ]);
   if (preferred) return preferred;
 
-  const hostedThumbnail = String(input.hostedThumbnail || "").trim();
+  const hostedThumbnail = normalizeCandidate(input.hostedThumbnail);
   if (hostedThumbnail) return hostedThumbnail;
-  const thumbnail = String(input.thumbnail || "").trim();
+  const thumbnail = normalizeCandidate(input.thumbnail);
   if (thumbnail) return thumbnail;
-  if (input.hostedMediaUrls?.[0]) return input.hostedMediaUrls[0];
-  if (input.mediaUrls?.[0]) return input.mediaUrls[0];
+  if (input.hostedMediaUrls?.[0]) return normalizeCandidate(input.hostedMediaUrls[0]);
+  if (input.mediaUrls?.[0]) return normalizeCandidate(input.mediaUrls[0]);
   return null;
 }
 
@@ -69,7 +75,7 @@ export function selectInstagramTikTokThumbnailUrl(input: {
     ...(input.mediaUrls || []),
   ];
   for (const raw of fallback) {
-    const candidate = typeof raw === "string" ? raw.trim() : "";
+    const candidate = normalizeCandidate(raw);
     if (candidate) return candidate;
   }
   return null;

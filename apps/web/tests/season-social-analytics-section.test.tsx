@@ -11,6 +11,7 @@ import SeasonSocialAnalyticsSection, {
   formatJobOutcomeNote,
   shouldSetPollingRetry,
 } from "../src/components/admin/season-social-analytics-section";
+import ShowSocialTab from "../src/components/admin/show-tabs/ShowSocialTab";
 import { auth } from "../src/lib/firebase";
 
 vi.mock("@/components/admin/social-posts-section", () => ({
@@ -1229,7 +1230,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByText("Season ID")).not.toBeInTheDocument();
   });
 
-  it("renders actionable current run empty state controls", async () => {
+  it("renders the compact control rail with no selected run", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
     render(
@@ -1241,13 +1242,43 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Current Run");
-    expect(screen.getByText("No run selected.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start New Ingest" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Select Latest Run" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Ingest + Export" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Run" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Run" })).toHaveAttribute("title", "No Run Selected");
+    expect(screen.queryByText("Current Run")).not.toBeInTheDocument();
+    expect(screen.queryByText("No run selected.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Test Show · Season 6" })).not.toBeInTheDocument();
   });
 
-  it("selects latest active run from current run empty state action", async () => {
+  it("opens and closes the ingest plus export popover from the control rail", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Ingest + Export" }));
+
+    expect(screen.getByRole("dialog", { name: "Ingest + Export" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Selected Week" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Selected Day" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Season Sync (All)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export CSV" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export PDF" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Ingest + Export" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("loads jobs for a run chosen from the pill dropdown", async () => {
     const activeRunId = "run-active-123";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1278,15 +1309,18 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    const selectLatestButton = await screen.findByRole("button", { name: "Select Latest Run" });
-    fireEvent.click(selectLatestButton);
+    const runSelect = await screen.findByRole("combobox", { name: "Run" });
+    fireEvent.change(runSelect, { target: { value: activeRunId } });
 
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: /Run/i })).toHaveValue(activeRunId);
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes("run_id=run-active-123")),
+      ).toBe(true);
     });
   });
 
-  it("renders last updated and window under the season title", async () => {
+  it("renders last updated and window in the analytics intro block", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
     render(
@@ -1306,6 +1340,61 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(windowRow).toBeTruthy();
     const windowValue = windowRow?.querySelector("dd");
     expect(windowValue?.textContent).toContain("to");
+  });
+
+  it("renders the control rail above the season selector on the show-level wrapper", async () => {
+    mockSeasonSocialFetch(analyticsBase);
+
+    function ShowSocialTabHarness() {
+      const [controlsHost, setControlsHost] = React.useState<HTMLDivElement | null>(null);
+
+      return (
+        <ShowSocialTab
+          socialDependencyError={null}
+          selectedSocialSeason={{ id: "season-1", season_number: 6 }}
+          socialPlatformTab="overview"
+          onSelectSocialPlatformTab={() => {}}
+          socialPlatformOptions={[
+            { key: "overview", label: "Overview" },
+            { key: "instagram", label: "Instagram" },
+          ]}
+          socialSeasonOptions={[
+            { id: "season-1", season_number: 6 },
+            { id: "season-2", season_number: 5 },
+          ]}
+          selectedSocialSeasonId="season-1"
+          onSelectSocialSeasonId={() => {}}
+          onSocialControlsHostChange={setControlsHost}
+          analyticsSection={
+            <SeasonSocialAnalyticsSection
+              showId="show-1"
+              seasonNumber={6}
+              seasonId="season-1"
+              showName="Test Show"
+              platformTab="overview"
+              onPlatformTabChange={() => {}}
+              hidePlatformTabs={true}
+              externalControlsTarget={controlsHost}
+            />
+          }
+          fallbackSection={<div>Fallback</div>}
+        />
+      );
+    }
+
+    render(<ShowSocialTabHarness />);
+
+    const tabsNav = await screen.findByRole("navigation", { name: "Social platform tabs" });
+    const ingestTrigger = await screen.findByRole("button", { name: "Ingest + Export" });
+    const seasonSelect = screen.getByRole("combobox", { name: "Season" });
+
+    expect(
+      Boolean(tabsNav.compareDocumentPosition(ingestTrigger) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+    expect(
+      Boolean(ingestTrigger.compareDocumentPosition(seasonSelect) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+    expect(screen.getByTestId("show-social-controls-host")).toContainElement(ingestTrigger);
   });
 
   it("preselects tab from social_platform query param and updates URL on tab change", async () => {
@@ -2411,7 +2500,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Ingest + Export");
+    await screen.findByRole("button", { name: "Ingest + Export" });
     expect(screen.queryByText("Top Sentiment Drivers")).not.toBeInTheDocument();
     expect(screen.queryByText("Weekly Trend")).not.toBeInTheDocument();
 
@@ -2426,7 +2515,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByText("Top Sentiment Drivers");
-    expect(screen.queryByText("Ingest + Export")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ingest + Export" })).toBeInTheDocument();
     expect(screen.getByText("Viewer Discussion Highlights")).toBeInTheDocument();
     expect(screen.getByText("Cast Mention Comparison (Prototype)")).toBeInTheDocument();
     expect(screen.getByText("Viewer Attitude by Platform")).toBeInTheDocument();
@@ -2442,11 +2531,11 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByText("Weekly Trend");
-    const ingestHeading = screen.getByRole("heading", { name: "Ingest + Export" });
+    const ingestButton = screen.getByRole("button", { name: "Ingest + Export" });
     const weeklyTrendHeading = screen.getByRole("heading", { name: "Weekly Trend" });
-    expect(ingestHeading).toBeInTheDocument();
+    expect(ingestButton).toBeInTheDocument();
     expect(
-      Boolean(ingestHeading.compareDocumentPosition(weeklyTrendHeading) & Node.DOCUMENT_POSITION_FOLLOWING),
+      Boolean(ingestButton.compareDocumentPosition(weeklyTrendHeading) & Node.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(true);
 
     rerender(
@@ -2764,7 +2853,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByText("Run Health");
-    fireEvent.click(screen.getByRole("button", { name: "Select Latest Run" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Run" }), {
+      target: { value: runId },
+    });
 
     await waitFor(() => {
       expect(screen.getByText("Failure Groups")).toBeInTheDocument();
@@ -2865,6 +2956,58 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.getByAltText("Instagram discussion thumbnail")).toHaveAttribute(
       "src",
       "https://images.test/discussion-thumb.jpg",
+    );
+  });
+
+  it("canonicalizes legacy hosted leaderboard thumbnails onto the R2 public host before rendering", async () => {
+    const analyticsWithLegacyHostedThumbs: AnalyticsPayload = {
+      ...analyticsBase,
+      leaderboards: {
+        bravo_content: [
+          {
+            platform: "instagram",
+            source_id: "ig-legacy-hosted",
+            text: "Hosted Instagram card",
+            engagement: 25,
+            url: "https://example.com/ig-legacy-hosted",
+            timestamp: "2026-01-07T00:00:00Z",
+            thumbnail_url: "https://d111111abcdef8.cloudfront.net/social/instagram/show/6/week-0/post/thumb.jpg",
+          },
+        ],
+        viewer_discussion: [
+          {
+            platform: "twitter",
+            source_id: "tw-legacy-hosted",
+            text: "Hosted discussion card",
+            engagement: 11,
+            url: "https://example.com/tw-legacy-hosted",
+            timestamp: "2026-01-07T00:00:00Z",
+            sentiment: "positive",
+            thumbnail_url: "https://d111111abcdef8.cloudfront.net/social/twitter/show/6/week-2/post/thumb.jpg",
+          },
+        ],
+      },
+    };
+    mockSeasonSocialFetch(analyticsWithLegacyHostedThumbs);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+        analyticsView="bravo"
+      />,
+    );
+
+    expect(await screen.findByText("Bravo Content Leaderboard")).toBeInTheDocument();
+    expect(screen.getByAltText("Instagram leaderboard thumbnail")).toHaveAttribute(
+      "src",
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/instagram/show/6/week-0/post/thumb.jpg",
+    );
+    expect(screen.getByAltText("Twitter/X discussion thumbnail")).toHaveAttribute(
+      "src",
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/twitter/show/6/week-2/post/thumb.jpg",
     );
   });
 
@@ -3209,7 +3352,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(await screen.findByText(/analytics unavailable/i)).toBeInTheDocument();
     expect(screen.getByText("Classification Rules")).toBeInTheDocument();
     expect(screen.getByText("YouTube:", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText(/accounts bravo/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "@bravo" })).toBeInTheDocument();
     const runSelect = screen.getByRole("combobox", { name: /Run/i });
     expect(within(runSelect).getByRole("option", { name: /run-1-ab/i })).toBeInTheDocument();
   });
@@ -3306,12 +3449,18 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    expect(await screen.findByText("Classification Rules")).toBeInTheDocument();
-    expect(screen.getByText("Instagram:", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText(/accounts bravotv, bravowwhl/i)).toBeInTheDocument();
-    expect(screen.getByText("TikTok:", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText(/^accounts bravotv$/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Select Latest Run/i }));
+    const classificationRulesHeading = await screen.findByText("Classification Rules");
+    const classificationRulesCard = classificationRulesHeading.closest("div");
+    expect(classificationRulesCard).not.toBeNull();
+    const classificationRulesScope = within(classificationRulesCard as HTMLElement);
+    expect(classificationRulesScope.getByText("Instagram:", { exact: false })).toBeInTheDocument();
+    expect(classificationRulesScope.getAllByRole("link", { name: "@bravotv" })).toHaveLength(2);
+    expect(classificationRulesScope.getByRole("link", { name: "@bravowwhl" })).toBeInTheDocument();
+    expect(classificationRulesScope.getByText("TikTok:", { exact: false })).toBeInTheDocument();
+    fireEvent.change(await screen.findByRole("combobox", { name: "Run" }), {
+      target: { value: "run-1-abcdef" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Ingest + Export" }));
     expect(await screen.findByText("Last Run Log")).toBeInTheDocument();
     expect(screen.getByText(/Candidate posts were scanned, but none matched the selected run window\./i)).toBeInTheDocument();
     expect(
@@ -3326,8 +3475,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
     const instagramRulesCard = screen.getByText("Instagram Classification Rules").closest("div");
     expect(instagramRulesCard).not.toBeNull();
-    expect(within(instagramRulesCard as HTMLElement).getByText(/^accounts bravotv, bravowwhl$/i)).toBeInTheDocument();
-    expect(within(instagramRulesCard as HTMLElement).queryByText(/^accounts bravotv$/i)).not.toBeInTheDocument();
+    expect(within(instagramRulesCard as HTMLElement).getByRole("link", { name: "@bravotv" })).toBeInTheDocument();
+    expect(within(instagramRulesCard as HTMLElement).getByRole("link", { name: "@bravowwhl" })).toBeInTheDocument();
   });
 
   it("exits loading and remains interactive when analytics request times out", async () => {
@@ -3512,7 +3661,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await screen.findByText("Ingest Job Status");
     fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
     expect(
-      await screen.findByText("No run selected. Pick a run above or start a new ingest."),
+      await screen.findByText("No run selected. Pick a run above or use Ingest + Export to start one."),
     ).toBeInTheDocument();
   });
 
@@ -3564,8 +3713,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    const selectLatestRunButton = await screen.findByRole("button", { name: "Select Latest Run" });
-    fireEvent.click(selectLatestRunButton);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Run" }), {
+      target: { value: "run-1-abcdef" },
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: /Run/i })).toHaveValue("run-1-abcdef");
@@ -3643,17 +3793,25 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    const selectLatestRunButton = await screen.findByRole("button", { name: "Select Latest Run" }, { timeout: 45_000 });
-    fireEvent.click(selectLatestRunButton);
+    fireEvent.change(await screen.findByRole("combobox", { name: "Run" }, { timeout: 45_000 }), {
+      target: { value: "run-1-abcdef" },
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: /Run/i })).toHaveValue("run-1-abcdef");
+      expect(
+        fetchMock.mock.calls.some(
+          (call) =>
+            String(call[0]).includes("/social/jobs?") && String(call[0]).includes("run_id=run-1-abcdef"),
+        ),
+      ).toBe(true);
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Ingest Job Status.*Show/i }));
     const jobsSection = screen.getByText("Ingest Job Status").closest("section");
     expect(jobsSection).not.toBeNull();
     const jobsScope = within(jobsSection as HTMLElement);
+    fireEvent.click(jobsScope.getByRole("button", { name: "Refresh Jobs" }));
     expect(await jobsScope.findByText("Done", {}, { timeout: 10_000 })).toBeInTheDocument();
     expect(
       jobsScope.getByText((content) => content.includes("123 items") || content.includes("123 posts")),
@@ -3710,7 +3868,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Ingest + Export");
+    fireEvent.click(await screen.findByRole("button", { name: "Ingest + Export" }));
     fireEvent.click(screen.getByRole("button", { name: /Run Season Sync \(All\)/i }));
 
     await waitFor(() => {
@@ -3755,6 +3913,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: "Ingest + Export" }));
     await screen.findByText("Daily Run");
     fireEvent.change(screen.getByLabelText(/Day/i), {
       target: { value: "2026-01-09" },
@@ -3807,6 +3966,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: "Ingest + Export" }));
     await screen.findByText("Weekly Run");
     fireEvent.change(screen.getByRole("combobox", { name: /^Week$/i }), {
       target: { value: "2" },
@@ -3855,6 +4015,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
+    fireEvent.click(await screen.findByRole("button", { name: "Ingest + Export" }));
     await screen.findByText("Sync Mode");
     fireEvent.change(screen.getByRole("combobox", { name: /Sync Mode/i }), {
       target: { value: "full_refresh" },
@@ -4291,7 +4452,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       />,
     );
 
-    await screen.findByText("Ingest + Export");
+    fireEvent.click(await screen.findByRole("button", { name: "Ingest + Export" }));
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole("button", { name: /Run Season Sync \(All\)/i }));
 

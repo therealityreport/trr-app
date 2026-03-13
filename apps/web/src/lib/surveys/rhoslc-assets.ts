@@ -20,7 +20,7 @@ export type RhoslcS6CastMember = {
 
 export const RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH = "/icons/snowflake-solid-ice-6.svg";
 export const RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL =
-  "https://d1fmdyqfafwim3.cloudfront.net/icons/snowflake-solid-ice-6.svg";
+  "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/icons/snowflake-solid-ice-6.svg";
 
 export const RHOSLC_S6_CAST_MEMBERS: readonly RhoslcS6CastMember[] = [
   {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 type TikTokAnalyticsView =
   | "tiktok-overview"
@@ -714,11 +715,18 @@ export default function TikTokSeasonAnalyticsSection({
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm"><p className="text-xs text-zinc-500">Related Posts Ingested</p><p className="font-semibold text-zinc-900">{numberFormatter.format(soundPostsPayload?.posts.length ?? 0)}</p></div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {(soundPostsPayload?.posts ?? []).slice(0, 30).map((post) => (
+                  {(soundPostsPayload?.posts ?? []).slice(0, 30).map((post) => {
+                    const canonicalThumbnailUrl = canonicalizeHostedMediaUrl(post.thumbnail_url);
+                    return (
                     <div key={post.platform_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-2">
-                      {post.thumbnail_url ? (
+                      {canonicalThumbnailUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={post.thumbnail_url} alt="TikTok post thumbnail" loading="lazy" className="h-36 w-full rounded object-cover" />
+                        <img
+                          src={canonicalThumbnailUrl}
+                          alt="TikTok post thumbnail"
+                          loading="lazy"
+                          className="h-36 w-full rounded object-cover"
+                        />
                       ) : (
                         <div className="flex h-36 items-center justify-center rounded bg-zinc-200 text-xs text-zinc-600">No thumbnail</div>
                       )}
@@ -728,7 +736,8 @@ export default function TikTokSeasonAnalyticsSection({
                         Post Detail
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ) : (

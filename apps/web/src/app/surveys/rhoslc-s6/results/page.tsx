@@ -10,7 +10,6 @@ import { RHOSLC_EPISODE_ID, RHOSLC_SEASON_ID, RHOSLC_SHOW_ID } from "@/lib/surve
 import { RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL } from "@/lib/surveys/rhoslc-assets";
 import type { SurveyResponse } from "@/lib/surveys/types";
 import PartialFillIcon from "@/components/survey/PartialFillIcon";
-import "@/styles/realitease-fonts.css";
 
 const IDENTIFIERS = {
   showId: RHOSLC_SHOW_ID,

@@ -14,6 +14,7 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSeasonBackendJson: fetchSeasonBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 45_000,
 }));
 
 import { GET } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/mirror-coverage/route";
@@ -54,6 +55,7 @@ describe("social mirror-coverage proxy route", () => {
       "/analytics/mirror-coverage",
       expect.objectContaining({
         seasonIdHint: seasonId,
+        timeoutMs: 45_000,
       }),
     );
     expect(fetchSeasonBackendJsonMock.mock.calls[0]?.[3]?.queryString).toContain("platforms=instagram");

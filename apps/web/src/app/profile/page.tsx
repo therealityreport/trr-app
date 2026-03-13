@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { getUserProfile } from "@/lib/db/users";
+import { getUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
 import type { UserProfile } from "@/lib/validation/user";
 
 type ProfileState = {
@@ -80,6 +80,12 @@ export default function ProfilePage() {
         setProfile(record);
         setState({ loading: false, error: null });
       } catch (err) {
+        if (isFirestoreUnavailableError(err)) {
+          console.warn("Profile page: Firestore unavailable, rendering auth-backed fallback", err);
+          setProfile(null);
+          setState({ loading: false, error: null });
+          return;
+        }
         console.error("Profile page: failed to load profile", err);
         setState({ loading: false, error: "Unable to load profile" });
       }

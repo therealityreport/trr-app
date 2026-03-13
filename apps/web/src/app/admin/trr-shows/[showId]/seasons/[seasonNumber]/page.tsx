@@ -38,6 +38,7 @@ import {
   castRoleMatchesFilter,
   normalizeCastRoleList,
 } from "@/lib/admin/cast-role-normalization";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 import { mapSeasonAssetToMetadata, type PhotoMetadata } from "@/lib/photo-metadata";
 import {
   readAdvancedFilters,
@@ -96,6 +97,7 @@ import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
   buildShowAdminUrl,
+  buildSocialAccountProfileUrl,
   buildSeasonAdminUrl,
   cleanLegacyRoutingQuery,
   parseSeasonEpisodeNumberFromPath,
@@ -1519,6 +1521,24 @@ export default function SeasonDetailPage() {
   ]);
 
   useEffect(() => {
+    if (seasonRouteState.tab !== "social" || socialAnalyticsView !== "bravo") return;
+    if (!seasonSocialPathFilters?.platform || !seasonSocialPathFilters.handle) return;
+    router.replace(
+      buildSocialAccountProfileUrl({
+        platform: seasonSocialPathFilters.platform,
+        handle: seasonSocialPathFilters.handle,
+      }) as Route,
+      { scroll: false },
+    );
+  }, [
+    router,
+    seasonRouteState.tab,
+    socialAnalyticsView,
+    seasonSocialPathFilters?.handle,
+    seasonSocialPathFilters?.platform,
+  ]);
+
+  useEffect(() => {
     if (!showSlugForRouting) return;
     const isEpisodeSocialPath =
       seasonRouteState.tab === "social" &&
@@ -1529,6 +1549,9 @@ export default function SeasonDetailPage() {
     }
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+    if (seasonRouteState.tab === "social" && socialAnalyticsView === "bravo" && seasonSocialPathFilters?.handle) {
+      return;
+    }
     if (seasonRouteState.tab === "social") {
       preservedQuery.delete("social_platform");
       if (socialAnalyticsView === "bravo") {
@@ -6678,7 +6701,12 @@ export default function SeasonDetailPage() {
                       }`}
                     >
                       <GalleryImage
-                        src={b.display_url ?? b.hosted_url ?? b.source_url ?? ""}
+                        src={
+                          canonicalizeHostedMediaUrl(b.display_url) ??
+                          canonicalizeHostedMediaUrl(b.hosted_url) ??
+                          b.source_url ??
+                          ""
+                        }
                         alt={b.caption || "Backdrop"}
                         sizes="420px"
                         className="object-cover"

@@ -485,15 +485,15 @@ function MetadataPanel({
   const galleryStatusNormalized = (metadata.galleryStatus ?? "").trim().toLowerCase();
   const isBrokenUnreachable = galleryStatusNormalized === "broken_unreachable";
   const galleryStatusLabel = metadata.galleryStatus ? metadata.galleryStatus.replace(/_/g, " ") : null;
-  const mirrorFileName =
-    typeof metadata.s3MirrorFileName === "string" && metadata.s3MirrorFileName.trim().length > 0
-      ? metadata.s3MirrorFileName.trim()
+  const hostedMediaFileName =
+    typeof metadata.hostedMediaFileName === "string" && metadata.hostedMediaFileName.trim().length > 0
+      ? metadata.hostedMediaFileName.trim()
       : null;
-  const mirrorHostedUrl =
-    typeof metadata.mirrorHostedUrl === "string" && metadata.mirrorHostedUrl.trim().length > 0
-      ? metadata.mirrorHostedUrl.trim()
+  const hostedMediaUrl =
+    typeof metadata.hostedMediaUrl === "string" && metadata.hostedMediaUrl.trim().length > 0
+      ? metadata.hostedMediaUrl.trim()
       : null;
-  const hasS3MirrorDetails = Boolean(metadata.isS3Mirrored);
+  const hasHostedMediaDetails = Boolean(metadata.isHostedMedia);
   const canEditContentType = Boolean(management?.canManage && management?.onUpdateContentType);
   const formatDateLabel = (value: Date | null | undefined): string =>
     value ? value.toLocaleDateString() : "—";
@@ -799,8 +799,8 @@ function MetadataPanel({
       value: metadata.galleryStatusCheckedAt ? metadata.galleryStatusCheckedAt.toLocaleString() : "—",
     });
   }
-  if (hasS3MirrorDetails) {
-    metadataCoverageRows.push({ label: "S3 Mirror File", value: mirrorFileName ?? "—" });
+  if (hasHostedMediaDetails) {
+    metadataCoverageRows.push({ label: "Hosted Media File", value: hostedMediaFileName ?? "—" });
   }
 
   const {
@@ -876,7 +876,7 @@ function MetadataPanel({
 
   useEffect(() => {
     setCopyMirrorFileNotice(null);
-  }, [mirrorFileName]);
+  }, [hostedMediaFileName]);
 
   useEffect(() => {
     setContentTypeValue(currentContentType);
@@ -1010,20 +1010,20 @@ function MetadataPanel({
           Original Source
         </span>
         <div className="mt-1 flex items-center gap-2">
-          {metadata.isS3Mirrored && (
-            mirrorHostedUrl ? (
+          {metadata.isHostedMedia && (
+            hostedMediaUrl ? (
               <a
-                href={mirrorHostedUrl}
+                href={hostedMediaUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-block rounded bg-blue-500/80 px-2 py-0.5 text-xs font-medium text-white underline decoration-white/50 underline-offset-2 hover:bg-blue-500"
-                title="Open mirrored S3 asset"
+                title="Open hosted media asset"
               >
-                S3 MIRROR
+                HOSTED MEDIA
               </a>
             ) : (
               <span className="inline-block rounded px-2 py-0.5 text-xs font-medium text-white bg-blue-500/80">
-                S3 MIRROR
+                HOSTED MEDIA
               </span>
             )
           )}
@@ -1057,44 +1057,44 @@ function MetadataPanel({
         </div>
       </div>
 
-      {hasS3MirrorDetails && (
+      {hasHostedMediaDetails && (
         <div className="mb-4">
           <div className="flex items-center gap-2">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
-              S3 Mirror File
+              Hosted Media File
             </span>
-            {mirrorHostedUrl ? (
+            {hostedMediaUrl ? (
               <a
-                href={mirrorHostedUrl}
+                href={hostedMediaUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-block rounded bg-blue-500/80 px-2 py-0.5 text-[10px] font-medium text-white underline decoration-white/50 underline-offset-2 hover:bg-blue-500"
-                title="Open mirrored S3 asset"
+                title="Open hosted media asset"
               >
-                S3 MIRROR
+                HOSTED MEDIA
               </a>
             ) : (
               <span className="inline-block rounded px-2 py-0.5 text-[10px] font-medium text-white bg-blue-500/80">
-                S3 MIRROR
+                HOSTED MEDIA
               </span>
             )}
           </div>
           <div className="mt-1 flex items-center gap-2">
             <code className="max-w-[70%] break-all rounded bg-white/10 px-2 py-1 text-xs text-white/90">
-              {mirrorFileName ?? "—"}
+              {hostedMediaFileName ?? "—"}
             </code>
             <button
               type="button"
               onClick={async () => {
-                if (!mirrorFileName) return;
+                if (!hostedMediaFileName) return;
                 try {
-                  const copied = await copyTextToClipboard(mirrorFileName);
+                  const copied = await copyTextToClipboard(hostedMediaFileName);
                   setCopyMirrorFileNotice(copied ? "Copied." : "Copy failed.");
                 } catch {
                   setCopyMirrorFileNotice("Copy failed.");
                 }
               }}
-              disabled={!mirrorFileName}
+              disabled={!hostedMediaFileName}
               className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
             >
               Copy

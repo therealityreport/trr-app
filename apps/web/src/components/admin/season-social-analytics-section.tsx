@@ -4,13 +4,20 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import Link from "next/link";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import {
+  canonicalizeHostedMediaUrl,
+  inferHostedMediaFileNameFromUrl,
+  isLikelyHostedMediaUrl,
+} from "@/lib/hosted-media";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 import {
+  buildSocialAccountProfileUrl,
   buildSeasonSocialWeekUrl,
   parseSeasonEpisodeNumberFromPath,
   parseSeasonSocialPathSegment,
@@ -334,6 +341,8 @@ type AnalyticsResponse = {
       engagement: number;
       url: string;
       timestamp: string;
+      hosted_thumbnail_url?: string | null;
+      source_thumbnail_url?: string | null;
       thumbnail_url?: string | null;
     }>;
     viewer_discussion: Array<{
@@ -344,6 +353,8 @@ type AnalyticsResponse = {
       url: string;
       timestamp: string;
       sentiment: "positive" | "neutral" | "negative";
+      hosted_thumbnail_url?: string | null;
+      source_thumbnail_url?: string | null;
       thumbnail_url?: string | null;
     }>;
   };
@@ -598,6 +609,7 @@ interface SeasonSocialAnalyticsSectionProps {
   platformTab?: PlatformTab;
   onPlatformTabChange?: (tab: PlatformTab) => void;
   hidePlatformTabs?: boolean;
+  externalControlsTarget?: HTMLElement | null;
   analyticsView?: SocialAnalyticsView;
 }
 
@@ -620,8 +632,6 @@ const SOCIAL_SOURCE_COLORS: Record<string, string> = {
   reddit: "#f97316",
 };
 const SOCIAL_MEDIA_VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|m3u8|mpd)(\?|$)/i;
-const SOCIAL_MIRROR_HOST_MARKERS = ["cloudfront.net", "amazonaws.com", "s3.", "therealityreport"];
-
 const PLATFORM_TABS: { key: PlatformTab; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "instagram", label: "Instagram" },
@@ -802,9 +812,6 @@ const formatSharedPipelineStageSummary = (stage: SharedPipelineStageStatus | nul
 
 const formatClassificationRuleSummary = (target: SocialTarget): string => {
   const parts: string[] = [];
-  if ((target.accounts ?? []).length > 0) {
-    parts.push(`accounts ${(target.accounts ?? []).join(", ")}`);
-  }
   if ((target.hashtags ?? []).length > 0) {
     parts.push(
       `hashtags ${(target.hashtags ?? []).map((tag) => (String(tag).startsWith("#") ? String(tag) : `#${String(tag)}`)).join(", ")}`,
@@ -1967,26 +1974,15 @@ const isVideoLikeThumbnailUrl = (url: string): boolean => {
 const detectSocialMediaType = (url: string): SocialMediaType =>
   isVideoLikeThumbnailUrl(url) ? "video" : "image";
 
-const isLikelyMirroredSocialUrl = (url: string | null | undefined): boolean => {
-  if (typeof url !== "string" || url.trim().length === 0) return false;
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return SOCIAL_MIRROR_HOST_MARKERS.some((marker) => host.includes(marker));
-  } catch {
-    return false;
-  }
-};
-
-const inferMirrorFileNameFromUrl = (url: string | null | undefined): string | null => {
-  if (typeof url !== "string" || url.trim().length === 0) return null;
-  try {
-    const pathname = new URL(url).pathname;
-    const fileName = pathname.split("/").filter(Boolean).pop();
-    return fileName ? decodeURIComponent(fileName) : null;
-  } catch {
-    return null;
-  }
-};
+const getCanonicalLeaderboardThumbnailUrl = (item: {
+  hosted_thumbnail_url?: string | null;
+  thumbnail_url?: string | null;
+  source_thumbnail_url?: string | null;
+}) =>
+  canonicalizeHostedMediaUrl(item.hosted_thumbnail_url) ??
+  canonicalizeHostedMediaUrl(item.thumbnail_url) ??
+  canonicalizeHostedMediaUrl(item.source_thumbnail_url) ??
+  null;
 
 const buildLeaderboardMediaMetadata = (input: {
   item: {
@@ -1995,6 +1991,8 @@ const buildLeaderboardMediaMetadata = (input: {
     text?: string;
     url: string;
     timestamp: string;
+    hosted_thumbnail_url?: string | null;
+    source_thumbnail_url?: string | null;
     thumbnail_url?: string | null;
   };
   sourceScope: Scope;
@@ -2006,17 +2004,17 @@ const buildLeaderboardMediaMetadata = (input: {
   const sourceLabel = PLATFORM_LABELS[item.platform] ?? item.platform;
   const postedAt = item.timestamp ? new Date(item.timestamp) : null;
   const postedDate = postedAt && !Number.isNaN(postedAt.getTime()) ? postedAt : null;
-  const mediaUrl = item.thumbnail_url ?? item.url;
+  const mediaUrl = getCanonicalLeaderboardThumbnailUrl(item) ?? item.url;
   const fileTypeMatch = mediaUrl.match(/\.([a-z0-9]+)(\?|$)/i);
   const fileType = fileTypeMatch?.[1]?.toLowerCase() ?? null;
-  const isS3Mirrored = isLikelyMirroredSocialUrl(mediaUrl);
-  const mirrorFileName = isS3Mirrored ? inferMirrorFileNameFromUrl(mediaUrl) : null;
-  const originalImageUrl = isS3Mirrored ? null : mediaUrl;
+  const isHostedMedia = isLikelyHostedMediaUrl(mediaUrl);
+  const hostedMediaFileName = isHostedMedia ? inferHostedMediaFileNameFromUrl(mediaUrl) : null;
+  const originalImageUrl = isHostedMedia ? null : mediaUrl;
   return {
     source: sourceLabel,
     sourceBadgeColor: SOCIAL_SOURCE_COLORS[item.platform] ?? "#71717a",
-    isS3Mirrored,
-    s3MirrorFileName: mirrorFileName,
+    isHostedMedia,
+    hostedMediaFileName,
     originalImageUrl,
     originalSourceFileUrl: originalImageUrl,
     originalSourcePageUrl: item.url,
@@ -2079,6 +2077,7 @@ export default function SeasonSocialAnalyticsSection({
   platformTab: controlledPlatformTab,
   onPlatformTabChange,
   hidePlatformTabs = false,
+  externalControlsTarget = null,
   analyticsView = "bravo",
 }: SeasonSocialAnalyticsSectionProps) {
   const router = useRouter();
@@ -2185,6 +2184,7 @@ export default function SeasonSocialAnalyticsSection({
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [ingestStartedAt, setIngestStartedAt] = useState<Date | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [ingestExportOpen, setIngestExportOpen] = useState(false);
   const [manualSourcesOpen, setManualSourcesOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [expandedJobErrors, setExpandedJobErrors] = useState<Set<string>>(new Set());
@@ -2217,8 +2217,9 @@ export default function SeasonSocialAnalyticsSection({
     enabled: boolean;
   } | null>(null);
   const lastAnalyticsPollAtRef = useRef(0);
-  const ingestPanelRef = useRef<HTMLElement | null>(null);
   const runSeasonIngestButtonRef = useRef<HTMLButtonElement | null>(null);
+  const ingestExportTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const ingestExportPopoverRef = useRef<HTMLDivElement | null>(null);
   const weekDetailTokenRequestsRef = useRef<Set<string>>(new Set());
   const weekDetailAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const weekDetailTokenCountsByWeekRef = useRef<Record<number, WeekDetailTokenCounts>>({});
@@ -2325,6 +2326,34 @@ export default function SeasonSocialAnalyticsSection({
       componentMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!ingestExportOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (ingestExportPopoverRef.current?.contains(target)) return;
+      if (ingestExportTriggerRef.current?.contains(target)) return;
+      setIngestExportOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIngestExportOpen(false);
+        ingestExportTriggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [ingestExportOpen]);
 
   useEffect(() => {
     weekDetailTokenCountsByWeekRef.current = weekDetailTokenCountsByWeek;
@@ -5185,18 +5214,6 @@ export default function SeasonSocialAnalyticsSection({
     if (platformTab === "overview") return targets;
     return targets.filter((target) => target.platform === platformTab);
   }, [platformTab, targets]);
-  const selectLatestRun = useCallback(() => {
-    if (!runs.length) return;
-    const preferredRun = runs.find((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? runs[0];
-    setSelectedRunId(preferredRun?.id ?? null);
-    setSectionErrors((current) => ({ ...current, jobs: null }));
-  }, [runs]);
-  const focusIngestControls = useCallback(() => {
-    ingestPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    window.requestAnimationFrame(() => {
-      runSeasonIngestButtonRef.current?.focus();
-    });
-  }, []);
   const openLeaderboardLightbox = useCallback(
     (
       item: {
@@ -5206,13 +5223,16 @@ export default function SeasonSocialAnalyticsSection({
         engagement: number;
         url: string;
         timestamp: string;
+        hosted_thumbnail_url?: string | null;
+        source_thumbnail_url?: string | null;
         thumbnail_url?: string | null;
       },
       sectionTitle: string,
       extraStats: SocialStatsItem[] = [],
     ) => {
-      if (!item.thumbnail_url) return;
-      const mediaType = detectSocialMediaType(item.thumbnail_url);
+      const canonicalThumbnailUrl = getCanonicalLeaderboardThumbnailUrl(item);
+      if (!canonicalThumbnailUrl) return;
+      const mediaType = detectSocialMediaType(canonicalThumbnailUrl);
       const metadata = buildLeaderboardMediaMetadata({
         item,
         sourceScope: scope,
@@ -5227,9 +5247,9 @@ export default function SeasonSocialAnalyticsSection({
       ];
       const entry: SocialLeaderboardLightboxEntry = {
         id: `${item.platform}-${item.source_id}`,
-        src: item.thumbnail_url,
+        src: canonicalThumbnailUrl,
         mediaType,
-        posterSrc: item.thumbnail_url,
+        posterSrc: canonicalThumbnailUrl,
         alt: `${PLATFORM_LABELS[item.platform] ?? item.platform} social media`,
         metadata,
         stats,
@@ -5242,15 +5262,29 @@ export default function SeasonSocialAnalyticsSection({
     setLeaderboardLightbox(null);
   }, []);
 
-  const ingestExportPanel = (
-    <article
-      ref={ingestPanelRef}
-      tabIndex={-1}
-      aria-label="Sync and export controls"
-      className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
+  const ingestExportPopover = (
+    <div
+      ref={ingestExportPopoverRef}
+      role="dialog"
+      aria-label="Ingest + Export"
+      className="absolute left-0 top-full z-30 mt-3 w-[min(30rem,calc(100vw-3rem))] rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl"
     >
-      <h4 className="mb-4 text-lg font-semibold text-zinc-900">Ingest + Export</h4>
-      <div className="space-y-3 text-sm text-zinc-600">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-lg font-semibold text-zinc-900">Ingest + Export</h4>
+          <p className="mt-1 text-xs text-zinc-500">
+            Run scoped sync jobs or export the current season social dataset.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIngestExportOpen(false)}
+          className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-50"
+        >
+          Close
+        </button>
+      </div>
+      <div className="mt-4 space-y-3 text-sm text-zinc-600">
         <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
           Sync Mode
           <select
@@ -5400,30 +5434,28 @@ export default function SeasonSocialAnalyticsSection({
             {cancellingRun ? "Cancelling Run..." : `Cancel Active Run (${activeRunId.slice(0, 8)})`}
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => downloadExport("csv")}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-        >
-          Export CSV
-        </button>
-        <button
-          type="button"
-          onClick={() => downloadExport("pdf")}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-        >
-          Export PDF
-        </button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => downloadExport("csv")}
+            className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadExport("pdf")}
+            className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+          >
+            Export PDF
+          </button>
+        </div>
       </div>
-      <p className="mt-3 text-xs text-zinc-500">
+      <p className="mt-4 text-xs text-zinc-500">
         Run scope:{" "}
-        <span className="font-semibold text-zinc-700">
-          {activeRunScope.weekLabel}
-        </span>
+        <span className="font-semibold text-zinc-700">{activeRunScope.weekLabel}</span>
         {" · "}
-        <span className="font-semibold text-zinc-700">
-          {activeRunScope.platformLabel}
-        </span>
+        <span className="font-semibold text-zinc-700">{activeRunScope.platformLabel}</span>
         {selectedRunId && (
           <>
             {" · "}
@@ -5444,119 +5476,199 @@ export default function SeasonSocialAnalyticsSection({
           </div>
         </div>
       )}
-      <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-        <p className="font-semibold text-zinc-700">
-          {platformTab === "overview"
-            ? "Classification Rules"
-            : `${PLATFORM_LABELS[platformTab] ?? platformTab} Classification Rules`}
-        </p>
-        <ul className="mt-1 space-y-1">
-          {displayedTargets.map((target) => (
-            <li key={target.platform}>
-              <span className="font-semibold text-zinc-700">{(PLATFORM_LABELS[target.platform] ?? target.platform) + ":"}</span>{" "}
-              {formatClassificationRuleSummary(target)}
-            </li>
-          ))}
-          {displayedTargets.length === 0 && (
-            <li>
-              {platformTab === "overview"
-                ? "No active classification rules configured."
-                : `No active ${(PLATFORM_LABELS[platformTab] ?? platformTab).toLowerCase()} classification rules configured.`}
-            </li>
-          )}
-        </ul>
-      </div>
-      {(sharedStatus || sharedStatusError) && (
-        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="font-semibold text-zinc-700">Shared Async Pipeline</p>
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${
-                sharedStatus?.ingest_mode === "shared_account_async" ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-600"
-              }`}
-            >
-              {sharedStatus?.ingest_mode === "shared_account_async" ? "Production Path" : "Unavailable"}
-            </span>
-          </div>
-          {sharedStatusError ? (
-            <p className="mt-2 text-amber-700">{sharedStatusError}</p>
-          ) : (
-            <>
-              <p className="mt-2 text-zinc-600">
-                Shared Bravo-owned account scraping feeds this season. These classification rules decide which posts materialize into the existing season tables.
-              </p>
-              <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
-                <div className="flex items-center gap-1.5">
-                  <dt className="font-semibold text-zinc-700">Matched posts</dt>
-                  <dd>{formatInteger(sharedStatus?.matched_posts ?? 0)}</dd>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <dt className="font-semibold text-zinc-700">Review queue</dt>
-                  <dd>{formatInteger(sharedStatus?.review_queue_count ?? 0)}</dd>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <dt className="font-semibold text-zinc-700">Latest match</dt>
-                  <dd>{formatDateTime(sharedStatus?.latest_match_at)}</dd>
-                </div>
-              </dl>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {[
-                  { label: "Shared scrape", value: sharedStatus?.shared_scrape_status },
-                  { label: "Classification", value: sharedStatus?.classification_status },
-                  { label: "Materialization", value: sharedStatus?.materialization_status },
-                ].map((item) => (
-                  <span
-                    key={item.label}
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSyncStatusTone(item.value?.status)}`}
-                  >
-                    <span>{item.label}</span>
-                    <span>{formatSharedPipelineStageSummary(item.value)}</span>
+    </div>
+  );
+  const classificationRulesPanel = (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-5 text-xs text-zinc-600 shadow-sm">
+      <p className="font-semibold text-zinc-700">
+        {platformTab === "overview"
+          ? "Classification Rules"
+          : `${PLATFORM_LABELS[platformTab] ?? platformTab} Classification Rules`}
+      </p>
+      <ul className="mt-2 space-y-1">
+        {displayedTargets.map((target) => (
+          <li key={target.platform}>
+            <span className="font-semibold text-zinc-700">{(PLATFORM_LABELS[target.platform] ?? target.platform) + ":"}</span>{" "}
+            {(target.accounts ?? []).length > 0 ? (
+              <>
+                accounts{" "}
+                {(target.accounts ?? []).map((account, index) => (
+                  <span key={`${target.platform}-${account}`}>
+                    {index > 0 ? ", " : ""}
+                    <Link
+                      href={buildSocialAccountProfileUrl({
+                        platform: target.platform,
+                        handle: account,
+                      }) as Route}
+                      className="font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      @{String(account).replace(/^@+/, "")}
+                    </Link>
                   </span>
                 ))}
-              </div>
-              {sharedStatus?.latest_shared_run?.run_id && (
-                <p className="mt-3 text-xs text-zinc-500">
-                  Latest shared run {sharedStatus.latest_shared_run.run_id.slice(0, 8)} ·{" "}
-                  {formatSyncStatusLabel(sharedStatus.latest_shared_run.status)} ·{" "}
-                  {formatDateTime(
-                    sharedStatus.latest_shared_run.completed_at ??
-                      sharedStatus.latest_shared_run.started_at ??
-                      sharedStatus.latest_shared_run.created_at,
-                  )}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </article>
+                {formatClassificationRuleSummary(target) ? ` · ${formatClassificationRuleSummary(target)}` : ""}
+              </>
+            ) : (
+              formatClassificationRuleSummary(target)
+            )}
+          </li>
+        ))}
+        {displayedTargets.length === 0 && (
+          <li>
+            {platformTab === "overview"
+              ? "No active classification rules configured."
+              : `No active ${(PLATFORM_LABELS[platformTab] ?? platformTab).toLowerCase()} classification rules configured.`}
+          </li>
+        )}
+      </ul>
+    </div>
   );
+  const sharedAsyncPipelinePanel =
+    sharedStatus || sharedStatusError ? (
+      <div className="rounded-2xl border border-zinc-200 bg-white p-5 text-xs text-zinc-600 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold text-zinc-700">Shared Async Pipeline</p>
+          <span
+            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${
+              sharedStatus?.ingest_mode === "shared_account_async" ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-600"
+            }`}
+          >
+            {sharedStatus?.ingest_mode === "shared_account_async" ? "Production Path" : "Unavailable"}
+          </span>
+        </div>
+        {sharedStatusError ? (
+          <p className="mt-2 text-amber-700">{sharedStatusError}</p>
+        ) : (
+          <>
+            <p className="mt-2 text-zinc-600">
+              Shared Bravo-owned account scraping feeds this season. These classification rules decide which posts materialize into the existing season tables.
+            </p>
+            <dl className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+              <div className="flex items-center gap-1.5">
+                <dt className="font-semibold text-zinc-700">Matched posts</dt>
+                <dd>{formatInteger(sharedStatus?.matched_posts ?? 0)}</dd>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <dt className="font-semibold text-zinc-700">Review queue</dt>
+                <dd>{formatInteger(sharedStatus?.review_queue_count ?? 0)}</dd>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <dt className="font-semibold text-zinc-700">Latest match</dt>
+                <dd>{formatDateTime(sharedStatus?.latest_match_at)}</dd>
+              </div>
+            </dl>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[
+                { label: "Shared scrape", value: sharedStatus?.shared_scrape_status },
+                { label: "Classification", value: sharedStatus?.classification_status },
+                { label: "Materialization", value: sharedStatus?.materialization_status },
+              ].map((item) => (
+                <span
+                  key={item.label}
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${getSyncStatusTone(item.value?.status)}`}
+                >
+                  <span>{item.label}</span>
+                  <span>{formatSharedPipelineStageSummary(item.value)}</span>
+                </span>
+              ))}
+            </div>
+            {sharedStatus?.latest_shared_run?.run_id && (
+              <p className="mt-3 text-xs text-zinc-500">
+                Latest shared run {sharedStatus.latest_shared_run.run_id.slice(0, 8)} ·{" "}
+                {formatSyncStatusLabel(sharedStatus.latest_shared_run.status)} ·{" "}
+                {formatDateTime(
+                  sharedStatus.latest_shared_run.completed_at ??
+                    sharedStatus.latest_shared_run.started_at ??
+                    sharedStatus.latest_shared_run.created_at,
+                )}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    ) : null;
+  const socialRulePanels = (
+    <div className={`grid gap-4 ${sharedAsyncPipelinePanel ? "xl:grid-cols-2" : ""}`}>
+      {classificationRulesPanel}
+      {sharedAsyncPipelinePanel}
+    </div>
+  );
+  const socialControlsRail = (
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="relative">
+        <button
+          ref={ingestExportTriggerRef}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={ingestExportOpen}
+          onClick={() => {
+            setIngestExportOpen((open) => !open);
+            if (!ingestExportOpen) {
+              window.requestAnimationFrame(() => {
+                runSeasonIngestButtonRef.current?.focus();
+              });
+            }
+          }}
+          className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-50"
+        >
+          <span>Ingest + Export</span>
+          <svg
+            className={`h-4 w-4 transition-transform ${ingestExportOpen ? "rotate-180" : ""}`}
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            aria-hidden="true"
+          >
+            <path d="m5 7 5 6 5-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        {ingestExportOpen && ingestExportPopover}
+      </div>
+      <label className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500 shadow-sm">
+        <span>Run</span>
+        <select
+          aria-label="Run"
+          value={selectedRunId ?? ""}
+          onChange={(event) => {
+            const nextRunId = event.target.value || null;
+            setSelectedRunId(nextRunId);
+            setSectionErrors((current) => ({ ...current, jobs: null }));
+          }}
+          disabled={runningIngest}
+          title={selectedRunLabel ?? "No Run Selected"}
+          className="min-w-[15rem] appearance-none bg-transparent pr-5 text-sm font-semibold normal-case tracking-normal text-zinc-900 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <option value="">No Run Selected</option>
+          {runs.map((run) => (
+            <option key={run.id} value={run.id}>
+              {runOptionLabelById.get(run.id) ??
+                `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+  const shouldRenderInlineControls = !hidePlatformTabs && !externalControlsTarget;
+  const shouldRenderPortaledControls = Boolean(hidePlatformTabs && externalControlsTarget);
 
   return (
     <div className="space-y-6">
       {!isRedditView && (
         <>
+          {shouldRenderPortaledControls && externalControlsTarget
+            ? createPortal(socialControlsRail, externalControlsTarget)
+            : null}
           <section
             aria-label="Season social analytics controls"
-            className="overflow-hidden rounded-3xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm sm:p-6"
+            className="rounded-3xl border border-zinc-200 bg-zinc-50/70 p-4 shadow-sm sm:p-6"
           >
             <div className="space-y-4">
               <header className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
-                    Season Social Analytics
-                  </p>
-                  <p
-                    className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] ${
-                      hasRunningJobs ? "bg-zinc-300 text-zinc-800" : "bg-zinc-100 text-zinc-600"
-                    }`}
-                  >
-                    {hasRunningJobs ? "Run Active" : "Idle"}
-                  </p>
-                </div>
-                <h3 className="text-2xl font-bold leading-tight text-zinc-900 sm:text-[28px]">
-                  {showName} · Season {seasonNumber}
-                </h3>
+                <p className="rounded-full bg-zinc-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white">
+                  Season Social Analytics
+                </p>
                 <p className="max-w-2xl text-sm text-zinc-500">
                   Bravo-owned social analytics with viewer sentiment and weekly rollups.
                 </p>
@@ -5602,58 +5714,7 @@ export default function SeasonSocialAnalyticsSection({
                   })}
                 </nav>
               )}
-
-              <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-zinc-100 shadow-sm sm:p-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-300">Current Run</p>
-                <label className="mt-2 block text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-300">
-                  Run
-                  <select
-                    value={selectedRunId ?? ""}
-                    onChange={(event) => {
-                      const nextRunId = event.target.value || null;
-                      setSelectedRunId(nextRunId);
-                      setSectionErrors((current) => ({ ...current, jobs: null }));
-                    }}
-                    disabled={runningIngest}
-                    className="mt-1 block w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm font-medium text-zinc-100 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <option value="">No Run Selected</option>
-                    {runs.map((run) => (
-                      <option key={run.id} value={run.id}>
-                        {runOptionLabelById.get(run.id) ??
-                          `${run.id.slice(0, 8)} · ${run.status} · ${formatDateTime(run.created_at ?? run.started_at ?? run.completed_at)}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {selectedRunLabel ? (
-                  <p className="mt-2 break-words text-sm font-medium leading-relaxed text-zinc-100">{selectedRunLabel}</p>
-                ) : (
-                  <div className="mt-2 space-y-3">
-                    <p className="text-sm font-medium text-zinc-100">No run selected.</p>
-                    <p className="text-xs text-zinc-300">Pick the latest run or jump to ingest controls to start one.</p>
-                    <div className="flex flex-wrap gap-2">
-                      {runs.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={selectLatestRun}
-                          disabled={runningIngest}
-                          className="rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Select Latest Run
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={focusIngestControls}
-                        className="rounded-lg border border-zinc-500 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-700"
-                      >
-                        Start New Ingest
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </article>
+              {shouldRenderInlineControls ? socialControlsRail : null}
             </div>
 
             {(pollingStatus !== "idle" || staleFallbackItems.length > 0 || sectionErrorItems.length > 0) && (
@@ -6278,7 +6339,7 @@ export default function SeasonSocialAnalyticsSection({
 
           {isBravoView && (
             <section className="space-y-6">
-              {ingestExportPanel}
+              {socialRulePanels}
               <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -6498,7 +6559,9 @@ export default function SeasonSocialAnalyticsSection({
 
           {isAdvancedView && (
             <section className="grid gap-6 xl:grid-cols-3">
-              {ingestExportPanel}
+              <div className="space-y-6 xl:col-span-1">
+                {socialRulePanels}
+              </div>
               <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <h4 className="text-lg font-semibold text-zinc-900">Run Health</h4>
                 {runSummariesLoading && runSummaries.length === 0 ? (
@@ -7180,27 +7243,29 @@ export default function SeasonSocialAnalyticsSection({
                 <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                   <h4 className="mb-4 text-lg font-semibold text-zinc-900">Bravo Content Leaderboard</h4>
                   <div className="space-y-2">
-                    {(analytics?.leaderboards.bravo_content ?? []).slice(0, 10).map((item) => (
+                    {(analytics?.leaderboards.bravo_content ?? []).slice(0, 10).map((item) => {
+                      const canonicalThumbnailUrl = getCanonicalLeaderboardThumbnailUrl(item);
+                      return (
                       <div
                         key={`${item.platform}-${item.source_id}`}
                         className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
                       >
                         <div className="flex items-start gap-3">
-                          {item.thumbnail_url && (
+                          {canonicalThumbnailUrl && (
                             <button
                               type="button"
                               onClick={() => openLeaderboardLightbox(item, "Bravo Content Leaderboard")}
                               className="shrink-0"
                               aria-label="Open leaderboard media lightbox"
                             >
-                              {isVideoLikeThumbnailUrl(item.thumbnail_url) ? (
+                              {isVideoLikeThumbnailUrl(canonicalThumbnailUrl) ? (
                                 <div className="flex h-12 w-12 items-center justify-center rounded-md border border-zinc-200 bg-zinc-900 text-[10px] font-semibold uppercase tracking-wide text-zinc-100">
                                   Video
                                 </div>
                               ) : (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
-                                  src={item.thumbnail_url}
+                                  src={canonicalThumbnailUrl}
                                   alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} leaderboard thumbnail`}
                                   loading="lazy"
                                   referrerPolicy="no-referrer"
@@ -7230,7 +7295,8 @@ export default function SeasonSocialAnalyticsSection({
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                     {(analytics?.leaderboards.bravo_content?.length ?? 0) === 0 && (
                       <p className="text-sm text-zinc-500">No content leaderboard entries yet.</p>
                     )}
@@ -7241,13 +7307,15 @@ export default function SeasonSocialAnalyticsSection({
               <article className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <h4 className="mb-4 text-lg font-semibold text-zinc-900">Viewer Discussion Highlights</h4>
                 <div className="space-y-2">
-                  {(analytics?.leaderboards.viewer_discussion ?? []).slice(0, 10).map((item) => (
+                  {(analytics?.leaderboards.viewer_discussion ?? []).slice(0, 10).map((item) => {
+                    const canonicalThumbnailUrl = getCanonicalLeaderboardThumbnailUrl(item);
+                    return (
                     <div
                       key={`${item.platform}-${item.source_id}`}
                       className="block rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 transition hover:bg-zinc-100"
                     >
                       <div className="flex items-start gap-3">
-                        {item.thumbnail_url && (
+                        {canonicalThumbnailUrl && (
                           <button
                             type="button"
                             onClick={() =>
@@ -7258,14 +7326,14 @@ export default function SeasonSocialAnalyticsSection({
                             className="shrink-0"
                             aria-label="Open discussion media lightbox"
                           >
-                            {isVideoLikeThumbnailUrl(item.thumbnail_url) ? (
+                            {isVideoLikeThumbnailUrl(canonicalThumbnailUrl) ? (
                               <div className="flex h-12 w-12 items-center justify-center rounded-md border border-zinc-200 bg-zinc-900 text-[10px] font-semibold uppercase tracking-wide text-zinc-100">
                                 Video
                               </div>
                             ) : (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
-                                src={item.thumbnail_url}
+                                src={canonicalThumbnailUrl}
                                 alt={`${PLATFORM_LABELS[item.platform] ?? item.platform} discussion thumbnail`}
                                 loading="lazy"
                                 referrerPolicy="no-referrer"
@@ -7293,7 +7361,8 @@ export default function SeasonSocialAnalyticsSection({
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   {(analytics?.leaderboards.viewer_discussion?.length ?? 0) === 0 && (
                     <p className="text-sm text-zinc-500">No viewer discussion highlights yet.</p>
                   )}
@@ -7636,7 +7705,7 @@ export default function SeasonSocialAnalyticsSection({
                 });
               })()}
               {!selectedRunId && (
-                <p className="text-sm text-zinc-500">No run selected. Pick a run above or start a new ingest.</p>
+                <p className="text-sm text-zinc-500">No run selected. Pick a run above or use Ingest + Export to start one.</p>
               )}
               {selectedRunId && runScopedJobs.length === 0 && (
                 <p className="text-sm text-zinc-500">No jobs found for the selected run yet.</p>

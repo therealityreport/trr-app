@@ -2,6 +2,9 @@ export const DEFAULT_ADMIN_DISPLAY_NAMES = [
   "The Reality Report Superfan @the_reality_report1",
   // Support potential multi-line profile names synced from Firebase
   "The Reality Report\nSuperfan\n@the_reality_report1",
+  "Codex Huli",
+  "@codex_huli",
+  "codex_huli",
 ] as const;
 
 export type DefaultAdminDisplayName = (typeof DEFAULT_ADMIN_DISPLAY_NAMES)[number];

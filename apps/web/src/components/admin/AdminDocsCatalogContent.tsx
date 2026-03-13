@@ -73,7 +73,7 @@ export function AdminDocsCatalogContent({
             <p className="mt-2 text-sm text-zinc-600">
               This catalog maps live TRR-APP admin job flows to their exact UI surface. Every row uses the current
               button label from the app and includes the route or proxy path behind that trigger, plus the current
-              runtime plane, the target runtime after EC2 retirement, and the migration status for that job family.
+              runtime plane, the target runtime, and the migration status for that job family.
             </p>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">

@@ -174,6 +174,31 @@ describe("server auth adapter", () => {
     });
   });
 
+  it("allows requireAdmin for supabase user when display name matches codex default variants", async () => {
+    process.env.TRR_AUTH_PROVIDER = "supabase";
+    getUserMock.mockResolvedValue({
+      data: {
+        user: {
+          id: "supabase-codex",
+          email: "different@example.com",
+          user_metadata: { name: "Codex Huli" },
+          app_metadata: {},
+          identities: [],
+        },
+      },
+      error: null,
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(requestWithBearer("token-codex-handle"));
+
+    expect(user).toMatchObject({
+      uid: "supabase-codex",
+      email: "different@example.com",
+      provider: "supabase",
+    });
+  });
+
   it("tracks fallback and shadow mismatch diagnostics counters", async () => {
     process.env.TRR_AUTH_SHADOW_MODE = "true";
     verifyIdTokenMock.mockRejectedValueOnce(new Error("firebase down"));
@@ -308,6 +333,38 @@ describe("server auth adapter", () => {
       await expect(
         auth.requireAdmin(requestWithBearerAt("http://localhost/api/test", "token-prod-default-host")),
       ).rejects.toThrow("forbidden");
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
+  it("allows requireAdmin on the current production host when no admin host config is set", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_HOSTS;
+    delete process.env.ADMIN_APP_ORIGIN;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin-prod-current-host",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      const user = await auth.requireAdmin(
+        requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-prod-current-host"),
+      );
+      expect(user).toMatchObject({
+        uid: "firebase-admin-prod-current-host",
+        email: "admin@example.com",
+        provider: "firebase",
+      });
     } finally {
       if (typeof previousNodeEnv === "undefined") {
         delete process.env.NODE_ENV;

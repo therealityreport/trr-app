@@ -47,6 +47,7 @@ export type SocialAnalyticsViewSlug =
   | "tiktok-sentiment";
 export type SocialPlatformSlug = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type SocialWeekSubTab = "details" | SocialPlatformSlug;
+export type SocialAccountProfileTab = "stats" | "posts" | "hashtags" | "collaborators-tags";
 
 type RouteSource = "path" | "query" | "default";
 
@@ -491,6 +492,13 @@ export type ParsedSocialPathFilters = {
   canonicalPathSuffix: string;
 };
 
+export type ParsedSocialAccountProfileRoute = {
+  platform: SocialPlatformSlug;
+  handle: string;
+  tab: SocialAccountProfileTab;
+  canonicalPath: string;
+};
+
 const parsePositiveSeasonNumber = (
   value: number | string | null | undefined,
 ): number | null => {
@@ -584,6 +592,57 @@ export function parseShowSocialPathFilters(pathname: string): ParsedSocialPathFi
 
 export function parseSeasonSocialPathFilters(pathname: string): ParsedSocialPathFilters | null {
   return parseSocialPathFilters(getSeasonBaseSegments(pathname) ?? null);
+}
+
+const toSocialAccountProfileTab = (value: string | null | undefined): SocialAccountProfileTab | null => {
+  const normalized = normalizeSegment(value);
+  if (!normalized) return "stats";
+  if (normalized === "posts") return "posts";
+  if (normalized === "hashtags" || normalized === "hashtag") return "hashtags";
+  if (
+    normalized === "collaborators-tags" ||
+    normalized === "collaborators_tags" ||
+    normalized === "collaborators" ||
+    normalized === "tags"
+  ) {
+    return "collaborators-tags";
+  }
+  return null;
+};
+
+export function parseSocialAccountProfilePath(pathname: string): ParsedSocialAccountProfileRoute | null {
+  const segments = toSegments(pathname);
+  if (normalizeSegment(segments[0]) !== "social") return null;
+  const platform = toSocialPlatform(segments[1]);
+  const handle = normalizeHandleSlug(segments[2]);
+  const tab = toSocialAccountProfileTab(segments[3]);
+  if (!platform || !handle || !tab) return null;
+  const canonicalPath = buildSocialAccountProfileUrl({ platform, handle, tab });
+  return {
+    platform,
+    handle,
+    tab,
+    canonicalPath,
+  };
+}
+
+export function buildSocialAccountProfileUrl(input: {
+  platform: string | null | undefined;
+  handle: string | null | undefined;
+  tab?: SocialAccountProfileTab;
+  query?: URLSearchParams;
+}): string {
+  const platform = toSocialPlatform(input.platform);
+  const handle = normalizeHandleSlug(input.handle);
+  if (!platform || !handle) {
+    return appendQuery("/social", buildCanonicalQuery(input.query, { removeSocialView: true }));
+  }
+  const tab = input.tab ?? "stats";
+  const path = tab === "stats" ? `/social/${platform}/${handle}` : `/social/${platform}/${handle}/${tab}`;
+  const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+  nextQuery.delete("social_platform");
+  nextQuery.delete("season_id");
+  return appendQuery(path, nextQuery);
 }
 
 export function cleanLegacyRoutingQuery(searchParams: URLSearchParams): URLSearchParams {
@@ -779,20 +838,12 @@ export function buildShowAdminUrl(input: {
     const season = parsePositiveSeasonNumber(input.socialRoute?.seasonNumber);
     const weekToken = toCanonicalWeekToken(input.socialRoute?.weekIndex);
     const platform = toSocialPlatform(input.socialRoute?.platform);
-    const handle = normalizeHandleSlug(input.socialRoute?.handle);
     const segments =
       socialView === "official"
         ? [`${base}/social${season ? `/s${season}` : ""}`]
         : [`${base}/social/${socialView}`];
     if (weekToken) segments.push(weekToken);
     if (platform) segments.push(platform);
-    if (handle) {
-      if (socialView === "official") {
-        segments.push("account", handle);
-      } else {
-        segments.push(handle);
-      }
-    }
     return appendQuery(segments.join("/"), nextQuery);
   }
 
@@ -808,10 +859,11 @@ export function buildPersonAdminUrl(input: {
 }): string {
   const personSlug = encodeURIComponent(input.personSlug.trim());
   const tab = input.tab ?? "overview";
+  const showContext = (input.showId ?? input.showSlug)?.trim();
   const base = `/people/${personSlug}`;
+  const query = buildCanonicalPersonQuery(input.query, showContext);
   const path = tab === "overview" ? base : `${base}/${tab}`;
-  const showContext = input.showId ?? input.showSlug;
-  return appendQuery(path, buildCanonicalPersonQuery(input.query, showContext));
+  return appendQuery(path, query);
 }
 
 export function buildSeasonAdminUrl(input: {
@@ -870,17 +922,9 @@ export function buildSeasonAdminUrl(input: {
     }
     const weekToken = toCanonicalWeekToken(input.socialRoute?.weekIndex);
     const platform = toSocialPlatform(input.socialRoute?.platform);
-    const handle = normalizeHandleSlug(input.socialRoute?.handle);
     const segments = socialView === "official" ? [`${base}/social`] : [`${base}/social/${socialView}`];
     if (weekToken) segments.push(weekToken);
     if (platform) segments.push(platform);
-    if (handle) {
-      if (socialView === "official") {
-        segments.push("account", handle);
-      } else {
-        segments.push(handle);
-      }
-    }
     return appendQuery(segments.join("/"), nextQuery);
   }
 

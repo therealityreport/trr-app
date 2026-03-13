@@ -2,9 +2,9 @@
  * CDN Font Definitions
  * ---------------------
  * These @font-face rules replace the next/font localFont() definitions
- * that were previously in layout.tsx. Fonts are served from CloudFront CDN.
+ * that were previously in layout.tsx. Fonts are served from Cloudflare R2.
  *
- * CDN base: https://d1fmdyqfafwim3.cloudfront.net/fonts/
+ * CDN base: https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/
  */
 
 /* ============================================================
@@ -13,7 +13,7 @@
 
 @font-face {
   font-family: "Beton";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Beton/Beton%20T%20Extended%20Bold.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Beton/Beton%20T%20Extended%20Bold.ttf") format("truetype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -25,7 +25,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProExtraLight-930829387.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProExtraLight-930829387.otf") format("opentype");
   font-weight: 200;
   font-style: normal;
   font-display: swap;
@@ -33,7 +33,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProExtraLightItalic-930829388.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProExtraLightItalic-930829388.otf") format("opentype");
   font-weight: 200;
   font-style: italic;
   font-display: swap;
@@ -41,7 +41,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProLight-930829389.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProLight-930829389.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -49,7 +49,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProLightItalic-930829390.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProLightItalic-930829390.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -57,7 +57,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProBook-930829391.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProBook-930829391.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -65,7 +65,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProItalic-930829392.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProItalic-930829392.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -73,7 +73,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProMedium-930829393.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProMedium-930829393.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -81,7 +81,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProMediumItalic-930829394.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProMediumItalic-930829394.otf") format("opentype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -89,7 +89,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProSemiBold-930829395.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProSemiBold-930829395.otf") format("opentype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -97,7 +97,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProSemiBoldItalic-930829396.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProSemiBoldItalic-930829396.otf") format("opentype");
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -105,7 +105,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProBold-930829397.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProBold-930829397.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -113,7 +113,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProBoldItalic-930829398.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProBoldItalic-930829398.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -121,7 +121,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProExtraBold-930829399.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProExtraBold-930829399.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -129,7 +129,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProExtraBoldItalic-930829400.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProExtraBoldItalic-930829400.otf") format("opentype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -137,7 +137,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProBlack-930829401.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProBlack-930829401.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -145,7 +145,7 @@
 
 @font-face {
   font-family: "Biotif Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Biotif%20Pro/BiotifProBlackItalic-930829402.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Biotif%20Pro/BiotifProBlackItalic-930829402.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -157,7 +157,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20Light.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20Light.ttf") format("truetype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -165,7 +165,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20LightItalic.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20LightItalic.ttf") format("truetype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -173,7 +173,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20Book.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20Book.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -181,7 +181,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20BookItalic.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20BookItalic.ttf") format("truetype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -189,7 +189,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20Bold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20Bold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -197,7 +197,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20Bold%20Italic.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20Bold%20Italic.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -205,7 +205,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20Ultra.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20Ultra.ttf") format("truetype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -213,7 +213,7 @@
 
 @font-face {
   font-family: "Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham/Cheltenham%20UltraItalic.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/Cheltenham%20UltraItalic.ttf") format("truetype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -225,7 +225,7 @@
 
 @font-face {
   font-family: "Cheltenham Old Style Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Cheltenham%20Old%20Style%20Pro/CheltenhamOldStylePro-930124398.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham%20Old%20Style%20Pro/CheltenhamOldStylePro-930124398.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -238,7 +238,7 @@
 
 @font-face {
   font-family: "Chomsky";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Chomsky/Chomsky-8MOa2.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Chomsky/Chomsky-8MOa2.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -250,7 +250,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicBook-5515841.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicBook-5515841.TTF") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -258,7 +258,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicBookItalic-5515843.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicBookItalic-5515843.TTF") format("truetype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -266,7 +266,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicMedium-5515859.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicMedium-5515859.TTF") format("truetype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -274,7 +274,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicMediumItalic-5515864.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicMediumItalic-5515864.TTF") format("truetype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -282,7 +282,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicDemi-5515846.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicDemi-5515846.TTF") format("truetype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -290,7 +290,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicDemiItalic-5515851.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicDemiItalic-5515851.TTF") format("truetype");
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -298,7 +298,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicHeavy-5515854.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicHeavy-5515854.TTF") format("truetype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -306,7 +306,7 @@
 
 @font-face {
   font-family: "Franklin Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic/FranklinGothicHeavyItalic-5515856.TTF") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicHeavyItalic-5515856.TTF") format("truetype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -318,7 +318,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawLight-1230518.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawLight-1230518.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -326,7 +326,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawLightOblique-1230521.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawLightOblique-1230521.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -334,7 +334,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawBook-1230524.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawBook-1230524.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -342,7 +342,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawBookOblique-1491640.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawBookOblique-1491640.ttf") format("truetype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -350,7 +350,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawMedium-1230530.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawMedium-1230530.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -358,7 +358,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawDemi-1230533.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawDemi-1230533.otf") format("opentype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -366,7 +366,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawDemiOblique-1230536.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawDemiOblique-1230536.otf") format("opentype");
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -374,7 +374,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawHeavy-1230539.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawHeavy-1230539.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -382,7 +382,7 @@
 
 @font-face {
   font-family: "Franklin Gothic Raw";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawUltra-1230542.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic%20Raw/FranklinGothicRawUltra-1230542.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -394,7 +394,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-light-589a6e187563a.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-light-589a6e187563a.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -402,7 +402,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-light-oblique-589e448ae90e2.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-light-oblique-589e448ae90e2.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -410,7 +410,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-book-589a6dec272c3.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-book-589a6dec272c3.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -418,7 +418,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-book-oblique-589e44623c7b4.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-book-oblique-589e44623c7b4.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -426,7 +426,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-medium-589e45b956de4.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-medium-589e45b956de4.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -434,7 +434,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-medium-oblique-589e460871ec2.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-medium-oblique-589e460871ec2.otf") format("opentype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -442,7 +442,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-demibold-589e43b852117.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-demibold-589e43b852117.otf") format("opentype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -450,7 +450,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-demibold-oblique-589e43ec3ea82.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-demibold-oblique-589e43ec3ea82.otf") format("opentype");
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -458,7 +458,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-bold-589e44b6aacd3.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-bold-589e44b6aacd3.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -466,7 +466,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-bold-oblique-589e453384a18.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-bold-oblique-589e453384a18.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -474,7 +474,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-heavy-589a6dd12187e.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-heavy-589a6dd12187e.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -482,7 +482,7 @@
 
 @font-face {
   font-family: "Futura Now";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Futura%20Now/futura-pt-heavy-oblique-589a6e480ab16.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/futura-pt-heavy-oblique-589a6e480ab16.otf") format("opentype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -494,7 +494,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703Light-1084320.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703Light-1084320.ttf") format("truetype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -502,7 +502,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703LightItalic-1084322.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703LightItalic-1084322.ttf") format("truetype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -510,7 +510,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703Medium-1084330.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703Medium-1084330.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -518,7 +518,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703MediumItalic-1084332.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703MediumItalic-1084332.ttf") format("truetype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -526,7 +526,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703Bold-1084334.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703Bold-1084334.ttf") format("truetype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -534,7 +534,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703BoldItalic-1084336.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703BoldItalic-1084336.ttf") format("truetype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -542,7 +542,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703ExtraBold-1084311.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703ExtraBold-1084311.ttf") format("truetype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -550,7 +550,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 703";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703ExtraBoldItalic-1084314.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703ExtraBoldItalic-1084314.ttf") format("truetype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -562,7 +562,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 712";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20712/geometric-slabserif-712-medium.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/geometric-slabserif-712-medium.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -570,7 +570,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 712";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20712/geometric-slabserif-712-bold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/geometric-slabserif-712-bold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -578,7 +578,7 @@
 
 @font-face {
   font-family: "Geometric Slabserif 712";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Geometric%20Slabserif%20712/Geometric%20Slabserif%20712%20Extra%20Bold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/Geometric%20Slabserif%20712%20Extra%20Bold.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -592,7 +592,7 @@
 
 @font-face {
   font-family: "Gloucester";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Gloucester/GloucesterOldStyle-5735713.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/GloucesterOldStyle-5735713.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -600,7 +600,7 @@
 
 @font-face {
   font-family: "Gloucester";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Gloucester/Gloucester%20MT%20Std%20Bold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/Gloucester%20MT%20Std%20Bold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -608,7 +608,7 @@
 
 @font-face {
   font-family: "Gloucester";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Gloucester/gloucester-mt-condensed-bold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/gloucester-mt-condensed-bold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-stretch: condensed;
@@ -617,7 +617,7 @@
 
 @font-face {
   font-family: "Gloucester";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Gloucester/Gloucester%20MT%20Extra%20Condensed%20Regular.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/Gloucester%20MT%20Extra%20Condensed%20Regular.ttf") format("truetype");
   font-weight: 700;
   font-style: normal;
   font-stretch: extra-condensed;
@@ -630,7 +630,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallRegular-930826308.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallRegular-930826308.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -638,7 +638,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallItalic-930826312.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallItalic-930826312.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -646,7 +646,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallMedium-930826315.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallMedium-930826315.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -654,7 +654,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallMediumItalic-930826316.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallMediumItalic-930826316.otf") format("opentype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -662,7 +662,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallSemiBold-930826317.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallSemiBold-930826317.otf") format("opentype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -670,7 +670,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallSemiBoldItalic-930826318.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallSemiBoldItalic-930826318.otf") format("opentype");
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -678,7 +678,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallBold-930826319.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallBold-930826319.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -686,7 +686,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallBoldItalic-930826320.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallBoldItalic-930826320.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -694,7 +694,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallBlack-930826321.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallBlack-930826321.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -702,7 +702,7 @@
 
 @font-face {
   font-family: "Goodall";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Goodall/GoodallBlackItalic-930826322.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Goodall/GoodallBlackItalic-930826322.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -714,7 +714,7 @@
 
 @font-face {
   font-family: "Hamburg Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerialExtraLight-930108095.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialExtraLight-930108095.otf") format("opentype");
   font-weight: 200;
   font-style: normal;
   font-display: swap;
@@ -722,7 +722,7 @@
 
 @font-face {
   font-family: "Hamburg Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerialLight-930108026.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialLight-930108026.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -730,7 +730,7 @@
 
 @font-face {
   font-family: "Hamburg Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerial-930108065.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerial-930108065.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -738,7 +738,7 @@
 
 @font-face {
   font-family: "Hamburg Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerialMedium-930108040.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialMedium-930108040.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -746,7 +746,7 @@
 
 @font-face {
   font-family: "Hamburg Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerialBold-930107972.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialBold-930107972.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -754,7 +754,7 @@
 
 @font-face {
   font-family: "Hamburg Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerialExtraBold-930108075.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialExtraBold-930108075.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -762,7 +762,7 @@
 
 @font-face {
   font-family: "Hamburg Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Hamburg%20Serial/HamburgSerialHeavy-930107996.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialHeavy-930107996.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -774,7 +774,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLight.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLight.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -782,7 +782,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLightItalic.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLightItalic.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -790,7 +790,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLightCond.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLightCond.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-stretch: condensed;
@@ -799,7 +799,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLightCondIt.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdLightCondIt.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-stretch: condensed;
@@ -808,7 +808,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBook.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBook.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -816,7 +816,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBookItalic.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBookItalic.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -824,7 +824,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBookCond.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBookCond.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-stretch: condensed;
@@ -833,7 +833,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBookCondIt.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBookCondIt.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-stretch: condensed;
@@ -842,7 +842,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -850,7 +850,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBoldItalic.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBoldItalic.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -858,7 +858,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBoldCond.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBoldCond.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-stretch: condensed;
@@ -867,7 +867,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBoldCondIt.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdBoldCondIt.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-stretch: condensed;
@@ -876,7 +876,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdHdtooledBold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdHdtooledBold.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -884,7 +884,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdHdtooledBdIt.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdHdtooledBdIt.otf") format("opentype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -892,7 +892,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltra.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltra.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -900,7 +900,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltraItalic.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltraItalic.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -908,7 +908,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltraCond.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltraCond.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-stretch: condensed;
@@ -917,7 +917,7 @@
 
 @font-face {
   font-family: "ITC Cheltenham";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltraCondIt.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Cheltenham/CheltenhamStdUltraCondIt.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-stretch: condensed;
@@ -930,7 +930,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBook-5739946.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBook-5739946.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -938,7 +938,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBookItalic-5739949.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBookItalic-5739949.ttf") format("truetype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -946,7 +946,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTMedium-5740000.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTMedium-5740000.ttf") format("truetype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -954,7 +954,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTMediumItalic-5740003.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTMediumItalic-5740003.ttf") format("truetype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -962,7 +962,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemi-5739982.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemi-5739982.ttf") format("truetype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -970,7 +970,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemiItalic-5739985.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemiItalic-5739985.ttf") format("truetype");
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -978,7 +978,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTHeavy-5739994.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTHeavy-5739994.ttf") format("truetype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -986,7 +986,7 @@
 
 @font-face {
   font-family: "ITC Franklin Gothic LT";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTHeavyItalic-5739997.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTHeavyItalic-5739997.ttf") format("truetype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -998,7 +998,7 @@
 
 @font-face {
   font-family: "Magnus";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Magnus/MagnusBold-5438313.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Magnus/MagnusBold-5438313.ttf") format("truetype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1010,7 +1010,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansThin-5698440.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansThin-5698440.otf") format("opentype");
   font-weight: 100;
   font-style: normal;
   font-display: swap;
@@ -1018,7 +1018,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansThinItalic-5698442.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansThinItalic-5698442.otf") format("opentype");
   font-weight: 100;
   font-style: italic;
   font-display: swap;
@@ -1026,7 +1026,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansLight-5698428.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansLight-5698428.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1034,7 +1034,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansLightItalic-5698430.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansLightItalic-5698430.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -1042,7 +1042,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansRegular-5698437.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansRegular-5698437.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1050,7 +1050,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansItalic-5698425.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansItalic-5698425.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -1058,7 +1058,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansMedium-5698433.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansMedium-5698433.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1066,7 +1066,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansMediumItalic-5698435.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansMediumItalic-5698435.otf") format("opentype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -1074,7 +1074,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansBold-5698386.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansBold-5698386.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1082,7 +1082,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansBoldItalic-5698388.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansBoldItalic-5698388.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -1090,7 +1090,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansExtraBold-5698421.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansExtraBold-5698421.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -1098,7 +1098,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansExtraBoldItalic-5698423.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansExtraBoldItalic-5698423.otf") format("opentype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -1106,7 +1106,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansBlack-5698381.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansBlack-5698381.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -1114,7 +1114,7 @@
 
 @font-face {
   font-family: "Malden Sans";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Malden%20Sans/MaldenSansBlackItalic-5698383.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansBlackItalic-5698383.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -1126,7 +1126,7 @@
 
 @font-face {
   font-family: "News Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic/NewsGothicStd.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic/NewsGothicStd.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1134,7 +1134,7 @@
 
 @font-face {
   font-family: "News Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic/NewsGothicStd-Oblique.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic/NewsGothicStd-Oblique.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -1142,7 +1142,7 @@
 
 @font-face {
   font-family: "News Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic/newsgottmed.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic/newsgottmed.ttf") format("truetype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1150,7 +1150,7 @@
 
 @font-face {
   font-family: "News Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic/newsgottdem.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic/newsgottdem.ttf") format("truetype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -1158,7 +1158,7 @@
 
 @font-face {
   font-family: "News Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic/NewsGothicStd-Bold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic/NewsGothicStd-Bold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1166,7 +1166,7 @@
 
 @font-face {
   font-family: "News Gothic";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic/NewsGothicStd-BoldOblique.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic/NewsGothicStd-BoldOblique.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -1178,7 +1178,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Light.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Light.ttf") format("truetype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1186,7 +1186,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Roman.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Roman.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1194,7 +1194,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Medium.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Medium.ttf") format("truetype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1202,7 +1202,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Medium%20It.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Medium%20It.ttf") format("truetype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -1210,7 +1210,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Bold.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Bold.ttf") format("truetype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1218,7 +1218,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Bold%20It.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Bold%20It.ttf") format("truetype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -1226,7 +1226,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Blk.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Blk.ttf") format("truetype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -1234,7 +1234,7 @@
 
 @font-face {
   font-family: "News Gothic No. 2";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Blk%20It.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Blk%20It.ttf") format("truetype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -1246,7 +1246,7 @@
 
 @font-face {
   font-family: "Newspaper Publisher JNL";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Newspaper%20Publisher%20JNL/NewspaperPublisherJNLRegular-7696168.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Newspaper%20Publisher%20JNL/NewspaperPublisherJNLRegular-7696168.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1254,7 +1254,7 @@
 
 @font-face {
   font-family: "Newspaper Publisher JNL";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Newspaper%20Publisher%20JNL/NewspaperPublisherJNLOblique-7696222.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Newspaper%20Publisher%20JNL/NewspaperPublisherJNLOblique-7696222.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -1266,7 +1266,7 @@
 
 @font-face {
   font-family: "Newston";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Newston/NewstonNormal-6509907.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Newston/NewstonNormal-6509907.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1278,7 +1278,7 @@
 
 @font-face {
   font-family: "Plymouth Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Plymouth%20Serial/PlymouthSerialLight-10035287.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialLight-10035287.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1286,7 +1286,7 @@
 
 @font-face {
   font-family: "Plymouth Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Plymouth%20Serial/PlymouthSerial-10035261.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerial-10035261.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1294,7 +1294,7 @@
 
 @font-face {
   font-family: "Plymouth Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Plymouth%20Serial/PlymouthSerialMedium-10035214.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialMedium-10035214.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1302,7 +1302,7 @@
 
 @font-face {
   font-family: "Plymouth Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Plymouth%20Serial/PlymouthSerialBold-10035269.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialBold-10035269.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1310,7 +1310,7 @@
 
 @font-face {
   font-family: "Plymouth Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Plymouth%20Serial/PlymouthSerialExtraBold-10035290.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialExtraBold-10035290.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -1318,7 +1318,7 @@
 
 @font-face {
   font-family: "Plymouth Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Plymouth%20Serial/PlymouthSerialHeavy-10035225.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialHeavy-10035225.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -1330,7 +1330,7 @@
 
 @font-face {
   font-family: "Rockwell";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell/rockwell-extra-bold.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/rockwell-extra-bold.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -1342,7 +1342,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaLight-5368892.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaLight-5368892.ttf") format("truetype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1350,7 +1350,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaLightItalic-5368894.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaLightItalic-5368894.ttf") format("truetype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -1358,7 +1358,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaRegular-5368896.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaRegular-5368896.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1366,7 +1366,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaItalic-5368889.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaItalic-5368889.ttf") format("truetype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -1374,7 +1374,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaBold-5368868.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaBold-5368868.ttf") format("truetype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1382,7 +1382,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaBoldItalic-5368870.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaBoldItalic-5368870.ttf") format("truetype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -1390,7 +1390,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaExtraBold-5368885.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaExtraBold-5368885.ttf") format("truetype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -1398,7 +1398,7 @@
 
 @font-face {
   font-family: "Rockwell Nova";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rockwell%20Nova/RockwellNovaExtraBoldItalic-5368887.ttf") format("truetype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaExtraBoldItalic-5368887.ttf") format("truetype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -1410,7 +1410,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedThin-930861873.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedThin-930861873.otf") format("opentype");
   font-weight: 200;
   font-style: normal;
   font-display: swap;
@@ -1418,7 +1418,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedThinItalic-930861871.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedThinItalic-930861871.otf") format("opentype");
   font-weight: 200;
   font-style: italic;
   font-display: swap;
@@ -1426,7 +1426,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedLight-930861870.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedLight-930861870.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1434,7 +1434,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedLightItalic-930861869.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedLightItalic-930861869.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -1442,7 +1442,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBook-930861867.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBook-930861867.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1450,7 +1450,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBookItalic-930861861.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBookItalic-930861861.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -1458,7 +1458,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedMedium-930861872.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedMedium-930861872.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1466,7 +1466,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedMediumItalic-930861862.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedMediumItalic-930861862.otf") format("opentype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -1474,7 +1474,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBold-930861866.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBold-930861866.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1482,7 +1482,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBoldItalic-930861864.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBoldItalic-930861864.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -1490,7 +1490,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedExtrabold-930861868.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedExtrabold-930861868.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -1498,7 +1498,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedExtraboldItalic-930861860.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedExtraboldItalic-930861860.otf") format("opentype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -1506,7 +1506,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBlack-930861865.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBlack-930861865.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -1514,7 +1514,7 @@
 
 @font-face {
   font-family: "Rude Slab Condensed";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBlackItalic-930861863.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedBlackItalic-930861863.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -1526,7 +1526,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProUltraLight-930940326.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProUltraLight-930940326.otf") format("opentype");
   font-weight: 100;
   font-style: normal;
   font-display: swap;
@@ -1534,7 +1534,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProUltraLightItalic-930940327.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProUltraLightItalic-930940327.otf") format("opentype");
   font-weight: 100;
   font-style: italic;
   font-display: swap;
@@ -1542,7 +1542,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProExtraLight-930940328.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProExtraLight-930940328.otf") format("opentype");
   font-weight: 200;
   font-style: normal;
   font-display: swap;
@@ -1550,7 +1550,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProExtraLightItalic-930940329.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProExtraLightItalic-930940329.otf") format("opentype");
   font-weight: 200;
   font-style: italic;
   font-display: swap;
@@ -1558,7 +1558,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProLight-930940330.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProLight-930940330.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1566,7 +1566,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProLightItalic-930940331.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProLightItalic-930940331.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -1574,7 +1574,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProRegular-930940332.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProRegular-930940332.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1582,7 +1582,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProItalic-930940333.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProItalic-930940333.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -1590,7 +1590,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProMedium-930940334.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProMedium-930940334.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1598,7 +1598,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProMediumItalic-930940335.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProMediumItalic-930940335.otf") format("opentype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -1606,7 +1606,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProSemiBold-930940336.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProSemiBold-930940336.otf") format("opentype");
   font-weight: 600;
   font-style: normal;
   font-display: swap;
@@ -1614,7 +1614,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProSemiBoldItalic-930940337.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProSemiBoldItalic-930940337.otf") format("opentype");
   font-weight: 600;
   font-style: italic;
   font-display: swap;
@@ -1622,7 +1622,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProBold-930940338.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProBold-930940338.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1630,7 +1630,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProBoldItalic-930940339.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProBoldItalic-930940339.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -1638,7 +1638,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProBlack-930940340.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProBlack-930940340.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -1646,7 +1646,7 @@
 
 @font-face {
   font-family: "Sofia Pro";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Sofia%20Pro/SofiaProBlackItalic-930940341.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Sofia%20Pro/SofiaProBlackItalic-930940341.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -1658,7 +1658,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialExtraLight-930109019.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialExtraLight-930109019.otf") format("opentype");
   font-weight: 200;
   font-style: normal;
   font-display: swap;
@@ -1666,7 +1666,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialExtraLightItalic-930109029.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialExtraLightItalic-930109029.otf") format("opentype");
   font-weight: 200;
   font-style: italic;
   font-display: swap;
@@ -1674,7 +1674,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialLight-930108698.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialLight-930108698.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1682,7 +1682,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialLightItalic-930108759.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialLightItalic-930108759.otf") format("opentype");
   font-weight: 300;
   font-style: italic;
   font-display: swap;
@@ -1690,7 +1690,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerial-930108984.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerial-930108984.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1698,7 +1698,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialItalic-930108818.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialItalic-930108818.otf") format("opentype");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
@@ -1706,7 +1706,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialMedium-930108796.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialMedium-930108796.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1714,7 +1714,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialMediumItalic-930108969.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialMediumItalic-930108969.otf") format("opentype");
   font-weight: 500;
   font-style: italic;
   font-display: swap;
@@ -1722,7 +1722,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialBold-930108768.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialBold-930108768.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1730,7 +1730,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialBoldItalic-930108709.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialBoldItalic-930108709.otf") format("opentype");
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -1738,7 +1738,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialExtraBold-930109094.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialExtraBold-930109094.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -1746,7 +1746,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialExtraBoldItalic-930108999.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialExtraBoldItalic-930108999.otf") format("opentype");
   font-weight: 800;
   font-style: italic;
   font-display: swap;
@@ -1754,7 +1754,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialHeavy-930108933.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialHeavy-930108933.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;
@@ -1762,7 +1762,7 @@
 
 @font-face {
   font-family: "Stafford Serial";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stafford%20Serial/StaffordSerialHeavyItalic-930109171.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stafford%20Serial/StaffordSerialHeavyItalic-930109171.otf") format("opentype");
   font-weight: 900;
   font-style: italic;
   font-display: swap;
@@ -1774,7 +1774,7 @@
 
 @font-face {
   font-family: "Stymie";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stymie/Stymie%20Medium.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/Stymie%20Medium.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1786,7 +1786,7 @@
 
 @font-face {
   font-family: "Stymie Extra Bold";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Stymie%20Extra%20Bold/StymieExtraBold-5907011.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie%20Extra%20Bold/StymieExtraBold-5907011.otf") format("opentype");
   font-weight: 800;
   font-style: normal;
   font-display: swap;
@@ -1798,7 +1798,7 @@
 
 @font-face {
   font-family: "Velino Compressed Text";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompThin-930862136.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompThin-930862136.otf") format("opentype");
   font-weight: 100;
   font-style: normal;
   font-display: swap;
@@ -1806,7 +1806,7 @@
 
 @font-face {
   font-family: "Velino Compressed Text";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompLight-930862140.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompLight-930862140.otf") format("opentype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -1814,7 +1814,7 @@
 
 @font-face {
   font-family: "Velino Compressed Text";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompBook-930862139.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompBook-930862139.otf") format("opentype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -1822,7 +1822,7 @@
 
 @font-face {
   font-family: "Velino Compressed Text";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompMedium-930862137.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompMedium-930862137.otf") format("opentype");
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -1830,7 +1830,7 @@
 
 @font-face {
   font-family: "Velino Compressed Text";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompBold-930862135.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompBold-930862135.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -1838,7 +1838,7 @@
 
 @font-face {
   font-family: "Velino Compressed Text";
-  src: url("https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompBlack-930862138.otf") format("opentype");
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Velino%20Compressed%20Text/VelinoCompressedTextCompBlack-930862138.otf") format("opentype");
   font-weight: 900;
   font-style: normal;
   font-display: swap;

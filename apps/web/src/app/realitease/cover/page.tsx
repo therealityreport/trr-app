@@ -9,7 +9,6 @@ import { useRealiteaseManager } from "@/lib/realitease/manager";
 import { formatRealiteaseDisplayDate, getRealiteaseDateKey } from "@/lib/realitease/utils";
 import type { RealiteaseGameSnapshot } from "@/lib/realitease/types";
 import { User } from "firebase/auth";
-import "@/styles/realitease-fonts.css";
 import GameHeader from "@/components/GameHeader";
 
 function RealiteaseIcon() {

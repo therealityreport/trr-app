@@ -7,7 +7,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
-import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
+import { buildShowAdminUrl, buildSocialAccountProfileUrl } from "@/lib/admin/show-admin-routes";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -296,7 +296,15 @@ export default function AdminSocialMediaPage() {
                         >
                           <div className="font-semibold capitalize text-zinc-900">{source.platform}</div>
                           <div>
-                            <p className="font-medium text-zinc-900">@{source.account_handle}</p>
+                            <Link
+                              href={buildSocialAccountProfileUrl({
+                                platform: source.platform,
+                                handle: source.account_handle,
+                              }) as Route}
+                              className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              @{source.account_handle}
+                            </Link>
                             <p className="text-xs text-zinc-500">
                               Priority {source.scrape_priority} · {source.is_active ? "Active" : "Archived"}
                             </p>

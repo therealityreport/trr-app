@@ -24,6 +24,7 @@ interface ShowSocialTabProps {
   socialSeasonOptions: SocialSeason[];
   selectedSocialSeasonId: string | null;
   onSelectSocialSeasonId: (seasonId: string | null) => void;
+  onSocialControlsHostChange?: (node: HTMLDivElement | null) => void;
   analyticsSection: ReactNode;
   fallbackSection: ReactNode;
 }
@@ -38,6 +39,7 @@ export default function ShowSocialTab({
   socialSeasonOptions,
   selectedSocialSeasonId,
   onSelectSocialSeasonId,
+  onSocialControlsHostChange,
   analyticsSection,
   fallbackSection,
 }: ShowSocialTabProps) {
@@ -87,6 +89,13 @@ export default function ShowSocialTab({
               <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-600">
                 Platform tabs are available after selecting a season.
               </div>
+            )}
+            {selectedSocialSeason && (
+              <div
+                ref={onSocialControlsHostChange}
+                className="mb-4 min-h-11"
+                data-testid="show-social-controls-host"
+              />
             )}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>

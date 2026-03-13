@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useSideMenu } from "@/components/SideMenuProvider";
 import { logout } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
@@ -27,6 +28,46 @@ export default function GlobalHeader() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!user) {
+      setIsAdmin(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const optimisticAdmin = isClientAdmin(user);
+    setIsAdmin(optimisticAdmin);
+
+    void (async () => {
+      try {
+        const response = await fetchAdminWithAuth("/api/admin/auth/status", undefined, {
+          preferredUser: user,
+        });
+        if (cancelled) return;
+        if (response.ok) {
+          setIsAdmin(true);
+          return;
+        }
+        if (response.status === 401 || response.status === 403) {
+          setIsAdmin(false);
+          return;
+        }
+        setIsAdmin(optimisticAdmin);
+      } catch {
+        if (!cancelled) {
+          setIsAdmin(optimisticAdmin);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // Close settings menu on outside click/escape
   useEffect(() => {

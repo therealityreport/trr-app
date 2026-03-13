@@ -9,7 +9,6 @@ import { useBravodleManager } from "@/lib/bravodle/manager";
 import { formatBravodleDisplayDate, getBravodleDateKey } from "@/lib/bravodle/utils";
 import type { BravodleGameSnapshot } from "@/lib/bravodle/types";
 import { User } from "firebase/auth";
-import "@/styles/realitease-fonts.css";
 import GameHeader from "@/components/GameHeader";
 
 function BravodleIcon() {

@@ -12,7 +12,7 @@ interface RouteParams {
  * GET /api/admin/trr-api/people/[personId]/photos
  *
  * Get all photos for a person from TRR Core API.
- * Only returns photos with hosted_url (mirrored to CloudFront).
+ * Only returns photos with hosted_url populated from the canonical hosted-media store.
  *
  * Query params:
  * - limit: max results (default 100, max 500)
