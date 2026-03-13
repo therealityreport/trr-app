@@ -7,9 +7,9 @@ const buildMetadata = (overrides?: Partial<PhotoMetadata>): PhotoMetadata => ({
   source: "fandom",
   sourceBadgeColor: "#00d6a3",
   contentType: "PROMO",
-  isS3Mirrored: true,
-  s3MirrorFileName: "4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
-  mirrorHostedUrl: "https://d1fmdyqfafwim3.cloudfront.net/media/4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
+  isHostedMedia: true,
+  hostedMediaFileName: "4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
+  hostedMediaUrl: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
   sourcePageTitle: "Lisa Barlow",
   sourceUrl: "https://real-housewives.fandom.com/wiki/Lisa_Barlow",
   originalImageUrl: "https://static.wikia.nocookie.net/rhoslc/images/lisa.jpg",
@@ -30,7 +30,7 @@ const openMetadataPanel = () => {
 };
 
 describe("ImageLightbox metadata panel", () => {
-  it("shows S3 mirror details and badge when media is mirrored", () => {
+  it("shows hosted-media details and badge when media is mirrored", () => {
     render(
       <ImageLightbox
         src="https://cdn.example.com/image.jpg"
@@ -43,17 +43,17 @@ describe("ImageLightbox metadata panel", () => {
 
     openMetadataPanel();
 
-    expect(screen.getAllByText("S3 Mirror File").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("S3 MIRROR").length).toBeGreaterThan(0);
-    const mirrorLinks = screen.getAllByRole("link", { name: "S3 MIRROR" });
+    expect(screen.getAllByText("Hosted Media File").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("HOSTED MEDIA").length).toBeGreaterThan(0);
+    const mirrorLinks = screen.getAllByRole("link", { name: "HOSTED MEDIA" });
     expect(mirrorLinks.length).toBeGreaterThan(0);
     expect(mirrorLinks[0]).toHaveAttribute(
       "href",
-      "https://d1fmdyqfafwim3.cloudfront.net/media/4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/4055eccc0ce3edbf4a37ef7bbe9297d943605402a2157fd6536864487c1c49be.webp",
     );
   });
 
-  it("hides S3 mirror details when media is not mirrored", () => {
+  it("hides hosted-media details when media is not mirrored", () => {
     render(
       <ImageLightbox
         src="https://static.wikia.nocookie.net/rhoslc/images/lisa.jpg"
@@ -61,16 +61,16 @@ describe("ImageLightbox metadata panel", () => {
         isOpen
         onClose={() => {}}
         metadata={buildMetadata({
-          isS3Mirrored: false,
-          s3MirrorFileName: null,
+          isHostedMedia: false,
+          hostedMediaFileName: null,
         })}
       />
     );
 
     openMetadataPanel();
 
-    expect(screen.queryByText("S3 Mirror File")).not.toBeInTheDocument();
-    expect(screen.queryByText("S3 MIRROR")).not.toBeInTheDocument();
+    expect(screen.queryByText("Hosted Media File")).not.toBeInTheDocument();
+    expect(screen.queryByText("HOSTED MEDIA")).not.toBeInTheDocument();
   });
 
   it("renders Original URL link with new-tab attributes", () => {

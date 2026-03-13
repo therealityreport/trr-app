@@ -91,8 +91,8 @@ async function runWithConcurrency<T>(
  * Creates kind=backdrop media_links from the season to each media_asset_id.
  * Idempotent: skips links that already exist.
  *
- * For TMDb assets that are not mirrored yet (hosted_url is null), this will first
- * mirror them to S3 via TRR-Backend, then assign.
+ * For TMDb assets that are not hosted yet (hosted_url is null), this will first
+ * mirror them into object storage via TRR-Backend, then assign.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       });
     }
 
-    // Mirror any not-yet-mirrored assets first (best-effort, but only assign ones that end up mirrored).
+    // Mirror any not-yet-hosted assets first (best-effort, but only assign ones that end up hosted).
     const assetRows = await pgQuery<{
       id: string;
       hosted_url: string | null;
@@ -175,7 +175,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const assetsById = new Map(assetRows.rows.map((row) => [row.id, row]));
     const toMirror = candidates.filter((id) => {
       const row = assetsById.get(id) ?? null;
-      // Mirror only when hosted_url is absent (already mirrored assets are assignable immediately).
+      // Mirror only when hosted_url is absent (already hosted assets are assignable immediately).
       return Boolean(row && !row.hosted_url);
     });
 
@@ -187,7 +187,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       });
     }
 
-    // Re-check hosted_url and only assign those that are mirrored (or were already mirrored).
+    // Re-check hosted_url and only assign those that are hosted (or were already hosted).
     const postMirror = await pgQuery<{ id: string; hosted_url: string | null }>(
       `SELECT id, hosted_url
        FROM core.media_assets

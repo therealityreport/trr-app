@@ -174,6 +174,31 @@ describe("server auth adapter", () => {
     });
   });
 
+  it("allows requireAdmin for supabase user when display name matches codex default variants", async () => {
+    process.env.TRR_AUTH_PROVIDER = "supabase";
+    getUserMock.mockResolvedValue({
+      data: {
+        user: {
+          id: "supabase-codex",
+          email: "different@example.com",
+          user_metadata: { name: "Codex Huli" },
+          app_metadata: {},
+          identities: [],
+        },
+      },
+      error: null,
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.requireAdmin(requestWithBearer("token-codex-handle"));
+
+    expect(user).toMatchObject({
+      uid: "supabase-codex",
+      email: "different@example.com",
+      provider: "supabase",
+    });
+  });
+
   it("tracks fallback and shadow mismatch diagnostics counters", async () => {
     process.env.TRR_AUTH_SHADOW_MODE = "true";
     verifyIdTokenMock.mockRejectedValueOnce(new Error("firebase down"));

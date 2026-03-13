@@ -26,6 +26,12 @@ vi.mock("@/lib/admin/useAdminGuard", () => ({
   useAdminGuard: () => mocks.guardState,
 }));
 
+vi.mock("@/components/admin/BrandLogoOptionsModal", () => ({
+  __esModule: true,
+  default: ({ isOpen, targetLabel }: { isOpen: boolean; targetLabel: string }) =>
+    isOpen ? <div data-testid="brand-logo-modal">{targetLabel}</div> : null,
+}));
+
 const jsonResponse = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
     status,
@@ -241,6 +247,51 @@ describe("Admin networks page auth + sync UI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "All" }));
     expect(screen.getByText("Peacock Premium")).toBeInTheDocument();
+  });
+
+  it("does not open the logo picker when inner network links are clicked", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/admin/networks-streaming/summary")) {
+        return jsonResponse({
+          totals: { total_available_shows: 1, total_added_shows: 1 },
+          rows: [
+            {
+              type: "network",
+              name: "Bravo",
+              available_show_count: 8,
+              added_show_count: 3,
+              hosted_logo_url: "https://cdn.example.com/bravo.png",
+              hosted_logo_black_url: null,
+              hosted_logo_white_url: null,
+              wikidata_id: "Q123",
+              wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+              resolution_status: "manual_required",
+              resolution_reason: "missing_bw_variants",
+              last_attempt_at: "2026-02-19T00:00:00Z",
+              has_logo: true,
+              has_bw_variants: false,
+              has_links: true,
+            },
+          ],
+          generated_at: "2026-02-19T00:00:00.000Z",
+        });
+      }
+      if (url.includes("/api/admin/networks-streaming/overrides")) {
+        return jsonResponse([]);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<AdminNetworksPage />);
+
+    const bravoLink = await screen.findByRole("link", { name: "Bravo" });
+    fireEvent.click(bravoLink);
+
+    expect(screen.queryByTestId("brand-logo-modal")).toBeNull();
+
+    fireEvent.click(bravoLink.closest("tr") as HTMLElement);
+    expect(await screen.findByTestId("brand-logo-modal")).toHaveTextContent("Bravo");
   });
 
   it("starts live summary polling while sync is active", async () => {

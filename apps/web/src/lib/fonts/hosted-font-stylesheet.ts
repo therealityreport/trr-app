@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   getHostedFontBaseUrl,
   normalizeHostedFontBaseUrl,
-  LEGACY_CLOUDFRONT_FONT_BASE_URL,
+  rewriteHostedFontCssUrls,
 } from "@/lib/fonts/hosted-fonts";
 
 const HOSTED_FONT_TEMPLATE_FILES = [
@@ -19,9 +19,7 @@ export function buildHostedFontsStylesheetFromTemplates(
   baseUrl = getHostedFontBaseUrl(),
 ): string {
   const normalizedBaseUrl = normalizeHostedFontBaseUrl(baseUrl);
-  const replacedTemplates = templates.map((template) =>
-    template.split(LEGACY_CLOUDFRONT_FONT_BASE_URL).join(""),
-  );
+  const replacedTemplates = templates.map((template) => rewriteHostedFontCssUrls(template));
 
   return [
     `/* Hosted fonts stylesheet generated at runtime. Upstream R2 base URL: ${normalizedBaseUrl} */`,

@@ -42,13 +42,13 @@ interface BrandLogoCard {
   discovered_from: string | null;
   wordmark_url: string | null;
   icon_url: string | null;
+  updated_at: string | null;
 }
 
 type LogoPickerState = {
   targetType: "publication" | "social";
   targetKey: string;
   targetLabel: string;
-  logoRole: "wordmark" | "icon";
 };
 
 type CardFilter = "all" | "missing" | "complete";
@@ -73,7 +73,10 @@ function getCardStatus(row: BrandLogoCard): "missing-both" | "missing-wordmark" 
 
 function compareCards(left: BrandLogoCard, right: BrandLogoCard, sortMode: CardSort): number {
   if (sortMode === "recent") {
-    return right.target_label.localeCompare(left.target_label);
+    const leftTs = left.updated_at ? Date.parse(left.updated_at) : 0;
+    const rightTs = right.updated_at ? Date.parse(right.updated_at) : 0;
+    if (rightTs !== leftTs) return rightTs - leftTs;
+    return left.target_label.localeCompare(right.target_label);
   }
   if (sortMode === "alpha") {
     return left.target_label.localeCompare(right.target_label);
@@ -121,16 +124,27 @@ export default function AdminNewsPage() {
     setError(null);
     try {
       const loadByType = async (targetType: "publication" | "social"): Promise<BrandLogoRow[]> => {
-        const response = await fetchWithAuth(
-          `/api/admin/trr-api/brands/logos?target_type=${targetType}&q=${encodeURIComponent(normalizedQuery)}&limit=400&include_missing=true`,
-          { cache: "no-store" }
-        );
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => ({}))) as { error?: string };
-          throw new Error(payload.error || `Failed to load ${targetType} logos`);
+        const pageSize = 500;
+        const merged: BrandLogoRow[] = [];
+        let offset = 0;
+        let totalCount = Number.POSITIVE_INFINITY;
+        while (offset < totalCount) {
+          const response = await fetchWithAuth(
+            `/api/admin/trr-api/brands/logos?target_type=${targetType}&q=${encodeURIComponent(normalizedQuery)}&limit=${pageSize}&offset=${offset}&include_missing=true`,
+            { cache: "no-store" }
+          );
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(payload.error || `Failed to load ${targetType} logos`);
+          }
+          const payload = (await response.json().catch(() => ({}))) as { rows?: BrandLogoRow[]; count?: number };
+          const rows = Array.isArray(payload.rows) ? payload.rows : [];
+          merged.push(...rows);
+          totalCount = Number(payload.count ?? rows.length);
+          if (rows.length < pageSize) break;
+          offset += rows.length;
         }
-        const payload = (await response.json().catch(() => ({}))) as { rows?: BrandLogoRow[] };
-        return Array.isArray(payload.rows) ? payload.rows : [];
+        return merged;
       };
       const [publicationRows, socialRows] = await Promise.all([loadByType("publication"), loadByType("social")]);
       setRows([...publicationRows, ...socialRows]);
@@ -214,6 +228,7 @@ export default function AdminNewsPage() {
         discovered_from: row.discovered_from ?? null,
         wordmark_url: null,
         icon_url: null,
+        updated_at: row.updated_at,
       };
 
       if (role === "icon") {
@@ -228,8 +243,16 @@ export default function AdminNewsPage() {
         current.wordmark_url = hostedUrl;
       }
 
-      if (!current.source_provider && row.source_provider) current.source_provider = row.source_provider;
-      if (!current.discovered_from && row.discovered_from) current.discovered_from = row.discovered_from;
+      const currentTs = current.updated_at ? Date.parse(current.updated_at) : 0;
+      const rowTs = row.updated_at ? Date.parse(row.updated_at) : 0;
+      if (rowTs >= currentTs) {
+        current.updated_at = row.updated_at;
+        if (row.source_provider) current.source_provider = row.source_provider;
+        if (row.discovered_from) current.discovered_from = row.discovered_from;
+      } else {
+        if (!current.source_provider && row.source_provider) current.source_provider = row.source_provider;
+        if (!current.discovered_from && row.discovered_from) current.discovered_from = row.discovered_from;
+      }
       grouped.set(key, current);
     }
 
@@ -383,7 +406,7 @@ export default function AdminNewsPage() {
                 >
                   <option value="attention">Needs Attention</option>
                   <option value="alpha">A-Z</option>
-                  <option value="recent">Z-A</option>
+                  <option value="recent">Most Recent</option>
                 </select>
               </label>
             </div>
@@ -424,7 +447,28 @@ export default function AdminNewsPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {publicationRows.map((row) => (
-                  <article key={row.id} className="rounded border border-zinc-200 p-3">
+                  <article
+                    key={row.id}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer rounded border border-zinc-200 p-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+                    onClick={() =>
+                      setLogoPickerState({
+                        targetType: row.target_type as "publication" | "social",
+                        targetKey: row.target_key,
+                        targetLabel: row.target_label,
+                      })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setLogoPickerState({
+                        targetType: row.target_type as "publication" | "social",
+                        targetKey: row.target_key,
+                        targetLabel: row.target_label,
+                      });
+                    }}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-zinc-900">{row.target_label}</p>
@@ -440,48 +484,22 @@ export default function AdminNewsPage() {
                     </div>
                     <div className="mt-2 flex gap-2">
                       <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: row.target_type as "publication" | "social",
-                              targetKey: row.target_key,
-                              targetLabel: row.target_label,
-                              logoRole: "wordmark",
-                            })
-                          }
-                        >
-                          <Image
-                            src={row.wordmark_url || PLACEHOLDER_ICON_PATH}
-                            alt={row.wordmark_url ? `${row.target_label} wordmark` : `${row.target_label} placeholder`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={row.wordmark_url || PLACEHOLDER_ICON_PATH}
+                          alt={row.wordmark_url ? `${row.target_label} wordmark` : `${row.target_label} placeholder`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                       <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: row.target_type as "publication" | "social",
-                              targetKey: row.target_key,
-                              targetLabel: row.target_label,
-                              logoRole: "icon",
-                            })
-                          }
-                        >
-                          <Image
-                            src={row.icon_url || PLACEHOLDER_ICON_PATH}
-                            alt={row.icon_url ? `${row.target_label} icon` : `${row.target_label} placeholder icon`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={row.icon_url || PLACEHOLDER_ICON_PATH}
+                          alt={row.icon_url ? `${row.target_label} icon` : `${row.target_label} placeholder icon`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                     </div>
                     <div className="mt-2 space-y-1">
@@ -513,7 +531,28 @@ export default function AdminNewsPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {socialRows.map((row) => (
-                  <article key={row.id} className="rounded border border-zinc-200 p-3">
+                  <article
+                    key={row.id}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer rounded border border-zinc-200 p-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+                    onClick={() =>
+                      setLogoPickerState({
+                        targetType: row.target_type as "publication" | "social",
+                        targetKey: row.target_key,
+                        targetLabel: row.target_label,
+                      })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setLogoPickerState({
+                        targetType: row.target_type as "publication" | "social",
+                        targetKey: row.target_key,
+                        targetLabel: row.target_label,
+                      });
+                    }}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-zinc-900">{row.target_label}</p>
@@ -529,48 +568,22 @@ export default function AdminNewsPage() {
                     </div>
                     <div className="mt-2 flex gap-2">
                       <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: row.target_type as "publication" | "social",
-                              targetKey: row.target_key,
-                              targetLabel: row.target_label,
-                              logoRole: "wordmark",
-                            })
-                          }
-                        >
-                          <Image
-                            src={row.wordmark_url || PLACEHOLDER_ICON_PATH}
-                            alt={row.wordmark_url ? `${row.target_label} wordmark` : `${row.target_label} placeholder`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={row.wordmark_url || PLACEHOLDER_ICON_PATH}
+                          alt={row.wordmark_url ? `${row.target_label} wordmark` : `${row.target_label} placeholder`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                       <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: row.target_type as "publication" | "social",
-                              targetKey: row.target_key,
-                              targetLabel: row.target_label,
-                              logoRole: "icon",
-                            })
-                          }
-                        >
-                          <Image
-                            src={row.icon_url || PLACEHOLDER_ICON_PATH}
-                            alt={row.icon_url ? `${row.target_label} icon` : `${row.target_label} placeholder icon`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={row.icon_url || PLACEHOLDER_ICON_PATH}
+                          alt={row.icon_url ? `${row.target_label} icon` : `${row.target_label} placeholder icon`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                     </div>
                     <div className="mt-2 space-y-1">
@@ -600,7 +613,6 @@ export default function AdminNewsPage() {
             targetType={logoPickerState.targetType}
             targetKey={logoPickerState.targetKey}
             targetLabel={logoPickerState.targetLabel}
-            logoRole={logoPickerState.logoRole}
             onSaved={loadLogos}
           />
         ) : null}

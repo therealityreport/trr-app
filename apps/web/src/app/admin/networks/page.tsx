@@ -139,7 +139,6 @@ type LogoPickerState = {
   targetType: NetworksStreamingType;
   targetKey: string;
   targetLabel: string;
-  logoRole: "wordmark" | "icon";
 };
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
@@ -1118,7 +1117,28 @@ export default function AdminNetworksPage() {
                             ? row.resolution_status === "resolved"
                             : row.has_logo && row.has_bw_variants && row.has_links;
                         return (
-                          <tr key={`${row.type}:${row.name}`}>
+                          <tr
+                            key={`${row.type}:${row.name}`}
+                            role="button"
+                            tabIndex={0}
+                            className="cursor-pointer transition hover:bg-zinc-50"
+                            onClick={() =>
+                              setLogoPickerState({
+                                targetType: row.type,
+                                targetKey: normalizeEntityKey(row.name),
+                                targetLabel: row.name,
+                              })
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") return;
+                              event.preventDefault();
+                              setLogoPickerState({
+                                targetType: row.type,
+                                targetKey: normalizeEntityKey(row.name),
+                                targetLabel: row.name,
+                              });
+                            }}
+                          >
                             <td className="px-3 py-2 text-zinc-700">
                               {row.type === "network" ? "Network" : row.type === "streaming" ? "Streaming" : "Production"}
                             </td>
@@ -1126,6 +1146,7 @@ export default function AdminNetworksPage() {
                               <Link
                                 href={`/brands/networks-and-streaming/${row.type}/${toEntitySlug(row.name)}`}
                                 className="text-zinc-900 underline-offset-2 hover:underline"
+                                onClick={(event) => event.stopPropagation()}
                               >
                                 {row.name}
                               </Link>
@@ -1134,44 +1155,22 @@ export default function AdminNetworksPage() {
                             <td className="px-3 py-2 text-right tabular-nums text-zinc-700">{row.added_show_count}</td>
                             <td className="px-3 py-2">
                               <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  className="relative h-8 w-[120px] overflow-hidden rounded border border-zinc-200 bg-zinc-50"
-                                  onClick={() =>
-                                    setLogoPickerState({
-                                      targetType: row.type,
-                                      targetKey: normalizeEntityKey(row.name),
-                                      targetLabel: row.name,
-                                      logoRole: "wordmark",
-                                    })
-                                  }
-                                >
+                                <div className="relative h-8 w-[120px] overflow-hidden rounded border border-zinc-200 bg-zinc-50">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={row.hosted_logo_url || PLACEHOLDER_ICON_PATH}
                                     alt={`${row.name} wordmark`}
                                     className="h-full w-full object-contain p-1"
                                   />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="relative h-8 w-8 overflow-hidden rounded border border-zinc-200 bg-zinc-50"
-                                  onClick={() =>
-                                    setLogoPickerState({
-                                      targetType: row.type,
-                                      targetKey: normalizeEntityKey(row.name),
-                                      targetLabel: row.name,
-                                      logoRole: "icon",
-                                    })
-                                  }
-                                >
+                                </div>
+                                <div className="relative h-8 w-8 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={row.hosted_logo_black_url || row.hosted_logo_white_url || PLACEHOLDER_ICON_PATH}
                                     alt={`${row.name} icon`}
                                     className="h-full w-full object-contain p-1"
                                   />
-                                </button>
+                                </div>
                               </div>
                             </td>
                             <td className="px-3 py-2">
@@ -1182,6 +1181,7 @@ export default function AdminNetworksPage() {
                                     target="_blank"
                                     rel="noreferrer"
                                     className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                    onClick={(event) => event.stopPropagation()}
                                   >
                                     TMDb
                                   </a>
@@ -1194,6 +1194,7 @@ export default function AdminNetworksPage() {
                                     target="_blank"
                                     rel="noreferrer"
                                     className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                    onClick={(event) => event.stopPropagation()}
                                   >
                                     IMDb
                                   </a>
@@ -1206,6 +1207,7 @@ export default function AdminNetworksPage() {
                                     target="_blank"
                                     rel="noreferrer"
                                     className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                    onClick={(event) => event.stopPropagation()}
                                   >
                                     Wikidata
                                   </a>
@@ -1218,6 +1220,7 @@ export default function AdminNetworksPage() {
                                     target="_blank"
                                     rel="noreferrer"
                                     className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                    onClick={(event) => event.stopPropagation()}
                                   >
                                     Wikipedia
                                   </a>
@@ -1230,6 +1233,7 @@ export default function AdminNetworksPage() {
                                     target="_blank"
                                     rel="noreferrer"
                                     className="rounded px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 no-underline hover:bg-green-200"
+                                    onClick={(event) => event.stopPropagation()}
                                   >
                                     Website
                                   </a>
@@ -1397,7 +1401,6 @@ export default function AdminNetworksPage() {
             targetType={logoPickerState.targetType}
             targetKey={logoPickerState.targetKey}
             targetLabel={logoPickerState.targetLabel}
-            logoRole={logoPickerState.logoRole}
             onSaved={async () => {
               await loadNetworksStreamingSummary({ silent: false });
               await loadOverrides();

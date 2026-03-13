@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
+  buildSocialAccountProfileUrl,
   buildShowRedditCommunityAnalyticsUrl,
   buildShowRedditCommunityUrl,
   buildShowRedditCommunityWindowPostUrl,
@@ -15,6 +16,7 @@ import {
   cleanLegacyPersonRoutingQuery,
   cleanLegacyRoutingQuery,
   parseSeasonEpisodeNumberFromPath,
+  parseSocialAccountProfilePath,
   parseSeasonSocialPathFilters,
   parseSocialAnalyticsViewFromPath,
   parseShowSocialPathFilters,
@@ -100,7 +102,7 @@ describe("show-admin-routes", () => {
           handle: "@BravoTV",
         },
       })
-    ).toBe("/the-real-housewives-of-salt-lake-city/social/w1/instagram/account/bravotv");
+    ).toBe("/the-real-housewives-of-salt-lake-city/social/w1/instagram");
 
     expect(
       buildShowAdminUrl({
@@ -131,6 +133,37 @@ describe("show-admin-routes", () => {
         tab: "cast",
       })
     ).toBe("/rhoslc/cast");
+  });
+
+  it("builds and parses canonical social account profile URLs", () => {
+    expect(
+      buildSocialAccountProfileUrl({
+        platform: "instagram",
+        handle: "@BravoTV",
+      }),
+    ).toBe("/social/instagram/bravotv");
+
+    expect(
+      buildSocialAccountProfileUrl({
+        platform: "instagram",
+        handle: "@BravoTV",
+        tab: "hashtags",
+      }),
+    ).toBe("/social/instagram/bravotv/hashtags");
+
+    expect(parseSocialAccountProfilePath("/social/instagram/bravotv")).toMatchObject({
+      platform: "instagram",
+      handle: "bravotv",
+      tab: "stats",
+      canonicalPath: "/social/instagram/bravotv",
+    });
+
+    expect(parseSocialAccountProfilePath("/social/instagram/bravotv/collaborators-tags")).toMatchObject({
+      platform: "instagram",
+      handle: "bravotv",
+      tab: "collaborators-tags",
+      canonicalPath: "/social/instagram/bravotv/collaborators-tags",
+    });
   });
 
   it("parses season path tabs and query fallback", () => {
@@ -270,7 +303,7 @@ describe("show-admin-routes", () => {
           handle: "@BravoTV",
         },
       }),
-    ).toBe("/rhoslc/s6/social/w0/account/bravotv");
+    ).toBe("/rhoslc/s6/social/w0");
 
     expect(
       buildSeasonAdminUrl({
@@ -531,9 +564,7 @@ describe("show-admin-routes", () => {
         showSlug: "the-real-housewives-of-salt-lake-city",
         personSlug: "meredith-marks--7f528757",
       })
-    ).toBe(
-      "/people/meredith-marks--7f528757?showId=the-real-housewives-of-salt-lake-city",
-    );
+    ).toBe("/people/meredith-marks--7f528757?showId=the-real-housewives-of-salt-lake-city");
 
     expect(
       buildPersonAdminUrl({

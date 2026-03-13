@@ -84,7 +84,6 @@ type LogoPickerState = {
   targetType: "franchise";
   targetKey: string;
   targetLabel: string;
-  logoRole: "wordmark" | "icon";
 };
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
@@ -1120,54 +1119,49 @@ export default function BrandsShowsAndFranchisesPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {franchiseLogoSummary.map((item) => (
-                  <article key={item.franchise_key} className="rounded-lg border border-zinc-200 p-3">
+                  <article
+                    key={item.franchise_key}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer rounded-lg border border-zinc-200 p-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+                    onClick={() =>
+                      setLogoPickerState({
+                        targetType: "franchise",
+                        targetKey: item.franchise_key,
+                        targetLabel: item.franchise_name,
+                      })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setLogoPickerState({
+                        targetType: "franchise",
+                        targetKey: item.franchise_key,
+                        targetLabel: item.franchise_name,
+                      });
+                    }}
+                  >
                     <p className="truncate text-sm font-semibold text-zinc-900">{item.franchise_name}</p>
                     <p className="truncate text-xs text-zinc-500">{item.franchise_key}</p>
                     <p className="mt-1 text-xs text-zinc-600">{item.count} logo{item.count === 1 ? "" : "s"}</p>
                     <div className="mt-2 flex gap-2">
                       <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: "franchise",
-                              targetKey: item.franchise_key,
-                              targetLabel: item.franchise_name,
-                              logoRole: "wordmark",
-                            })
-                          }
-                        >
-                          <Image
-                            src={item.wordmark_url || PLACEHOLDER_ICON_PATH}
-                            alt={`${item.franchise_name} wordmark`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={item.wordmark_url || PLACEHOLDER_ICON_PATH}
+                          alt={`${item.franchise_name} wordmark`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                       <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: "franchise",
-                              targetKey: item.franchise_key,
-                              targetLabel: item.franchise_name,
-                              logoRole: "icon",
-                            })
-                          }
-                        >
-                          <Image
-                            src={item.icon_url || PLACEHOLDER_ICON_PATH}
-                            alt={`${item.franchise_name} icon`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={item.icon_url || PLACEHOLDER_ICON_PATH}
+                          alt={`${item.franchise_name} icon`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                     </div>
                   </article>
@@ -1481,7 +1475,6 @@ export default function BrandsShowsAndFranchisesPage() {
             targetType={logoPickerState.targetType}
             targetKey={logoPickerState.targetKey}
             targetLabel={logoPickerState.targetLabel}
-            logoRole={logoPickerState.logoRole}
             onSaved={loadFranchiseLogos}
           />
         ) : null}

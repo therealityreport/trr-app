@@ -73,4 +73,15 @@ describe("social week twitter thumbnail selection", () => {
     });
     expect(selected).toBe("https://cdn.test/social/tiktok/x/media-01.mp4");
   });
+
+  it("rewrites legacy hosted thumbnail candidates onto the canonical R2 host", () => {
+    const selected = selectTwitterThumbnailUrl({
+      hostedThumbnail: "https://d111111abcdef8.cloudfront.net/social/twitter/x/thumb.jpg",
+      thumbnail: "https://video.twimg.com/ext_tw_video/123/pu/vid/avc1/1280x720/main.mp4?tag=12",
+      hostedMediaUrls: [],
+      mediaUrls: [],
+    });
+
+    expect(selected).toBe("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/social/twitter/x/thumb.jpg");
+  });
 });

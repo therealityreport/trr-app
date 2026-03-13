@@ -33,6 +33,14 @@ describe("show social subnav wiring", () => {
     expect(socialTabContents).toMatch(/Social Scope/);
     expect(socialTabContents).toMatch(/!isRedditView/);
     expect(socialTabContents).toMatch(/\{selectedSocialSeason \? \(/);
+    expect(socialTabContents).toMatch(/data-testid="show-social-controls-host"/);
+
+    const navIndex = socialTabContents.indexOf('aria-label="Social platform tabs"');
+    const hostIndex = socialTabContents.indexOf('data-testid="show-social-controls-host"');
+    const scopeIndex = socialTabContents.indexOf("Social Scope");
+    expect(navIndex).toBeGreaterThan(-1);
+    expect(hostIndex).toBeGreaterThan(navIndex);
+    expect(scopeIndex).toBeGreaterThan(hostIndex);
   });
 
   it("passes controlled social props to SeasonSocialAnalyticsSection", () => {
@@ -42,6 +50,18 @@ describe("show social subnav wiring", () => {
     expect(contents).toMatch(/platformTab=\{socialPlatformTab\}/);
     expect(contents).toMatch(/onPlatformTabChange=\{setSocialPlatformTab\}/);
     expect(contents).toMatch(/hidePlatformTabs=\{true\}/);
+    expect(contents).toMatch(/externalControlsTarget=\{socialControlsHost\}/);
     expect(contents).toMatch(/analyticsView=\{socialAnalyticsView\}/);
+  });
+
+  it("uses a season-specific social page title and wires the external controls host", () => {
+    const pagePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
+    const contents = fs.readFileSync(pagePath, "utf8");
+
+    expect(contents).toMatch(/const socialHeaderTitle = selectedSocialSeason/);
+    expect(contents).toMatch(/Season \$\{selectedSocialSeason\.season_number\}/);
+    expect(contents).toMatch(/<h1 className="mt-3 text-3xl font-bold text-zinc-900">\{socialHeaderTitle\}<\/h1>/);
+    expect(contents).toMatch(/const \[socialControlsHost, setSocialControlsHost\] = useState<HTMLDivElement \| null>\(null\);/);
+    expect(contents).toMatch(/onSocialControlsHostChange=\{setSocialControlsHost\}/);
   });
 });

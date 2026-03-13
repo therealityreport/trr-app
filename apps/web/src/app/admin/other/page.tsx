@@ -45,7 +45,6 @@ type LogoPickerState = {
   targetType: "other";
   targetKey: string;
   targetLabel: string;
-  logoRole: "wordmark" | "icon";
 };
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
@@ -74,16 +73,27 @@ export default function AdminOtherBrandsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetchWithAuth(
-        `/api/admin/trr-api/brands/logos?target_type=other&q=${encodeURIComponent(query)}&limit=300&include_missing=true`,
-        { cache: "no-store" }
-      );
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(payload.error || "Failed to load other logos");
+      const pageSize = 500;
+      const merged: BrandLogoRow[] = [];
+      let offset = 0;
+      let totalCount = Number.POSITIVE_INFINITY;
+      while (offset < totalCount) {
+        const response = await fetchWithAuth(
+          `/api/admin/trr-api/brands/logos?target_type=other&q=${encodeURIComponent(query)}&limit=${pageSize}&offset=${offset}&include_missing=true`,
+          { cache: "no-store" }
+        );
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error || "Failed to load other logos");
+        }
+        const payload = (await response.json().catch(() => ({}))) as { rows?: BrandLogoRow[]; count?: number };
+        const rows = Array.isArray(payload.rows) ? payload.rows : [];
+        merged.push(...rows);
+        totalCount = Number(payload.count ?? rows.length);
+        if (rows.length < pageSize) break;
+        offset += rows.length;
       }
-      const payload = (await response.json().catch(() => ({}))) as { rows?: BrandLogoRow[] };
-      setRows(Array.isArray(payload.rows) ? payload.rows : []);
+      setRows(merged);
     } catch (loadError) {
       setRows([]);
       setError(loadError instanceof Error ? loadError.message : "Failed to load logos");
@@ -261,53 +271,48 @@ export default function AdminOtherBrandsPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {cards.map((row) => (
-                  <article key={row.id} className="rounded border border-zinc-200 p-3">
+                  <article
+                    key={row.id}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer rounded border border-zinc-200 p-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+                    onClick={() =>
+                      setLogoPickerState({
+                        targetType: "other",
+                        targetKey: row.target_key,
+                        targetLabel: row.target_label,
+                      })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setLogoPickerState({
+                        targetType: "other",
+                        targetKey: row.target_key,
+                        targetLabel: row.target_label,
+                      });
+                    }}
+                  >
                     <p className="truncate text-sm font-semibold text-zinc-900">{row.target_label}</p>
                     <p className="truncate text-xs text-zinc-500">{row.target_key}</p>
                     <div className="mt-2 flex gap-2">
                       <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: "other",
-                              targetKey: row.target_key,
-                              targetLabel: row.target_label,
-                              logoRole: "wordmark",
-                            })
-                          }
-                        >
-                          <Image
-                            src={row.wordmark_url || PLACEHOLDER_ICON_PATH}
-                            alt={row.wordmark_url ? `${row.target_label} wordmark` : `${row.target_label} placeholder`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={row.wordmark_url || PLACEHOLDER_ICON_PATH}
+                          alt={row.wordmark_url ? `${row.target_label} wordmark` : `${row.target_label} placeholder`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                       <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <button
-                          type="button"
-                          className="relative h-full w-full"
-                          onClick={() =>
-                            setLogoPickerState({
-                              targetType: "other",
-                              targetKey: row.target_key,
-                              targetLabel: row.target_label,
-                              logoRole: "icon",
-                            })
-                          }
-                        >
-                          <Image
-                            src={row.icon_url || PLACEHOLDER_ICON_PATH}
-                            alt={row.icon_url ? `${row.target_label} icon` : `${row.target_label} placeholder icon`}
-                            fill
-                            className="object-contain p-1"
-                            unoptimized
-                          />
-                        </button>
+                        <Image
+                          src={row.icon_url || PLACEHOLDER_ICON_PATH}
+                          alt={row.icon_url ? `${row.target_label} icon` : `${row.target_label} placeholder icon`}
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
                       </div>
                     </div>
                     {row.source_provider ? (
@@ -334,7 +339,6 @@ export default function AdminOtherBrandsPage() {
             targetType={logoPickerState.targetType}
             targetKey={logoPickerState.targetKey}
             targetLabel={logoPickerState.targetLabel}
-            logoRole={logoPickerState.logoRole}
             onSaved={loadLogos}
           />
         ) : null}

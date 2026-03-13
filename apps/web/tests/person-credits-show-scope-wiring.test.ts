@@ -6,7 +6,7 @@ describe("person credits show-scope wiring", () => {
   it("renders cast/crew sections with integrated other-show subsections", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx"
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx"
     );
     const contents = fs.readFileSync(filePath, "utf8");
 

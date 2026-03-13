@@ -19,6 +19,7 @@ const SYNC_STAGE_IDS = new Set([
   "metadata_enrichment",
   "metadata_repair",
   "upserting",
+  "nbcumv_import",
   "pruning",
 ]);
 
@@ -40,6 +41,7 @@ export function mapPersonRefreshStage(rawStage: string | null | undefined): Pers
   if (normalized === "word_id") return PERSON_REFRESH_PHASES.findingText;
   if (normalized === "centering_cropping") return PERSON_REFRESH_PHASES.centeringCropping;
   if (normalized === "resizing") return PERSON_REFRESH_PHASES.resizing;
+  if (normalized === "nbcumv_import") return PERSON_REFRESH_PHASES.syncing;
   if (normalized.startsWith("sync_") || SYNC_STAGE_IDS.has(normalized)) {
     return PERSON_REFRESH_PHASES.syncing;
   }
@@ -67,6 +69,17 @@ const SOURCE_LABEL_BY_ID: Record<string, string> = {
   getty: "Getty",
 };
 
+const EXECUTION_OWNER_LABEL_BY_ID: Record<string, string> = {
+  remote_worker: "remote worker",
+  local_api: "local API",
+};
+
+const EXECUTION_BACKEND_LABEL_BY_ID: Record<string, string> = {
+  modal: "Modal",
+  legacy_worker: "legacy worker",
+  local: "local runtime",
+};
+
 function normalizeKey(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().toLowerCase();
@@ -89,6 +102,53 @@ export function formatRefreshSourceLabel(source: string | null | undefined): str
   const normalized = normalizeKey(source);
   if (!normalized) return null;
   return SOURCE_LABEL_BY_ID[normalized] ?? normalized.replace(/_/g, " ");
+}
+
+function formatExecutionOwnerLabel(owner: string | null | undefined): string | null {
+  const normalized = normalizeKey(owner);
+  if (!normalized) return null;
+  return EXECUTION_OWNER_LABEL_BY_ID[normalized] ?? normalized.replace(/_/g, " ");
+}
+
+function formatExecutionBackendLabel(backend: string | null | undefined): string | null {
+  const normalized = normalizeKey(backend);
+  if (!normalized) return null;
+  return EXECUTION_BACKEND_LABEL_BY_ID[normalized] ?? normalized.replace(/_/g, " ");
+}
+
+export function buildOperationDispatchDetailMessage(input: {
+  eventType: string | null | undefined;
+  status?: string | null;
+  attached?: boolean | null;
+  executionOwner?: string | null;
+  executionBackendCanonical?: string | null;
+  executionModeCanonical?: string | null;
+}): string | null {
+  const eventType = normalizeKey(input.eventType);
+  if (eventType !== "operation" && eventType !== "dispatched_to_modal") return null;
+
+  const executionOwner = formatExecutionOwnerLabel(input.executionOwner);
+  const executionBackend = formatExecutionBackendLabel(input.executionBackendCanonical);
+  const executionMode = normalizeKey(input.executionModeCanonical);
+  const rawStatus = normalizeKey(input.status);
+  const attached = input.attached === true;
+
+  const suffixParts = [executionOwner, executionBackend, executionMode].filter(Boolean);
+  const suffix = suffixParts.length > 0 ? ` (${suffixParts.join(" · ")})` : "";
+
+  if (eventType === "dispatched_to_modal") {
+    return `Queued for Modal worker ownership${suffix}.`;
+  }
+  if (attached) {
+    return `Attached to existing refresh operation${suffix}.`;
+  }
+  if (rawStatus === "running") {
+    return `Refresh operation is running${suffix}.`;
+  }
+  if (rawStatus === "queued" || rawStatus === "pending") {
+    return `Refresh operation queued${suffix}.`;
+  }
+  return suffixParts.length > 0 ? `Refresh operation update${suffix}.` : "Refresh operation update.";
 }
 
 export function buildPersonRefreshDetailMessage(input: {
@@ -386,6 +446,7 @@ export type PersonRefreshPipelineStepId =
   | "upserting"
   | "metadata_repair"
   | "mirroring"
+  | "nbcumv_import"
   | "pruning"
   | "auto_count"
   | "word_id"
@@ -422,6 +483,7 @@ const REFRESH_PIPELINE_STEPS: PersonRefreshPipelineStepDefinition[] = [
   { id: "upserting", label: "Saving Photos", modes: new Set(["ingest", "refresh"]) },
   { id: "metadata_repair", label: "Fixing IMDb Details", modes: new Set(["ingest", "refresh", "reprocess"]) },
   { id: "mirroring", label: "S3 Mirroring", modes: new Set(["ingest", "refresh"]) },
+  { id: "nbcumv_import", label: "Getty / NBCUMV", modes: new Set(["ingest", "refresh"]) },
   { id: "pruning", label: "Pruning", modes: new Set(["refresh"]) },
   { id: "auto_count", label: "Tagging (Face Boxes + Identity)", modes: new Set(["refresh", "reprocess"]) },
   { id: "word_id", label: "Text Overlay", modes: new Set(["refresh", "reprocess"]) },
@@ -478,6 +540,7 @@ function mapStageToPipelineStep(rawStage: string | null | undefined): PersonRefr
   if (stage === "upserting") return "upserting";
   if (stage === "metadata_repair") return "metadata_repair";
   if (stage === "mirroring") return "mirroring";
+  if (stage === "nbcumv_import") return "nbcumv_import";
   if (stage === "pruning") return "pruning";
   if (stage === "auto_count") return "auto_count";
   if (stage === "word_id") return "word_id";

@@ -2487,7 +2487,7 @@ const resolvePersonPhotoVariantUrls = (
 
 /**
  * Get all photos for a person, ordered by source then gallery_index.
- * Only returns photos with hosted_url (mirrored to CloudFront).
+ * Only returns photos with hosted_url populated from the canonical hosted-media store.
  * Queries both cast_photos table AND media_links/media_assets for imported photos.
  */
 export async function getPhotosByPersonId(

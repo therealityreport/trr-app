@@ -3,6 +3,17 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import AdminModal from "@/components/admin/AdminModal";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +31,9 @@ import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 type BrandLogoRole = "wordmark" | "icon";
 type SourceQueryKind = "search_term" | "slug" | "host_or_url" | "readonly";
 type SourceStatus = "idle" | "loading" | "saving" | "ready" | "error";
+type ModalTargetType = "network" | "streaming" | "production" | "franchise" | "publication" | "social" | "other";
 
-type LogoOptionRow = {
+type LogoOptionBase = {
   id: string;
   source_url: string | null;
   source_provider?: string | null;
@@ -29,20 +41,22 @@ type LogoOptionRow = {
   hosted_logo_url?: string | null;
   hosted_logo_black_url?: string | null;
   hosted_logo_white_url?: string | null;
-  is_selected_for_role?: boolean;
   option_kind?: string | null;
+  file_type?: string | null;
+  content_type?: string | null;
+  width?: number | null;
+  height?: number | null;
+  aspect_ratio?: number | null;
+  logo_role?: BrandLogoRole | null;
+  detected_logo_role?: BrandLogoRole | null;
 };
 
-type DiscoverCandidate = {
-  id: string;
+type SavedLogoAsset = LogoOptionBase & {
+  selected_roles?: BrandLogoRole[];
+};
+
+type DiscoverCandidate = LogoOptionBase & {
   source_url: string;
-  source_provider?: string | null;
-  discovered_from?: string | null;
-  hosted_logo_url?: string | null;
-  hosted_logo_black_url?: string | null;
-  hosted_logo_white_url?: string | null;
-  is_selected_for_role?: boolean;
-  logo_role: BrandLogoRole;
   option_kind: "candidate";
 };
 
@@ -57,27 +71,35 @@ type SourceSummary = {
   effective_query_value?: string | null;
   query_values?: string[];
   query_links?: string[];
-  logo_role?: BrandLogoRole;
 };
 
 type SourceQuerySaveResponse = {
   source?: SourceSummary;
 };
 
-type InitialLoadResult = {
-  options: LogoOptionRow[];
-  sourceRowsRaw: SourceSummary[];
-  errors: string[];
+type SourceSuggestion = {
+  query_value: string;
+  query_link: string;
+  reason?: string | null;
+  discovered_from?: string | null;
+};
+
+type SourceSuggestionResponse = {
+  suggestions?: SourceSuggestion[];
+};
+
+type ModalStateResponse = {
+  saved_assets?: SavedLogoAsset[];
+  featured_assets?: Partial<Record<BrandLogoRole, SavedLogoAsset | null>>;
+  sources?: SourceSummary[];
 };
 
 type DiscoverResponse = {
-  candidates: DiscoverCandidate[];
-  hasMore: boolean;
-  nextOffset: number;
-  totalCount: number;
+  candidates?: DiscoverCandidate[];
+  has_more?: boolean;
+  next_offset?: number;
+  total_count?: number;
 };
-
-type ModalTargetType = "network" | "streaming" | "production" | "franchise" | "publication" | "social" | "other";
 
 type BrandLogoOptionsModalProps = {
   isOpen: boolean;
@@ -86,8 +108,27 @@ type BrandLogoOptionsModalProps = {
   targetType: ModalTargetType;
   targetKey: string;
   targetLabel: string;
-  logoRole: BrandLogoRole;
   onSaved: () => Promise<void> | void;
+};
+
+type LogoCardProps = {
+  option: SavedLogoAsset | DiscoverCandidate;
+  isSaved: boolean;
+  selected: boolean;
+  targetLabel: string;
+  onClick?: () => void;
+  onDelete?: () => void;
+  onCancelDelete?: () => void;
+  onSetAsIcon?: () => void;
+  onSetAsWordmark?: () => void;
+  confirmingDelete?: boolean;
+  disabled?: boolean;
+};
+
+type FeatureSlotProps = {
+  role: BrandLogoRole;
+  option: SavedLogoAsset | DiscoverCandidate | null;
+  targetLabel: string;
 };
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
@@ -95,6 +136,8 @@ const MANUAL_SOURCE_PROVIDER = "manual_import_url";
 const SAVED_SOURCE_PROVIDER = "saved";
 const SOURCE_PREFETCH_SIZE = 10;
 const SOURCE_PREFETCH_CONCURRENCY = 3;
+const SHARED_SOURCE_QUERY_ROLES: BrandLogoRole[] = ["wordmark", "icon"];
+const SHARED_SLUG_SOURCE_KINDS: SourceQueryKind[] = ["slug", "search_term"];
 
 const QUERY_PLACEHOLDERS: Record<SourceQueryKind, string> = {
   search_term: "Enter search term",
@@ -103,10 +146,10 @@ const QUERY_PLACEHOLDERS: Record<SourceQueryKind, string> = {
   readonly: "",
 };
 
-const SHARED_SLUG_SOURCE_KINDS: SourceQueryKind[] = ["slug", "search_term"];
-
-const pickDisplayUrl = (row: LogoOptionRow | DiscoverCandidate): string | null =>
+const pickDisplayUrl = (row: LogoOptionBase): string | null =>
   row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url || row.source_url || null;
+
+const joinClassNames = (...values: Array<string | false | null | undefined>): string => values.filter(Boolean).join(" ");
 
 const isSchemaVariantError = (message: string): boolean => {
   const normalized = (message || "").toLowerCase();
@@ -122,6 +165,17 @@ const normalizeLogoOptionsErrorMessage = (message: string): string => {
     return "Related logo pairing temporarily unavailable; discovery sources are still usable.";
   }
   return message;
+};
+
+const formatProviderLabel = (value: string | null | undefined): string =>
+  String(value || "unknown")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const formatDimensions = (width: number | null | undefined, height: number | null | undefined): string | null => {
+  if (!width || !height) return null;
+  return `${width}x${height}`;
 };
 
 const isHttpUrl = (value: string): boolean => {
@@ -143,10 +197,50 @@ const isHttpImageUrl = (value: string): boolean => {
   }
 };
 
-const manualCandidateId = (url: string, role: BrandLogoRole): string =>
-  `candidate:manual:${encodeURIComponent(`${role}:${url}`)}`;
+const inferFileTypeFromHint = (value: string | null | undefined): string | null => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("svg")) return "svg";
+  if (normalized.includes("png")) return "png";
+  if (normalized.includes("webp")) return "webp";
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+  if (normalized.includes("gif")) return "gif";
+  if (normalized.includes("avif")) return "avif";
+  return null;
+};
 
-const parseErrorPayload = async (response: Response): Promise<string> => {
+const inferFileTypeFromUrl = (value: string): string | null => {
+  try {
+    const parsed = new URL(value);
+    const extensionMatch = parsed.pathname.match(/\.([a-z0-9]+)$/i);
+    const extension = inferFileTypeFromHint(extensionMatch?.[1] ?? null);
+    if (extension) return extension;
+    const hinted = inferFileTypeFromHint(
+      parsed.searchParams.get("format")
+      || parsed.searchParams.get("fm")
+      || parsed.searchParams.get("ext")
+      || parsed.searchParams.get("fileType")
+      || parsed.searchParams.get("contentType")
+      || parsed.searchParams.get("mime"),
+    );
+    if (hinted) return hinted;
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const manualCandidateId = (url: string): string => `candidate:manual:${encodeURIComponent(url)}`;
+
+const getOptionPreferredRole = (option: SavedLogoAsset | DiscoverCandidate): BrandLogoRole => {
+  if (option.detected_logo_role === "icon" || option.logo_role === "icon") return "icon";
+  if (Array.isArray((option as SavedLogoAsset).selected_roles) && (option as SavedLogoAsset).selected_roles?.includes("icon")) {
+    return "icon";
+  }
+  return "wordmark";
+};
+
+async function parseErrorPayload(response: Response): Promise<string> {
   const fallback = `Request failed (${response.status})`;
   try {
     const payload = (await response.json()) as { detail?: string; error?: string; message?: string };
@@ -157,7 +251,7 @@ const parseErrorPayload = async (response: Response): Promise<string> => {
     return fallback;
   }
   return fallback;
-};
+}
 
 async function runWithConcurrency<T>(
   items: T[],
@@ -177,10 +271,6 @@ async function runWithConcurrency<T>(
       }
     }),
   );
-}
-
-function joinClassNames(...values: Array<string | undefined | false | null>): string {
-  return values.filter(Boolean).join(" ");
 }
 
 function getSourceQueryValues(source: SourceSummary | null | undefined): string[] {
@@ -300,6 +390,239 @@ function renderSourceLinks(queryLinks: string[] | undefined) {
   );
 }
 
+function getEmptyStateMessage({
+  activeSource,
+  activeSourceRow,
+  activeSourceStatus,
+  activeSourceError,
+  relatedFallbackActive,
+}: {
+  activeSource: string | null;
+  activeSourceRow: SourceSummary | null;
+  activeSourceStatus: SourceStatus | undefined;
+  activeSourceError: string | null | undefined;
+  relatedFallbackActive: boolean;
+}): string {
+  if (!activeSource) return "Select a source.";
+  if (activeSourceStatus === "loading") return `Loading candidates for ${activeSource}...`;
+  if (activeSourceError || activeSourceStatus === "error") {
+    return `Refreshing ${activeSource} failed. Update the query or try refreshing again.`;
+  }
+  if (activeSource === SAVED_SOURCE_PROVIDER) {
+    return "No saved assets yet. Save or assign a discovered asset to build the shared library.";
+  }
+  if (activeSource === MANUAL_SOURCE_PROVIDER) {
+    return "Add a manual image URL to create options here.";
+  }
+  if (relatedFallbackActive && activeSourceRow?.refreshable) {
+    return "No candidates found. Related-logo fallback mode is active, so only direct source matches are currently available.";
+  }
+  return "No candidates found for this source.";
+}
+
+function FeatureSlot({ role, option, targetLabel }: FeatureSlotProps) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `feature:${role}`,
+  });
+  const isWordmark = role === "wordmark";
+  return (
+    <div
+      ref={setNodeRef}
+      className={joinClassNames(
+        "rounded-2xl border bg-zinc-50 p-3 transition",
+        isOver ? "border-cyan-600 ring-2 ring-cyan-200" : "border-zinc-200",
+      )}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+        {isWordmark ? "Featured Wordmark" : "Featured Icon"}
+      </p>
+      <div
+        className={joinClassNames(
+          "mt-3 overflow-hidden rounded-xl border border-zinc-200 bg-white",
+          isWordmark ? "relative h-24 w-full" : "relative h-24 w-24",
+        )}
+      >
+        <Image
+          src={(option ? pickDisplayUrl(option) : null) || PLACEHOLDER_ICON_PATH}
+          alt={`${targetLabel} featured ${role}`}
+          fill
+          className="object-contain p-3"
+          unoptimized
+        />
+      </div>
+      <p className="mt-3 truncate text-sm font-semibold text-zinc-900">
+        {option ? formatProviderLabel(option.source_provider) : "Drop an asset here"}
+      </p>
+      <p className="truncate text-xs text-zinc-500">{option?.discovered_from || option?.source_url || "Drag from Saved or a source tab."}</p>
+    </div>
+  );
+}
+
+function LogoCard({
+  option,
+  isSaved,
+  selected,
+  targetLabel,
+  onClick,
+  onDelete,
+  onCancelDelete,
+  onSetAsIcon,
+  onSetAsWordmark,
+  confirmingDelete = false,
+  disabled = false,
+}: LogoCardProps) {
+  const { listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `drag:${option.id}`,
+    data: {
+      optionId: option.id,
+    },
+  });
+  const style = transform
+    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
+    : undefined;
+  const metadataBits = [
+    option.file_type ? option.file_type.toUpperCase() : null,
+    formatDimensions(option.width, option.height),
+  ].filter(Boolean);
+  const selectedRoles = isSaved && Array.isArray((option as SavedLogoAsset).selected_roles)
+    ? (option as SavedLogoAsset).selected_roles ?? []
+    : [];
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={joinClassNames(
+        "rounded-2xl border p-3 transition",
+        selected ? "border-zinc-900 bg-zinc-100" : "border-zinc-200 bg-white hover:bg-zinc-50",
+        isDragging ? "opacity-60" : "",
+      )}
+    >
+      <div
+        role={onClick ? "button" : undefined}
+        aria-pressed={onClick ? selected : undefined}
+        aria-label={onClick ? `${targetLabel} option${selected ? " selected" : ""}` : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onClick={disabled ? undefined : onClick}
+        onKeyDown={(event) => {
+          if (!onClick || disabled) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onClick();
+          }
+        }}
+        className={joinClassNames(
+          "rounded-xl outline-none",
+          onClick ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" : "",
+          disabled ? "cursor-not-allowed opacity-70" : "",
+        )}
+        {...listeners}
+      >
+        <div className="relative h-20 w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
+          <Image
+            src={pickDisplayUrl(option) || PLACEHOLDER_ICON_PATH}
+            alt={`${targetLabel} option`}
+            fill
+            className="object-contain p-2"
+            unoptimized
+          />
+        </div>
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
+              {formatProviderLabel(option.source_provider)}
+            </p>
+            <p className="truncate text-xs text-zinc-500" title={option.discovered_from || option.source_url || "n/a"}>
+              {option.discovered_from || option.source_url || "n/a"}
+            </p>
+          </div>
+          {selectedRoles.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {selectedRoles.map((role) => (
+                <span key={`${option.id}:${role}`} className="rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-semibold text-cyan-800">
+                  {role}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {metadataBits.length > 0 ? (
+          <p className="mt-2 text-[11px] font-semibold text-zinc-500">{metadataBits.join(" · ")}</p>
+        ) : null}
+      </div>
+      {isSaved ? (
+        <div className="mt-3 space-y-2">
+          <p className="text-[11px] font-semibold text-zinc-500">Drag into the wordmark or icon frame, or use explicit feature actions.</p>
+          {confirmingDelete ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+              <p className="text-xs font-semibold text-red-800">Delete this saved asset permanently?</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCancelDelete?.();
+                  }}
+                  disabled={disabled}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete?.();
+                  }}
+                  disabled={disabled}
+                >
+                  Delete Permanently
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSetAsWordmark?.();
+                }}
+                disabled={disabled}
+              >
+                Set as Wordmark
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSetAsIcon?.();
+                }}
+                disabled={disabled}
+              >
+                Set as Icon
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDelete?.();
+                }}
+                disabled={disabled}
+              >
+                Delete
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function BrandLogoOptionsModal({
   isOpen,
   onClose,
@@ -307,40 +630,52 @@ export default function BrandLogoOptionsModal({
   targetType,
   targetKey,
   targetLabel,
-  logoRole,
   onSaved,
 }: BrandLogoOptionsModalProps) {
+  const includeRelated = targetType === "publication" || targetType === "social";
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [relatedFallbackActive, setRelatedFallbackActive] = useState(false);
   const [sources, setSources] = useState<SourceSummary[]>([]);
   const [activeSource, setActiveSource] = useState<string | null>(null);
-  const [storedOptions, setStoredOptions] = useState<LogoOptionRow[]>([]);
+  const [savedAssets, setSavedAssets] = useState<SavedLogoAsset[]>([]);
+  const [featuredByRole, setFeaturedByRole] = useState<Record<BrandLogoRole, SavedLogoAsset | null>>({
+    wordmark: null,
+    icon: null,
+  });
   const [discoveredOptionsBySource, setDiscoveredOptionsBySource] = useState<Record<string, DiscoverCandidate[]>>({});
-  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [selectedOptionIdsBySource, setSelectedOptionIdsBySource] = useState<Record<string, string[]>>({});
   const [discoverOffsetBySource, setDiscoverOffsetBySource] = useState<Record<string, number>>({});
   const [discoverHasMoreBySource, setDiscoverHasMoreBySource] = useState<Record<string, boolean>>({});
   const [discoveredCountBySource, setDiscoveredCountBySource] = useState<Record<string, number>>({});
-  const [discoverIncludeRelated, setDiscoverIncludeRelated] = useState(false);
+  const [sourceStatusBySource, setSourceStatusBySource] = useState<Record<string, SourceStatus>>({});
+  const [sourceErrorBySource, setSourceErrorBySource] = useState<Record<string, string | null>>({});
   const [manualImageUrl, setManualImageUrl] = useState("");
   const [manualImportOpen, setManualImportOpen] = useState(false);
+  const [manualImportError, setManualImportError] = useState<string | null>(null);
   const [slugPanelOpen, setSlugPanelOpen] = useState(false);
-  const [applyingSlugs, setApplyingSlugs] = useState(false);
   const [sharedSlugs, setSharedSlugs] = useState<string[]>([]);
   const [addingSharedSlug, setAddingSharedSlug] = useState(false);
   const [newSharedSlugDraft, setNewSharedSlugDraft] = useState("");
-  const [manualImportError, setManualImportError] = useState<string | null>(null);
-  const [brokenPreviewIds, setBrokenPreviewIds] = useState<Record<string, boolean>>({});
-  const [sourceStatusBySource, setSourceStatusBySource] = useState<Record<string, SourceStatus>>({});
-  const [sourceErrorBySource, setSourceErrorBySource] = useState<Record<string, string | null>>({});
+  const [applyingSlugs, setApplyingSlugs] = useState(false);
   const [addingQueryBySource, setAddingQueryBySource] = useState<Record<string, boolean>>({});
   const [newQueryDraftBySource, setNewQueryDraftBySource] = useState<Record<string, string>>({});
+  const [sourceSuggestionsBySource, setSourceSuggestionsBySource] = useState<Record<string, SourceSuggestion[]>>({});
+  const [sourceSuggestionsLoadingBySource, setSourceSuggestionsLoadingBySource] = useState<Record<string, boolean>>({});
+  const [sourceSuggestionsErrorBySource, setSourceSuggestionsErrorBySource] = useState<Record<string, string | null>>({});
+  const [activeDragOptionId, setActiveDragOptionId] = useState<string | null>(null);
+  const [deleteConfirmAssetId, setDeleteConfirmAssetId] = useState<string | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const sourcesRef = useRef<SourceSummary[]>([]);
   const discoverOffsetBySourceRef = useRef<Record<string, number>>({});
-  const discoverIncludeRelatedRef = useRef(false);
-  const currentFeaturedOptionIdRef = useRef<string | null>(null);
-
-  const includeRelated = targetType === "publication" || targetType === "social";
+  const discoveredOptionsBySourceRef = useRef<Record<string, DiscoverCandidate[]>>({});
+  const resultsScrollRef = useRef<HTMLDivElement | null>(null);
+  const modalSessionRef = useRef(0);
+  const modalLoadRequestIdRef = useRef(0);
+  const mutationRefreshRequestIdRef = useRef(0);
+  const sourceRefreshRequestIdRef = useRef<Record<string, number>>({});
+  const suggestionRequestIdRef = useRef<Record<string, number>>({});
 
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
@@ -360,445 +695,289 @@ export default function BrandLogoOptionsModal({
   }, [discoverOffsetBySource]);
 
   useEffect(() => {
-    discoverIncludeRelatedRef.current = discoverIncludeRelated;
-  }, [discoverIncludeRelated]);
+    discoveredOptionsBySourceRef.current = discoveredOptionsBySource;
+  }, [discoveredOptionsBySource]);
 
-  useEffect(() => {
-    if (applyingSlugs) return;
-    const derived = deriveSharedSlugsFromSources(sources);
-    setSharedSlugs((previous) => (areStringListsEqual(previous, derived) ? previous : derived));
-  }, [applyingSlugs, sources]);
-
-  const updateSourceSummary = useCallback((sourceProvider: string, updater: (source: SourceSummary) => SourceSummary) => {
-    setSources((previous) =>
-      previous.map((source) => (source.source_provider === sourceProvider ? updater(source) : source)),
-    );
+  const resetResultsScroll = useCallback(() => {
+    const node = resultsScrollRef.current;
+    if (!node) return;
+    if (typeof node.scrollTo === "function") {
+      node.scrollTo({ top: 0 });
+    }
+    node.scrollTop = 0;
   }, []);
 
-  const loadForIncludeRelated = useCallback(
-    async (related: boolean): Promise<InitialLoadResult> => {
-      const logosParams = new URLSearchParams({
-        target_type: targetType,
-        target_key: targetKey,
-        logo_role: logoRole,
-        include_related: related ? "true" : "false",
-        limit: "500",
-      });
-      const sourceParams = new URLSearchParams({
+  const hydrateFromModalPayload = useCallback((
+    payload: ModalStateResponse,
+    options?: { preferredActiveSource?: string | null },
+  ) => {
+    const nextSavedAssets = Array.isArray(payload.saved_assets) ? payload.saved_assets : [];
+    const nextSources = Array.isArray(payload.sources) ? payload.sources : [];
+    setSavedAssets(nextSavedAssets);
+    setSources(nextSources);
+    setFeaturedByRole({
+      wordmark: (payload.featured_assets?.wordmark as SavedLogoAsset | null | undefined) ?? null,
+      icon: (payload.featured_assets?.icon as SavedLogoAsset | null | undefined) ?? null,
+    });
+    setSharedSlugs(deriveSharedSlugsFromSources(nextSources));
+    setDiscoverHasMoreBySource(
+      Object.fromEntries(nextSources.map((source) => [source.source_provider, Boolean(source.has_more)])),
+    );
+    setSourceStatusBySource(
+      Object.fromEntries(
+        nextSources.map((source) => [source.source_provider, source.refreshable ? ("idle" as const) : ("ready" as const)]),
+      ),
+    );
+    setActiveSource((previous) => {
+      const preferredActiveSource = options?.preferredActiveSource ?? null;
+      if (
+        preferredActiveSource
+        && (
+          preferredActiveSource === SAVED_SOURCE_PROVIDER
+          || preferredActiveSource === MANUAL_SOURCE_PROVIDER
+          || nextSources.some((source) => source.source_provider === preferredActiveSource)
+        )
+      ) {
+        return preferredActiveSource;
+      }
+      if (previous && (previous === SAVED_SOURCE_PROVIDER || previous === MANUAL_SOURCE_PROVIDER || nextSources.some((source) => source.source_provider === previous))) {
+        return previous;
+      }
+      return nextSavedAssets.length > 0 ? SAVED_SOURCE_PROVIDER : nextSources[0]?.source_provider ?? null;
+    });
+  }, []);
+
+  const loadModalState = useCallback(async (related: boolean): Promise<ModalStateResponse> => {
+    const params = new URLSearchParams({
+      target_type: targetType,
+      target_key: targetKey,
+      target_label: targetLabel,
+      include_related: related ? "true" : "false",
+    });
+    const response = await fetchWithAuth(`/api/admin/trr-api/brands/logos/options/modal?${params.toString()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
+    }
+    return (await response.json()) as ModalStateResponse;
+  }, [fetchWithAuth, targetKey, targetLabel, targetType]);
+
+  const fetchModalPayloadWithFallback = useCallback(async () => {
+    try {
+      const payload = await loadModalState(includeRelated);
+      return {
+        fallbackMessage: null as string | null,
+        payload,
+        relatedFallback: false,
+      };
+    } catch (modalError) {
+      const message = modalError instanceof Error ? modalError.message : "";
+      if (!includeRelated || !isSchemaVariantError(message)) {
+        throw modalError;
+      }
+      const payload = await loadModalState(false);
+      return {
+        fallbackMessage: "Related logo pairing temporarily unavailable; discovery sources are still usable.",
+        payload,
+        relatedFallback: true,
+      };
+    }
+  }, [includeRelated, loadModalState]);
+
+  const discoverBySource = useCallback(async (sourceProvider: string, offset: number, limit: number, queryValues: string[]) => {
+    const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/discover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         target_type: targetType,
         target_key: targetKey,
         target_label: targetLabel,
-        logo_role: logoRole,
-        include_related: related ? "true" : "false",
-      });
-
-      const [logosResponse, sourcesResponse] = await Promise.all([
-        fetchWithAuth(`/api/admin/trr-api/brands/logos?${logosParams.toString()}`, { cache: "no-store" }),
-        fetchWithAuth(`/api/admin/trr-api/brands/logos/options/sources?${sourceParams.toString()}`, { cache: "no-store" }),
-      ]);
-
-      const errors: string[] = [];
-      let options: LogoOptionRow[] = [];
-      let sourceRowsRaw: SourceSummary[] = [];
-
-      if (logosResponse.ok) {
-        const logosPayload = (await logosResponse.json()) as { rows?: LogoOptionRow[] };
-        options = Array.isArray(logosPayload.rows) ? logosPayload.rows : [];
-      } else {
-        errors.push(await parseErrorPayload(logosResponse));
-      }
-
-      if (sourcesResponse.ok) {
-        const sourcePayload = (await sourcesResponse.json()) as { sources?: SourceSummary[] };
-        sourceRowsRaw = Array.isArray(sourcePayload.sources) ? sourcePayload.sources : [];
-      } else {
-        errors.push(await parseErrorPayload(sourcesResponse));
-      }
-
-      return { options, sourceRowsRaw, errors };
-    },
-    [fetchWithAuth, logoRole, targetKey, targetLabel, targetType],
-  );
-
-  const discoverBySource = useCallback(
-    async (
-      sourceProvider: string,
-      offset: number,
-      limit: number,
-      related: boolean,
-      queryOverrides: string[] | null | undefined,
-    ): Promise<DiscoverResponse> => {
-      const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/discover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          target_type: targetType,
-          target_key: targetKey,
-          target_label: targetLabel,
-          logo_role: logoRole,
-          source_provider: sourceProvider,
-          query_override: queryOverrides?.[0] || undefined,
-          query_overrides: queryOverrides && queryOverrides.length > 0 ? queryOverrides : undefined,
-          offset,
-          limit,
-          include_related: related,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
-      }
-      const payload = (await response.json()) as {
-        candidates?: DiscoverCandidate[];
-        has_more?: boolean;
-        next_offset?: number;
-        total_count?: number;
-      };
-      return {
-        candidates: (Array.isArray(payload.candidates) ? payload.candidates : []).map((candidate) => ({
-          ...candidate,
-          option_kind: "candidate" as const,
-        })),
-        hasMore: Boolean(payload.has_more),
-        nextOffset: Number(payload.next_offset ?? offset),
-        totalCount: Number(payload.total_count ?? 0),
-      };
-    },
-    [fetchWithAuth, logoRole, targetKey, targetLabel, targetType],
-  );
-
-  const replaceDiscoveredOptionsForSource = useCallback((sourceProvider: string, candidates: DiscoverCandidate[]) => {
-    setDiscoveredOptionsBySource((previous) => {
-      const previousCandidates = previous[sourceProvider] ?? [];
-      if (previousCandidates.length > 0) {
-        setSelectedOptionId((previousSelectedId) => {
-          if (!previousSelectedId) return previousSelectedId;
-          const replacedPreviousSelection = previousCandidates.some((row) => row.id === previousSelectedId);
-          if (!replacedPreviousSelection) return previousSelectedId;
-          return candidates.some((row) => row.id === previousSelectedId)
-            ? previousSelectedId
-            : currentFeaturedOptionIdRef.current;
-        });
-      }
-      return { ...previous, [sourceProvider]: candidates };
+        logo_role: "wordmark",
+        source_provider: sourceProvider,
+        query_override: queryValues[0] || undefined,
+        query_overrides: queryValues.length > 0 ? queryValues : undefined,
+        offset,
+        limit,
+        include_related: includeRelated,
+      }),
     });
-  }, []);
+    if (!response.ok) {
+      throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
+    }
+    return (await response.json()) as DiscoverResponse;
+  }, [fetchWithAuth, includeRelated, targetKey, targetLabel, targetType]);
 
-  const appendDiscoveredOptionsForSource = useCallback((sourceProvider: string, candidates: DiscoverCandidate[]) => {
-    setDiscoveredOptionsBySource((previous) => {
-      const existing = previous[sourceProvider] ?? [];
-      const existingIds = new Set(existing.map((row) => row.id));
-      const existingKeys = new Set(existing.map((row) => `${row.source_provider || "unknown"}|${row.source_url}`));
-      const merged = [...existing];
-      for (const candidate of candidates) {
-        const key = `${candidate.source_provider || "unknown"}|${candidate.source_url}`;
-        if (existingIds.has(candidate.id) || existingKeys.has(key)) continue;
-        existingIds.add(candidate.id);
-        existingKeys.add(key);
-        merged.push(candidate);
+  const refreshSource = useCallback(async ({
+    append = false,
+    sourceProvider,
+    sourceSnapshot,
+    sessionId = modalSessionRef.current,
+  }: {
+    append?: boolean;
+    sourceProvider: string;
+    sourceSnapshot?: SourceSummary;
+    sessionId?: number;
+  }) => {
+    const source = sourceSnapshot ?? sourcesRef.current.find((row) => row.source_provider === sourceProvider);
+    if (!source?.refreshable) return;
+    const requestId = (sourceRefreshRequestIdRef.current[sourceProvider] ?? 0) + 1;
+    sourceRefreshRequestIdRef.current[sourceProvider] = requestId;
+
+    const offset = append ? discoverOffsetBySourceRef.current[sourceProvider] ?? 0 : 0;
+    setSourceStatusBySource((previous) => ({ ...previous, [sourceProvider]: "loading" }));
+    setSourceErrorBySource((previous) => ({ ...previous, [sourceProvider]: null }));
+
+    try {
+      const payload = await discoverBySource(sourceProvider, offset, SOURCE_PREFETCH_SIZE, getSourceQueryValues(source));
+      if (
+        modalSessionRef.current !== sessionId
+        || sourceRefreshRequestIdRef.current[sourceProvider] !== requestId
+      ) {
+        return;
       }
-      return { ...previous, [sourceProvider]: merged };
-    });
-  }, []);
-
-  const refreshSource = useCallback(
-    async ({
-      append = false,
-      related = discoverIncludeRelatedRef.current,
-      sourceProvider,
-      sourceSnapshot,
-    }: {
-      append?: boolean;
-      related?: boolean;
-      sourceProvider: string;
-      sourceSnapshot?: SourceSummary;
-    }) => {
-      const source = sourceSnapshot ?? sourcesRef.current.find((row) => row.source_provider === sourceProvider);
-      if (!source?.refreshable) return;
-
-      const offset = append ? discoverOffsetBySourceRef.current[sourceProvider] ?? 0 : 0;
-      setSourceStatusBySource((previous) => ({
-        ...previous,
-        [sourceProvider]: append ? "loading" : "loading",
-      }));
+      const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+      const allowedIds = new Set(
+        append
+          ? [
+              ...((discoveredOptionsBySourceRef.current[sourceProvider] ?? []).map((candidate) => candidate.id)),
+              ...nextCandidates.map((candidate) => candidate.id),
+            ]
+          : nextCandidates.map((candidate) => candidate.id),
+      );
+      setDiscoveredOptionsBySource((previous) => {
+        if (!append) return { ...previous, [sourceProvider]: nextCandidates };
+        const existing = previous[sourceProvider] ?? [];
+        const existingIds = new Set(existing.map((candidate) => candidate.id));
+        const merged = [...existing];
+        for (const candidate of nextCandidates) {
+          if (existingIds.has(candidate.id)) continue;
+          existingIds.add(candidate.id);
+          merged.push(candidate);
+        }
+        return { ...previous, [sourceProvider]: merged };
+      });
+      setSelectedOptionIdsBySource((previous) => {
+        if (!Object.prototype.hasOwnProperty.call(previous, sourceProvider)) return previous;
+        return {
+          ...previous,
+          [sourceProvider]: (previous[sourceProvider] ?? []).filter((optionId) => allowedIds.has(optionId)),
+        };
+      });
+      setDiscoveredCountBySource((previous) => ({ ...previous, [sourceProvider]: Number(payload.total_count ?? 0) }));
+      setDiscoverOffsetBySource((previous) => ({ ...previous, [sourceProvider]: Number(payload.next_offset ?? 0) }));
+      setDiscoverHasMoreBySource((previous) => ({ ...previous, [sourceProvider]: Boolean(payload.has_more) }));
+      setSourceStatusBySource((previous) => ({ ...previous, [sourceProvider]: "ready" }));
+      if (!append) resetResultsScroll();
+    } catch (sourceError) {
+      if (
+        modalSessionRef.current !== sessionId
+        || sourceRefreshRequestIdRef.current[sourceProvider] !== requestId
+      ) {
+        return;
+      }
+      setSourceStatusBySource((previous) => ({ ...previous, [sourceProvider]: "error" }));
       setSourceErrorBySource((previous) => ({
         ...previous,
-        [sourceProvider]: null,
+        [sourceProvider]: normalizeLogoOptionsErrorMessage(
+          sourceError instanceof Error ? sourceError.message : "Failed to refresh source",
+        ),
       }));
+    }
+  }, [discoverBySource, resetResultsScroll]);
 
-      try {
-        const response = await discoverBySource(
-          sourceProvider,
-          offset,
-          SOURCE_PREFETCH_SIZE,
-          related,
-          getSourceQueryValues(source),
-        );
-        if (append) {
-          appendDiscoveredOptionsForSource(sourceProvider, response.candidates);
-        } else {
-          replaceDiscoveredOptionsForSource(sourceProvider, response.candidates);
-        }
-        setDiscoveredCountBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: response.totalCount,
-        }));
-        setDiscoverOffsetBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: response.nextOffset,
-        }));
-        setDiscoverHasMoreBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: response.hasMore,
-        }));
-        setSourceStatusBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: "ready",
-        }));
-      } catch (sourceError) {
-        setSourceStatusBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: "error",
-        }));
-        setSourceErrorBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: normalizeLogoOptionsErrorMessage(
-            sourceError instanceof Error ? sourceError.message : "Failed to refresh source",
-          ),
-        }));
-      }
-    },
-    [
-      appendDiscoveredOptionsForSource,
-      discoverBySource,
-      replaceDiscoveredOptionsForSource,
-    ],
-  );
-
-  const prefetchSourceCandidates = useCallback(
-    async (sourceRows: SourceSummary[], related: boolean) => {
-      const refreshableRows = sourceRows.filter((source) => source.refreshable);
-      if (refreshableRows.length === 0) return;
-
-      setSourceStatusBySource((previous) => {
-        const next = { ...previous };
-        for (const source of refreshableRows) {
-          next[source.source_provider] = "loading";
-        }
-        return next;
-      });
-
-      await runWithConcurrency(refreshableRows, SOURCE_PREFETCH_CONCURRENCY, async (source) => {
-        await refreshSource({
-          sourceProvider: source.source_provider,
-          sourceSnapshot: source,
-          related,
-        });
-      });
-    },
-    [refreshSource],
-  );
-
-  const saveSourceQueries = useCallback(
-    async (sourceProvider: string, nextValues: string[]) => {
-      setSourceStatusBySource((previous) => ({
-        ...previous,
-        [sourceProvider]: "saving",
-      }));
-      setSourceErrorBySource((previous) => ({
-        ...previous,
-        [sourceProvider]: null,
-      }));
-
-      const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/source-query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          target_type: targetType,
-          target_key: targetKey,
-          target_label: targetLabel,
-          logo_role: logoRole,
-          source_provider: sourceProvider,
-          query_values: nextValues,
-        }),
-      });
-
-      if (!response.ok) {
-        const message = normalizeLogoOptionsErrorMessage(await parseErrorPayload(response));
-        setSourceStatusBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: "error",
-        }));
-        setSourceErrorBySource((previous) => ({
-          ...previous,
-          [sourceProvider]: message,
-        }));
-        throw new Error(message);
-      }
-
-      const payload = (await response.json()) as SourceQuerySaveResponse;
-      if (payload.source) {
-        updateSourceSummary(sourceProvider, (source) => ({
-          ...source,
-          ...payload.source,
-          total_count: source.total_count,
-        }));
-        await refreshSource({
-          sourceProvider,
-          sourceSnapshot: {
-            ...payload.source,
-            source_provider: payload.source.source_provider || sourceProvider,
-            total_count: sourcesRef.current.find((source) => source.source_provider === sourceProvider)?.total_count ?? 0,
-            has_more: payload.source.has_more ?? false,
-          },
-        });
-      } else {
-        await refreshSource({ sourceProvider });
-      }
-      setAddingQueryBySource((previous) => ({
-        ...previous,
-        [sourceProvider]: false,
-      }));
-      setNewQueryDraftBySource((previous) => ({
-        ...previous,
-        [sourceProvider]: "",
-      }));
-    },
-    [fetchWithAuth, logoRole, refreshSource, targetKey, targetLabel, targetType, updateSourceSummary],
-  );
-
-  const applySharedSlugs = useCallback(
-    async (nextSlugs: string[]) => {
-      const normalizedSlugs = dedupeNormalizedValues(nextSlugs.map((value) => normalizeSharedSlug(value)).filter(Boolean));
-      setApplyingSlugs(true);
-      setError(null);
-      try {
-        const eligibleSources = sourcesRef.current.filter(
-          (source) => source.editable && SHARED_SLUG_SOURCE_KINDS.includes(source.query_kind ?? "readonly"),
-        );
-        for (const source of eligibleSources) {
-          const nextQueryValues = buildQueriesFromSharedSlugs(source, normalizedSlugs);
-          const currentQueryValues = getSourceQueryValues(source);
-          if (areStringListsEqual(currentQueryValues, nextQueryValues)) continue;
-          await saveSourceQueries(source.source_provider, nextQueryValues);
-        }
-        setSharedSlugs(normalizedSlugs);
-        setAddingSharedSlug(false);
-        setNewSharedSlugDraft("");
-      } catch (applyError) {
-        setError(
-          normalizeLogoOptionsErrorMessage(
-            applyError instanceof Error ? applyError.message : "Failed to apply shared slugs",
-          ),
-        );
-      } finally {
-        setApplyingSlugs(false);
-      }
-    },
-    [saveSourceQueries],
-  );
+  const prefetchSourceCandidates = useCallback(async (sourceRows: SourceSummary[], sessionId = modalSessionRef.current) => {
+    const refreshable = sourceRows.filter((source) => source.refreshable);
+    await runWithConcurrency(refreshable, SOURCE_PREFETCH_CONCURRENCY, async (source) => {
+      await refreshSource({ sourceProvider: source.source_provider, sourceSnapshot: source, sessionId });
+    });
+  }, [refreshSource]);
 
   const loadInitial = useCallback(async () => {
+    const sessionId = modalSessionRef.current + 1;
+    modalSessionRef.current = sessionId;
+    const requestId = modalLoadRequestIdRef.current + 1;
+    modalLoadRequestIdRef.current = requestId;
+    sourceRefreshRequestIdRef.current = {};
+    suggestionRequestIdRef.current = {};
     setLoading(true);
     setError(null);
+    setRelatedFallbackActive(false);
     setManualImportError(null);
     setManualImageUrl("");
+    setManualImportOpen(false);
     setSlugPanelOpen(false);
-    setApplyingSlugs(false);
-    setSharedSlugs([]);
     setAddingSharedSlug(false);
     setNewSharedSlugDraft("");
-    setBrokenPreviewIds({});
+    setAddingQueryBySource({});
+    setNewQueryDraftBySource({});
+    setActiveDragOptionId(null);
     setDiscoveredOptionsBySource({});
-    setSelectedOptionId(null);
+    setSelectedOptionIdsBySource({});
     setDiscoveredCountBySource({});
     setDiscoverOffsetBySource({});
     setDiscoverHasMoreBySource({});
     setSourceErrorBySource({});
-    setSourceStatusBySource({});
-    setAddingQueryBySource({});
-    setNewQueryDraftBySource({});
-
+    setSourceSuggestionsBySource({});
+    setSourceSuggestionsLoadingBySource({});
+    setSourceSuggestionsErrorBySource({});
+    setDeleteConfirmAssetId(null);
     try {
-      const initial = await loadForIncludeRelated(includeRelated);
-      let options = initial.options;
-      let sourceRowsRaw = initial.sourceRowsRaw;
-      let loadErrors = initial.errors;
-      let showRelatedFallbackWarning = false;
-      let relatedForDiscovery = includeRelated;
-
-      if (includeRelated && loadErrors.some((message) => isSchemaVariantError(message))) {
-        const fallback = await loadForIncludeRelated(false);
-        options = fallback.options;
-        sourceRowsRaw = fallback.sourceRowsRaw;
-        loadErrors = fallback.errors;
-        showRelatedFallbackWarning = true;
-        relatedForDiscovery = false;
+      const {
+        fallbackMessage,
+        payload,
+        relatedFallback,
+      } = await fetchModalPayloadWithFallback();
+      if (
+        modalSessionRef.current !== sessionId
+        || modalLoadRequestIdRef.current !== requestId
+      ) {
+        return;
       }
-
-      setStoredOptions(options);
-      setSources(sourceRowsRaw);
-      setSharedSlugs(deriveSharedSlugsFromSources(sourceRowsRaw));
-      setDiscoverIncludeRelated(relatedForDiscovery);
-      const selectedStored = options.find((row) => row.is_selected_for_role);
-      setSelectedOptionId(selectedStored?.id ?? null);
-      setActiveSource(
-        (options.length > 0 ? SAVED_SOURCE_PROVIDER : null)
-          || selectedStored?.source_provider
-          || sourceRowsRaw.find((source) => source.source_provider !== "related_network_streaming")?.source_provider
-          || sourceRowsRaw[0]?.source_provider
-          || null,
-      );
-      setDiscoverHasMoreBySource(
-        Object.fromEntries(sourceRowsRaw.map((source) => [source.source_provider, Boolean(source.has_more)])),
-      );
-      setSourceStatusBySource(
-        Object.fromEntries(
-          sourceRowsRaw.map((source) => [source.source_provider, source.refreshable ? ("idle" as const) : ("ready" as const)]),
-        ),
-      );
-
-      if (showRelatedFallbackWarning) {
-        setError("Related logo pairing temporarily unavailable; discovery sources are still usable.");
-      } else if (loadErrors.length > 0) {
-        setError(normalizeLogoOptionsErrorMessage(loadErrors[0] || "Failed to load logo options"));
-      }
-
-      void prefetchSourceCandidates(sourceRowsRaw, relatedForDiscovery);
+      setRelatedFallbackActive(relatedFallback);
+      setError(fallbackMessage);
+      hydrateFromModalPayload(payload);
+      const sourceRows = Array.isArray(payload.sources) ? payload.sources : [];
+      void prefetchSourceCandidates(sourceRows, sessionId);
     } catch (loadError) {
-      setStoredOptions([]);
-      setSources([]);
-      setActiveSource(null);
+      if (
+        modalSessionRef.current !== sessionId
+        || modalLoadRequestIdRef.current !== requestId
+      ) {
+        return;
+      }
       setError(normalizeLogoOptionsErrorMessage(loadError instanceof Error ? loadError.message : "Failed to load logo options"));
     } finally {
-      setLoading(false);
+      if (
+        modalSessionRef.current === sessionId
+        && modalLoadRequestIdRef.current === requestId
+      ) {
+        setLoading(false);
+      }
     }
-  }, [includeRelated, loadForIncludeRelated, prefetchSourceCandidates]);
+  }, [fetchModalPayloadWithFallback, hydrateFromModalPayload, prefetchSourceCandidates]);
 
   useEffect(() => {
     if (!isOpen) return;
     void loadInitial();
   }, [isOpen, loadInitial]);
 
-  const manualOptions = useMemo(
-    () => discoveredOptionsBySource[MANUAL_SOURCE_PROVIDER] ?? [],
-    [discoveredOptionsBySource],
-  );
+  const manualOptions = useMemo(() => discoveredOptionsBySource[MANUAL_SOURCE_PROVIDER] ?? [], [discoveredOptionsBySource]);
 
   const savedSourceSummary = useMemo<SourceSummary | null>(() => {
-    if (storedOptions.length === 0) return null;
+    if (savedAssets.length === 0) return null;
     return {
       source_provider: SAVED_SOURCE_PROVIDER,
-      total_count: storedOptions.length,
+      total_count: savedAssets.length,
       has_more: false,
       editable: false,
       refreshable: false,
       query_kind: "readonly",
       default_query_value: "saved library assets",
       effective_query_value: "saved library assets",
-      query_links: ["featured assets already stored in TRR"],
-      logo_role: logoRole,
+      query_links: ["shared saved asset library"],
     };
-  }, [logoRole, storedOptions.length]);
+  }, [savedAssets.length]);
 
   const manualSourceSummary = useMemo<SourceSummary | null>(() => {
     if (manualOptions.length === 0) return null;
@@ -812,78 +991,37 @@ export default function BrandLogoOptionsModal({
       default_query_value: "manual import",
       effective_query_value: "manual import",
       query_links: ["manual URL input"],
-      logo_role: logoRole,
     };
-  }, [logoRole, manualOptions.length]);
+  }, [manualOptions.length]);
 
   const sourceLookup = useMemo(() => {
-    const map = new Map(sources.map((source) => [source.source_provider, source]));
-    if (savedSourceSummary) {
-      map.set(savedSourceSummary.source_provider, savedSourceSummary);
-    }
-    if (manualSourceSummary) {
-      map.set(manualSourceSummary.source_provider, manualSourceSummary);
-    }
+    const map = new Map<string, SourceSummary>(sources.map((source) => [source.source_provider, source]));
+    if (savedSourceSummary) map.set(savedSourceSummary.source_provider, savedSourceSummary);
+    if (manualSourceSummary) map.set(manualSourceSummary.source_provider, manualSourceSummary);
     return map;
   }, [manualSourceSummary, savedSourceSummary, sources]);
 
   const optionsById = useMemo(() => {
-    const map = new Map<string, LogoOptionRow | DiscoverCandidate>();
-    for (const option of storedOptions) {
-      map.set(option.id, option);
-    }
+    const map = new Map<string, SavedLogoAsset | DiscoverCandidate>();
+    for (const asset of savedAssets) map.set(asset.id, asset);
     for (const sourceOptions of Object.values(discoveredOptionsBySource)) {
-      for (const option of sourceOptions) {
-        map.set(option.id, option);
-      }
+      for (const option of sourceOptions) map.set(option.id, option);
     }
     return map;
-  }, [discoveredOptionsBySource, storedOptions]);
+  }, [discoveredOptionsBySource, savedAssets]);
 
-  const currentFeaturedOptionId = useMemo(
-    () => storedOptions.find((row) => row.is_selected_for_role)?.id ?? null,
-    [storedOptions],
-  );
-
-  useEffect(() => {
-    currentFeaturedOptionIdRef.current = currentFeaturedOptionId;
-  }, [currentFeaturedOptionId]);
-
-  const selectedOption = useMemo(
-    () => (selectedOptionId ? optionsById.get(selectedOptionId) ?? null : null),
-    [optionsById, selectedOptionId],
-  );
   const sourceTabs = useMemo(() => {
-    const tabs = [...sources]
-      .filter((source) => {
-        const hasLiveCount = Object.prototype.hasOwnProperty.call(discoveredCountBySource, source.source_provider);
-        const displayCount = hasLiveCount ? discoveredCountBySource[source.source_provider] : source.total_count;
-        if (source.source_provider === "related_network_streaming" && displayCount <= 0) {
-          return false;
-        }
-        return true;
-      })
-      .sort((left, right) => {
-        const leftHasLiveCount = Object.prototype.hasOwnProperty.call(discoveredCountBySource, left.source_provider);
-        const rightHasLiveCount = Object.prototype.hasOwnProperty.call(discoveredCountBySource, right.source_provider);
-        const leftCount = leftHasLiveCount ? discoveredCountBySource[left.source_provider] : left.total_count;
-        const rightCount = rightHasLiveCount ? discoveredCountBySource[right.source_provider] : right.total_count;
-        if (rightCount !== leftCount) return rightCount - leftCount;
-        const leftLoading = sourceStatusBySource[left.source_provider] === "loading";
-        const rightLoading = sourceStatusBySource[right.source_provider] === "loading";
-        if (leftLoading !== rightLoading) return leftLoading ? 1 : -1;
-        return left.source_provider.localeCompare(right.source_provider);
-      });
+    const tabs = [...sources];
     const out: SourceSummary[] = [];
-    if (savedSourceSummary) {
-      out.push(savedSourceSummary);
-    }
+    if (savedSourceSummary) out.push(savedSourceSummary);
     out.push(...tabs);
-    if (manualSourceSummary) {
-      out.push(manualSourceSummary);
-    }
+    if (manualSourceSummary) out.push(manualSourceSummary);
     return out;
-  }, [discoveredCountBySource, manualSourceSummary, savedSourceSummary, sourceStatusBySource, sources]);
+  }, [manualSourceSummary, savedSourceSummary, sources]);
+  const hasSharedSlugSources = useMemo(
+    () => sources.some((source) => source.editable && SHARED_SLUG_SOURCE_KINDS.includes(source.query_kind ?? "readonly")),
+    [sources],
+  );
 
   useEffect(() => {
     if (sourceTabs.length === 0) {
@@ -895,28 +1033,198 @@ export default function BrandLogoOptionsModal({
     }
   }, [activeSource, sourceTabs]);
 
-  const allOptions = useMemo(() => {
-    if (!activeSource) return [];
-    if (activeSource === SAVED_SOURCE_PROVIDER) {
-      return storedOptions;
-    }
-    if (activeSource === MANUAL_SOURCE_PROVIDER) {
-      return manualOptions;
-    }
-    const storedForSource = storedOptions.filter((row) => (row.source_provider || "unknown") === activeSource);
-    const discoveredForSource = discoveredOptionsBySource[activeSource] ?? [];
-    return [...storedForSource, ...discoveredForSource];
-  }, [activeSource, discoveredOptionsBySource, manualOptions, storedOptions]);
-
   const activeSourceRow = activeSource ? sourceLookup.get(activeSource) ?? null : null;
   const activeSourceStatus = activeSource ? sourceStatusBySource[activeSource] : undefined;
   const activeSourceError = activeSource ? sourceErrorBySource[activeSource] : undefined;
   const activeSourceQueryValues = getSourceQueryValues(activeSourceRow);
-  const featuredOption = selectedOption || storedOptions.find((row) => row.is_selected_for_role) || allOptions[0] || null;
-  const hasPendingSelection = Boolean(selectedOption?.id && selectedOption.id !== currentFeaturedOptionId);
-  const canSaveSelection = Boolean(selectedOption) && (currentFeaturedOptionId === null || selectedOption?.id !== currentFeaturedOptionId);
+  const activeSourceSuggestions = activeSource ? sourceSuggestionsBySource[activeSource] ?? [] : [];
+  const activeSourceSuggestionsLoading = activeSource ? Boolean(sourceSuggestionsLoadingBySource[activeSource]) : false;
+  const activeSourceSuggestionsError = activeSource ? sourceSuggestionsErrorBySource[activeSource] : null;
+  const activeSelectionIds = useMemo(() => {
+    if (!activeSource || activeSource === SAVED_SOURCE_PROVIDER) return [];
+    return (selectedOptionIdsBySource[activeSource] ?? []).filter((optionId) => optionsById.has(optionId));
+  }, [activeSource, optionsById, selectedOptionIdsBySource]);
+  const allOptions = useMemo(() => {
+    if (!activeSource) return [];
+    if (activeSource === SAVED_SOURCE_PROVIDER) return savedAssets;
+    if (activeSource === MANUAL_SOURCE_PROVIDER) return manualOptions;
+    return discoveredOptionsBySource[activeSource] ?? [];
+  }, [activeSource, discoveredOptionsBySource, manualOptions, savedAssets]);
+  const activeDragOption = activeDragOptionId ? optionsById.get(activeDragOptionId) ?? null : null;
+
+  const updateSourceSummary = useCallback((sourceProvider: string, updater: (source: SourceSummary) => SourceSummary) => {
+    setSources((previous) => previous.map((source) => (source.source_provider === sourceProvider ? updater(source) : source)));
+  }, []);
+
+  const notifySaved = useCallback(() => {
+    void Promise.resolve(onSaved()).catch(() => undefined);
+  }, [onSaved]);
+
+  const saveSourceQueries = useCallback(async (sourceProvider: string, nextValues: string[]) => {
+    if (saving || loading) return;
+    const previousSource = sourcesRef.current.find((source) => source.source_provider === sourceProvider) ?? null;
+    const normalizedValues = dedupeNormalizedValues(nextValues);
+    setSourceStatusBySource((previous) => ({ ...previous, [sourceProvider]: "saving" }));
+    setSourceErrorBySource((previous) => ({ ...previous, [sourceProvider]: null }));
+    if (previousSource) {
+      updateSourceSummary(sourceProvider, (source) => ({
+        ...source,
+        effective_query_value: normalizedValues[0] ?? null,
+        query_values: normalizedValues,
+      }));
+    }
+    try {
+      const responses = await Promise.all(
+        SHARED_SOURCE_QUERY_ROLES.map(async (role) => {
+          const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/source-query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              target_type: targetType,
+              target_key: targetKey,
+              target_label: targetLabel,
+              logo_role: role,
+              source_provider: sourceProvider,
+              query_values: normalizedValues,
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
+          }
+          return (await response.json()) as SourceQuerySaveResponse;
+        }),
+      );
+      const payload = responses[0];
+      if (payload.source) {
+        updateSourceSummary(sourceProvider, (source) => ({
+          ...source,
+          ...payload.source,
+          total_count: source.total_count,
+        }));
+      }
+      await refreshSource({
+        sourceProvider,
+        sourceSnapshot: payload.source
+          ? {
+              ...payload.source,
+              source_provider: payload.source.source_provider || sourceProvider,
+              total_count: sourcesRef.current.find((source) => source.source_provider === sourceProvider)?.total_count ?? 0,
+              has_more: payload.source.has_more ?? false,
+            }
+          : undefined,
+      });
+      setAddingQueryBySource((previous) => ({ ...previous, [sourceProvider]: false }));
+      setNewQueryDraftBySource((previous) => ({ ...previous, [sourceProvider]: "" }));
+      setSourceStatusBySource((previous) => ({ ...previous, [sourceProvider]: "ready" }));
+      if (sourceProvider === "logos_fandom") {
+        setSourceSuggestionsBySource((previous) => ({ ...previous, [sourceProvider]: [] }));
+      }
+    } catch (saveError) {
+      if (previousSource) {
+        updateSourceSummary(sourceProvider, () => previousSource);
+      }
+      setSourceStatusBySource((previous) => ({ ...previous, [sourceProvider]: "error" }));
+      setSourceErrorBySource((previous) => ({
+        ...previous,
+        [sourceProvider]: normalizeLogoOptionsErrorMessage(
+          saveError instanceof Error ? saveError.message : "Failed to save source queries",
+        ),
+      }));
+    }
+  }, [fetchWithAuth, loading, refreshSource, saving, targetKey, targetLabel, targetType, updateSourceSummary]);
+
+  const loadSourceSuggestions = useCallback(async (
+    sourceProvider: string,
+    { force = false, sessionId = modalSessionRef.current }: { force?: boolean; sessionId?: number } = {},
+  ) => {
+    if (sourceProvider !== "logos_fandom") return;
+    if (!force && sourceSuggestionsBySource[sourceProvider]) return;
+    const requestId = (suggestionRequestIdRef.current[sourceProvider] ?? 0) + 1;
+    suggestionRequestIdRef.current[sourceProvider] = requestId;
+    setSourceSuggestionsLoadingBySource((previous) => ({ ...previous, [sourceProvider]: true }));
+    setSourceSuggestionsErrorBySource((previous) => ({ ...previous, [sourceProvider]: null }));
+    try {
+      const params = new URLSearchParams({
+        target_type: targetType,
+        target_key: targetKey,
+        target_label: targetLabel,
+        logo_role: "wordmark",
+        source_provider: sourceProvider,
+      });
+      const response = await fetchWithAuth(`/api/admin/trr-api/brands/logos/options/source-suggestions?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
+      }
+      const payload = (await response.json()) as SourceSuggestionResponse;
+      if (
+        modalSessionRef.current !== sessionId
+        || suggestionRequestIdRef.current[sourceProvider] !== requestId
+      ) {
+        return;
+      }
+      setSourceSuggestionsBySource((previous) => ({
+        ...previous,
+        [sourceProvider]: Array.isArray(payload.suggestions) ? payload.suggestions : [],
+      }));
+    } catch (suggestionError) {
+      if (
+        modalSessionRef.current !== sessionId
+        || suggestionRequestIdRef.current[sourceProvider] !== requestId
+      ) {
+        return;
+      }
+      setSourceSuggestionsErrorBySource((previous) => ({
+        ...previous,
+        [sourceProvider]: normalizeLogoOptionsErrorMessage(
+          suggestionError instanceof Error ? suggestionError.message : "Failed to load source suggestions",
+        ),
+      }));
+    } finally {
+      if (
+        modalSessionRef.current === sessionId
+        && suggestionRequestIdRef.current[sourceProvider] === requestId
+      ) {
+        setSourceSuggestionsLoadingBySource((previous) => ({ ...previous, [sourceProvider]: false }));
+      }
+    }
+  }, [fetchWithAuth, sourceSuggestionsBySource, targetKey, targetLabel, targetType]);
+
+  useEffect(() => {
+    if (!isOpen || activeSource !== "logos_fandom") return;
+    void loadSourceSuggestions(activeSource);
+  }, [activeSource, isOpen, loadSourceSuggestions]);
+
+  const applySharedSlugs = useCallback(async (nextSlugs: string[]) => {
+    const normalizedSlugs = dedupeNormalizedValues(nextSlugs.map((value) => normalizeSharedSlug(value)).filter(Boolean));
+    setApplyingSlugs(true);
+    setError(null);
+    try {
+      const eligibleSources = sourcesRef.current.filter(
+        (source) => source.editable && SHARED_SLUG_SOURCE_KINDS.includes(source.query_kind ?? "readonly"),
+      );
+      for (const source of eligibleSources) {
+        const nextQueryValues = buildQueriesFromSharedSlugs(source, normalizedSlugs);
+        if (areStringListsEqual(getSourceQueryValues(source), nextQueryValues)) continue;
+        await saveSourceQueries(source.source_provider, nextQueryValues);
+      }
+      setSharedSlugs(normalizedSlugs);
+      setAddingSharedSlug(false);
+      setNewSharedSlugDraft("");
+    } catch (applyError) {
+      setError(
+        normalizeLogoOptionsErrorMessage(
+          applyError instanceof Error ? applyError.message : "Failed to apply shared slugs",
+        ),
+      );
+    } finally {
+      setApplyingSlugs(false);
+    }
+  }, [saveSourceQueries]);
 
   const onAddManualImageUrl = useCallback(() => {
+    if (saving || loading) return;
     const sourceUrl = manualImageUrl.trim();
     if (!sourceUrl) {
       setManualImportError("Enter an image URL to import.");
@@ -927,314 +1235,383 @@ export default function BrandLogoOptionsModal({
       return;
     }
     const candidate: DiscoverCandidate = {
-      id: manualCandidateId(sourceUrl, logoRole),
+      id: manualCandidateId(sourceUrl),
       source_url: sourceUrl,
       source_provider: MANUAL_SOURCE_PROVIDER,
       discovered_from: sourceUrl,
-      logo_role: logoRole,
       option_kind: "candidate",
+      file_type: inferFileTypeFromUrl(sourceUrl),
+      content_type: null,
+      width: null,
+      height: null,
+      aspect_ratio: null,
+      detected_logo_role: "wordmark",
     };
+    const alreadyExists = manualOptions.some((option) => option.source_url === sourceUrl);
     setManualImportError(null);
     setDiscoveredOptionsBySource((previous) => {
-      const manualRows = previous[MANUAL_SOURCE_PROVIDER] ?? [];
-      if (manualRows.some((row) => row.source_url === candidate.source_url && row.logo_role === candidate.logo_role)) {
-        return previous;
-      }
+      const current = previous[MANUAL_SOURCE_PROVIDER] ?? [];
+      if (current.some((option) => option.source_url === sourceUrl)) return previous;
+      return { ...previous, [MANUAL_SOURCE_PROVIDER]: [...current, candidate] };
+    });
+    if (!alreadyExists) {
+      setDiscoveredCountBySource((previous) => ({ ...previous, [MANUAL_SOURCE_PROVIDER]: (previous[MANUAL_SOURCE_PROVIDER] ?? 0) + 1 }));
+    }
+    setActiveSource(MANUAL_SOURCE_PROVIDER);
+    setSelectedOptionIdsBySource((previous) => ({
+      ...previous,
+      [MANUAL_SOURCE_PROVIDER]: Array.from(new Set([...(previous[MANUAL_SOURCE_PROVIDER] ?? []), candidate.id])),
+    }));
+    setManualImageUrl("");
+  }, [loading, manualImageUrl, manualOptions, saving]);
+
+  const toggleNonSavedSelection = useCallback((sourceProvider: string, optionId: string) => {
+    if (saving) return;
+    setSelectedOptionIdsBySource((previous) => {
+      const existing = previous[sourceProvider] ?? [];
+      const isSelected = existing.includes(optionId);
       return {
         ...previous,
-        [MANUAL_SOURCE_PROVIDER]: [...manualRows, candidate],
+        [sourceProvider]: isSelected ? existing.filter((candidateId) => candidateId !== optionId) : [...existing, optionId],
       };
     });
-    setDiscoveredCountBySource((previous) => ({
-      ...previous,
-      [MANUAL_SOURCE_PROVIDER]: Math.max(1, (previous[MANUAL_SOURCE_PROVIDER] ?? 0) + 1),
-    }));
-    setDiscoverHasMoreBySource((previous) => ({
-      ...previous,
-      [MANUAL_SOURCE_PROVIDER]: false,
-    }));
-    setActiveSource(MANUAL_SOURCE_PROVIDER);
-    setSelectedOptionId(candidate.id);
-    setManualImageUrl("");
-  }, [logoRole, manualImageUrl]);
+  }, [saving]);
 
-  const onLoadMore = useCallback(async () => {
-    if (!activeSourceRow?.refreshable || !activeSource) return;
-    await refreshSource({ append: true, sourceProvider: activeSource, sourceSnapshot: activeSourceRow });
-  }, [activeSource, activeSourceRow, refreshSource]);
-
-  const onSave = useCallback(async () => {
-    if (!selectedOption) {
-      setError("Select a logo option before saving.");
-      return;
+  const refreshModalAfterMutation = useCallback(async (preferredActiveSource: string | null) => {
+    const requestId = mutationRefreshRequestIdRef.current + 1;
+    mutationRefreshRequestIdRef.current = requestId;
+    const sessionId = modalSessionRef.current;
+    const {
+      fallbackMessage,
+      payload,
+      relatedFallback,
+    } = await fetchModalPayloadWithFallback();
+    if (
+      mutationRefreshRequestIdRef.current !== requestId
+      || modalSessionRef.current !== sessionId
+    ) {
+      return false;
     }
+    setRelatedFallbackActive(relatedFallback);
+    setError(fallbackMessage);
+    hydrateFromModalPayload(payload, { preferredActiveSource });
+    const sourceRows = Array.isArray(payload.sources) ? payload.sources : [];
+    void prefetchSourceCandidates(sourceRows, sessionId);
+    return true;
+  }, [fetchModalPayloadWithFallback, hydrateFromModalPayload, prefetchSourceCandidates]);
+
+  const assignOptionToRole = useCallback(async (option: SavedLogoAsset | DiscoverCandidate, role: BrandLogoRole) => {
+    if (saving) return;
     setSaving(true);
     setError(null);
+    setDeleteConfirmAssetId(null);
     try {
-      const payload: Record<string, unknown> = {
+      const body: Record<string, unknown> = {
         target_type: targetType,
         target_key: targetKey,
         target_label: targetLabel,
-        logo_role: logoRole,
+        logo_role: role,
       };
-      if ((selectedOption.option_kind || "stored") === "candidate") {
-        payload.candidate = {
-          source_url: selectedOption.source_url,
-          source_provider: selectedOption.source_provider || null,
-          discovered_from: selectedOption.discovered_from || null,
+      if ((option.option_kind || "stored") === "candidate") {
+        body.candidate = {
+          source_url: option.source_url,
+          source_provider: option.source_provider || null,
+          discovered_from: option.discovered_from || null,
         };
       } else {
-        payload.asset_id = selectedOption.id;
+        body.asset_id = option.id;
       }
-      const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/select", {
+      const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
       }
-      await onSaved();
-      onClose();
-    } catch (saveError) {
+      if ((option.option_kind || "stored") !== "candidate") {
+        setFeaturedByRole((previous) => ({ ...previous, [role]: option as SavedLogoAsset }));
+      }
+      await refreshModalAfterMutation((option.option_kind || "stored") === "candidate" ? SAVED_SOURCE_PROVIDER : (activeSource ?? SAVED_SOURCE_PROVIDER));
+      notifySaved();
+    } catch (assignError) {
       setError(
         normalizeLogoOptionsErrorMessage(
-          saveError instanceof Error ? saveError.message : "Failed to save selected logo option",
+          assignError instanceof Error ? assignError.message : "Failed to assign featured logo",
         ),
       );
     } finally {
       setSaving(false);
     }
-  }, [fetchWithAuth, logoRole, onClose, onSaved, selectedOption, targetKey, targetLabel, targetType]);
+  }, [activeSource, fetchWithAuth, notifySaved, refreshModalAfterMutation, saving, targetKey, targetLabel, targetType]);
+
+  const deleteSavedAsset = useCallback(async (assetId: string) => {
+    if (saving) return;
+    const requestId = mutationRefreshRequestIdRef.current + 1;
+    mutationRefreshRequestIdRef.current = requestId;
+    setSaving(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        target_type: targetType,
+        target_key: targetKey,
+        target_label: targetLabel,
+      });
+      const response = await fetchWithAuth(`/api/admin/trr-api/brands/logos/options/saved/${assetId}?${params.toString()}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
+      }
+      const payload = (await response.json()) as ModalStateResponse;
+      if (mutationRefreshRequestIdRef.current !== requestId) return;
+      setDeleteConfirmAssetId(null);
+      hydrateFromModalPayload(payload, { preferredActiveSource: SAVED_SOURCE_PROVIDER });
+      const sourceRows = Array.isArray(payload.sources) ? payload.sources : [];
+      void prefetchSourceCandidates(sourceRows, modalSessionRef.current);
+      notifySaved();
+    } catch (deleteError) {
+      setError(
+        normalizeLogoOptionsErrorMessage(
+          deleteError instanceof Error ? deleteError.message : "Failed to delete saved logo option",
+        ),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [fetchWithAuth, hydrateFromModalPayload, notifySaved, prefetchSourceCandidates, saving, targetKey, targetLabel, targetType]);
+
+  const onSaveSelected = useCallback(async () => {
+    if (saving) return;
+    if (!activeSource || activeSource === SAVED_SOURCE_PROVIDER || activeSelectionIds.length === 0) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const selectedOptions = activeSelectionIds
+        .map((optionId) => optionsById.get(optionId))
+        .filter((option): option is SavedLogoAsset | DiscoverCandidate => Boolean(option));
+      if (selectedOptions.length === 0) {
+        throw new Error("Selected options are no longer available.");
+      }
+      for (const [index, option] of selectedOptions.entries()) {
+        const setFeatured = index === selectedOptions.length - 1;
+        const body: Record<string, unknown> = {
+          target_type: targetType,
+          target_key: targetKey,
+          target_label: targetLabel,
+          logo_role: getOptionPreferredRole(option),
+          set_featured: setFeatured,
+        };
+        if ((option.option_kind || "stored") === "candidate") {
+          body.candidate = {
+            source_url: option.source_url,
+            source_provider: option.source_provider || null,
+            discovered_from: option.discovered_from || null,
+          };
+        } else {
+          body.asset_id = option.id;
+        }
+        const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/select", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
+        }
+      }
+      await refreshModalAfterMutation(SAVED_SOURCE_PROVIDER);
+      notifySaved();
+    } catch (saveError) {
+      setError(
+        normalizeLogoOptionsErrorMessage(
+          saveError instanceof Error ? saveError.message : "Failed to save selected logo options",
+        ),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [activeSelectionIds, activeSource, fetchWithAuth, notifySaved, optionsById, refreshModalAfterMutation, saving, targetKey, targetLabel, targetType]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    if (saving) return;
+    const optionId = String(event.active.data.current?.optionId || "");
+    setActiveDragOptionId(optionId || null);
+  }, [saving]);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const optionId = String(event.active.data.current?.optionId || "");
+    const overId = String(event.over?.id || "");
+    setActiveDragOptionId(null);
+    if (!optionId || !overId.startsWith("feature:")) return;
+    const role = overId.replace("feature:", "") as BrandLogoRole;
+    const option = optionsById.get(optionId);
+    if (!option) return;
+    void assignOptionToRole(option, role);
+  }, [assignOptionToRole, optionsById]);
+
+  const activeSourceDisplayCount = activeSource && Object.prototype.hasOwnProperty.call(discoveredCountBySource, activeSource)
+    ? discoveredCountBySource[activeSource]
+    : activeSourceRow?.total_count ?? 0;
+  const activeSourceBusy = activeSource ? sourceStatusBySource[activeSource] === "saving" || sourceStatusBySource[activeSource] === "loading" : false;
+
+  useEffect(() => {
+    if (!activeSource) return;
+    resetResultsScroll();
+  }, [activeSource, resetResultsScroll]);
 
   return (
     <AdminModal
       isOpen={isOpen}
       onClose={onClose}
-      title={`${logoRole === "wordmark" ? "Wordmark" : "Icon"} Options • ${targetLabel}`}
-      panelClassName="max-h-[90vh] max-w-6xl overflow-hidden p-0"
+      title={`Brand Logos • ${targetLabel}`}
+      panelClassName="max-h-[90vh] max-w-6xl overflow-y-auto p-0"
     >
-      <div className="flex h-full min-h-0 max-h-[90vh] flex-col">
-        <div className="border-b border-zinc-200 bg-white px-4 py-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Source Discovery</p>
-              <p className="text-sm text-zinc-600">
-                Auto-scraped source counts, per-source query editing, and one-click refresh for logo candidates.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant={slugPanelOpen ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => setSlugPanelOpen((previous) => !previous)}
-              >
-                {slugPanelOpen ? "Hide Slugs" : "Slugs"}
-              </Button>
-              <Button
-                variant={manualImportOpen ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => setManualImportOpen((previous) => !previous)}
-              >
-                {manualImportOpen ? "Hide Manual Import" : "Add Manual Import"}
-              </Button>
-            </div>
-          </div>
-
-          {featuredOption ? (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="relative h-16 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white sm:w-40">
-                  <Image
-                    src={pickDisplayUrl(featuredOption) || PLACEHOLDER_ICON_PATH}
-                    alt={`${targetLabel} featured ${logoRole}`}
-                    fill
-                    className="object-contain p-2"
-                    unoptimized
-                  />
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                    {hasPendingSelection ? "Pending Featured" : "Current Featured"}
-                  </p>
-                  <p className="text-sm font-semibold text-zinc-900">
-                    {featuredOption.source_provider || "saved"}
-                  </p>
-                  <p className="truncate text-xs text-zinc-500">
-                    {featuredOption.discovered_from || featuredOption.source_url || "Saved in TRR"}
-                  </p>
-                </div>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div ref={resultsScrollRef} data-testid="brand-logo-modal-scroll-root" className="flex min-h-0 flex-col">
+          <div className="border-b border-zinc-200 bg-white px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Combined Picker</p>
+                <p className="text-sm text-zinc-600">One shared saved library, drag-to-feature frames, and source discovery in a single modal.</p>
               </div>
-            </div>
-          ) : null}
-
-          {slugPanelOpen ? (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="space-y-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Shared Slugs</p>
-                    <p className="text-sm text-zinc-600">
-                      Apply slug variants across compatible logo sources.
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setAddingSharedSlug(true)}
-                    disabled={applyingSlugs}
-                  >
-                    Add Slug
+              <div className="flex flex-wrap items-center gap-2">
+                {hasSharedSlugSources ? (
+                  <Button variant={slugPanelOpen ? "secondary" : "outline"} size="sm" onClick={() => setSlugPanelOpen((previous) => !previous)} disabled={saving || loading || applyingSlugs}>
+                    {slugPanelOpen ? "Hide Slugs" : "Slugs"}
                   </Button>
-                </div>
-
-                {sharedSlugs.length > 0 ? (
-                  <div className="space-y-3">
-                    {sharedSlugs.map((slugValue, index) => (
-                      <Editable
-                        key={`shared-slug:${slugValue}:${index}`}
-                        value={slugValue}
-                        placeholder="Enter shared slug"
-                        onSubmit={(nextValue) => {
-                          const nextSlugs = [...sharedSlugs];
-                          const normalized = normalizeSharedSlug(nextValue);
-                          if (normalized) {
-                            nextSlugs[index] = normalized;
-                          } else {
-                            nextSlugs.splice(index, 1);
-                          }
-                          return applySharedSlugs(nextSlugs);
-                        }}
-                      >
-                        <EditableArea>
-                          <EditablePreview />
-                          <EditableInput />
-                        </EditableArea>
-                        <EditableToolbar className="pt-1">
-                          <EditableSubmit asChild>
-                            <Button size="sm">Save</Button>
-                          </EditableSubmit>
-                          <EditableCancel asChild>
-                            <Button variant="outline" size="sm">
-                              Cancel
-                            </Button>
-                          </EditableCancel>
-                        </EditableToolbar>
-                        <div className="pt-1">
-                          <EditableTrigger asChild>
-                            <Button variant="ghost" size="sm" className="w-fit">
-                              Edit slug
-                            </Button>
-                          </EditableTrigger>
-                        </div>
-                      </Editable>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-zinc-500">No shared slugs yet.</p>
-                )}
-
-                {addingSharedSlug ? (
-                  <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 bg-white p-3">
-                    <label className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500" htmlFor="new-shared-slug">
-                      New Slug
-                    </label>
-                    <input
-                      id="new-shared-slug"
-                      aria-label="New Slug"
-                      type="text"
-                        name="new_shared_slug"
-                        value={newSharedSlugDraft}
-                      onChange={(event) => setNewSharedSlugDraft(event.target.value)}
-                      placeholder="Enter shared slug"
-                      className="min-h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        disabled={applyingSlugs}
-                        onClick={() => void applySharedSlugs([...sharedSlugs, newSharedSlugDraft])}
-                      >
-                        Add
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setAddingSharedSlug(false);
-                          setNewSharedSlugDraft("");
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
                 ) : null}
-
-                {applyingSlugs ? (
-                  <div className="flex items-center gap-2 text-sm text-zinc-500">
-                    <span
-                      aria-hidden="true"
-                      className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900"
-                    />
-                    <span>Applying shared slugs...</span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {manualImportOpen ? (
-            <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-                <div className="flex-1 space-y-2">
-                  <label className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500" htmlFor="manual-image-url">
-                    Manual Import
-                  </label>
-                  <input
-                    id="manual-image-url"
-                    aria-label="Manual image URL"
-                    type="url"
-                    value={manualImageUrl}
-                    name="manual_image_url"
-                    onChange={(event) => setManualImageUrl(event.target.value)}
-                    placeholder="https://example.com/logo.svg"
-                    className="min-h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
-                  />
-                  {manualImportError ? <p className="text-xs text-red-700">{manualImportError}</p> : null}
-                </div>
-                <Button variant="outline" onClick={onAddManualImageUrl}>
-                  Import Image URL
+                <Button variant={manualImportOpen ? "secondary" : "outline"} size="sm" onClick={() => setManualImportOpen((previous) => !previous)} disabled={saving || loading}>
+                  {manualImportOpen ? "Hide Manual Import" : "Add Manual Import"}
                 </Button>
               </div>
             </div>
-          ) : null}
 
-          {error ? <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <FeatureSlot role="wordmark" option={featuredByRole.wordmark} targetLabel={targetLabel} />
+              <FeatureSlot role="icon" option={featuredByRole.icon} targetLabel={targetLabel} />
+            </div>
 
-          <div className="mt-4 space-y-4">
-            <div className="sticky top-0 z-10 -mx-4 overflow-x-auto border-y border-zinc-200 bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
+            {slugPanelOpen && hasSharedSlugSources ? (
+              <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Shared Slugs</p>
+                    <p className="text-sm text-zinc-600">Editing a shared slug reruns every compatible source with the full shared slug list.</p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setAddingSharedSlug(true)} disabled={applyingSlugs}>
+                    Add Slug
+                  </Button>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {sharedSlugs.length === 0 ? <p className="text-sm text-zinc-500">No shared slugs yet.</p> : null}
+                  {sharedSlugs.map((slugValue, index) => (
+                    <Editable
+                      key={`shared-slug:${slugValue}:${index}`}
+                      value={slugValue}
+                      placeholder="Enter shared slug"
+                      onSubmit={(nextValue) => {
+                        const nextSlugs = [...sharedSlugs];
+                        const normalized = normalizeSharedSlug(nextValue);
+                        if (normalized) {
+                          nextSlugs[index] = normalized;
+                        } else {
+                          nextSlugs.splice(index, 1);
+                        }
+                        return applySharedSlugs(nextSlugs);
+                      }}
+                    >
+                      <EditableArea>
+                        <EditablePreview />
+                        <EditableInput />
+                      </EditableArea>
+                      <EditableToolbar className="pt-1">
+                        <EditableSubmit asChild><Button size="sm">Save</Button></EditableSubmit>
+                        <EditableCancel asChild><Button variant="outline" size="sm">Cancel</Button></EditableCancel>
+                      </EditableToolbar>
+                      <div className="pt-1">
+                        <EditableTrigger asChild><Button variant="ghost" size="sm" className="w-fit">Edit slug</Button></EditableTrigger>
+                      </div>
+                    </Editable>
+                  ))}
+                  {addingSharedSlug ? (
+                    <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 bg-white p-3">
+                      <label className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500" htmlFor="new-shared-slug">
+                        New Slug
+                      </label>
+                      <input
+                        id="new-shared-slug"
+                        aria-label="New Slug"
+                        type="text"
+                        value={newSharedSlugDraft}
+                        onChange={(event) => setNewSharedSlugDraft(event.target.value)}
+                        placeholder="Enter shared slug"
+                        className="min-h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" disabled={applyingSlugs || saving || loading} onClick={() => void applySharedSlugs([...sharedSlugs, newSharedSlugDraft])}>Add</Button>
+                        <Button variant="outline" size="sm" onClick={() => {
+                          setAddingSharedSlug(false);
+                          setNewSharedSlugDraft("");
+                        }} disabled={applyingSlugs || saving || loading}>Cancel</Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {manualImportOpen ? (
+              <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+                  <div className="flex-1 space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500" htmlFor="manual-image-url">
+                      Manual Import
+                    </label>
+                    <input
+                      id="manual-image-url"
+                      aria-label="Manual image URL"
+                      type="url"
+                      value={manualImageUrl}
+                      onChange={(event) => setManualImageUrl(event.target.value)}
+                      placeholder="https://example.com/logo.svg"
+                      className="min-h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                    />
+                    {manualImportError ? <p className="text-xs text-red-700">{manualImportError}</p> : null}
+                  </div>
+                  <Button variant="outline" onClick={onAddManualImageUrl} disabled={saving || loading}>Import Image URL</Button>
+                </div>
+              </div>
+            ) : null}
+
+            {error ? <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+
+            <div className="mt-4 sticky top-0 z-10 -mx-4 overflow-x-auto border-y border-zinc-200 bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,0.03)]">
               <div className="flex min-w-max flex-wrap gap-2 pr-1">
                 {sourceTabs.map((source) => {
-                  const sourceStatus = sourceStatusBySource[source.source_provider] ?? (source.refreshable ? "idle" : "ready");
                   const hasLiveCount = Object.prototype.hasOwnProperty.call(discoveredCountBySource, source.source_provider);
-                  const displayCount = hasLiveCount ? discoveredCountBySource[source.source_provider] : source.total_count;
-                  const displayCountText =
-                    source.refreshable && !hasLiveCount && (sourceStatus === "idle" || sourceStatus === "loading") ? "..." : String(displayCount);
+                  const displayCount = source.source_provider === SAVED_SOURCE_PROVIDER
+                    ? savedAssets.length
+                    : source.source_provider === MANUAL_SOURCE_PROVIDER
+                      ? manualOptions.length
+                      : hasLiveCount
+                        ? discoveredCountBySource[source.source_provider]
+                        : source.total_count;
                   return (
                     <button
                       key={source.source_provider}
                       type="button"
                       onClick={() => setActiveSource(source.source_provider)}
-                      aria-label={`Filter options by ${source.source_provider} (${displayCountText})`}
                       className={joinClassNames(
-                        "rounded-full border px-3 py-1 text-xs font-semibold transition",
+                        "rounded-full border px-3 py-1 text-xs font-semibold transition outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2",
                         activeSource === source.source_provider
                           ? "border-cyan-600 bg-cyan-600 text-white"
                           : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50",
                       )}
                     >
-                      {source.source_provider} ({displayCountText})
+                      {source.source_provider} ({displayCount})
                     </button>
                   );
                 })}
@@ -1242,7 +1619,7 @@ export default function BrandLogoOptionsModal({
             </div>
 
             {activeSourceRow ? (
-              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
+              <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="space-y-2 lg:max-w-[220px]">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Active Source</p>
@@ -1250,6 +1627,11 @@ export default function BrandLogoOptionsModal({
                       <span className="rounded-full border border-zinc-900 bg-zinc-900 px-3 py-1 text-xs font-semibold text-white">
                         {activeSourceRow.source_provider}
                       </span>
+                      {relatedFallbackActive ? (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+                          Related fallback active
+                        </span>
+                      ) : null}
                       <span className="text-xs text-zinc-500">
                         {activeSourceStatus === "saving"
                           ? "Saving query..."
@@ -1271,22 +1653,19 @@ export default function BrandLogoOptionsModal({
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() =>
-                              setAddingQueryBySource((previous) => ({
-                                ...previous,
-                                [activeSourceRow.source_provider]: true,
-                              }))
-                            }
+                            onClick={() => setAddingQueryBySource((previous) => ({ ...previous, [activeSourceRow.source_provider]: true }))}
+                            disabled={saving || loading || activeSourceStatus === "saving"}
                           >
                             Add Query
                           </Button>
                         </div>
                         {activeSourceQueryValues.map((queryValue, index) => (
                           <Editable
-                            key={`${activeSourceRow.source_provider}:${queryValue}:${index}`}
+                            key={`${activeSourceRow.source_provider}:query:${index}`}
                             value={queryValue}
                             placeholder={QUERY_PLACEHOLDERS[activeSourceRow.query_kind ?? "search_term"]}
                             onSubmit={(nextValue) => {
+                              if (saving || loading || activeSourceStatus === "saving") return Promise.resolve();
                               const nextQueryValues = [...activeSourceQueryValues];
                               if (nextValue.trim()) {
                                 nextQueryValues[index] = nextValue;
@@ -1301,71 +1680,43 @@ export default function BrandLogoOptionsModal({
                               <EditableInput />
                             </EditableArea>
                             <EditableToolbar className="pt-1">
-                              <EditableSubmit asChild>
-                                <Button size="sm">Save</Button>
-                              </EditableSubmit>
-                              <EditableCancel asChild>
-                                <Button variant="outline" size="sm">
-                                  Cancel
-                                </Button>
-                              </EditableCancel>
+                              <EditableSubmit asChild><Button size="sm" disabled={saving || loading || activeSourceStatus === "saving"}>Save</Button></EditableSubmit>
+                              <EditableCancel asChild><Button variant="outline" size="sm" disabled={saving || loading || activeSourceStatus === "saving"}>Cancel</Button></EditableCancel>
                             </EditableToolbar>
                             <div className="pt-1">
-                              <EditableTrigger asChild>
-                                <Button variant="ghost" size="sm" className="w-fit">
-                                  Edit {activeSourceRow.source_provider}
-                                </Button>
-                              </EditableTrigger>
+                              <EditableTrigger asChild><Button variant="ghost" size="sm" className="w-fit" disabled={saving || loading || activeSourceStatus === "saving"}>Edit query</Button></EditableTrigger>
                             </div>
                           </Editable>
                         ))}
                         {addingQueryBySource[activeSourceRow.source_provider] ? (
                           <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 bg-white p-3">
-                            <label
-                              className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500"
-                              htmlFor={`new-query-${activeSourceRow.source_provider}`}
-                            >
+                            <label className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500" htmlFor={`new-query-${activeSourceRow.source_provider}`}>
                               New Query
                             </label>
                             <input
                               id={`new-query-${activeSourceRow.source_provider}`}
-                              name={`new_query_${activeSourceRow.source_provider}`}
                               aria-label="New Query"
                               type="text"
                               value={newQueryDraftBySource[activeSourceRow.source_provider] ?? ""}
-                              onChange={(event) =>
-                                setNewQueryDraftBySource((previous) => ({
-                                  ...previous,
-                                  [activeSourceRow.source_provider]: event.target.value,
-                                }))
-                              }
+                              onChange={(event) => setNewQueryDraftBySource((previous) => ({ ...previous, [activeSourceRow.source_provider]: event.target.value }))}
                               placeholder={QUERY_PLACEHOLDERS[activeSourceRow.query_kind ?? "search_term"]}
                               className="min-h-10 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
                             />
                             <div className="flex flex-wrap gap-2">
                               <Button
                                 size="sm"
-                                onClick={() =>
-                                  void saveSourceQueries(activeSourceRow.source_provider, [
-                                    ...activeSourceQueryValues,
-                                    newQueryDraftBySource[activeSourceRow.source_provider] ?? "",
-                                  ])
-                                }
+                                disabled={saving || loading || activeSourceStatus === "saving"}
+                                onClick={() => void saveSourceQueries(activeSourceRow.source_provider, [...activeSourceQueryValues, newQueryDraftBySource[activeSourceRow.source_provider] ?? ""])}
                               >
                                 Add
                               </Button>
                               <Button
                                 variant="outline"
                                 size="sm"
+                                disabled={saving || loading || activeSourceStatus === "saving"}
                                 onClick={() => {
-                                  setAddingQueryBySource((previous) => ({
-                                    ...previous,
-                                    [activeSourceRow.source_provider]: false,
-                                  }));
-                                  setNewQueryDraftBySource((previous) => ({
-                                    ...previous,
-                                    [activeSourceRow.source_provider]: "",
-                                  }));
+                                  setAddingQueryBySource((previous) => ({ ...previous, [activeSourceRow.source_provider]: false }));
+                                  setNewQueryDraftBySource((previous) => ({ ...previous, [activeSourceRow.source_provider]: "" }));
                                 }}
                               >
                                 Cancel
@@ -1374,16 +1725,63 @@ export default function BrandLogoOptionsModal({
                           </div>
                         ) : null}
                         {renderSourceLinks(activeSourceRow.query_links)}
+                        {activeSourceRow.source_provider === "logos_fandom" ? (
+                          <div className="space-y-3 rounded-xl border border-dashed border-zinc-300 bg-white p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="space-y-1">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Editable Suggestions</p>
+                                <p className="text-sm text-zinc-600">Add linked brand and program pages into the saved query list.</p>
+                              </div>
+                              {activeSourceSuggestions.length > 0 ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={saving || loading || activeSourceStatus === "saving"}
+                                  onClick={() => void saveSourceQueries(
+                                    activeSourceRow.source_provider,
+                                    dedupeNormalizedValues([
+                                      ...activeSourceQueryValues,
+                                      ...activeSourceSuggestions.map((suggestion) => suggestion.query_value),
+                                    ]),
+                                  )}
+                                >
+                                  Add All Suggestions
+                                </Button>
+                              ) : null}
+                            </div>
+                            {activeSourceSuggestionsLoading ? <p className="text-sm text-zinc-500">Loading suggestions...</p> : null}
+                            {activeSourceSuggestionsError ? <p className="text-sm text-red-700">{activeSourceSuggestionsError}</p> : null}
+                            {!activeSourceSuggestionsLoading && !activeSourceSuggestionsError && activeSourceSuggestions.length === 0 ? (
+                              <p className="text-sm text-zinc-500">No extra suggestions available.</p>
+                            ) : null}
+                            {activeSourceSuggestions.map((suggestion) => (
+                              <div key={`${suggestion.query_value}:${suggestion.query_link}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                <div className="min-w-0 space-y-1">
+                                  <p className="truncate text-sm font-semibold text-zinc-900">{suggestion.query_value}</p>
+                                  <p className="truncate text-xs text-zinc-500">{suggestion.discovered_from || suggestion.reason || suggestion.query_link}</p>
+                                </div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={saving || loading || activeSourceStatus === "saving"}
+                                  onClick={() => void saveSourceQueries(
+                                    activeSourceRow.source_provider,
+                                    dedupeNormalizedValues([...activeSourceQueryValues, suggestion.query_value]),
+                                  )}
+                                >
+                                  Add
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="space-y-2">
                         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Source Queries</p>
                         <div className="space-y-2">
                           {activeSourceQueryValues.map((queryValue, index) => (
-                            <div
-                              key={`${activeSourceRow.source_provider}:readonly:${queryValue}:${index}`}
-                              className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
-                            >
+                            <div key={`${activeSourceRow.source_provider}:readonly:${queryValue}:${index}`} className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900">
                               {queryValue}
                             </div>
                           ))}
@@ -1398,13 +1796,8 @@ export default function BrandLogoOptionsModal({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() =>
-                          void refreshSource({
-                            sourceProvider: activeSourceRow.source_provider,
-                            sourceSnapshot: activeSourceRow,
-                          })
-                        }
-                        disabled={activeSourceStatus === "loading" || activeSourceStatus === "saving"}
+                        onClick={() => void refreshSource({ sourceProvider: activeSourceRow.source_provider, sourceSnapshot: activeSourceRow })}
+                        disabled={saving || activeSourceStatus === "loading" || activeSourceStatus === "saving"}
                       >
                         {activeSourceStatus === "loading" || activeSourceStatus === "saving"
                           ? `Refreshing ${activeSourceRow.source_provider}...`
@@ -1417,114 +1810,106 @@ export default function BrandLogoOptionsModal({
                 </div>
               </div>
             ) : null}
-
-            {sources.length === 0 ? (
-              <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-4 text-sm text-zinc-500">
-                {loading ? "Loading source discovery..." : "No sources available."}
-              </div>
-            ) : null}
           </div>
-        </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4">
-          {activeSourceError && !error ? (
-            <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{activeSourceError}</p>
-          ) : null}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Logo Results</p>
-              <p className="text-sm text-zinc-600">
-                {loading
-                  ? "Loading available sources and saved logo options..."
-                  : activeSource
-                    ? `${allOptions.length} option${allOptions.length === 1 ? "" : "s"} for ${activeSource}`
-                    : "Select a source."}
-              </p>
-              {activeSourceStatus === "loading" || activeSourceStatus === "saving" ? (
-                <div className="mt-2 flex items-center gap-2 text-sm text-zinc-500">
-                  <span
-                    aria-hidden="true"
-                    className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900"
-                  />
-                  <span>{activeSourceStatus === "saving" ? "Refreshing media..." : "Scraping media..."}</span>
-                </div>
+          <div className="flex min-h-0 flex-1 flex-col px-4 py-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Logo Results</p>
+                <p className="text-sm text-zinc-600">
+                  {loading
+                    ? "Loading brand logo picker..."
+                    : activeSource
+                      ? `${allOptions.length} option${allOptions.length === 1 ? "" : "s"} for ${activeSource} (${activeSourceDisplayCount} total)`
+                      : "Select a source."}
+                </p>
+              </div>
+              {activeSourceRow?.refreshable && discoverHasMoreBySource[activeSourceRow.source_provider] ? (
+                <Button
+                  variant="outline"
+                  onClick={() => void refreshSource({ append: true, sourceProvider: activeSourceRow.source_provider, sourceSnapshot: activeSourceRow })}
+                  disabled={saving || activeSourceStatus === "loading" || activeSourceStatus === "saving"}
+                >
+                  Load More
+                </Button>
               ) : null}
             </div>
-            {activeSourceRow?.refreshable && discoverHasMoreBySource[activeSourceRow.source_provider] ? (
-              <Button
-                variant="outline"
-                onClick={() => void onLoadMore()}
-                disabled={activeSourceStatus === "loading" || activeSourceStatus === "saving"}
-              >
-                {activeSourceStatus === "loading" || activeSourceStatus === "saving" ? "Loading..." : "Load More"}
-              </Button>
-            ) : null}
+
+            <div data-testid="brand-logo-results-panel" className="rounded-2xl border border-zinc-200 bg-white p-3">
+              {!loading && activeSource && allOptions.length === 0 ? (
+                <p className="text-sm text-zinc-500">
+                  {getEmptyStateMessage({
+                    activeSource,
+                    activeSourceError,
+                    activeSourceRow,
+                    activeSourceStatus,
+                    relatedFallbackActive,
+                  })}
+                </p>
+              ) : null}
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {allOptions.map((option) => {
+                  const isSaved = activeSource === SAVED_SOURCE_PROVIDER;
+                  const isSelected = !isSaved && activeSelectionIds.includes(option.id);
+                  return (
+                    <LogoCard
+                      key={option.id}
+                      option={option}
+                      isSaved={isSaved}
+                      selected={isSelected}
+                      targetLabel={targetLabel}
+                      confirmingDelete={deleteConfirmAssetId === option.id}
+                      disabled={saving || loading || activeSourceBusy}
+                      onClick={
+                        isSaved || !activeSource
+                          ? undefined
+                          : () => toggleNonSavedSelection(activeSource, option.id)
+                      }
+                      onDelete={isSaved ? (deleteConfirmAssetId === option.id ? () => void deleteSavedAsset(option.id) : () => setDeleteConfirmAssetId(option.id)) : undefined}
+                      onCancelDelete={isSaved ? () => setDeleteConfirmAssetId(null) : undefined}
+                      onSetAsWordmark={isSaved ? () => void assignOptionToRole(option, "wordmark") : undefined}
+                      onSetAsIcon={isSaved ? () => void assignOptionToRole(option, "icon") : undefined}
+                    />
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-3 pr-2">
-            {!loading && activeSource && activeSourceStatus !== "loading" && activeSourceStatus !== "saving" && allOptions.length === 0 ? (
-              <p className="text-sm text-zinc-500">No options found for this source.</p>
-            ) : null}
-
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {allOptions.map((option) => {
-                const previewUrl = pickDisplayUrl(option) || PLACEHOLDER_ICON_PATH;
-                const finalPreviewUrl = brokenPreviewIds[option.id] ? PLACEHOLDER_ICON_PATH : previewUrl;
-                const isSelected = selectedOptionId ? selectedOptionId === option.id : Boolean(option.is_selected_for_role);
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setSelectedOptionId(option.id)}
-                    className={joinClassNames(
-                      "rounded-2xl border p-3 text-left transition",
-                      isSelected ? "border-zinc-900 bg-zinc-100" : "border-zinc-200 hover:bg-zinc-50",
-                    )}
-                    aria-pressed={isSelected}
-                  >
-                    <div className="relative h-16 w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
-                      <Image
-                        src={finalPreviewUrl}
-                        alt={`${targetLabel} ${logoRole}`}
-                        fill
-                        className="object-contain p-2"
-                        unoptimized
-                        onError={() =>
-                          setBrokenPreviewIds((previous) => ({
-                            ...previous,
-                            [option.id]: true,
-                          }))
-                        }
-                      />
-                    </div>
-                    <p className="mt-3 truncate text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
-                      {option.source_provider || "unknown"}
-                    </p>
-                    <p className="truncate text-xs text-zinc-500" title={option.discovered_from || option.source_url || "n/a"}>
-                      {option.discovered_from || option.source_url || "n/a"}
-                    </p>
-                    <p className="mt-2 text-[11px] font-semibold text-zinc-500">
-                      {isSelected ? "Selected as featured" : "Click to feature this option"}
-                    </p>
-                    {(option.option_kind || "stored") === "candidate" ? (
-                      <p className="mt-2 text-[11px] font-semibold text-amber-700">Discovered option</p>
-                    ) : null}
-                  </button>
-                );
-              })}
+          <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 bg-white px-4 py-3">
+            <p className="text-xs text-zinc-500">
+              {activeSource === SAVED_SOURCE_PROVIDER ? "Drag any saved asset into the top frames to make it featured." : "Batch save selected assets into the shared Saved library."}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={onClose} disabled={saving}>Close</Button>
+              {activeSource !== SAVED_SOURCE_PROVIDER ? (
+                <Button onClick={() => void onSaveSelected()} disabled={saving || activeSelectionIds.length === 0}>
+                  {saving ? "Saving..." : `Save Selected (${activeSelectionIds.length})`}
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>
-
-        <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-end gap-2 border-t border-zinc-200 bg-white px-4 py-3">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={() => void onSave()} disabled={saving || !canSaveSelection}>
-            {saving ? "Saving..." : `Save Featured${selectedOption ? " (1)" : " (0)"}`}
-          </Button>
-        </div>
-      </div>
+        <DragOverlay>
+          {activeDragOption ? (
+            <div className="w-56 rounded-2xl border border-zinc-300 bg-white p-3 shadow-lg">
+              <div className="relative h-20 w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
+                <Image
+                  src={pickDisplayUrl(activeDragOption) || PLACEHOLDER_ICON_PATH}
+                  alt={`${targetLabel} drag preview`}
+                  fill
+                  className="object-contain p-2"
+                  unoptimized
+                />
+              </div>
+              <p className="mt-3 truncate text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                {formatProviderLabel(activeDragOption.source_provider)}
+              </p>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </AdminModal>
   );
 }

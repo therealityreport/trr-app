@@ -95,7 +95,7 @@ describe("admin host proxy", () => {
     );
   });
 
-  it("redirects /shows requests on public host to admin origin", () => {
+  it("keeps /shows requests on the public host", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
@@ -103,10 +103,8 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://localhost:3000/shows/rhoslc/s6/social/reddit");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "http://admin.localhost:3000/shows/rhoslc/s6/social/reddit",
-    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("redirects /games requests on public host to admin origin", () => {
@@ -126,7 +124,6 @@ describe("admin host proxy", () => {
     "/docs",
     "/groups",
     "/settings",
-    "/social-media",
     "/surveys",
     "/users",
   ])("redirects %s requests on public host to admin origin", (pathname) => {
@@ -141,7 +138,24 @@ describe("admin host proxy", () => {
     expect(response.headers.get("location")).toBe(`http://admin.localhost:3000${pathname}`);
   });
 
-  it("redirects /people routes on public host to admin origin", () => {
+  it.each([
+    "/social-media",
+    "/rhoslc/social",
+    "/rhoslc/s6/social/w0",
+    "/people/mary-cosby",
+  ])("keeps %s on the public host", (pathname) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(`http://localhost:3000${pathname}`);
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("keeps /people detail routes on the public host", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
@@ -149,10 +163,8 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://localhost:3000/people/mary-cosby");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "http://admin.localhost:3000/people/mary-cosby",
-    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("redirects /people root on public host to admin origin", () => {
@@ -179,7 +191,42 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("redirects root show routes on public host to admin origin", () => {
+  it.each([
+    ["/social-media", "http://admin.localhost:3000/admin/social-media"],
+    ["/shows", "http://admin.localhost:3000/admin/shows"],
+    ["/shows/rhoslc", "http://admin.localhost:3000/rhoslc"],
+  ])("redirects %s to the canonical admin-host URL", (pathname, expectedLocation) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(`http://admin.localhost:3000${pathname}`);
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(expectedLocation);
+  });
+
+  it.each([
+    ["/rhoslc", "http://admin.localhost:3000/admin/trr-shows/rhoslc"],
+    ["/rhoslc/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
+    ["/rhoslc/social/s6", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
+    ["/rhoslc/social/s6/w0/instagram", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
+    ["/rhoslc/s6", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6"],
+    ["/rhoslc/s6/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social"],
+  ])("rewrites %s to the internal admin surface while keeping the short URL visible", (pathname, expectedRewrite) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(`http://admin.localhost:3000${pathname}`);
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(expectedRewrite);
+  });
+
+  it("keeps root show routes on the public host", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_STRICT_HOST_ROUTING = "false";
@@ -187,10 +234,8 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://localhost:3000/rhoslc/s6/social/reddit");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "http://admin.localhost:3000/rhoslc/s6/social/reddit",
-    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("redirects /brands requests on public host to admin origin", () => {
@@ -317,7 +362,7 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("allows /shows routes on admin host", () => {
+  it("redirects /shows detail routes to the short admin-host show URL", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -326,11 +371,11 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/shows/rhoslc");
     const response = proxy(request);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/rhoslc");
   });
 
-  it("allows /people routes on admin host", () => {
+  it("rewrites /people detail routes to the admin person workspace on admin host", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -340,7 +385,54 @@ describe("admin host proxy", () => {
     const response = proxy(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://admin.localhost:3000/admin/trr-shows/people/mary-cosby",
+    );
+  });
+
+  it("rewrites person gallery routes while keeping the short admin-host URL visible", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/people/mary-cosby/gallery?showId=rhoslc",
+    );
+  });
+
+  it.each([
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc",
+      "http://admin.localhost:3000/rhoslc",
+    ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/season-6/social",
+      "http://admin.localhost:3000/rhoslc/s6/social",
+    ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/people/mary-cosby/gallery?showId=rhoslc",
+      "http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc",
+    ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/people/mary-cosby/gallery",
+      "http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc",
+    ],
+  ])("redirects legacy internal admin URLs back to the short canonical URL: %s", (inputUrl, expectedLocation) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(inputUrl);
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(expectedLocation);
   });
 
   it("allows /people root on admin host", () => {

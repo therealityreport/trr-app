@@ -1,7 +1,8 @@
+import { canonicalizeHostedMediaUrl, isLikelyHostedMediaUrl } from "@/lib/hosted-media";
+
 const normalizeImageUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return canonicalizeHostedMediaUrl(value);
 };
 
 const dedupeCandidates = (values: Array<string | null>): string[] => {
@@ -16,29 +17,15 @@ const dedupeCandidates = (values: Array<string | null>): string[] => {
   return out;
 };
 
-const isLikelyMirroredUrl = (value: string): boolean => {
-  try {
-    const host = new URL(value).hostname.toLowerCase();
-    return (
-      host.includes("cloudfront.net") ||
-      host.includes("amazonaws.com") ||
-      host.includes("s3.") ||
-      host.includes("therealityreport")
-    );
-  } catch {
-    return false;
-  }
-};
-
-const partitionByMirror = (values: Array<string | null>): { mirrored: string[]; external: string[] } => {
-  const mirrored: string[] = [];
+const partitionByHostedMedia = (values: Array<string | null>): { hosted: string[]; external: string[] } => {
+  const hosted: string[] = [];
   const external: string[] = [];
   for (const value of values) {
     if (!value) continue;
-    if (isLikelyMirroredUrl(value)) mirrored.push(value);
+    if (isLikelyHostedMediaUrl(value)) hosted.push(value);
     else external.push(value);
   }
-  return { mirrored, external };
+  return { hosted, external };
 };
 
 export interface ImageCardCandidateInput {
@@ -91,12 +78,12 @@ export const buildCardImageUrlCandidates = (input: ImageCardCandidateInput): str
     normalizeImageUrl(input.originalUrl),
     normalizeImageUrl(input.sourceUrl),
   ];
-  const variantPartition = partitionByMirror(variantCandidates);
-  const sourcePartition = partitionByMirror(sourceCandidates);
+  const variantPartition = partitionByHostedMedia(variantCandidates);
+  const sourcePartition = partitionByHostedMedia(sourceCandidates);
   return dedupeCandidates([
-    ...variantPartition.mirrored,
+    ...variantPartition.hosted,
     ...variantPartition.external,
-    ...sourcePartition.mirrored,
+    ...sourcePartition.hosted,
     ...sourcePartition.external,
   ]);
 };
@@ -111,12 +98,12 @@ export const buildDetailImageUrlCandidates = (input: ImageDetailCandidateInput):
     normalizeImageUrl(input.detailUrl),
     normalizeImageUrl(input.cropDetailUrl),
   ];
-  const variantPartition = partitionByMirror(generatedCandidates);
-  const sourcePartition = partitionByMirror(sourceCandidates);
+  const variantPartition = partitionByHostedMedia(generatedCandidates);
+  const sourcePartition = partitionByHostedMedia(sourceCandidates);
   return dedupeCandidates([
-    ...sourcePartition.mirrored,
+    ...sourcePartition.hosted,
     ...sourcePartition.external,
-    ...variantPartition.mirrored,
+    ...variantPartition.hosted,
     ...variantPartition.external,
   ]);
 };

@@ -27,7 +27,7 @@ describe("bravo video thumbnail sync wiring", () => {
   it("wires person page videos tab to thumbnail sync and hosted-first rendering", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx"
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx"
     );
     const contents = fs.readFileSync(filePath, "utf8");
 

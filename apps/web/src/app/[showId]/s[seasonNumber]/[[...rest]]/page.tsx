@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
 import type { Route } from "next";
+import PublicRouteShell, { formatRouteValue } from "@/components/public/PublicRouteShell";
+import PrefixedPathValue from "@/components/public/PrefixedPathValue";
+import { resolvePrefixedRouteParam } from "@/lib/public/prefixed-route-params";
 
 export const dynamic = "force-dynamic";
 
@@ -64,47 +67,104 @@ const resolveRedditPathContext = ({
 export default async function RootShowSeasonAliasPage({
   params,
 }: RootShowSeasonAliasPageProps) {
-  const { showId, seasonNumber, rest } = await params;
-  const normalizedSeasonNumber =
-    typeof seasonNumber === "string" ? seasonNumber.trim() : "";
+  const resolvedParams = await params;
+  const showId = resolvedParams.showId;
+  const rest = resolvedParams.rest;
+  const normalizedSeasonNumber = resolvePrefixedRouteParam(resolvedParams, "seasonNumber", "s") ?? "";
+
   if (isStrictSeasonNumber(normalizedSeasonNumber)) {
-    const { default: SeasonAdminPage } = await import(
-      "@/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page"
+    return (
+      <PublicRouteShell
+        eyebrow="Season Alias"
+        title={`Season ${formatRouteValue(normalizedSeasonNumber)}`}
+        description="This season alias route is publicly reachable and no longer imports the admin season editor."
+        details={[
+          { label: "Show", value: formatRouteValue(showId) },
+          {
+            label: "Season",
+            value: <PrefixedPathValue fallback={normalizedSeasonNumber} prefix="s" segmentIndex={1} />,
+          },
+          { label: "Subroute", value: formatRouteValue(rest) },
+        ]}
+        links={[
+          { href: `/${showId}`, label: "Show page" },
+          { href: `/${showId}/s${normalizedSeasonNumber}/social`, label: "Season social" },
+        ]}
+      />
     );
-    return <SeasonAdminPage />;
   }
 
   const ctx = resolveRedditPathContext({ rest });
-  if (ctx) {
-    if (ctx.windowKey && (ctx.postId || ctx.detailSlug)) {
-      const { default: AdminRedditPostDetailsPage } = await import(
-        "@/app/admin/reddit-post-details/page"
-      );
-      return <AdminRedditPostDetailsPage />;
-    }
-    if (ctx.windowKey) {
-      // Render the window page directly instead of redirecting to avoid
-      // infinite redirect loops.  The catch-all matches "social" as
-      // s[seasonNumber] (seasonNumber="ocial"), so redirecting to the
-      // show-scoped URL would re-match this same catch-all endlessly.
-      // The AdminRedditWindowPostsPage component will parse its context
-      // from the pathname via its built-in fallback resolution.
-      const { default: AdminRedditWindowPostsPage } = await import(
-        "@/app/admin/reddit-window-posts/page"
-      );
-      return <AdminRedditWindowPostsPage />;
-    }
-    if (ctx.season) {
-      // Community+season redirect (no window key) — the specific route at
-      // [showId]/social/reddit/[communitySlug]/s[seasonNumber] handles this.
-      redirect(
-        `/${encodeURIComponent(showId)}/social/reddit/${encodeURIComponent(ctx.communitySlug)}/s${ctx.season}` as Route,
-      );
-    }
+  if (ctx?.season && !ctx.windowKey && !ctx.postId && !ctx.detailSlug) {
+    redirect(
+      `/${encodeURIComponent(showId)}/social/reddit/${encodeURIComponent(ctx.communitySlug)}/s${ctx.season}` as Route,
+    );
   }
 
-  const { default: ShowAdminPage } = await import(
-    "@/app/admin/trr-shows/[showId]/page"
+  if (ctx?.windowKey && (ctx.postId || ctx.detailSlug)) {
+    return (
+      <PublicRouteShell
+        eyebrow="Reddit Alias"
+        title="Public reddit detail alias route"
+        description="This season alias no longer renders the admin reddit detail page for public traffic."
+        details={[
+          { label: "Show", value: formatRouteValue(showId) },
+          {
+            label: "Season token",
+            value: <PrefixedPathValue fallback={normalizedSeasonNumber} prefix="s" segmentIndex={1} />,
+          },
+          { label: "Community", value: formatRouteValue(ctx.communitySlug) },
+          { label: "Window", value: formatRouteValue(ctx.windowKey) },
+          { label: "Detail", value: formatRouteValue(ctx.postId ?? ctx.detailSlug) },
+        ]}
+        links={[
+          { href: `/${showId}/social/reddit/${ctx.communitySlug}/${ctx.windowKey}`, label: "Window route" },
+          { href: `/${showId}/social`, label: "Show social" },
+        ]}
+      />
+    );
+  }
+
+  if (ctx?.windowKey) {
+    return (
+      <PublicRouteShell
+        eyebrow="Reddit Alias"
+        title="Public reddit window alias route"
+        description="This season alias no longer renders the admin reddit window workspace for public traffic."
+        details={[
+          { label: "Show", value: formatRouteValue(showId) },
+          {
+            label: "Season token",
+            value: <PrefixedPathValue fallback={normalizedSeasonNumber} prefix="s" segmentIndex={1} />,
+          },
+          { label: "Community", value: formatRouteValue(ctx.communitySlug) },
+          { label: "Window", value: formatRouteValue(ctx.windowKey) },
+        ]}
+        links={[
+          { href: `/${showId}/social/reddit/${ctx.communitySlug}/${ctx.windowKey}`, label: "Window route" },
+          { href: `/${showId}/social/reddit/${ctx.communitySlug}`, label: "Community route" },
+        ]}
+      />
+    );
+  }
+
+  return (
+    <PublicRouteShell
+      eyebrow="Season Alias"
+      title="Public show alias route"
+      description="This show-season alias route no longer re-exports admin show pages. Public aliases remain reachable without admin auth."
+      details={[
+        { label: "Show", value: formatRouteValue(showId) },
+        {
+          label: "Season token",
+          value: <PrefixedPathValue fallback={normalizedSeasonNumber} prefix="s" segmentIndex={1} />,
+        },
+        { label: "Subroute", value: formatRouteValue(rest) },
+      ]}
+      links={[
+        { href: `/${showId}`, label: "Show page" },
+        { href: `/${showId}/social`, label: "Show social" },
+      ]}
+    />
   );
-  return <ShowAdminPage />;
 }

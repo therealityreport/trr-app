@@ -63,6 +63,7 @@ import {
   formatCastBatchRunningMessage,
 } from "@/lib/admin/cast-batch-progress";
 import { mapSeasonAssetToMetadata } from "@/lib/photo-metadata";
+import { canonicalizeHostedMediaUrl, isLikelyHostedMediaUrl } from "@/lib/hosted-media";
 import {
   clearAdvancedFilters,
   countActiveAdvancedFilters,
@@ -73,6 +74,7 @@ import {
 import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
+  buildSocialAccountProfileUrl,
   buildSeasonAdminUrl,
   buildShowAdminUrl,
   cleanLegacyRoutingQuery,
@@ -872,21 +874,6 @@ const SEASON_PAGE_TABS = [
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const looksLikeUuid = (value: string) => UUID_RE.test(value);
-
-const isLikelyMirroredAssetUrl = (value: string | null | undefined): boolean => {
-  if (!value) return false;
-  try {
-    const host = new URL(value).hostname.toLowerCase();
-    return (
-      host.includes("cloudfront.net") ||
-      host.includes("amazonaws.com") ||
-      host.includes("s3.") ||
-      host.includes("therealityreport")
-    );
-  } catch {
-    return false;
-  }
-};
 
 const normalizeEntityLinkStatus = (value: unknown): EntityLinkStatus => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -2070,6 +2057,7 @@ export default function TrrShowDetailPage() {
   const [archiveFootageCast, setArchiveFootageCast] = useState<TrrCastMember[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("details");
   const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
+  const [socialControlsHost, setSocialControlsHost] = useState<HTMLDivElement | null>(null);
   const [assetsView, setAssetsView] = useState<"images" | "videos" | "branding">("images");
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoLoading, setBravoLoading] = useState(false);
@@ -2828,7 +2816,28 @@ export default function TrrShowDetailPage() {
   ]);
 
   useEffect(() => {
+    if (showRouteState.tab !== "social" || socialAnalyticsView !== "bravo") return;
+    if (!socialPathFilters?.platform || !socialPathFilters.handle) return;
+    router.replace(
+      buildSocialAccountProfileUrl({
+        platform: socialPathFilters.platform,
+        handle: socialPathFilters.handle,
+      }) as Route,
+      { scroll: false },
+    );
+  }, [
+    router,
+    showRouteState.tab,
+    socialAnalyticsView,
+    socialPathFilters?.handle,
+    socialPathFilters?.platform,
+  ]);
+
+  useEffect(() => {
     if (!showSlugForRouting) return;
+    if (showRouteState.tab === "social" && socialAnalyticsView === "bravo" && socialPathFilters?.handle) {
+      return;
+    }
 
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
     if (showRouteState.tab === "social") {
@@ -7797,15 +7806,23 @@ export default function TrrShowDetailPage() {
   );
 
   const featuredHeaderLogoUrl = useMemo(() => {
-    if (!featuredShowLogoAsset) return show?.logo_url ?? null;
+    if (!featuredShowLogoAsset) return canonicalizeHostedMediaUrl(show?.logo_url);
     const colorUrl = getAssetDisplayUrl(featuredShowLogoAsset);
     if (featuredLogoVariant === "black") {
-      return featuredShowLogoAsset.logo_black_url ?? colorUrl ?? show?.logo_url ?? null;
+      return (
+        canonicalizeHostedMediaUrl(featuredShowLogoAsset.logo_black_url) ??
+        canonicalizeHostedMediaUrl(colorUrl) ??
+        canonicalizeHostedMediaUrl(show?.logo_url)
+      );
     }
     if (featuredLogoVariant === "white") {
-      return featuredShowLogoAsset.logo_white_url ?? colorUrl ?? show?.logo_url ?? null;
+      return (
+        canonicalizeHostedMediaUrl(featuredShowLogoAsset.logo_white_url) ??
+        canonicalizeHostedMediaUrl(colorUrl) ??
+        canonicalizeHostedMediaUrl(show?.logo_url)
+      );
     }
-    return colorUrl ?? show?.logo_url ?? null;
+    return canonicalizeHostedMediaUrl(colorUrl) ?? canonicalizeHostedMediaUrl(show?.logo_url);
   }, [featuredLogoVariant, featuredShowLogoAsset, show?.logo_url]);
 
   const featuredPosterCandidates = useMemo(
@@ -8376,7 +8393,7 @@ export default function TrrShowDetailPage() {
           const mirroredCount = rows.filter((asset) => {
             const candidates = getSeasonAssetCardUrlCandidates(asset);
             const preferredUrl = firstImageUrlCandidate(candidates) ?? asset.hosted_url ?? null;
-            return isLikelyMirroredAssetUrl(preferredUrl);
+            return isLikelyHostedMediaUrl(preferredUrl);
           }).length;
           return {
             mirroredCount,
@@ -10783,6 +10800,9 @@ export default function TrrShowDetailPage() {
     },
   });
   const socialHeaderNetworkLabel = `${formatSocialAnalyticsViewLabel(socialAnalyticsView)} Analytics`;
+  const socialHeaderTitle = selectedSocialSeason
+    ? `${show.name} · Season ${selectedSocialSeason.season_number}`
+    : show.name;
   const headerBreadcrumbs =
     activeTab === "social"
       ? buildSeasonSocialBreadcrumb(show.name, selectedSocialSeason?.season_number ?? "", {
@@ -10830,6 +10850,9 @@ export default function TrrShowDetailPage() {
                     <ImdbLinkIcon imdbId={show.imdb_id} type="title" />
                   </div>
                 </div>
+                {activeTab === "social" && (
+                  <h1 className="mt-3 text-3xl font-bold text-zinc-900">{socialHeaderTitle}</h1>
+                )}
                 {show.description && (
                   <p className="mt-2 max-w-2xl text-sm text-zinc-600">
                     {show.description}
@@ -12382,6 +12405,7 @@ export default function TrrShowDetailPage() {
               socialSeasonOptions={socialSeasonOptions}
               selectedSocialSeasonId={selectedSocialSeasonId}
               onSelectSocialSeasonId={setSelectedSocialSeasonId}
+              onSocialControlsHostChange={setSocialControlsHost}
               analyticsSection={
                 selectedSocialSeason ? (
                   <SeasonSocialAnalyticsSection
@@ -12393,6 +12417,7 @@ export default function TrrShowDetailPage() {
                     platformTab={socialPlatformTab}
                     onPlatformTabChange={setSocialPlatformTab}
                     hidePlatformTabs={true}
+                    externalControlsTarget={socialControlsHost}
                     analyticsView={socialAnalyticsView}
                   />
                 ) : null

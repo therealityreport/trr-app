@@ -12,6 +12,11 @@ import {
   buildSeasonSocialBreadcrumb,
   humanizeSlug,
 } from "@/lib/admin/admin-breadcrumbs";
+import {
+  canonicalizeHostedMediaUrl,
+  inferHostedMediaFileNameFromUrl,
+  isLikelyHostedMediaUrl,
+} from "@/lib/hosted-media";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
@@ -794,10 +799,10 @@ const PLATFORM_LABELS: Record<string, string> = {
   threads: "Threads",
 };
 const VERIFIED_BADGE_URL_BY_PLATFORM: Record<string, string> = {
-  instagram: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/instagram-threads-verified.png",
-  threads: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/instagram-threads-verified.png",
-  tiktok: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/tiktok-verified.svg",
-  twitter: "https://d1fmdyqfafwim3.cloudfront.net/icons/verified/x-twitter-verified.png",
+  instagram: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/icons/verified/instagram-threads-verified.png",
+  threads: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/icons/verified/instagram-threads-verified.png",
+  tiktok: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/icons/verified/tiktok-verified.svg",
+  twitter: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/icons/verified/x-twitter-verified.png",
 };
 const getSyncActionPlatformLabel = (platform: Exclude<PlatformFilter, "all">): string =>
   platform === "twitter" ? "X" : (PLATFORM_LABELS[platform] ?? platform);
@@ -1006,7 +1011,6 @@ const TRANSIENT_DEV_RESTART_PATTERNS = [
 const SOCIAL_MEDIA_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|$)/i;
 const SOCIAL_MEDIA_VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|m3u8|mpd)(\?|$)/i;
 const SOCIAL_MEDIA_HTML_EXT_RE = /\.(html?|php|aspx?)(\?|$)/i;
-const SOCIAL_MIRROR_HOST_MARKERS = ["cloudfront.net", "amazonaws.com", "s3.", "therealityreport"];
 const SOCIAL_SOURCE_COLORS: Record<string, string> = {
   instagram: "#f43f5e",
   tiktok: "#111827",
@@ -1529,9 +1533,7 @@ function isEmbeddableSocialPageUrl(url: string): boolean {
 }
 
 function normalizeSocialMediaCandidateUrl(url: string | null | undefined): string | null {
-  if (typeof url !== "string") return null;
-  const trimmed = url.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return canonicalizeHostedMediaUrl(url);
 }
 
 function buildNormalizedMediaUrlList(urls: Array<string | null | undefined>): string[] {
@@ -1588,8 +1590,8 @@ function selectPreferredMediaUrlPair(sourceMediaUrlRaw: string | null, hostedMed
     const hostedIsThumbnailLike = hostedMediaType === "image" || isLikelyHtmlDocumentUrl(hostedMediaUrl);
     if (sourceMediaType === "video" && hostedIsThumbnailLike) {
       return {
-        src: sourceMediaUrl,
-        mirrored: false,
+        src: hostedMediaUrl,
+        mirrored: true,
         originalSrc: sourceMediaUrl,
       };
     }
@@ -1622,27 +1624,6 @@ function selectPreferredMediaUrlPair(sourceMediaUrlRaw: string | null, hostedMed
     mirrored: false,
     originalSrc: null,
   };
-}
-
-function isLikelyMirroredSocialUrl(url: string | null | undefined): boolean {
-  if (typeof url !== "string" || url.trim().length === 0) return false;
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return SOCIAL_MIRROR_HOST_MARKERS.some((marker) => host.includes(marker));
-  } catch {
-    return false;
-  }
-}
-
-function inferMirrorFileNameFromUrl(url: string | null | undefined): string | null {
-  if (typeof url !== "string" || url.trim().length === 0) return null;
-  try {
-    const pathname = new URL(url).pathname;
-    const fileName = pathname.split("/").filter(Boolean).pop();
-    return fileName ? decodeURIComponent(fileName) : null;
-  } catch {
-    return null;
-  }
 }
 
 function normalizeSocialMediaUrlForCompare(url: string | null | undefined): string {
@@ -1722,7 +1703,7 @@ function getPostMediaCandidates(platform: string, post: AnyPost): SocialMediaCan
     const candidate = selectPreferredMediaUrlPair(sourceMediaUrl, hostedMediaUrl);
     const normalized = normalizeSocialMediaCandidateUrl(candidate.src);
     if (!normalized) continue;
-    const mirrored = candidate.mirrored || isLikelyMirroredSocialUrl(normalized);
+    const mirrored = candidate.mirrored || isLikelyHostedMediaUrl(normalized);
     if (mirrored && isLikelyHtmlDocumentUrl(normalized)) continue;
     const dedupeKey = normalizeSocialMediaUrlForCompare(normalized);
     if (dedupeKey && seen.has(dedupeKey)) continue;
@@ -1742,7 +1723,7 @@ function getPostMediaCandidates(platform: string, post: AnyPost): SocialMediaCan
       return candidates;
     }
     seen.add(thumbnailDedupeKey || thumbnail);
-    const mirrored = Boolean(hostedThumbnail) || isLikelyMirroredSocialUrl(thumbnail);
+    const mirrored = Boolean(hostedThumbnail) || isLikelyHostedMediaUrl(thumbnail);
     candidates.push({
       src: thumbnail,
       mediaType: "image",
@@ -1810,6 +1791,12 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
 
   if (hostedMediaUrls.length > 0) {
     const pairCount = Math.max(sourceMediaUrls.length, hostedMediaUrls.length);
+    const hostedVideoCandidate = pickFirstVideoUrl(hostedMediaUrls);
+    if (hostedVideoCandidate) return hostedVideoCandidate;
+
+    const hostedNonHtmlCandidate = pickFirstNonHtmlUrl(hostedMediaUrls);
+    if (hostedNonHtmlCandidate) return hostedNonHtmlCandidate;
+
     for (let index = 0; index < pairCount; index += 1) {
       const sourceMediaUrl = normalizeSocialMediaCandidateUrl(sourceMediaUrls[index]);
       const hostedMediaUrl = normalizeSocialMediaCandidateUrl(hostedMediaUrls[index]);
@@ -1818,15 +1805,9 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
       const hostedType = detectSocialMediaType(hostedMediaUrl);
       const hostedIsThumbnailLike = hostedType === "image" || isLikelyHtmlDocumentUrl(hostedMediaUrl);
       if (sourceType === "video" && hostedIsThumbnailLike) {
-        return sourceMediaUrl;
+        return hostedMediaUrl;
       }
     }
-
-    const hostedVideoCandidate = pickFirstVideoUrl(hostedMediaUrls);
-    if (hostedVideoCandidate) return hostedVideoCandidate;
-
-    const hostedNonHtmlCandidate = pickFirstNonHtmlUrl(hostedMediaUrls);
-    if (hostedNonHtmlCandidate) return hostedNonHtmlCandidate;
 
     return pickFirstUrl([
       hostedThumbnailUrl,
@@ -2050,9 +2031,9 @@ function buildSocialPostMetadata({
   const sourcePageTitle = title || caption || `${sourceLabel} post`;
   const sectionLabel = weekLabel ? `${sourceLabel} · ${weekLabel}` : sourceLabel;
   const fileType = inferFileExtensionFromUrl(media.src);
-  const isS3Mirrored = media.mirrored || isLikelyMirroredSocialUrl(media.src);
-  const mirrorFileName = isS3Mirrored ? inferMirrorFileNameFromUrl(media.src) : null;
-  const originalMediaUrl = media.originalSrc ?? (!isS3Mirrored ? media.src : null);
+  const isHostedMedia = media.mirrored || isLikelyHostedMediaUrl(media.src);
+  const hostedMediaFileName = isHostedMedia ? inferHostedMediaFileNameFromUrl(media.src) : null;
+  const originalMediaUrl = media.originalSrc ?? (!isHostedMedia ? media.src : null);
   const sourcePostUrl = resolvePostExternalUrl(platform, post);
 
   const postNumber = computeDailyPostNumber(platform, post, allPlatformPosts);
@@ -2067,8 +2048,8 @@ function buildSocialPostMetadata({
   return {
     source: sourceLabel,
     sourceBadgeColor: SOCIAL_SOURCE_COLORS[platform] ?? "#71717a",
-    isS3Mirrored,
-    s3MirrorFileName: mirrorFileName,
+    isHostedMedia,
+    hostedMediaFileName,
     originalImageUrl: originalMediaUrl,
     originalSourceFileUrl: originalMediaUrl,
     originalSourcePageUrl: sourcePostUrl,
@@ -2940,7 +2921,7 @@ function resolveHandleProfile(post: AnyPost, handle: string): HandleProfile | nu
 
 function resolveAccountAvatarUrl(post: AnyPost, handle: string, isAuthor: boolean): string | null {
   const profileAvatar = resolveHandleProfile(post, handle)?.avatarUrl ?? null;
-  const hostedProfileAvatar = profileAvatar && isLikelyMirroredSocialUrl(profileAvatar) ? profileAvatar : null;
+  const hostedProfileAvatar = profileAvatar && isLikelyHostedMediaUrl(profileAvatar) ? profileAvatar : null;
 
   if (isAuthor) {
     const hostedOwnerAvatar = String(post.hosted_owner_profile_pic_url || "").trim();

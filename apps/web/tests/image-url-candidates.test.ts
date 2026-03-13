@@ -104,12 +104,12 @@ describe("image-url-candidates", () => {
       cropDisplayUrl: "https://origin.example.com/crop.jpg",
       thumbUrl: "https://origin.example.com/thumb.jpg",
       displayUrl: "https://origin.example.com/display.jpg",
-      hostedUrl: "https://d1fmdyqfafwim3.cloudfront.net/media/hosted.webp",
+      hostedUrl: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/hosted.webp",
       originalUrl: "https://origin.example.com/original.jpg",
       sourceUrl: "https://origin.example.com/source.jpg",
     });
 
-    expect(candidates[0]).toBe("https://d1fmdyqfafwim3.cloudfront.net/media/hosted.webp");
+    expect(candidates[0]).toBe("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/hosted.webp");
     expect(candidates.slice(1)).toEqual([
       "https://origin.example.com/crop.jpg",
       "https://origin.example.com/thumb.jpg",
@@ -117,5 +117,17 @@ describe("image-url-candidates", () => {
       "https://origin.example.com/original.jpg",
       "https://origin.example.com/source.jpg",
     ]);
+  });
+
+  it("rewrites legacy CloudFront hosted candidates onto the canonical R2 host", () => {
+    const candidates = buildDetailImageUrlCandidates({
+      hostedUrl: "https://d111111abcdef8.cloudfront.net/media/aa/bb.webp",
+      detailUrl: "https://origin.example.com/detail.jpg",
+      cropDetailUrl: "https://origin.example.com/crop-detail.jpg",
+      originalUrl: "https://origin.example.com/original.jpg",
+      sourceUrl: "https://origin.example.com/source.jpg",
+    });
+
+    expect(candidates[0]).toBe("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/aa/bb.webp");
   });
 });

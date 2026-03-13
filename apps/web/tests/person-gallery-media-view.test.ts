@@ -215,8 +215,10 @@ describe("person gallery media view helpers", () => {
     });
   });
 
-  it("includes NBCUMV in canonical scoped source normalization", () => {
+  it("includes Getty and NBCUMV in canonical scoped source normalization", () => {
+    expect(toCanonicalScopedSource("getty")).toBe("getty");
     expect(toCanonicalScopedSource("nbcumv")).toBe("nbcumv");
+    expect(CANONICAL_SCOPED_SOURCE_ORDER).toContain("getty");
     expect(CANONICAL_SCOPED_SOURCE_ORDER).toContain("nbcumv");
   });
 

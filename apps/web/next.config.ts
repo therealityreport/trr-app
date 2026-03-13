@@ -7,6 +7,14 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   typedRoutes: true,
   distDir: DIST_DIR,
+  onDemandEntries: IS_DEV
+    ? {
+        // Keep a wider set of admin routes warm in dev so multiple open tabs do
+        // not constantly fall out of Next's page buffer and trigger cold recompiles.
+        maxInactiveAge: 15 * 60 * 1000,
+        pagesBufferLength: 25,
+      }
+    : undefined,
   turbopack: {
     root: __dirname, // ensure Turbopack uses this app as root
   },
@@ -26,7 +34,7 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: "https",
-        hostname: "d1fmdyqfafwim3.cloudfront.net",
+        hostname: "pub-a3c452f3df0d40319f7c585253a4776c.r2.dev",
       },
     ],
   },
@@ -40,16 +48,6 @@ const nextConfig: NextConfig = {
       {
         source: "/:showId/s:seasonNumber(\\d+)/social/week/:weekIndex(\\d+)/overview",
         destination: "/:showId/s:seasonNumber/social/w:weekIndex/details",
-        permanent: false,
-      },
-      {
-        source: "/admin/shows",
-        destination: "/shows",
-        permanent: false,
-      },
-      {
-        source: "/admin/trr-shows",
-        destination: "/shows",
         permanent: false,
       },
       {
@@ -70,36 +68,12 @@ const nextConfig: NextConfig = {
         // Root-scoped season routes (canonical URL shape)
         // Canonical reddit community routes are handled by app aliases so
         // show slug + optional season stay in pathname params.
-        {
-          source: "/:showId/social/reddit/s:seasonNumber(\\d+)",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=social&social_view=reddit",
-        },
-        {
-          source: "/:showId/social/reddit",
-          destination: "/admin/trr-shows/:showId?tab=social&social_view=reddit",
-        },
         // Community + window URLs under /:showId/social/reddit/:communitySlug/*
         // are handled by App Router aliases in src/app/[showId]/social/reddit/*
         // so route params stay available to the page layer.
         {
-          source: "/:showId/social/reddit/:communitySlug/s:seasonNumber(\\d+)",
-          destination: "/admin/social-media/reddit/:communitySlug?showSlug=:showId&season=:seasonNumber",
-        },
-        {
-          source: "/:showId/social/reddit/:communitySlug",
-          destination: "/admin/social-media/reddit/:communitySlug?showSlug=:showId",
-        },
-        {
           source: "/:showId/social/official/reddit/:communitySlug/s:seasonNumber(\\d+)",
           destination: "/:showId/social/reddit/:communitySlug/s:seasonNumber",
-        },
-        {
-          source: "/:showId/social/official/reddit/s:seasonNumber(\\d+)",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=social&social_view=reddit",
-        },
-        {
-          source: "/:showId/social/official/reddit",
-          destination: "/admin/trr-shows/:showId?tab=social&social_view=reddit",
         },
         {
           source: "/:showId/social/official/reddit/:communitySlug",
@@ -113,61 +87,7 @@ const nextConfig: NextConfig = {
           source: "/:showId/s:seasonNumber(\\d+)/social/official/reddit/:communitySlug",
           destination: "/:showId/social/reddit/:communitySlug/s:seasonNumber",
         },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social/official/reddit",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=social&social_view=reddit",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social/w:weekIndex(\\d+)/:platform",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber/social/week/:weekIndex/:platform",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social/w:weekIndex(\\d+)",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber/social/week/:weekIndex",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social/week/:weekIndex/:platform",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber/social/week/:weekIndex/:platform",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social/week/:weekIndex",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber/social/week/:weekIndex",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social/:network",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=social&social_view=:network",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social/:network/:rest*",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=social&social_view=:network",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/e:episodeNumber(\\d+)/:tab/:subtab",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=:tab",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/e:episodeNumber(\\d+)/:tab",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=:tab",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/social",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber?tab=social",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/:tab/:subtab",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber/:tab/:subtab",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)/:tab",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber/:tab",
-        },
-        {
-          source: "/:showId/s:seasonNumber(\\d+)",
-          destination: "/admin/trr-shows/:showId/seasons/:seasonNumber",
-        },
-
         // Canonical shows routes
-        { source: "/shows", destination: "/admin/trr-shows" },
         { source: "/shows/:showId/overview", destination: "/shows/:showId?tab=details" },
         { source: "/shows/:showId/details", destination: "/shows/:showId?tab=details" },
         { source: "/shows/:showId/settings", destination: "/shows/:showId?tab=settings" },

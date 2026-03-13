@@ -9,6 +9,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import ImagePaletteLab from "@/components/admin/color-lab/ImagePaletteLab";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADDITIONAL_MONOTYPE_FONTS } from "@/lib/fonts/additional-monotype-fonts";
 import {
   DESIGN_SYSTEM_TAB_DEFINITIONS,
   buildDesignSystemHref,
@@ -21,7 +22,11 @@ import {
   DESIGN_SYSTEM_BASE_COLORS,
   DESIGN_SYSTEM_COLORS_STORAGE_KEY,
 } from "@/lib/admin/design-system-tokens";
-import { buildHostedFontAssetPath } from "@/lib/fonts/hosted-fonts";
+import {
+  buildHostedFontAssetPath,
+  buildHostedFontUrl,
+  extractHostedFontAssetLinks,
+} from "@/lib/fonts/hosted-fonts";
 
 const QuestionsTab = dynamic(() => import("@/app/admin/fonts/_components/QuestionsTab"), {
   loading: () => (
@@ -148,6 +153,7 @@ interface FontFamily {
   type: "CDN Font" | "Google Font" | "Font Stack";
   source: "CloudFront CDN" | "Google Fonts" | "Tailwind Theme";
   cdnPath?: string;
+  previewAssetPath?: string;
   description: string;
   usedOn: UsedOnEntry[];
   fontFamilyValue: string;
@@ -607,6 +613,29 @@ const CDN_FONTS: FontFamily[] = [
   },
 ];
 
+function inferFontFormat(assetPath: string): string {
+  const normalized = assetPath.toLowerCase();
+  if (normalized.endsWith(".ttf")) return "truetype";
+  if (normalized.endsWith(".woff2")) return "woff2";
+  if (normalized.endsWith(".woff")) return "woff";
+  return "opentype";
+}
+
+const COMPLETE_CDN_FONTS: FontFamily[] = [
+  ...CDN_FONTS,
+  ...ADDITIONAL_MONOTYPE_FONTS.map((font) => ({
+    name: font.name,
+    weights: [w(400)],
+    type: "CDN Font" as const,
+    source: "CloudFront CDN" as const,
+    cdnPath: `${CDN_BASE}/monotype/${encodeURIComponent(font.name)}/`,
+    previewAssetPath: font.previewAssetPath,
+    description: font.description,
+    fontFamilyValue: `"${font.name}"`,
+    usedOn: [{ page: "Not yet used", path: "Available in hosted font library" }],
+  })),
+].sort((left, right) => left.name.localeCompare(right.name));
+
 /* ------------------------------------------------------------------ */
 /*  Google Fonts                                                      */
 /* ------------------------------------------------------------------ */
@@ -933,9 +962,11 @@ function TypeBadge({ type, source }: { type: FontFamily["type"]; source: FontFam
 
 function FontCard({
   family,
+  fontAssetHref,
   previewText,
 }: {
   family: FontFamily;
+  fontAssetHref?: string;
   previewText: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -944,6 +975,12 @@ function FontCard({
   const totalStyles = totalWeights + (hasAnyItalic ? family.weights.filter((w) => w.hasItalic).length : 0);
   const activeUsedOn = getFontUsedOnEntries(family, true);
   const displayUsedOn = activeUsedOn.length > 0 ? activeUsedOn : getFontUsedOnEntries(family);
+  const fallbackCdnHref = family.previewAssetPath
+    ? buildHostedFontUrl(family.previewAssetPath)
+    : family.cdnPath
+      ? (family.cdnPath.startsWith("/fonts/") ? buildHostedFontUrl(family.cdnPath) : family.cdnPath)
+      : null;
+  const resolvedAssetHref = fontAssetHref ?? fallbackCdnHref;
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden transition-shadow hover:shadow-md">
@@ -991,12 +1028,13 @@ function FontCard({
                 CSS: <code className="font-mono text-zinc-700">{family.cssVar}</code>
               </span>
             )}
-            {family.cdnPath && (
+            {family.cdnPath && resolvedAssetHref && (
               <a
-                href={family.cdnPath}
+                href={resolvedAssetHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-600 hover:text-blue-800 hover:underline truncate max-w-sm"
+                title={resolvedAssetHref}
               >
                 {family.cdnPath}
               </a>
@@ -1297,9 +1335,32 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
     "The quick brown fox jumps over the lazy dog"
   );
   const [showUsedOnly, setShowUsedOnly] = useState(false);
+  const [hostedFontAssetLinks, setHostedFontAssetLinks] = useState<Record<string, string>>({});
   const [designSystemColors, setDesignSystemColors] = useState<string[]>(() => [...DESIGN_SYSTEM_BASE_COLORS]);
   const [newBaseColor, setNewBaseColor] = useState("#5C0F4F");
   const [newBaseColorError, setNewBaseColorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch("/hosted-fonts.css")
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.text();
+      })
+      .then((stylesheet) => {
+        if (!stylesheet || cancelled) return;
+        setHostedFontAssetLinks(extractHostedFontAssetLinks(stylesheet));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHostedFontAssetLinks({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -1380,7 +1441,7 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
   const isUsed = (font: { usedOn: UsedOnEntry[]; weights?: FontWeight[] }) =>
     getFontUsedOnEntries(font, true).length > 0;
 
-  const filteredCDN = showUsedOnly ? CDN_FONTS.filter((f) => isUsed(f)) : CDN_FONTS;
+  const filteredCDN = showUsedOnly ? COMPLETE_CDN_FONTS.filter((f) => isUsed(f)) : COMPLETE_CDN_FONTS;
   const filteredGoogle = showUsedOnly ? GOOGLE_FONTS.filter((f) => isUsed(f)) : GOOGLE_FONTS;
   const filteredStacks = showUsedOnly ? FONT_STACKS.filter((f) => isUsed(f)) : FONT_STACKS;
   const filteredRealitease = showUsedOnly ? REALITEASE_FONTS.filter((f) => isUsed({ usedOn: f.usedOn })) : REALITEASE_FONTS;
@@ -1391,6 +1452,9 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
   const realiteaseCount = filteredRealitease.length;
   const totalStyles = filteredCDN.reduce((sum, f) => sum + f.weights.length + f.weights.filter((w) => w.hasItalic).length, 0);
   const activeTabSubtabs = getDesignSystemSubtabs(activeTab);
+  const additionalHostedFontPreviewCss = ADDITIONAL_MONOTYPE_FONTS.map((font) => (
+    `@font-face { font-family: "${font.name}"; src: url("${buildHostedFontAssetPath(font.previewAssetPath)}") format("${inferFontFormat(font.previewAssetPath)}"); font-weight: 400; font-style: normal; font-display: swap; }`
+  )).join("\n");
 
   return (
     <ClientOnly>
@@ -1632,6 +1696,7 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
 
         {/* Fonts Tab */}
         {activeTab === "fonts" && (<>
+          <style>{additionalHostedFontPreviewCss}</style>
           <p className="mb-4 text-sm text-zinc-500">
             {cdnFontCount} CDN fonts ({totalStyles} styles) &middot; {googleFontCount} Google &middot; {stackCount} stacks &middot; {realiteaseCount} Realitease
           </p>
@@ -1691,6 +1756,7 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
                 <FontCard
                   key={family.name}
                   family={family}
+                  fontAssetHref={hostedFontAssetLinks[family.name]}
                   previewText={previewText}
                 />
               ))}

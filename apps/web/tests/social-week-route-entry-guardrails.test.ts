@@ -12,8 +12,8 @@ const WEEK_ROUTE_DIRS = [
   path.join(APP_ROOT, "[showId]/s[seasonNumber]/social/w[weekIndex]"),
 ];
 
-const EXPECTED_SHARED_IMPORT =
-  "@/components/admin/social-week/WeekDetailPageViewLoader";
+const EXPECTED_SHARED_IMPORT = "@/components/admin/social-week/WeekDetailPageViewLoader";
+const EXPECTED_PUBLIC_IMPORT = "@/components/public/PublicRouteShell";
 
 function collectFilesRecursively(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -56,8 +56,8 @@ describe("social week route entry guardrails", () => {
     }
   });
 
-  it("keeps all week entry pages as static wrappers to the shared view", () => {
-    const entryPages = [
+  it("keeps admin week entry pages as shared-loader wrappers", () => {
+    const adminEntryPages = [
       path.join(
         APP_ROOT,
         "admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
@@ -66,6 +66,18 @@ describe("social week route entry guardrails", () => {
         APP_ROOT,
         "admin/trr-shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/[platform]/page.tsx",
       ),
+    ];
+
+    for (const pagePath of adminEntryPages) {
+      const contents = fs.readFileSync(pagePath, "utf8");
+      expect(contents).toMatch(new RegExp(`from ["']${EXPECTED_SHARED_IMPORT}["']`));
+      expect(contents).toMatch(/return <WeekDetailPageViewLoader \/>;/);
+      expect(contents).toMatch(/export const dynamic = "force-dynamic";/);
+    }
+  });
+
+  it("keeps public week entry pages behind the public route shell boundary", () => {
+    const publicEntryPages = [
       path.join(
         APP_ROOT,
         "shows/[showId]/seasons/[seasonNumber]/social/week/[weekIndex]/page.tsx",
@@ -84,11 +96,12 @@ describe("social week route entry guardrails", () => {
       ),
     ];
 
-    for (const pagePath of entryPages) {
+    for (const pagePath of publicEntryPages) {
       const contents = fs.readFileSync(pagePath, "utf8");
-      expect(contents).toMatch(new RegExp(`from ["']${EXPECTED_SHARED_IMPORT}["']`));
-      expect(contents).toMatch(/return <WeekDetailPageViewLoader \/>;/);
+      expect(contents).toMatch(new RegExp(`from ["']${EXPECTED_PUBLIC_IMPORT}["']`));
       expect(contents).toMatch(/export const dynamic = "force-dynamic";/);
+      expect(contents).toMatch(/PublicRouteShell/);
+      expect(contents).toMatch(/no longer lazy-loads|without importing the admin weekly detail loader/i);
     }
   });
 

@@ -6,7 +6,7 @@ describe("person gallery broken-row audit toggle wiring", () => {
   it("wires include_broken query flag and broken badges", () => {
     const filePath = path.resolve(
       __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/page.tsx"
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx"
     );
     const contents = fs.readFileSync(filePath, "utf8");
 

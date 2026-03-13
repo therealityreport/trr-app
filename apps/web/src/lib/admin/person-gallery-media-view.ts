@@ -9,11 +9,12 @@ export type PersonGalleryOtherShowOption = {
   acronym: string | null;
 };
 
-export type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery" | "nbcumv";
+export type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery" | "getty" | "nbcumv";
 
 export const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
   "fandom",
   "fandom-gallery",
+  "getty",
   "imdb",
   "nbcumv",
   "tmdb",
@@ -42,6 +43,7 @@ export function toCanonicalScopedSource(value: string | null | undefined): Canon
   if (normalized === "tmdb") return "tmdb";
   if (normalized === "fandom") return "fandom";
   if (normalized === "fandom-gallery") return "fandom-gallery";
+  if (normalized === "getty") return "getty";
   if (normalized === "nbcumv") return "nbcumv";
   return null;
 }

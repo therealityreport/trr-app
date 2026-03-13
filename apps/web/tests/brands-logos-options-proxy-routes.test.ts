@@ -15,6 +15,7 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 }));
 
 import { GET as getOptionSources } from "@/app/api/admin/trr-api/brands/logos/options/sources/route";
+import { GET as getOptionSourceSuggestions } from "@/app/api/admin/trr-api/brands/logos/options/source-suggestions/route";
 import { POST as postOptionDiscover } from "@/app/api/admin/trr-api/brands/logos/options/discover/route";
 import { POST as postOptionSourceQuery } from "@/app/api/admin/trr-api/brands/logos/options/source-query/route";
 import { POST as postOptionSelect } from "@/app/api/admin/trr-api/brands/logos/options/select/route";
@@ -87,6 +88,36 @@ describe("brands logo option proxy routes", () => {
         headers: expect.objectContaining({
           Authorization: "Bearer service-role-secret",
           "Content-Type": "application/json",
+        }),
+      }),
+    );
+  });
+
+  it("forwards source suggestion requests to backend", async () => {
+    getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/brands/logos/options/source-suggestions");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ source_provider: "logos_fandom", suggestions: [{ query_value: "IMDb/Original" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/brands/logos/options/source-suggestions?target_type=publication&target_key=imdb.com&logo_role=wordmark&source_provider=logos_fandom",
+      { method: "GET" },
+    );
+    const response = await getOptionSourceSuggestions(request);
+    const payload = (await response.json()) as { suggestions?: Array<{ query_value: string }> };
+
+    expect(response.status).toBe(200);
+    expect(payload.suggestions?.[0]?.query_value).toBe("IMDb/Original");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/admin/brands/logos/options/source-suggestions"),
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer service-role-secret",
         }),
       }),
     );

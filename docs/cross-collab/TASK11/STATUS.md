@@ -3,6 +3,23 @@
 Repo: TRR-APP
 Last updated: March 13, 2026
 
+## March 13, 2026 — Admin host fallback hotfix prepared; Vercel redeploy still required
+
+- Found and fixed a live production regression on the deployed Vercel path:
+  - `/admin` returned `{"error":"Admin origin is not configured."}` when `ADMIN_APP_ORIGIN` / `ADMIN_APP_HOSTS` were unset in production
+  - the host middleware and server auth layer now fall back to the current deployed host when explicit admin host config is absent
+- Added regression coverage for the production same-host fallback:
+  - middleware allows `/admin` and `/api/admin/*` on the current deployment host with no explicit admin origin configured
+  - server auth allows `requireAdmin(...)` on the current deployment host in the same scenario
+- Managed Chrome verification against the currently deployed app still shows the regression on the live site until a new Vercel deploy is pushed:
+  - `https://trr-app.vercel.app/` loads normally
+  - `https://trr-app.vercel.app/admin` currently returns `{"error":"Admin origin is not configured."}`
+- Repo-side fix status:
+  - middleware and auth fallback are implemented
+  - regression tests pass locally
+  - live deploy is blocked in this session because Vercel CLI credentials are unavailable
+- Task 11 backend closeout remains valid, but the deployed TRR-APP admin host gate still needs the hotfix rollout.
+
 ## March 13, 2026 — Frontend blockers resolved; backend canary gate is now GREEN
 
 - Frontend baseline blockers documented in this file are now resolved:
@@ -14,8 +31,9 @@ Last updated: March 13, 2026
   - Full evidence recorded in `TRR-Backend/docs/cross-collab/TASK11/STATUS.md`
 - Canary confidence is now GREEN for the Modal live path.
 - Remaining Task 11 work:
-  - Better Stack token setup (current token returns 401)
-  - AWS teardown (gated until `2026-03-13T16:09:13-04:00`)
+  - ~~AWS teardown (gated until `2026-03-13T16:09:13-04:00`)~~ — completed March 12; all compute, networking, storage, observability, and IAM resources deleted
+  - ~~Better Stack token setup (current token returns 401)~~ — resolved March 12; HTTP source created (ID: 2295477), ingestion confirmed 202, credentials deployed to `.env`, Render, and Modal
+- Backend migration work is closed, but the deployed TRR-APP admin host hotfix from the March 13 entry above still needs a Vercel redeploy.
 
 ## March 12, 2026 — Vercel Preview and Production now point at the Modal backend URL
 

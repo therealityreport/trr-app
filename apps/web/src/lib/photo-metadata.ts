@@ -1,5 +1,10 @@
 import type { TrrPersonPhoto, SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 import {
+  canonicalizeHostedMediaUrl,
+  inferHostedMediaFileNameFromUrl,
+  isLikelyHostedMediaUrl,
+} from "@/lib/hosted-media";
+import {
   formatContentTypeLabel,
   normalizeContentTypeToken,
   resolveCanonicalContentType,
@@ -47,10 +52,10 @@ export interface PhotoFaceCrop {
 export interface PhotoMetadata {
   source: string;
   sourceBadgeColor: string;
-  s3Mirroring?: boolean;
-  isS3Mirrored?: boolean;
-  s3MirrorFileName?: string | null;
-  mirrorHostedUrl?: string | null;
+  hostedMediaSyncing?: boolean;
+  isHostedMedia?: boolean;
+  hostedMediaFileName?: string | null;
+  hostedMediaUrl?: string | null;
   originalImageUrl?: string | null;
   originalSourceFileUrl?: string | null;
   originalSourcePageUrl?: string | null;
@@ -291,7 +296,7 @@ const normalizeMirrorKey = (value: string | null | undefined): string | null => 
   return trimmed.replace(/^\/+/, "");
 };
 
-const inferS3MirrorFileName = (
+const inferHostedMediaFileName = (
   metadata: Record<string, unknown> | null | undefined,
   candidateUrls: Array<string | null | undefined>
 ): string | null => {
@@ -318,46 +323,21 @@ const inferS3MirrorFileName = (
     .filter((value): value is string => typeof value === "string" && value.length > 0);
 
   for (const key of keyCandidates) {
-    const fileName = key.split("/").filter(Boolean).pop();
-    if (fileName && fileName.trim().length > 0) {
-      try {
-        return decodeURIComponent(fileName.trim());
-      } catch {
-        return fileName.trim();
-      }
-    }
+    const fileName = inferHostedMediaFileNameFromUrl(key);
+    if (fileName) return fileName;
   }
 
   return null;
 };
 
 const normalizeUrl = (value: string | null | undefined): string | null => {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
+  const canonical = canonicalizeHostedMediaUrl(value);
+  if (!canonical) return null;
   try {
-    const parsed = new URL(trimmed);
+    const parsed = new URL(canonical);
     return parsed.toString();
   } catch {
     return null;
-  }
-};
-
-const isLikelyHostedMirrorUrl = (value: string): boolean => {
-  try {
-    const parsed = new URL(value);
-    const host = parsed.hostname.toLowerCase();
-    if (
-      host.includes("cloudfront.net") ||
-      host.includes("amazonaws.com") ||
-      host.includes("s3.") ||
-      host.includes("therealityreport")
-    ) {
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
   }
 };
 
@@ -400,7 +380,7 @@ const resolveOriginalImageUrl = (
     const normalized = normalizeUrl(candidate);
     if (!normalized) continue;
     if (hostedSet.has(normalized)) continue;
-    if (isLikelyHostedMirrorUrl(normalized)) continue;
+    if (isLikelyHostedMediaUrl(normalized)) continue;
     return normalized;
   }
   return null;
@@ -1104,7 +1084,7 @@ export function mapPhotoToMetadata(
     getDomainLabel(originalSourceFileUrl) ??
     (photo.source?.trim() ? formatPhotoSourceLabel(photo.source) : null);
   const normalizedHostedUrl = normalizeUrl(photo.hosted_url ?? null);
-  const isS3Mirrored = normalizedHostedUrl ? isLikelyHostedMirrorUrl(normalizedHostedUrl) : false;
+  const isHostedMedia = normalizedHostedUrl ? isLikelyHostedMediaUrl(normalizedHostedUrl) : false;
   const faceBoxes = parseFaceBoxes(
     (photo as { face_boxes?: unknown }).face_boxes ?? metadata.face_boxes
   );
@@ -1199,7 +1179,7 @@ export function mapPhotoToMetadata(
     toPeopleCount(metadata.people_count) ??
     (people.length > 0 ? people.length : null) ??
     (faceBoxes.length > 0 ? faceBoxes.length : null);
-  const s3MirrorFileName = inferS3MirrorFileName(metadata, [photo.hosted_url]);
+  const hostedMediaFileName = inferHostedMediaFileName(metadata, [photo.hosted_url]);
   const rawCreatedAt =
     metadata.created_at ??
     metadata.createdAt ??
@@ -1315,10 +1295,10 @@ export function mapPhotoToMetadata(
   return {
     source: photo.source,
     sourceBadgeColor: SOURCE_COLORS[photo.source.toLowerCase()] ?? "#6b7280",
-    s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
-    isS3Mirrored,
-    s3MirrorFileName,
-    mirrorHostedUrl: normalizedHostedUrl,
+    hostedMediaSyncing: ingestStatus === "pending" || ingestStatus === "in_progress",
+    isHostedMedia,
+    hostedMediaFileName,
+    hostedMediaUrl: normalizedHostedUrl,
     originalImageUrl,
     originalSourceFileUrl,
     originalSourcePageUrl,
@@ -1506,14 +1486,14 @@ export function mapSeasonAssetToMetadata(
     getDomainLabel(originalSourceFileUrl) ??
     (asset.source?.trim() ? formatPhotoSourceLabel(asset.source) : null);
   const normalizedHostedUrl = normalizeUrl(asset.hosted_url ?? null);
-  const isS3Mirrored = normalizedHostedUrl ? isLikelyHostedMirrorUrl(normalizedHostedUrl) : false;
+  const isHostedMedia = normalizedHostedUrl ? isLikelyHostedMediaUrl(normalizedHostedUrl) : false;
   const faceBoxes = parseFaceBoxes(metadata.face_boxes);
   const faceCrops = parseFaceCrops(metadata.face_crops);
   const peopleCount =
     toPeopleCount((asset as { people_count?: unknown }).people_count) ??
     toPeopleCount((metadata as Record<string, unknown>).people_count) ??
     (faceBoxes.length > 0 ? faceBoxes.length : null);
-  const s3MirrorFileName = inferS3MirrorFileName(metadata, [
+  const hostedMediaFileName = inferHostedMediaFileName(metadata, [
     asset.hosted_url,
   ]);
 
@@ -1643,10 +1623,10 @@ export function mapSeasonAssetToMetadata(
   return {
     source: asset.source,
     sourceBadgeColor: SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
-    s3Mirroring: ingestStatus === "pending" || ingestStatus === "in_progress",
-    isS3Mirrored,
-    s3MirrorFileName,
-    mirrorHostedUrl: normalizedHostedUrl,
+    hostedMediaSyncing: ingestStatus === "pending" || ingestStatus === "in_progress",
+    isHostedMedia,
+    hostedMediaFileName,
+    hostedMediaUrl: normalizedHostedUrl,
     originalImageUrl,
     originalSourceFileUrl,
     originalSourcePageUrl,

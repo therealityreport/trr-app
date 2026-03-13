@@ -1,7 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import PersonPage from "@/app/admin/trr-shows/people/[personId]/page";
+import PersonPage from "@/app/admin/trr-shows/people/[personId]/PersonPageClient";
 
 const mocks = vi.hoisted(() => {
   const personId = "11111111-2222-3333-4444-555555555555";
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
     personId,
     showId,
     params: { personId },
-    pathname: `/admin/trr-shows/people/${personId}`,
+    pathname: `/people/${personId}`,
     searchParams: new URLSearchParams(`showId=${showId}`),
     router: { replace },
     replace,
@@ -167,7 +167,7 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
 describe("people page tab runtime behavior", () => {
   beforeEach(() => {
     mocks.params.personId = PERSON_ID;
-    mocks.pathname = `/admin/trr-shows/people/${PERSON_ID}`;
+    mocks.pathname = `/people/${PERSON_ID}`;
     mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}`);
     mocks.replace.mockReset();
     mocks.guardState.checking = false;
