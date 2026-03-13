@@ -614,7 +614,7 @@ export default function CastDecisionCardInput({
             className="mx-auto mt-3 max-w-4xl rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-xs text-amber-900"
             data-testid="three-choice-missing-fonts"
           >
-            Missing CloudFront CDN fonts: {fontOverrides.missingFonts.join(", ")}
+            Missing hosted fonts: {fontOverrides.missingFonts.join(", ")}
           </p>
         )}
         {fontLoadFailures.length > 0 && (
@@ -622,7 +622,7 @@ export default function CastDecisionCardInput({
             className="mx-auto mt-3 max-w-4xl rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-xs text-amber-900"
             data-testid="three-choice-font-load-failures"
           >
-            CloudFront CDN fonts failed to load in this browser: {fontLoadFailures.join(", ")}
+            Hosted fonts failed to load in this browser: {fontLoadFailures.join(", ")}
           </p>
         )}
 

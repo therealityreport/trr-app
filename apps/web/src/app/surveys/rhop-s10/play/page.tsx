@@ -15,7 +15,6 @@ import {
 } from "@/lib/surveys/config";
 import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse } from "@/lib/surveys/types";
 import { shows } from "@/lib/admin/shows/data";
-import "@/styles/realitease-fonts.css";
 
 export const dynamic = "force-dynamic";
 

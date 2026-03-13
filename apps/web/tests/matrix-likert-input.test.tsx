@@ -98,7 +98,7 @@ describe("MatrixLikertInput", () => {
     expect(screen.queryByTestId("matrix-likert-missing-fonts")).not.toBeInTheDocument();
   });
 
-  it("shows warning when required fonts are missing from CloudFront CDN", () => {
+  it("shows warning when required hosted fonts are missing", () => {
     render(
       <MatrixLikertInput
         question={makeQuestion({
@@ -111,7 +111,7 @@ describe("MatrixLikertInput", () => {
     );
 
     expect(screen.getByTestId("matrix-likert-missing-fonts")).toHaveTextContent(
-      "Missing CloudFront CDN fonts: Totally Missing Font",
+      "Missing hosted fonts: Totally Missing Font",
     );
   });
 

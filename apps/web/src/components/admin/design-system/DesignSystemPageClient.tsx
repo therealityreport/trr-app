@@ -21,6 +21,7 @@ import {
   DESIGN_SYSTEM_BASE_COLORS,
   DESIGN_SYSTEM_COLORS_STORAGE_KEY,
 } from "@/lib/admin/design-system-tokens";
+import { buildHostedFontAssetPath } from "@/lib/fonts/hosted-fonts";
 
 const QuestionsTab = dynamic(() => import("@/app/admin/fonts/_components/QuestionsTab"), {
   loading: () => (
@@ -125,7 +126,7 @@ function calculateTints(colorValue: string, steps = TINT_SHADE_SWATCHES_PER_SIDE
   });
 }
 
-const CDN_BASE = "https://d1fmdyqfafwim3.cloudfront.net/fonts";
+const CDN_BASE = buildHostedFontAssetPath("/fonts");
 
 interface UsedOnEntry {
   page: string;
@@ -908,6 +909,8 @@ function ChevronIcon({ open }: { open: boolean }) {
 }
 
 function TypeBadge({ type, source }: { type: FontFamily["type"]; source: FontFamily["source"] }) {
+  const displayType = type === "CDN Font" ? "Hosted Font" : type;
+  const displaySource = source === "CloudFront CDN" ? "Cloudflare R2" : source;
   const colors =
     type === "CDN Font"
       ? "bg-blue-50 text-blue-700 ring-blue-200"
@@ -917,9 +920,9 @@ function TypeBadge({ type, source }: { type: FontFamily["type"]; source: FontFam
   return (
     <div className="flex items-center gap-2">
       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ring-inset ${colors}`}>
-        {type}
+        {displayType}
       </span>
-      <span className="text-[10px] text-zinc-400">{source}</span>
+      <span className="text-[10px] text-zinc-400">{displaySource}</span>
     </div>
   );
 }
@@ -1672,16 +1675,16 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
             </div>
           </div>
 
-          {/* CDN Fonts */}
+          {/* Hosted Fonts */}
           <section className="mb-10">
             <div className="mb-4 flex items-center gap-3">
               <h2 className="text-lg font-bold text-zinc-900">
-                CDN Fonts
+                Hosted Fonts
               </h2>
               <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
                 {cdnFontCount}
               </span>
-              <span className="text-xs text-zinc-400">CloudFront CDN</span>
+              <span className="text-xs text-zinc-400">Cloudflare R2</span>
             </div>
             <div className="space-y-2">
               {filteredCDN.map((family) => (

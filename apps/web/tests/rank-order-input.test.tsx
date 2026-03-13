@@ -209,7 +209,7 @@ describe("RankOrderInput", () => {
     expect(props.styleOverrides?.circlePlaceholderNumberColor).toBe("#0F172A");
   });
 
-  it("shows a warning when required fonts are not in CloudFront CDN", () => {
+  it("shows a warning when required hosted fonts are missing", () => {
     const question = makeQuestion("rectangle-ranking");
     question.config = {
       ...question.config,
@@ -225,7 +225,7 @@ describe("RankOrderInput", () => {
     );
 
     expect(
-      screen.getByText("Missing CloudFront CDN fonts: Totally Missing Font"),
+      screen.getByText("Missing hosted fonts: Totally Missing Font"),
     ).toBeInTheDocument();
   });
 });

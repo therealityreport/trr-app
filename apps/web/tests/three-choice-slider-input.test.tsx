@@ -235,7 +235,7 @@ describe("CastDecisionCardInput", () => {
     expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
   });
 
-  it("uses Canva template fonts when they exist in CloudFront CDN list", () => {
+  it("uses Canva template fonts when they exist in the hosted font library", () => {
     render(
       <CastDecisionCardInput
         question={makeQuestion({
@@ -258,7 +258,7 @@ describe("CastDecisionCardInput", () => {
     expect(screen.queryByTestId("three-choice-missing-fonts")).not.toBeInTheDocument();
   });
 
-  it("shows missing-font warning when Canva template fonts are not on CloudFront CDN", () => {
+  it("shows missing-font warning when Canva template fonts are not in the hosted font library", () => {
     render(
       <CastDecisionCardInput
         question={makeQuestion({
@@ -271,7 +271,7 @@ describe("CastDecisionCardInput", () => {
     );
 
     expect(screen.getByTestId("three-choice-missing-fonts")).toHaveTextContent(
-      "Missing CloudFront CDN fonts: Canva Mystery Serif, Another Missing Font",
+      "Missing hosted fonts: Canva Mystery Serif, Another Missing Font",
     );
   });
 });

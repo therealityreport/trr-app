@@ -11,7 +11,6 @@ import { useSurveyManager } from "@/lib/surveys/manager";
 import { RHOSLC_EPISODE_ID, RHOSLC_SEASON_ID, RHOSLC_SHOW_ID, RHOSLC_SURVEY_ID } from "@/lib/surveys/config";
 import { RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL } from "@/lib/surveys/rhoslc-assets";
 import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse } from "@/lib/surveys/types";
-import "@/styles/realitease-fonts.css";
 
 const IDENTIFIERS = {
   showId: RHOSLC_SHOW_ID,

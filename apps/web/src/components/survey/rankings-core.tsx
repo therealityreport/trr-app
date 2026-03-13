@@ -449,7 +449,7 @@ export function RankingInputCore({
           className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
           data-testid={`${warningTestIdPrefix}-missing-fonts`}
         >
-          Missing CloudFront CDN fonts: {fontOverrides.missingFonts.join(", ")}
+          Missing hosted fonts: {fontOverrides.missingFonts.join(", ")}
         </p>
       )}
       {fontLoadFailures.length > 0 && (
@@ -457,7 +457,7 @@ export function RankingInputCore({
           className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
           data-testid={`${warningTestIdPrefix}-font-load-failures`}
         >
-          CloudFront CDN fonts failed to load in this browser: {fontLoadFailures.join(", ")}
+          Hosted fonts failed to load in this browser: {fontLoadFailures.join(", ")}
         </p>
       )}
       {disabled ? <div className="pointer-events-none opacity-50">{ranker}</div> : ranker}
