@@ -1,6 +1,28 @@
 # Session Handoff (TRR-APP)
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
+## Latest Update (2026-03-13 18:04 EDT) — PR 68 stale routing assertions aligned with current branch behavior
+
+- primary_skill: `senior-qa`
+- supporting_skills:
+  - `code-reviewer`
+  - `senior-frontend`
+- mcp_tools_used:
+  - `functions.exec_command`
+  - `functions.apply_patch`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-navigation.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/brands-logo-sync-wiring.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/reddit-community-view-page.test.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Updated the admin navigation test to reflect the branch's current `Shows` destination of `/admin/shows`.
+  - Reworked the brand-logo sync wiring test to validate the current modal bootstrap/proxy route set (`modal`, `discover`, `source-query`, `source-suggestions`, `assign`, `saved`, `select`) instead of the older `sources` bootstrap expectation.
+  - Updated the reddit community route test to match the branch's public-route-shell behavior and the current `next.config.ts` contract, which no longer rewrites public reddit community aliases into admin pages.
+- validation_evidence:
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm vitest tests/admin-navigation.test.ts tests/brands-logo-sync-wiring.test.ts tests/reddit-community-view-page.test.tsx tests/public-route-rewrites.test.ts --run` (pass; `4 files / 20 tests`)
+- blocked_checks:
+  - Full GitHub branch CI still needs to rerun after the repair commit is pushed.
 ## Latest Update (2026-03-13 17:53 EDT) — PR 68 CI repair restored the person admin page target and aligned route/repository guardrails
 
 - primary_skill: `senior-qa`

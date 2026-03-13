@@ -82,16 +82,16 @@ describe("reddit community view page", () => {
     expect(nextConfigSource).toContain(
       'destination: "/:showId/social/reddit/:communitySlug"',
     );
-    expect(nextConfigSource).toContain(
+    expect(nextConfigSource).not.toContain(
       'source: "/:showId/social/reddit/:communitySlug/s:seasonNumber(\\\\d+)"',
     );
-    expect(nextConfigSource).toContain(
+    expect(nextConfigSource).not.toContain(
       'destination: "/admin/social-media/reddit/:communitySlug?showSlug=:showId&season=:seasonNumber"',
     );
-    expect(nextConfigSource).toContain(
+    expect(nextConfigSource).not.toContain(
       'source: "/:showId/social/reddit/:communitySlug"',
     );
-    expect(nextConfigSource).toContain(
+    expect(nextConfigSource).not.toContain(
       'destination: "/admin/social-media/reddit/:communitySlug?showSlug=:showId"',
     );
     expect(
@@ -100,11 +100,13 @@ describe("reddit community view page", () => {
     expect(
       existsSync(resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/social/reddit/[communitySlug]/page.tsx")),
     ).toBe(true);
-    expect(readFileSync(showCommunityAliasPath, "utf8")).toContain(
-      'export { default } from "@/app/admin/social-media/reddit/communities/[communityId]/page";',
-    );
-    expect(readFileSync(showCommunitySeasonAliasPath, "utf8")).toContain(
-      'export { default } from "@/app/admin/social-media/reddit/communities/[communityId]/page";',
+    const showCommunityAliasSource = readFileSync(showCommunityAliasPath, "utf8");
+    const showCommunitySeasonAliasSource = readFileSync(showCommunitySeasonAliasPath, "utf8");
+    expect(showCommunityAliasSource).toContain('import PublicRouteShell');
+    expect(showCommunityAliasSource).toContain("This public Reddit route no longer renders the admin community workspace.");
+    expect(showCommunitySeasonAliasSource).toContain('import PublicRouteShell');
+    expect(showCommunitySeasonAliasSource).toContain(
+      "This public season-scoped Reddit route no longer imports the admin community workspace.",
     );
     const rootSeasonAliasSource = readFileSync(
       resolve(process.cwd(), "src/app/[showId]/s[seasonNumber]/[[...rest]]/page.tsx"),

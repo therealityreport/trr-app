@@ -42,24 +42,27 @@ describe("brands logo sync wiring", () => {
 
   it("wires logo option proxy endpoints and modal save actions", () => {
     const modalPath = path.resolve(__dirname, "../src/components/admin/BrandLogoOptionsModal.tsx");
-    const sourceRoute = path.resolve(__dirname, "../src/app/api/admin/trr-api/brands/logos/options/sources/route.ts");
+    const modalRoute = path.resolve(__dirname, "../src/app/api/admin/trr-api/brands/logos/options/modal/route.ts");
     const discoverRoute = path.resolve(__dirname, "../src/app/api/admin/trr-api/brands/logos/options/discover/route.ts");
     const sourceQueryRoute = path.resolve(__dirname, "../src/app/api/admin/trr-api/brands/logos/options/source-query/route.ts");
     const selectRoute = path.resolve(__dirname, "../src/app/api/admin/trr-api/brands/logos/options/select/route.ts");
     const modalContents = fs.readFileSync(modalPath, "utf8");
-    const sourceContents = fs.readFileSync(sourceRoute, "utf8");
+    const modalRouteContents = fs.readFileSync(modalRoute, "utf8");
     const discoverContents = fs.readFileSync(discoverRoute, "utf8");
     const sourceQueryContents = fs.readFileSync(sourceQueryRoute, "utf8");
     const selectContents = fs.readFileSync(selectRoute, "utf8");
 
-    expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/sources/);
+    expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/modal/);
     expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/discover/);
     expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/source-query/);
+    expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/source-suggestions/);
+    expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/assign/);
+    expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/saved\//);
     expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/select/);
     expect(modalContents).toMatch(/Related logo pairing temporarily unavailable; discovery sources are still usable\./);
     expect(modalContents).toMatch(/runWithConcurrency/);
     expect(modalContents).toMatch(/Add Manual Import/);
-    expect(sourceContents).toMatch(/\/admin\/brands\/logos\/options\/sources/);
+    expect(modalRouteContents).toMatch(/\/admin\/brands\/logos\/options\/modal/);
     expect(discoverContents).toMatch(/\/admin\/brands\/logos\/options\/discover/);
     expect(sourceQueryContents).toMatch(/\/admin\/brands\/logos\/options\/source-query/);
     expect(selectContents).toMatch(/\/admin\/brands\/logos\/options\/select/);

@@ -20,7 +20,7 @@ describe("admin navigation config", () => {
 
     expect(ADMIN_NAV_ITEMS.map((item) => item.href)).toEqual([
       "/dev-dashboard",
-      "/shows",
+      "/admin/shows",
       "/people",
       "/games",
       "/surveys",
@@ -38,7 +38,7 @@ describe("admin navigation config", () => {
     const submenuItems = ADMIN_NAV_ITEMS.filter((item) => item.hasShowsSubmenu);
     expect(submenuItems).toHaveLength(1);
     expect(submenuItems[0]?.title).toBe("Shows");
-    expect(submenuItems[0]?.href).toBe("/shows");
+    expect(submenuItems[0]?.href).toBe("/admin/shows");
   });
 
   it("reuses the shared navigation config for dashboard tools", () => {
