@@ -651,7 +651,7 @@ export default function TrrShowsPage() {
             ) : coveredShowsError ? (
               <p className="text-sm text-zinc-500">
                 Covered shows could not be loaded. Use Retry above once admin auth and
-                the local app database connection are ready.
+                the admin data service are ready.
               </p>
             ) : coveredShows.length === 0 ? (
               <p className="text-sm text-zinc-500">
