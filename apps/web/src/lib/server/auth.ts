@@ -474,7 +474,6 @@ const adminAllowedHosts = resolveAdminAllowedHosts();
 
 function isRequestHostAllowedForAdmin(request: NextRequest): boolean {
   if (!isAdminHostEnforced()) return true;
-
   const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
   if (!requestHost) return false;
   if (adminAllowedHosts.size === 0) return true;
