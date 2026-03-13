@@ -1,6 +1,35 @@
 # Session Handoff (TRR-APP)
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
+## Latest Update (2026-03-14 06:56 EDT) — production admin-origin fallback hotfix shipped for single-host Vercel
+
+- primary_skill: `senior-frontend`
+- supporting_skills:
+  - `senior-qa`
+  - `orchestrate-plan-execution`
+- mcp_tools_used:
+  - `functions.exec_command`
+  - `functions.apply_patch`
+  - `functions.mcp__chrome-devtools__new_page`
+  - `functions.mcp__chrome-devtools__take_snapshot`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/proxy.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/auth.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/admin-host-middleware.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/server-auth-adapter.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Fixed the production `/admin` failure on `https://trr-app.vercel.app` where middleware returned `{\"error\":\"Admin origin is not configured.\"}` when `ADMIN_APP_ORIGIN` and `ADMIN_APP_HOSTS` were unset.
+  - Middleware now falls back to the current request origin in production, which preserves single-host Vercel deployments while still using the explicit admin origin whenever it is configured.
+  - Server-side admin auth now treats the current production host as allowed when host enforcement is enabled but no explicit admin host allowlist is configured.
+  - Added focused regressions for `/admin`, `/api/admin/*`, and `requireAdmin(...)` on the current production Vercel host with no explicit admin-origin settings.
+- validation_evidence:
+  - `source /Users/thomashulihan/.nvm/nvm.sh && nvm use 24.14.0 >/dev/null && pnpm -C /tmp/trr-app-admin-origin-hotfix-59952/apps/web vitest run tests/admin-host-middleware.test.ts tests/server-auth-adapter.test.ts` (pass; `50 passed`)
+  - `source /Users/thomashulihan/.nvm/nvm.sh && nvm use 24.14.0 >/dev/null && pnpm -C /tmp/trr-app-admin-origin-hotfix-59952/apps/web exec tsc --noEmit --pretty false` (pass)
+  - Managed Chrome pre-deploy verification:
+    - `https://trr-app.vercel.app/admin` reproduced the JSON config error before this hotfix was pushed.
+- blocked_checks:
+  - Post-deploy browser verification is pending until Vercel finishes rebuilding from the pushed `main` update.
 ## Latest Update (2026-03-07 19:52 EST) — Admin docs now match the live Modal runtime state
 
 - primary_skill: `senior-frontend`

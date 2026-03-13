@@ -85,11 +85,11 @@ function normalizeHost(value: string | null | undefined): string | null {
   return normalized;
 }
 
-function resolveAdminOrigin(): string | null {
+function resolveAdminOrigin(request: NextRequest): string | null {
   const configuredOrigin = process.env.ADMIN_APP_ORIGIN?.trim();
   if (configuredOrigin) return configuredOrigin;
   if (process.env.NODE_ENV === "development") return DEFAULT_DEV_ADMIN_ORIGIN;
-  return null;
+  return request.nextUrl.origin;
 }
 
 function resolveAdminHost(adminOrigin: string | null): string | null {
@@ -238,7 +238,7 @@ export function proxy(request: NextRequest): NextResponse {
   if (isStaticPath(pathname)) return NextResponse.next();
 
   const strictHostRouting = parseOptionalBoolean(process.env.ADMIN_STRICT_HOST_ROUTING) ?? false;
-  const adminOrigin = resolveAdminOrigin();
+  const adminOrigin = resolveAdminOrigin(request);
   const canonicalAdminHost = resolveAdminHost(adminOrigin);
   const allowedAdminApiHosts = resolveAdminApiAllowedHosts(adminOrigin);
   const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);

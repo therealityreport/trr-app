@@ -317,6 +317,38 @@ describe("server auth adapter", () => {
     }
   });
 
+  it("allows requireAdmin on the current production host when no admin host config is set", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_APP_HOSTS;
+    delete process.env.ADMIN_APP_ORIGIN;
+    process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin-prod-current-host",
+      email: "admin@example.com",
+      name: "Admin User",
+    });
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      const user = await auth.requireAdmin(
+        requestWithBearerAt("https://trr-app.vercel.app/api/test", "token-prod-current-host"),
+      );
+      expect(user).toMatchObject({
+        uid: "firebase-admin-prod-current-host",
+        email: "admin@example.com",
+        provider: "firebase",
+      });
+    } finally {
+      if (typeof previousNodeEnv === "undefined") {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
+  });
+
   it("denies requireAdmin on non-admin host when host enforcement is enabled", async () => {
     process.env.ADMIN_ENFORCE_HOST = "true";
     process.env.ADMIN_APP_HOSTS = "admin.localhost";

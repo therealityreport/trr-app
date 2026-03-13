@@ -263,6 +263,34 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
+  it("allows /admin requests on the current production host when no explicit admin origin is configured", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://trr-app.vercel.app/admin");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("allows /api/admin requests on the current production host when no explicit admin origin is configured", () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.ADMIN_APP_ORIGIN;
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("https://trr-app.vercel.app/api/admin/auth/status");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("allows admin routes on admin host", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
