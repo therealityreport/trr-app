@@ -19,7 +19,10 @@ const getTrrAdminServiceKey = (): string => {
   return key;
 };
 
-let client: ReturnType<typeof createClient> | null = null;
+// Keep this client loosely typed to avoid pulling the entire PostgREST type surface
+// into server-only admin routes that only need runtime access.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let client: any = null;
 
 export const getSupabaseTrrAdmin = () => {
   if (!client) {
@@ -28,7 +31,8 @@ export const getSupabaseTrrAdmin = () => {
         persistSession: false,
         autoRefreshToken: false,
       },
-    });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
   }
   return client;
 };

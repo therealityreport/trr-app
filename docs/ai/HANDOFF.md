@@ -24,7 +24,6 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/covered-shows-repository.ts`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/supabase-trr-admin.ts`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/page.tsx`
-  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/covered-shows-repository.test.ts`
   - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
 - behavior_summary:
   - Replaced the covered-shows repository's direct `pg`/RDS dependency with service-role Supabase calls against `admin.covered_shows` plus `core.shows` and `core.show_images`.
@@ -32,8 +31,8 @@ Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update 
   - Preserved the admin route payload shape, including canonical slug collision suffixing, poster URL lookup, and add/remove support.
   - Updated the admin shows page fallback copy so it no longer claims the user must wait for a "local app database connection".
 - validation_evidence:
-  - `source /Users/thomashulihan/.nvm/nvm.sh && nvm use 24.14.0 >/dev/null && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web vitest run tests/covered-shows-repository.test.ts tests/covered-shows-route-metadata.test.ts tests/trr-shows-page-covered-shows-loading.test.tsx` (pass; `6 passed`)
-  - `source /Users/thomashulihan/.nvm/nvm.sh && nvm use 24.14.0 >/dev/null && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/server/admin/covered-shows-repository.ts src/lib/server/supabase-trr-admin.ts src/app/admin/trr-shows/page.tsx tests/covered-shows-repository.test.ts tests/covered-shows-route-metadata.test.ts tests/trr-shows-page-covered-shows-loading.test.tsx` (pass)
+  - `source /Users/thomashulihan/.nvm/nvm.sh && nvm use 24.14.0 >/dev/null && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web vitest run tests/covered-shows-route-metadata.test.ts tests/trr-shows-page-covered-shows-loading.test.tsx` (pass; `3 passed`)
+  - `source /Users/thomashulihan/.nvm/nvm.sh && nvm use 24.14.0 >/dev/null && pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/server/admin/covered-shows-repository.ts src/lib/server/supabase-trr-admin.ts src/app/admin/trr-shows/page.tsx tests/covered-shows-route-metadata.test.ts tests/trr-shows-page-covered-shows-loading.test.tsx` (pass)
 - blocked_checks:
   - Repo-wide `pnpm exec tsc --noEmit --pretty false` did not complete in this dirty workspace and produced no diagnostics before timing concern; this pass relied on focused tests plus eslint.
   - Managed-Chrome verification of `http://admin.localhost:3000/admin/trr-shows` was blocked by an existing local `ERR_TOO_MANY_REDIRECTS` loop unrelated to the covered-shows repository change.
