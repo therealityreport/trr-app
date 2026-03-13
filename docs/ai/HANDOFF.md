@@ -1,6 +1,28 @@
 # Session Handoff (TRR-APP)
 
 Purpose: persistent state for multi-turn AI agent sessions in `TRR-APP`. Update before ending a session or requesting handoff.
+## Latest Update (2026-03-13 17:53 EDT) — PR 68 CI repair restored the person admin page target and aligned route/repository guardrails
+
+- primary_skill: `senior-qa`
+- supporting_skills:
+  - `code-reviewer`
+  - `senior-frontend`
+- mcp_tools_used:
+  - `functions.exec_command`
+  - `functions.apply_patch`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/admin/trr-shows/people/[personId]/page.tsx`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/covered-shows-repository-slug-query-safety.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/social-week-route-entry-guardrails.test.ts`
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/docs/ai/HANDOFF.md`
+- behavior_summary:
+  - Restored the tracked admin person page file that the branch had dropped even though both the catch-all admin route and multiple tests still depend on it.
+  - Replaced the stale covered-shows SQL-string test with a Supabase-backed canonical-slug collision test that matches the current repository implementation.
+  - Updated the social-week guardrail test to enforce the branch’s intended split: admin week entry pages stay on `WeekDetailPageViewLoader`, while public alias pages stay behind `PublicRouteShell`.
+- validation_evidence:
+  - `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null && cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm vitest tests/covered-shows-repository-slug-query-safety.test.ts tests/gallery-fallback-telemetry.test.ts tests/person-autocrop-wiring.test.ts tests/person-credits-show-scope-wiring.test.ts tests/person-gallery-broken-toggle.test.ts tests/person-gallery-detail-priority.test.ts tests/person-gallery-thumbnail-wiring.test.ts tests/person-refresh-request-id-wiring.test.ts tests/show-bravo-video-thumbnail-wiring.test.ts tests/social-week-route-entry-guardrails.test.ts --run` (pass; `10 files / 26 tests`)
+- blocked_checks:
+  - Full branch CI still needs to be rerun in GitHub after this repair commit is pushed.
 ## Latest Update (2026-03-13 17:31 EDT) — combined brand-logo picker content restored after route-conflict fix, with modal hardening completed
 
 - primary_skill: `orchestrate-plan-execution`
