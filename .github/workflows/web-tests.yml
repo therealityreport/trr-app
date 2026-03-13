@@ -80,6 +80,9 @@ jobs:
           NEXT_PUBLIC_FIREBASE_API_KEY: "placeholder-api-key-for-build"
           NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "placeholder.firebaseapp.com"
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-build"
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: "demo-build.firebasestorage.app"
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+          NEXT_PUBLIC_FIREBASE_APP_ID: "1:1234567890:web:demo-build"
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         if: always() && matrix.lane == 'full'

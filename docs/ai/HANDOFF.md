@@ -26385,6 +26385,25 @@ Continuation (2026-03-02) — System Health summary switched to run-based counts
 - notes:
   - The remaining console noise on the brands page is unrelated to Firebase auth and comes from unresolved external logo asset hosts plus an existing `500` on the overrides endpoint.
 
+## Latest Update (2026-03-13 18:20 EDT) — Web CI build lane now injects the full placeholder Firebase client contract
+
+- primary_skill: `senior-devops`
+- supporting_skills:
+  - `senior-qa`
+  - `code-reviewer`
+- files_changed:
+  - `/Users/thomashulihan/Projects/TRR/TRR-APP/.github/workflows/web-tests.yml`
+- behavior_summary:
+  - Updated the PR `Web Tests` workflow build step to provide placeholder values for `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`, `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, and `NEXT_PUBLIC_FIREBASE_APP_ID` in addition to the existing Firebase placeholders.
+  - This keeps CI aligned with `firebase-client-config.ts`, which now requires the full Firebase client contract during prerender instead of only API key, auth domain, and project id.
+  - The fix is isolated to CI scaffolding so the runtime guard still fails loudly when real Firebase client configuration is incomplete outside the controlled build harness.
+- validation_evidence:
+  - `gh api repos/therealityreport/trr-app/actions/jobs/67026256252/logs | tail -n 120` (confirmed failing step was `Build (no DATABASE_URL)` and the missing env vars were `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`, `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`, and `NEXT_PUBLIC_FIREBASE_APP_ID`)
+  - `source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run -c vitest.config.ts tests/validation.test.ts tests/cdn-fonts.test.ts` (pass)
+  - `source ~/.nvm/nvm.sh && nvm use 22 >/dev/null && cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web && pnpm exec vitest run -c vitest.config.ts tests/admin-auth-status-route.test.ts tests/admin-auth-status-reset-route.test.ts tests/admin-auth-drill-report-route.test.ts` (pass)
+- notes:
+  - Managed Chrome validation was not needed for this fix because the regression was isolated to GitHub Actions build-time environment wiring.
+
 ## Latest Update (2026-03-13 11:33 EDT) — Person gallery refresh modal now surfaces Modal worker dispatch state
 
 - primary_skill: `senior-frontend`
