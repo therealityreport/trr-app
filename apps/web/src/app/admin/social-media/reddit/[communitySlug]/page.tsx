@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Route } from "next";
 
 type PageProps = {
   params: Promise<{ communitySlug: string }>;
@@ -29,6 +30,6 @@ export default async function LegacyAdminSocialRedditCommunitySlugPage({ params,
     appendQuery(
       `/admin/social/reddit/${encodeURIComponent(resolvedParams.communitySlug)}`,
       resolvedSearchParams,
-    ),
+    ) as Route,
   );
 }
