@@ -1,3 +1,4 @@
+import type { Route } from "next";
 import { redirect } from "next/navigation";
 
 type PageProps = {
@@ -29,6 +30,6 @@ export default async function LegacyAdminSocialRedditPostDetailsPage({ params, s
     appendQuery(
       `/admin/social/reddit/communities/${encodeURIComponent(resolvedParams.communityId)}/${encodeURIComponent(resolvedParams.windowKey)}/post/${encodeURIComponent(resolvedParams.postId)}`,
       resolvedSearchParams,
-    ),
+    ) as Route,
   );
 }
