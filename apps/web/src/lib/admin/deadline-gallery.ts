@@ -1,7 +1,7 @@
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 const DEADLINE_HOSTS = new Set(["deadline.com", "www.deadline.com"]);
-const GALLERY_EXPORT_RE = /(?:var\s+)?pmcGalleryExports\s*=\s*(\{.*?\});/s;
+const GALLERY_EXPORT_RE = /(?:var\s+)?pmcGalleryExports\s*=\s*(\{[\s\S]*?\});/;
 
 const HTML_ENTITY_MAP: Record<string, string> = {
   amp: "&",

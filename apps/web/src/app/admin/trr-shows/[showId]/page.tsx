@@ -3982,6 +3982,18 @@ export default function TrrShowDetailPage() {
         altNamesText: restAlt.join("\n"),
         description: show.description ?? "",
         premiereDate: show.premiere_date ?? "",
+        imdbId: readShowExternalId(show, "imdb_id"),
+        tmdbId: readShowExternalId(show, "tmdb_id"),
+        tvdbId: readShowExternalId(show, "tvdb_id"),
+        wikidataId: readShowExternalId(show, "wikidata_id"),
+        tvRageId: readShowExternalId(show, "tv_rage_id"),
+        genresText: toDelimitedEditorText(show.genres),
+        networksText: toDelimitedEditorText(show.networks),
+        streamingProvidersText: toDelimitedEditorText(
+          (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
+            (Array.isArray(show.watch_providers) ? show.watch_providers : []),
+        ),
+        tagsText: toDelimitedEditorText(show.tags),
       });
     }
     setDetailsNotice(null);

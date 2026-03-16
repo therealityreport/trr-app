@@ -24,7 +24,7 @@ const buildLogoAsset = (
   }) as SeasonAsset;
 
 describe("resolveFeaturedShowLogoAssetId", () => {
-  it("prefers the selected show_image logo over stale primary media links", () => {
+  it("prefers media_links.is_primary logo over show primary_logo_image_id fallback", () => {
     const featuredId = resolveFeaturedShowLogoAssetId(
       [
         buildLogoAsset("logo-show", "show_images"),
@@ -33,7 +33,7 @@ describe("resolveFeaturedShowLogoAssetId", () => {
       "logo-show",
     );
 
-    expect(featuredId).toBe("logo-show");
+    expect(featuredId).toBe("logo-media");
   });
 
   it("falls back to primary media link when no show_image logo is selected", () => {

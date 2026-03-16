@@ -527,7 +527,7 @@ export default function UnifiedBrandsWorkspace() {
     (nextCategory: UnifiedBrandsCategory, nextView: UnifiedBrandsView) => {
       const href = buildUnifiedBrandsHref(nextCategory, nextView);
       if (href === `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`) return;
-      router.replace(href, { scroll: false });
+      router.replace(href as Route, { scroll: false });
     },
     [pathname, router, searchParams],
   );

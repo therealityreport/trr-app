@@ -1377,10 +1377,11 @@ function normalizeCaptionPreviewText(platform: string, text: string | null | und
   return raw.replace(TWITTER_TEXT_URL_RE, "").replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
 }
 
-function shouldShowPostTitle(post: AnyPost): boolean {
-  const title = getStr(post, "title").trim();
+function shouldShowPostTitle(post: AnyPost | PostDetailResponse): boolean {
+  const p = post as AnyPost;
+  const title = getStr(p, "title").trim();
   if (!title) return false;
-  return !(getStr(post, "platform") === "youtube" && Boolean(post.is_short));
+  return !(getStr(p, "platform") === "youtube" && Boolean((p as YouTubePost).is_short));
 }
 
 function formatTranscriptErrorLabel(error: string | null | undefined): string {

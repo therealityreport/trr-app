@@ -29,6 +29,12 @@ export const resolveFeaturedShowLogoAssetId = (
   logoAssets: SeasonAsset[],
   primaryLogoImageId: string | null | undefined
 ): string | null => {
+  for (const asset of logoAssets) {
+    if (asset.origin_table !== "media_assets") continue;
+    if ((asset.kind ?? "").trim().toLowerCase() !== "logo") continue;
+    if (asset.logo_link_is_primary) return asset.id;
+  }
+
   const normalizedPrimaryLogoImageId = primaryLogoImageId?.trim() ?? null;
   if (normalizedPrimaryLogoImageId) {
     for (const asset of logoAssets) {
@@ -36,12 +42,6 @@ export const resolveFeaturedShowLogoAssetId = (
       if ((asset.kind ?? "").trim().toLowerCase() !== "logo") continue;
       if (asset.id === normalizedPrimaryLogoImageId) return asset.id;
     }
-  }
-
-  for (const asset of logoAssets) {
-    if (asset.origin_table !== "media_assets") continue;
-    if ((asset.kind ?? "").trim().toLowerCase() !== "logo") continue;
-    if (asset.logo_link_is_primary) return asset.id;
   }
 
   return null;

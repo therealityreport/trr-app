@@ -256,6 +256,7 @@ describe("WeekDetailPage thumbnails", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     mockSearch.value = "source_scope=bravo";
+    try { sessionStorage.clear(); } catch { /* no-op in jsdom */ }
   });
 
   it("renders thumbnail previews for instagram, tiktok, and youtube", async () => {
@@ -3263,13 +3264,60 @@ describe("WeekDetailPage thumbnails", () => {
       if (url.includes("/social/analytics/week/1")) {
         return { ok: true, status: 200, json: async () => weekPayload } as Response;
       }
-      if (url.includes("/social/ingest") && init?.method === "POST") {
+      if (url.includes("/social/sync-sessions") && init?.method === "POST") {
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            run_id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
-            queued_or_started_jobs: 8,
+            status: "created",
+            sync_session_id: "ss-80423aa2-0001",
+            current_run_id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
+            current_run: {
+              id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
+              summary: { total_jobs: 8 },
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/sync-sessions/") && url.includes("/stream")) {
+        return { ok: false, status: 503, headers: new Headers(), body: null } as unknown as Response;
+      }
+      if (url.includes("/social/sync-sessions/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sync_session_id: "ss-80423aa2-0001",
+            status: "completed",
+            season_id: "season-1",
+            source_scope: "bravo",
+            platforms: [],
+            date_start: weekPayload.week.start,
+            date_end: weekPayload.week.end,
+            current_pass_kind: "initial",
+            current_pass_attempt: 1,
+            current_run_id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
+            pass_sequence: 1,
+            follow_up_reason: null,
+            pass_history: [],
+            completeness_snapshot: {
+              up_to_date: true,
+              comments_coverage: {
+                total_saved_comments: 36,
+                total_reported_comments: 36,
+                coverage_pct: 100,
+                up_to_date: true,
+                stale_posts_count: 0,
+                posts_scanned: 3,
+                by_platform: {
+                  instagram: { total_saved_comments: 10, total_reported_comments: 10, coverage_pct: 100, up_to_date: true, stale_posts_count: 0, posts_scanned: 1 },
+                  tiktok: { total_saved_comments: 12, total_reported_comments: 12, coverage_pct: 100, up_to_date: true, stale_posts_count: 0, posts_scanned: 1 },
+                  youtube: { total_saved_comments: 14, total_reported_comments: 14, coverage_pct: 100, up_to_date: true, stale_posts_count: 0, posts_scanned: 1 },
+                },
+                evaluated_at: "2026-01-01T00:02:00.000Z",
+              },
+            },
+            current_run: { id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb", status: "completed" },
           }),
         } as Response;
       }
@@ -3399,7 +3447,24 @@ describe("WeekDetailPage thumbnails", () => {
           }),
         } as Response;
       }
-      throw new Error(`Unexpected URL: ${url}`);
+      if (url.includes("/social/runs?")) {
+        return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
+      }
+      if (url.includes("/social/ingest/health-dot")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ queue_enabled: true, workers: { healthy: true, count: 1 } }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/mirror-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ posts_scanned: 0, needs_mirror_count: 0, up_to_date: true, by_platform: {} }),
+        } as Response;
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
@@ -3411,27 +3476,26 @@ describe("WeekDetailPage thumbnails", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Pass 1\/1 queued for Week 1 \(all platforms\) · run 80423aa2 · 8 job\(s\)/),
+        screen.getByText(/Sync session created for Week 1 \(all platforms\) · run 80423aa2/),
       ).toBeInTheDocument();
     });
     await waitFor(() => {
       expect(screen.getByText("Sync Progress")).toBeInTheDocument();
-      expect(screen.getByText(/Coverage 36\/36 \(100\.0%\) · Up-to-Date\./i)).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/8\/8 jobs/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/10 scraped/i)).toBeInTheDocument();
 
-    const ingestCall = fetchMock.mock.calls.find(
-      (call) => String(call[0]).includes("/social/ingest") && (call[1] as RequestInit | undefined)?.method === "POST",
+    const syncSessionCall = fetchMock.mock.calls.find(
+      (call) => String(call[0]).includes("/social/sync-sessions") && (call[1] as RequestInit | undefined)?.method === "POST",
     );
-    expect(ingestCall).toBeDefined();
-    const ingestInit = ingestCall?.[1] as RequestInit;
-    const body = JSON.parse(String(ingestInit.body ?? "{}")) as Record<string, unknown>;
+    expect(syncSessionCall).toBeDefined();
+    const syncSessionInit = syncSessionCall?.[1] as RequestInit;
+    const body = JSON.parse(String(syncSessionInit.body ?? "{}")) as Record<string, unknown>;
 
     expect(body.source_scope).toBe("bravo");
     expect(body.sync_strategy).toBe("incremental");
-    expect(body.ingest_mode).toBe("posts_and_comments");
-    expect(body.max_comments_per_post).toBe(10000);
-    expect(body.max_replies_per_post).toBe(2000);
     expect(body.date_start).toBe(weekPayload.week.start);
     expect(body.date_end).toBe(weekPayload.week.end);
     expect(body.platforms).toBeUndefined();
@@ -3456,13 +3520,44 @@ describe("WeekDetailPage thumbnails", () => {
       if (url.includes("/social/analytics/week/1")) {
         return { ok: true, status: 200, json: async () => weekPayload } as Response;
       }
-      if (url.includes("/social/ingest") && init?.method === "POST") {
+      if (url.includes("/social/sync-sessions") && init?.method === "POST") {
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            run_id: "a623c36b-9805-4f6b-b741-0b208fba050c",
-            queued_or_started_jobs: 8,
+            status: "created",
+            sync_session_id: "ss-a623c36b-0001",
+            current_run_id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+            current_run: {
+              id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+              summary: { total_jobs: 8 },
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/sync-sessions/") && url.includes("/stream")) {
+        return { ok: false, status: 503, headers: new Headers(), body: null } as unknown as Response;
+      }
+      if (url.includes("/social/sync-sessions/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sync_session_id: "ss-a623c36b-0001",
+            status: "running",
+            season_id: "season-1",
+            source_scope: "bravo",
+            platforms: [],
+            date_start: weekPayload.week.start,
+            date_end: weekPayload.week.end,
+            current_pass_kind: "initial",
+            current_pass_attempt: 1,
+            current_run_id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+            pass_sequence: 1,
+            follow_up_reason: null,
+            pass_history: [],
+            completeness_snapshot: {},
+            current_run: { id: "a623c36b-9805-4f6b-b741-0b208fba050c", status: "running" },
           }),
         } as Response;
       }
@@ -3500,7 +3595,17 @@ describe("WeekDetailPage thumbnails", () => {
           }),
         } as Response;
       }
-      throw new Error(`Unexpected URL: ${url}`);
+      if (url.includes("/social/runs?")) {
+        return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
+      }
+      if (url.includes("/social/ingest/health-dot")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ queue_enabled: true, workers: { healthy: true, count: 1 } }),
+        } as Response;
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 

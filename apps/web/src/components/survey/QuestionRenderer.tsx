@@ -70,16 +70,6 @@ export default function QuestionRenderer({
         : "";
       const resolvedIconUrl = override || (showIconUrl ?? "").trim();
       const usesTenPointScale = numericConfig.min === 0 && numericConfig.max === 10;
-      if (usesTenPointScale) {
-        return (
-          <StarRatingInput
-            {...commonProps}
-            value={value as number | null}
-            onChange={onChange}
-            iconSrc={resolvedIconUrl || null}
-          />
-        );
-      }
       if (resolvedIconUrl) {
         return (
           <IconRatingInput
@@ -92,6 +82,16 @@ export default function QuestionRenderer({
             iconSrc={resolvedIconUrl}
             ariaLabel={question.question_text}
             disabled={disabled}
+          />
+        );
+      }
+      if (usesTenPointScale) {
+        return (
+          <StarRatingInput
+            {...commonProps}
+            value={value as number | null}
+            onChange={onChange}
+            iconSrc={null}
           />
         );
       }

@@ -8,6 +8,15 @@ const DEFAULT_SHOW_DETAILS_FORM: ShowDetailsForm = {
   altNamesText: "",
   description: "",
   premiereDate: "",
+  imdbId: "",
+  tmdbId: "",
+  tvdbId: "",
+  wikidataId: "",
+  tvRageId: "",
+  genresText: "",
+  networksText: "",
+  streamingProvidersText: "",
+  tagsText: "",
 };
 
 export function useShowCore<TShow, TSeason>(showRouteParam: string) {
