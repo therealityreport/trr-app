@@ -30,7 +30,7 @@ export default async function ShowSectionRedirectPage({ params }: ShowSectionPag
   if (seasonMatch) {
     const seasonNumber = Number.parseInt(seasonMatch[1], 10);
     if (Number.isFinite(seasonNumber)) {
-      redirect(`/${showId}/s${seasonNumber}` as Route);
+      redirect(`/admin/trr-shows/${encodeURIComponent(showId)}/seasons/${seasonNumber}` as Route);
     }
   }
 

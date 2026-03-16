@@ -394,6 +394,7 @@ const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: str
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
   { id: "reddit", label: "REDDIT ANALYTICS" },
+  { id: "cast-content", label: "CAST COMPARISON" },
 ];
 
 const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {

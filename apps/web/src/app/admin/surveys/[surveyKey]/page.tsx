@@ -10,6 +10,7 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildSurveyDetailBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 import { DEFAULT_SURVEY_THEME, type SurveyTheme } from "@/lib/surveys/types";
 
 // ============================================================================
@@ -1489,7 +1490,7 @@ export default function SurveyEditorPage({
                       className="group relative aspect-square overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100"
                     >
                       <Image
-                        src={asset.hosted_url}
+                        src={canonicalizeHostedMediaUrl(asset.hosted_url) ?? asset.hosted_url}
                         alt={asset.caption || `${asset.type} image`}
                         fill
                         className="object-cover transition group-hover:scale-105"

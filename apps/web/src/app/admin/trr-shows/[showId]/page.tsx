@@ -124,6 +124,10 @@ import {
   type AssetSectionKey,
 } from "@/lib/admin/asset-sectioning";
 import {
+  isDeadlineGalleryNonPhotoCaption,
+  isDeadlineOfficialSeasonAnnouncementAsset,
+} from "@/lib/admin/deadline-gallery";
+import {
   firstImageUrlCandidate,
   getSeasonAssetCardUrlCandidates,
   getSeasonAssetDetailUrlCandidates,
@@ -141,7 +145,7 @@ import {
   runCastEnrichMediaWorkflow,
   runPhasedCastRefresh,
 } from "@/lib/admin/cast-refresh-orchestration";
-import { getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
   AdminRequestError,
   adminStream,
@@ -217,6 +221,38 @@ interface TrrSeason {
   url_original_poster: string | null;
   tmdb_season_id: number | null;
 }
+
+const normalizeErrorMessage = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (Array.isArray(value)) {
+    const messages = value
+      .map((entry) => normalizeErrorMessage(entry))
+      .filter((entry): entry is string => Boolean(entry));
+    return messages.length > 0 ? messages.join("; ") : null;
+  }
+
+  if (value && typeof value === "object") {
+    const candidate = value as {
+      detail?: unknown;
+      error?: unknown;
+      msg?: unknown;
+      message?: unknown;
+    };
+    return (
+      normalizeErrorMessage(candidate.error) ??
+      normalizeErrorMessage(candidate.detail) ??
+      normalizeErrorMessage(candidate.msg) ??
+      normalizeErrorMessage(candidate.message) ??
+      JSON.stringify(value)
+    );
+  }
+
+  return null;
+};
 
 
 interface TrrCastMember {
@@ -409,7 +445,14 @@ type TabId = "seasons" | "assets" | "news" | "cast" | "surveys" | "social" | "de
 type ShowCastSource = "episode_evidence" | "show_fallback" | "imdb_show_membership";
 type ShowCastRosterMode = "episode_evidence" | "imdb_show_membership";
 type CastPhotoFallbackMode = "none" | "bravo";
-type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
+type ShowRefreshTarget =
+  | "details"
+  | "seasons_episodes"
+  | "photos"
+  | "cast_credits"
+  | "videos"
+  | "news"
+  | "social_setup";
 type ShowTab = { id: TabId; label: string; icon?: "home" };
 type RefreshProgressState = {
   stage?: string | null;
@@ -721,6 +764,9 @@ const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   seasons_episodes: "Seasons & Episodes",
   photos: "Show/Season/Episode Media",
   cast_credits: "Cast & Credits",
+  videos: "Bravo Videos",
+  news: "Google News",
+  social_setup: "Social Setup",
 };
 
 const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
@@ -734,6 +780,9 @@ const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   photos_season_episode_images: "Season/Episode Media",
   cast_credits_show_cast: "Cast Credits",
   cast_credits_episode_appearances: "Episode Credits",
+  videos_bravo_import: "Bravo Videos",
+  news_google_sync: "Google News",
+  social_setup_seed: "Social Setup",
   sync_show_images: "Show Media",
   sync_imdb_mediaindex: "Show Media",
   sync_tmdb_seasons: "Season Media",
@@ -1093,6 +1142,9 @@ const getCastMemberLinkText = (link: EntityLink, personName: string): string => 
   const badgeKind = getLinkSourceBadgeKind(link);
   if (isSocialLinkKind(badgeKind)) {
     return getApprovedLinkText(link, personName);
+  }
+  if (badgeKind === "fandom") {
+    return resolveLinkPageTitle(link) || personName;
   }
   return personName;
 };
@@ -1462,6 +1514,21 @@ const parseAltNamesText = (value: string): string[] => {
   return out;
 };
 
+const toDelimitedEditorText = (value: string[] | null | undefined): string =>
+  Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim().length > 0).join("\n") : "";
+
+const readShowExternalId = (
+  show: { external_ids?: Record<string, unknown> | null; imdb_id?: string | null; tmdb_id?: number | null } | null,
+  key: string,
+): string => {
+  if (!show) return "";
+  if (key === "imdb_id") return typeof show.imdb_id === "string" ? show.imdb_id : "";
+  if (key === "tmdb_id") return typeof show.tmdb_id === "number" ? String(show.tmdb_id) : "";
+  const value = show.external_ids && typeof show.external_ids === "object" ? show.external_ids[key] : null;
+  if (value === null || value === undefined) return "";
+  return String(value);
+};
+
 const inferBravoShowUrl = (showName: string | null | undefined): string | null => {
   if (typeof showName !== "string") return null;
   const slug = showName
@@ -1789,9 +1856,6 @@ function CastPhoto({
 
 const getAssetDisplayUrl = (asset: SeasonAsset): string =>
   firstImageUrlCandidate(getSeasonAssetCardUrlCandidates(asset)) ?? asset.hosted_url;
-
-const getAssetDetailUrl = (asset: SeasonAsset): string =>
-  firstImageUrlCandidate(getSeasonAssetDetailUrlCandidates(asset)) ?? asset.hosted_url;
 
 const getFeaturedShowImageKind = (asset: SeasonAsset): "poster" | "backdrop" | null => {
   const normalizedKind = String(asset.kind ?? "").trim().toLowerCase();
@@ -2148,12 +2212,30 @@ export default function TrrShowDetailPage() {
     altNamesText: string;
     description: string;
     premiereDate: string;
+    imdbId: string;
+    tmdbId: string;
+    tvdbId: string;
+    wikidataId: string;
+    tvRageId: string;
+    genresText: string;
+    networksText: string;
+    streamingProvidersText: string;
+    tagsText: string;
   }>({
     displayName: "",
     nickname: "",
     altNamesText: "",
     description: "",
     premiereDate: "",
+    imdbId: "",
+    tmdbId: "",
+    tvdbId: "",
+    wikidataId: "",
+    tvRageId: "",
+    genresText: "",
+    networksText: "",
+    streamingProvidersText: "",
+    tagsText: "",
   });
   const [detailsSaving, setDetailsSaving] = useState(false);
   const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
@@ -2167,19 +2249,40 @@ export default function TrrShowDetailPage() {
         altNamesText: "",
         description: "",
         premiereDate: "",
+        imdbId: "",
+        tmdbId: "",
+        tvdbId: "",
+        wikidataId: "",
+        tvRageId: "",
+        genresText: "",
+        networksText: "",
+        streamingProvidersText: "",
+        tagsText: "",
       };
     }
     const alternatives = Array.isArray(show.alternative_names)
       ? show.alternative_names.filter((name) => typeof name === "string" && name.trim().length > 0)
       : [];
     const [nickname = "", ...restAlt] = alternatives;
-    return {
-      displayName: show.name ?? "",
-      nickname,
-      altNamesText: restAlt.join("\n"),
-      description: show.description ?? "",
-      premiereDate: show.premiere_date ?? "",
-    };
+      return {
+        displayName: show.name ?? "",
+        nickname,
+        altNamesText: restAlt.join("\n"),
+        description: show.description ?? "",
+        premiereDate: show.premiere_date ?? "",
+        imdbId: readShowExternalId(show, "imdb_id"),
+        tmdbId: readShowExternalId(show, "tmdb_id"),
+        tvdbId: readShowExternalId(show, "tvdb_id"),
+        wikidataId: readShowExternalId(show, "wikidata_id"),
+        tvRageId: readShowExternalId(show, "tv_rage_id"),
+        genresText: toDelimitedEditorText(show.genres),
+        networksText: toDelimitedEditorText(show.networks),
+        streamingProvidersText: toDelimitedEditorText(
+          (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
+            (Array.isArray(show.watch_providers) ? show.watch_providers : []),
+        ),
+        tagsText: toDelimitedEditorText(show.tags),
+      };
   }, [show]);
   const hasUnsavedDetailsChanges = useMemo(() => {
     if (!detailsEditing) return false;
@@ -2188,6 +2291,19 @@ export default function TrrShowDetailPage() {
       detailsForm.nickname.trim() !== detailsBaseline.nickname.trim() ||
       detailsForm.description.trim() !== detailsBaseline.description.trim() ||
       detailsForm.premiereDate.trim() !== detailsBaseline.premiereDate.trim() ||
+      detailsForm.imdbId.trim() !== detailsBaseline.imdbId.trim() ||
+      detailsForm.tmdbId.trim() !== detailsBaseline.tmdbId.trim() ||
+      detailsForm.tvdbId.trim() !== detailsBaseline.tvdbId.trim() ||
+      detailsForm.wikidataId.trim() !== detailsBaseline.wikidataId.trim() ||
+      detailsForm.tvRageId.trim() !== detailsBaseline.tvRageId.trim() ||
+      parseAltNamesText(detailsForm.genresText).join("\n") !==
+        parseAltNamesText(detailsBaseline.genresText).join("\n") ||
+      parseAltNamesText(detailsForm.networksText).join("\n") !==
+        parseAltNamesText(detailsBaseline.networksText).join("\n") ||
+      parseAltNamesText(detailsForm.streamingProvidersText).join("\n") !==
+        parseAltNamesText(detailsBaseline.streamingProvidersText).join("\n") ||
+      parseAltNamesText(detailsForm.tagsText).join("\n") !==
+        parseAltNamesText(detailsBaseline.tagsText).join("\n") ||
       parseAltNamesText(detailsForm.altNamesText).join("\n") !==
         parseAltNamesText(detailsBaseline.altNamesText).join("\n")
     );
@@ -2354,6 +2470,9 @@ export default function TrrShowDetailPage() {
     index: number;
     filteredAssets: SeasonAsset[];
   } | null>(null);
+  const [deadlineGalleryResolvedImageUrls, setDeadlineGalleryResolvedImageUrls] = useState<
+    Record<string, string | null>
+  >({});
   const assetTriggerRef = useRef<HTMLElement | null>(null);
 
   // Covered shows state
@@ -2367,6 +2486,9 @@ export default function TrrShowDetailPage() {
     seasons_episodes: false,
     photos: false,
     cast_credits: false,
+    videos: false,
+    news: false,
+    social_setup: false,
   });
   const [refreshTargetNotice, setRefreshTargetNotice] = useState<
     Partial<Record<ShowRefreshTarget, string>>
@@ -3757,6 +3879,10 @@ export default function TrrShowDetailPage() {
 
     const nickname = detailsForm.nickname.trim();
     const altNames = parseAltNamesText(detailsForm.altNamesText);
+    const genres = parseAltNamesText(detailsForm.genresText);
+    const networks = parseAltNamesText(detailsForm.networksText);
+    const streamingProviders = parseAltNamesText(detailsForm.streamingProvidersText);
+    const tags = parseAltNamesText(detailsForm.tagsText);
     const allAltNames = [
       ...(nickname ? [nickname] : []),
       ...altNames.filter((name) => name.toLowerCase() !== nickname.toLowerCase()),
@@ -3778,6 +3904,15 @@ export default function TrrShowDetailPage() {
             alternative_names: allAltNames,
             description: detailsForm.description.trim() || "",
             premiere_date: detailsForm.premiereDate || "",
+            imdb_id: detailsForm.imdbId.trim() || "",
+            tmdb_id: detailsForm.tmdbId.trim() || "",
+            tvdb_id: detailsForm.tvdbId.trim() || "",
+            wikidata_id: detailsForm.wikidataId.trim() || "",
+            tv_rage_id: detailsForm.tvRageId.trim() || "",
+            genres,
+            networks,
+            streaming_providers: streamingProviders,
+            tags,
           }),
         },
         SETTINGS_MUTATION_TIMEOUT_MS
@@ -3814,6 +3949,18 @@ export default function TrrShowDetailPage() {
       altNamesText: restAlt.join("\n"),
       description: show.description ?? "",
       premiereDate: show.premiere_date ?? "",
+      imdbId: readShowExternalId(show, "imdb_id"),
+      tmdbId: readShowExternalId(show, "tmdb_id"),
+      tvdbId: readShowExternalId(show, "tvdb_id"),
+      wikidataId: readShowExternalId(show, "wikidata_id"),
+      tvRageId: readShowExternalId(show, "tv_rage_id"),
+      genresText: toDelimitedEditorText(show.genres),
+      networksText: toDelimitedEditorText(show.networks),
+      streamingProvidersText: toDelimitedEditorText(
+        (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
+          (Array.isArray(show.watch_providers) ? show.watch_providers : []),
+      ),
+      tagsText: toDelimitedEditorText(show.tags),
     });
   }, [show]);
 
@@ -5683,6 +5830,63 @@ export default function TrrShowDetailPage() {
       syncGoogleNews,
     ]
   );
+
+  const ensureDefaultRedditCommunity = useCallback(async (): Promise<boolean> => {
+    if (!showId || !show) return false;
+    const showNetworks = Array.isArray(show.networks) ? show.networks : [];
+    const isBravoShow = showNetworks.some((network) => network.trim().toLowerCase() === "bravo");
+    if (!isBravoShow) return true;
+
+    const headers = await getAuthHeaders();
+    const listResponse = await fetchWithTimeout(
+      `/api/admin/reddit/communities?trr_show_id=${encodeURIComponent(showId)}`,
+      { headers, cache: "no-store" },
+      SETTINGS_MUTATION_TIMEOUT_MS,
+    );
+    const listBody = (await listResponse.json().catch(() => ({}))) as {
+      communities?: Array<{ subreddit?: string }>;
+      error?: string;
+    };
+    if (!listResponse.ok) {
+      throw new Error(listBody.error || "Failed to load Reddit communities");
+    }
+    const communities = Array.isArray(listBody.communities) ? listBody.communities : [];
+    if (
+      communities.some(
+        (community) => String(community.subreddit || "").trim().toLowerCase() === "bravorealhousewives",
+      )
+    ) {
+      return true;
+    }
+
+    const isHousewivesShow = show.name.toLowerCase().includes("real housewives");
+    const createResponse = await fetchWithTimeout(
+      "/api/admin/reddit/communities",
+      {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trr_show_id: showId,
+          trr_show_name: show.name,
+          subreddit: "BravoRealHousewives",
+          display_name: "r/BravoRealHousewives",
+          notes: "Auto-seeded during show refresh.",
+          is_show_focused: false,
+          network_focus_targets: ["Bravo"],
+          franchise_focus_targets: isHousewivesShow ? ["Real Housewives"] : [],
+        }),
+      },
+      SETTINGS_MUTATION_TIMEOUT_MS,
+    );
+    if (createResponse.status === 409) {
+      return true;
+    }
+    const createBody = (await createResponse.json().catch(() => ({}))) as { error?: string };
+    if (!createResponse.ok) {
+      throw new Error(createBody.error || "Failed to seed default Reddit community");
+    }
+    return true;
+  }, [getAuthHeaders, show, showId]);
 
   const syncBravoCastUrlCandidates = useMemo(() => {
     const urls = new Set<string>();
@@ -7775,6 +7979,123 @@ export default function TrrShowDetailPage() {
     showGalleryAllowedSectionSet,
   ]);
 
+  const castPromoSectionAssets = useMemo(
+    () =>
+      gallerySectionAssets.cast_photos.filter(
+        (asset) => !isDeadlineGalleryNonPhotoCaption(asset.caption),
+      ),
+    [gallerySectionAssets.cast_photos],
+  );
+
+  useEffect(() => {
+    const pendingAssets = castPromoSectionAssets.filter((asset) => {
+      if (!isDeadlineOfficialSeasonAnnouncementAsset(asset)) return false;
+      return !Object.prototype.hasOwnProperty.call(deadlineGalleryResolvedImageUrls, asset.id);
+    });
+    if (pendingAssets.length === 0) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      const resolvedEntries = await Promise.all(
+        pendingAssets.map(async (asset) => {
+          const metadata =
+            asset.metadata && typeof asset.metadata === "object"
+              ? (asset.metadata as Record<string, unknown>)
+              : null;
+          const sourceUrl =
+            (typeof metadata?.source_page_url === "string" && metadata.source_page_url.trim()) ||
+            asset.source_url ||
+            asset.original_url ||
+            "";
+          if (!sourceUrl) return [asset.id, null] as const;
+
+          const params = new URLSearchParams();
+          params.set("sourceUrl", sourceUrl);
+          if (typeof metadata?.page_url === "string" && metadata.page_url.trim()) {
+            params.set("pageUrl", metadata.page_url.trim());
+          }
+          if (typeof asset.caption === "string" && asset.caption.trim()) {
+            params.set("caption", asset.caption.trim());
+          }
+          const peopleNames = Array.isArray(metadata?.people_names)
+            ? metadata.people_names
+                .map((value) => (typeof value === "string" ? value.trim() : ""))
+                .filter(Boolean)
+            : [];
+          for (const name of peopleNames) {
+            params.append("personName", name);
+          }
+
+          try {
+            const response = await fetchAdminWithAuth(
+              `/api/admin/assets/deadline-gallery?${params.toString()}`,
+              undefined,
+              { allowDevAdminBypass: true },
+            );
+            if (!response.ok) {
+              return [asset.id, null] as const;
+            }
+            const payload = (await response.json()) as { resolvedUrl?: unknown };
+            return [
+              asset.id,
+              typeof payload.resolvedUrl === "string" && payload.resolvedUrl.trim()
+                ? payload.resolvedUrl.trim()
+                : null,
+            ] as const;
+          } catch {
+            return [asset.id, null] as const;
+          }
+        }),
+      );
+
+      if (cancelled || resolvedEntries.length === 0) return;
+      setDeadlineGalleryResolvedImageUrls((current) => {
+        const next = { ...current };
+        for (const [assetId, resolvedUrl] of resolvedEntries) {
+          next[assetId] = resolvedUrl;
+        }
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [castPromoSectionAssets, deadlineGalleryResolvedImageUrls]);
+
+  const getResolvedGalleryAssetCardUrlCandidates = useCallback(
+    (asset: SeasonAsset): string[] => {
+      const resolvedUrl = deadlineGalleryResolvedImageUrls[asset.id] ?? null;
+      const baseCandidates = getSeasonAssetCardUrlCandidates(asset);
+      if (!resolvedUrl) return baseCandidates;
+      return [resolvedUrl, ...baseCandidates.filter((candidate) => candidate !== resolvedUrl)];
+    },
+    [deadlineGalleryResolvedImageUrls],
+  );
+
+  const getResolvedGalleryAssetDetailUrlCandidates = useCallback(
+    (asset: SeasonAsset): string[] => {
+      const resolvedUrl = deadlineGalleryResolvedImageUrls[asset.id] ?? null;
+      const baseCandidates = getSeasonAssetDetailUrlCandidates(asset);
+      if (!resolvedUrl) return baseCandidates;
+      return [resolvedUrl, ...baseCandidates.filter((candidate) => candidate !== resolvedUrl)];
+    },
+    [deadlineGalleryResolvedImageUrls],
+  );
+
+  const getResolvedGalleryAssetDisplayUrl = useCallback(
+    (asset: SeasonAsset): string =>
+      firstImageUrlCandidate(getResolvedGalleryAssetCardUrlCandidates(asset)) ?? asset.hosted_url,
+    [getResolvedGalleryAssetCardUrlCandidates],
+  );
+
+  const getResolvedGalleryAssetDetailUrl = useCallback(
+    (asset: SeasonAsset): string =>
+      firstImageUrlCandidate(getResolvedGalleryAssetDetailUrlCandidates(asset)) ?? asset.hosted_url,
+    [getResolvedGalleryAssetDetailUrlCandidates],
+  );
+
   const brandLogoAssets = useMemo(() => {
     // Keep show-brand logos limited to canonical logo sources (Wikipedia + IMDb/TMDb).
     const trusted = galleryAssets.filter((asset) => isTrustedShowBrandLogoAsset(asset));
@@ -8506,33 +8827,42 @@ export default function TrrShowDetailPage() {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const message =
-            (data as { error?: string; detail?: string }).error ||
-            (data as { detail?: string }).detail ||
+            normalizeErrorMessage((data as { error?: unknown }).error) ||
+            normalizeErrorMessage((data as { detail?: unknown }).detail) ||
             `Failed to set featured logo (HTTP ${response.status})`;
           throw new Error(message);
         }
 
+        const nextShow = (data as { show?: TrrShow | null }).show ?? null;
+
         setGalleryAssets((prev) =>
           prev.map((candidate) => {
             if ((candidate.kind ?? "").trim().toLowerCase() !== "logo") return candidate;
-            if (candidate.origin_table !== "media_assets") return candidate;
             return {
               ...candidate,
               logo_link_is_primary:
+                candidate.origin_table === "media_assets" &&
                 selectedMediaAssetId != null &&
                 (candidate.media_asset_id ?? candidate.id) === selectedMediaAssetId,
             };
           })
         );
-        setShow((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            primary_logo_image_id: selectedShowImageId ?? null,
-          };
-        });
+        if (nextShow) {
+          setShow(nextShow);
+        } else {
+          setShow((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              primary_logo_image_id: selectedShowImageId ?? null,
+            };
+          });
+        }
 
-        await Promise.all([fetchShow(), loadGalleryAssets(selectedGallerySeason)]);
+        await loadGalleryAssets(selectedGallerySeason);
+        if (!nextShow) {
+          await fetchShow();
+        }
       } finally {
         setFeaturedLogoSavingAssetId(null);
       }
@@ -9254,17 +9584,25 @@ export default function TrrShowDetailPage() {
       stage: "Initializing",
       message: "Starting full show refresh...",
       current: 0,
-      total: 4,
+      total: 7,
     });
     appendRefreshLog({
       category: "Refresh",
       message: "Starting full refresh.",
       current: 0,
-      total: 4,
+      total: 7,
     });
 
     try {
-      const targets: ShowRefreshTarget[] = ["details", "seasons_episodes", "cast_credits", "photos"];
+      const targets: ShowRefreshTarget[] = [
+        "details",
+        "seasons_episodes",
+        "cast_credits",
+        "photos",
+        "videos",
+        "news",
+        "social_setup",
+      ];
       const failedLabels: string[] = [];
 
       for (const [index, target] of targets.entries()) {
@@ -9293,6 +9631,9 @@ export default function TrrShowDetailPage() {
           if (target === "seasons_episodes") failedLabels.push("seasons/episodes");
           if (target === "cast_credits") failedLabels.push("cast/credits");
           if (target === "photos") failedLabels.push("media/photos");
+          if (target === "videos") failedLabels.push("Bravo videos");
+          if (target === "news") failedLabels.push("Google News");
+          if (target === "social_setup") failedLabels.push("social setup");
         }
       }
 
@@ -9307,8 +9648,14 @@ export default function TrrShowDetailPage() {
         return;
       }
 
+      await Promise.allSettled([
+        loadBravoData({ force: true }),
+        loadUnifiedNews({ force: true, forceSync: false }),
+        ensureDefaultRedditCommunity(),
+      ]);
+
       setRefreshAllNotice(
-        "Refreshed show info, seasons/episodes, media/photos, and cast/credits."
+        "Refreshed show info, seasons/episodes, media/photos, cast/credits, Bravo videos, Google News, and social setup."
       );
       appendRefreshLog({
         category: "Refresh",
@@ -9328,7 +9675,15 @@ export default function TrrShowDetailPage() {
       setRefreshingShowAll(false);
       setRefreshAllProgress(null);
     }
-  }, [appendRefreshLog, refreshShow, refreshingShowAll, showId]);
+  }, [
+    appendRefreshLog,
+    ensureDefaultRedditCommunity,
+    loadBravoData,
+    loadUnifiedNews,
+    refreshShow,
+    refreshingShowAll,
+    showId,
+  ]);
 
   const refreshShowCast = useCallback(async () => {
     if (
@@ -11457,13 +11812,13 @@ export default function TrrShowDetailPage() {
                       )}
 
                       {/* Cast Photos (official season announcement only) */}
-                      {gallerySectionAssets.cast_photos.length > 0 && (
+                      {castPromoSectionAssets.length > 0 && (
                         <section>
                           <h4 className="mb-3 text-sm font-semibold text-zinc-900">
                             Cast Promos
                           </h4>
                           <div className="grid grid-cols-5 gap-4">
-                            {gallerySectionAssets.cast_photos.map((asset, i, arr) => (
+                            {castPromoSectionAssets.map((asset, i, arr) => (
                                 <button
                                   key={asset.id}
                                   onClick={(e) =>
@@ -11472,8 +11827,8 @@ export default function TrrShowDetailPage() {
                                   className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                   <GalleryImage
-                                    src={getAssetDisplayUrl(asset)}
-                                    srcCandidates={getSeasonAssetCardUrlCandidates(asset)}
+                                    src={getResolvedGalleryAssetDisplayUrl(asset)}
+                                    srcCandidates={getResolvedGalleryAssetCardUrlCandidates(asset)}
                                     diagnosticKey={`${asset.origin_table || "unknown"}:${asset.id}`}
                                     onFallbackEvent={trackGalleryFallbackEvent}
                                     alt={asset.caption || "Cast photo"}
@@ -11601,6 +11956,7 @@ export default function TrrShowDetailPage() {
                     trrShowName={show.name}
                     trrSeasons={seasons}
                     trrCast={cast}
+                    showDefaultMediaSection={false}
                   />
                 </div>
               )}
@@ -12442,7 +12798,7 @@ export default function TrrShowDetailPage() {
                     Show Settings
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
-                    Links and Cast Role Catalog
+                    Settings
                   </h3>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -12510,6 +12866,221 @@ export default function TrrShowDetailPage() {
               )}
 
               <div className="space-y-6">
+                <section>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-zinc-700">Editable Metadata</h4>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {detailsEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={cancelDetailsEdit}
+                            disabled={detailsSaving}
+                            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={saveShowDetails}
+                            disabled={detailsSaving}
+                            className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                          >
+                            {detailsSaving ? "Saving..." : "Save"}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={startDetailsEdit}
+                          className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800"
+                        >
+                          Edit Metadata
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {(detailsNotice || detailsError) && (
+                    <p className={`mb-3 text-sm ${detailsError ? "text-red-600" : "text-zinc-500"}`}>
+                      {detailsError || detailsNotice}
+                    </p>
+                  )}
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Display Name
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.displayName}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, displayName: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Nickname
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.nickname}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, nickname: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Premiere Date
+                        </span>
+                        <input
+                          type="date"
+                          value={detailsForm.premiereDate}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, premiereDate: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Alt Names
+                        </span>
+                        <textarea
+                          value={detailsForm.altNamesText}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, altNamesText: e.target.value }))}
+                          rows={3}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Description
+                        </span>
+                        <textarea
+                          value={detailsForm.description}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, description: e.target.value }))}
+                          rows={4}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          TMDb
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.tmdbId}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tmdbId: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          IMDb
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.imdbId}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, imdbId: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          TVDb
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.tvdbId}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tvdbId: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Wikidata
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.wikidataId}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, wikidataId: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          TV Rage
+                        </span>
+                        <input
+                          type="text"
+                          value={detailsForm.tvRageId}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tvRageId: e.target.value }))}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Genres
+                        </span>
+                        <textarea
+                          value={detailsForm.genresText}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, genresText: e.target.value }))}
+                          rows={2}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Networks
+                        </span>
+                        <textarea
+                          value={detailsForm.networksText}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, networksText: e.target.value }))}
+                          rows={2}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Streaming
+                        </span>
+                        <textarea
+                          value={detailsForm.streamingProvidersText}
+                          onChange={(e) =>
+                            setDetailsForm((prev) => ({ ...prev, streamingProvidersText: e.target.value }))
+                          }
+                          rows={2}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                      <label className="block md:col-span-2">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Tags
+                        </span>
+                        <textarea
+                          value={detailsForm.tagsText}
+                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, tagsText: e.target.value }))}
+                          rows={2}
+                          disabled={!detailsEditing}
+                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </section>
+
                 <section>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">Role Catalog</h4>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
@@ -12957,34 +13528,13 @@ export default function TrrShowDetailPage() {
                   </h3>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {detailsEditing ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={cancelDetailsEdit}
-                        disabled={detailsSaving}
-                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={saveShowDetails}
-                        disabled={detailsSaving}
-                        className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
-                      >
-                        {detailsSaving ? "Saving..." : "Save"}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={startDetailsEdit}
-                      className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                    >
-                      Edit
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setTab("settings")}
+                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                  >
+                    Open Settings
+                  </button>
                   <button
                     type="button"
                     onClick={refreshAllShowData}
@@ -13020,87 +13570,51 @@ export default function TrrShowDetailPage() {
 
               <div className="space-y-6">
                 <div>
-                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Editable Info</h4>
+                  <h4 className="mb-3 text-sm font-semibold text-zinc-700">Show Info</h4>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                     <div className="grid gap-4 md:grid-cols-2">
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                      <div className="md:col-span-2">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Display Name
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.displayName}
-                          onChange={(e) =>
-                            setDetailsForm((prev) => ({ ...prev, displayName: e.target.value }))
-                          }
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                          placeholder="Real Housewives of Beverly Hills"
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        </p>
+                        <p className="text-sm text-zinc-900">{show.name || "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Nickname
-                        </span>
-                        <input
-                          type="text"
-                          value={detailsForm.nickname}
-                          onChange={(e) =>
-                            setDetailsForm((prev) => ({ ...prev, nickname: e.target.value }))
-                          }
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                          placeholder="RHOBH"
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        </p>
+                        <p className="text-sm text-zinc-900">{detailsBaseline.nickname || "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Premiere Date
-                        </span>
-                        <input
-                          type="date"
-                          value={detailsForm.premiereDate}
-                          onChange={(e) =>
-                            setDetailsForm((prev) => ({ ...prev, premiereDate: e.target.value }))
-                          }
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
-
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        </p>
+                        <p className="text-sm text-zinc-900">
+                          {show.premiere_date
+                            ? new Date(show.premiere_date).toLocaleDateString("en-US", {
+                                year: "numeric",
+                                month: "long",
+                                day: "numeric",
+                              })
+                            : "Not set"}
+                        </p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Alt Names
-                        </span>
-                        <textarea
-                          value={detailsForm.altNamesText}
-                          onChange={(e) =>
-                            setDetailsForm((prev) => ({ ...prev, altNamesText: e.target.value }))
-                          }
-                          rows={3}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                          placeholder={"One per line (or comma-separated)\nThe Real Housewives of Beverly Hills"}
-                        />
-                      </label>
-
-                      <label className="block md:col-span-2">
-                        <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        </p>
+                        <p className="text-sm text-zinc-900 whitespace-pre-line">
+                          {detailsBaseline.altNamesText || "None"}
+                        </p>
+                      </div>
+                      <div className="md:col-span-2">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Description
-                        </span>
-                        <textarea
-                          value={detailsForm.description}
-                          onChange={(e) =>
-                            setDetailsForm((prev) => ({ ...prev, description: e.target.value }))
-                          }
-                          rows={4}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                          placeholder="Short show description"
-                        />
-                      </label>
+                        </p>
+                        <p className="text-sm leading-6 text-zinc-900">
+                          {show.description || "No description available."}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -13384,8 +13898,8 @@ export default function TrrShowDetailPage() {
         {/* Lightbox for gallery assets */}
         {assetLightbox && lightboxAssetCapabilities && (
           <ImageLightbox
-            src={getAssetDetailUrl(assetLightbox.asset)}
-            fallbackSrcs={getSeasonAssetDetailUrlCandidates(assetLightbox.asset)}
+            src={getResolvedGalleryAssetDetailUrl(assetLightbox.asset)}
+            fallbackSrcs={getResolvedGalleryAssetDetailUrlCandidates(assetLightbox.asset)}
             alt={assetLightbox.asset.caption || "Gallery image"}
             isOpen={true}
             onClose={closeAssetLightbox}

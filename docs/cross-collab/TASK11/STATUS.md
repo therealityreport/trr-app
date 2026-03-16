@@ -3,6 +3,17 @@
 Repo: TRR-APP
 Last updated: March 13, 2026
 
+## Handoff Snapshot
+```yaml
+handoff:
+  include: true
+  state: active
+  last_updated: 2026-03-13
+  current_phase: "deploy hotfix rollout"
+  next_action: "Redeploy Vercel and verify /admin same-host fallback on the live host"
+  detail: self
+```
+
 ## March 13, 2026 — Admin host fallback hotfix prepared; Vercel redeploy still required
 
 - Found and fixed a live production regression on the deployed Vercel path:

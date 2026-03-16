@@ -48,6 +48,24 @@ function normalizeStringArray(value: unknown): string[] | undefined {
   return out;
 }
 
+function normalizeNullableIntegerString(
+  value: unknown,
+  fieldName: string
+): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName}_invalid`);
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${fieldName}_invalid`);
+  }
+  return Number.parseInt(trimmed, 10);
+}
+
 /**
  * GET /api/admin/trr-api/shows/[showId]
  *
@@ -111,6 +129,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const premiereDateRaw = normalizeText(body.premiere_date);
     const nickname = normalizeText(body.nickname);
     const alternativeNamesInput = normalizeStringArray(body.alternative_names);
+    const imdbIdRaw = normalizeText(body.imdb_id);
+    const tmdbId = normalizeNullableIntegerString(body.tmdb_id, "tmdb_id");
+    const tvdbId = normalizeNullableIntegerString(body.tvdb_id, "tvdb_id");
+    const wikidataId = normalizeText(body.wikidata_id);
+    const tvRageId = normalizeNullableIntegerString(body.tv_rage_id, "tv_rage_id");
+    const genres = normalizeStringArray(body.genres);
+    const networks = normalizeStringArray(body.networks);
+    const streamingProviders = normalizeStringArray(body.streaming_providers);
+    const tags = normalizeStringArray(body.tags);
     const primaryPosterImageId = normalizeUuidOrNull(body.primary_poster_image_id);
     const primaryBackdropImageId = normalizeUuidOrNull(body.primary_backdrop_image_id);
     const primaryLogoImageId = normalizeUuidOrNull(body.primary_logo_image_id);
@@ -201,6 +228,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       ...(description !== undefined ? { description: description.length > 0 ? description : null } : {}),
       ...(premiereDate !== undefined ? { premiereDate } : {}),
       ...(alternativeNames !== undefined ? { alternativeNames } : {}),
+      ...(imdbIdRaw !== undefined ? { imdbId: imdbIdRaw.length > 0 ? imdbIdRaw : null } : {}),
+      ...(tmdbId !== undefined ? { tmdbId } : {}),
+      ...((imdbIdRaw !== undefined ||
+        tmdbId !== undefined ||
+        tvdbId !== undefined ||
+        wikidataId !== undefined ||
+        tvRageId !== undefined)
+        ? {
+            externalIds: {
+              ...(imdbIdRaw !== undefined ? { imdb_id: imdbIdRaw.length > 0 ? imdbIdRaw : null } : {}),
+              ...(tmdbId !== undefined ? { tmdb_id: tmdbId } : {}),
+              ...(tvdbId !== undefined ? { tvdb_id: tvdbId } : {}),
+              ...(wikidataId !== undefined ? { wikidata_id: wikidataId.length > 0 ? wikidataId : null } : {}),
+              ...(tvRageId !== undefined ? { tv_rage_id: tvRageId } : {}),
+            },
+          }
+        : {}),
+      ...(genres !== undefined ? { genres } : {}),
+      ...(networks !== undefined ? { networks } : {}),
+      ...(streamingProviders !== undefined ? { streamingProviders } : {}),
+      ...(tags !== undefined ? { tags } : {}),
       ...(primaryPosterImageId !== undefined ? { primaryPosterImageId } : {}),
       ...(primaryBackdropImageId !== undefined ? { primaryBackdropImageId } : {}),
       ...(primaryLogoImageId !== undefined ? { primaryLogoImageId } : {}),
@@ -220,6 +268,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         },
         { status: 400 }
       );
+    }
+    if (
+      error instanceof Error &&
+      ["tmdb_id_invalid", "tvdb_id_invalid", "tv_rage_id_invalid"].includes(error.message)
+    ) {
+      return NextResponse.json({ error: `${error.message.replace("_invalid", "")} must be an integer or empty` }, { status: 400 });
     }
     console.error("[api] Failed to update TRR show", error);
     const message = error instanceof Error ? error.message : "failed";

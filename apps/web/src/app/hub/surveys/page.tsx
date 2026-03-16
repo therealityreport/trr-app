@@ -8,6 +8,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { AuthDebugger } from "@/lib/debug";
 import { getSurveyXState, saveSurveyXResponses } from "@/lib/db/surveys";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import type { SurveyXResponses } from "@/lib/validation/user";
 
 type SurveyCardConfig = {
@@ -417,6 +418,7 @@ function SurveyXModal({ open, onClose, user, initialResponses, onComplete }: Sur
               <h2
                 className="text-2xl font-medium text-zinc-900 md:text-3xl"
                 style={{ fontFamily: "var(--font-rude-slab)", fontWeight: 500 }}
+                {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub-surveys", instanceKey: "survey-list", role: "heroTitle" })}
               >
                 {currentQuestion.question}
               </h2>
@@ -436,6 +438,7 @@ function SurveyXModal({ open, onClose, user, initialResponses, onComplete }: Sur
                           : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300"
                       }`}
                       style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
+                      {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub-surveys", instanceKey: "survey-list", role: "option" })}
                     >
                       <span className="font-extrabold">{option}</span>
                     </button>
@@ -456,6 +459,7 @@ function SurveyXModal({ open, onClose, user, initialResponses, onComplete }: Sur
                           : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300"
                       }`}
                       style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
+                      {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub-surveys", instanceKey: "survey-list", role: "option" })}
                     >
                       <span className="font-extrabold">{option.label}</span>
                     </button>
@@ -478,6 +482,7 @@ function SurveyXModal({ open, onClose, user, initialResponses, onComplete }: Sur
                             : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300"
                         }`}
                         style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
+                        {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub-surveys", instanceKey: "survey-list", role: "option" })}
                       >
                         <div
                           className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border-2 ${
@@ -649,7 +654,7 @@ export default function SurveysPage() {
     <section className="space-y-8">
       <header className="space-y-3">
         <p className="text-xs font-semibold uppercase tracking-[0.35em] text-zinc-500">Surveys & Polls</p>
-        <h1 className="text-3xl font-serif text-zinc-900">Help shape the shows you love</h1>
+        <h1 className="text-3xl font-serif text-zinc-900" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub-surveys", instanceKey: "survey-list", role: "pageTitle" })}>Help shape the shows you love</h1>
         <p className="text-sm text-zinc-600">
           Start with Survey X to store your viewing habits and demographics. Once it’s complete, weekly check-ins unlock instantly.
         </p>

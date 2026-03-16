@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import type { AdminBreadcrumbItem } from "@/lib/admin/admin-breadcrumbs";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 interface AdminBreadcrumbsProps {
   items: AdminBreadcrumbItem[];
@@ -19,7 +20,7 @@ export default function AdminBreadcrumbs({ items, className }: AdminBreadcrumbsP
       aria-label="Breadcrumb"
       className={className}
     >
-      <ol className="flex flex-wrap items-center gap-1 text-xs font-semibold text-zinc-500">
+      <ol className="flex flex-wrap items-center gap-1 text-xs font-semibold text-zinc-500" {...buildTypographyDataAttributes({ area: "admin", role: "breadcrumb" })}>
         {visibleItems.map((item, index) => {
           const isCurrent = item === currentItem;
           const href = item.href.trim();

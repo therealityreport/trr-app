@@ -31,6 +31,7 @@ import {
   buildShowRedditCommunityWindowUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 interface RedditCommunityListItem {
   id: string;
@@ -362,7 +363,7 @@ const parsePostRouteFromPathname = (
   }
 
   const adminWindow = pathname.match(
-    /^\/admin\/social-media\/reddit\/communities\/([^/]+)\/([^/]+)\/post\/([^/]+)$/,
+    /^\/admin\/social(?:-media)?\/reddit\/communities\/([^/]+)\/([^/]+)\/post\/([^/]+)$/,
   );
   if (adminWindow) {
     return {
@@ -1269,7 +1270,7 @@ function AdminRedditPostDetailsPageContent() {
         showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
       })
-    : "/admin/social-media";
+    : "/admin/social";
   const communityHref = context
     ? buildShowRedditCommunityUrl({
         showSlug: context.showSlug,
@@ -1676,7 +1677,7 @@ function AdminRedditPostDetailsPageContent() {
                                 {item.hosted_url ? (
                                   <a
                                     className="rounded border border-zinc-300 px-2 py-1 font-semibold text-zinc-700 hover:bg-zinc-50"
-                                    href={item.hosted_url}
+                                    href={canonicalizeHostedMediaUrl(item.hosted_url) ?? item.hosted_url}
                                     target="_blank"
                                     rel="noreferrer"
                                   >

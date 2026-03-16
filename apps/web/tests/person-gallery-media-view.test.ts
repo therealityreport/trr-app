@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BRAVOCON_LABEL,
   CANONICAL_SCOPED_SOURCE_ORDER,
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
@@ -81,6 +82,50 @@ describe("person gallery media view helpers", () => {
     expect(availability.hasWwhlMatches).toBe(true);
     expect(availability.hasOtherShowMatches).toBe(true);
     expect(availability.hasNonThisShowMatches).toBe(true);
+  });
+
+  it("builds BravoCon and event dropdown buckets from explicit bucket metadata", () => {
+    const availability = computePersonGalleryMediaViewAvailability({
+      photos: [
+        makePhoto({
+          id: "bravocon",
+          source: "getty",
+          bucket_type: "bravocon",
+          bucket_key: "bravocon",
+          bucket_label: BRAVOCON_LABEL,
+          metadata: {
+            bucket_type: "bravocon",
+            bucket_key: "bravocon",
+            bucket_label: BRAVOCON_LABEL,
+          },
+        }),
+        makePhoto({
+          id: "event",
+          source: "getty",
+          bucket_type: "event",
+          bucket_key: "directv-plot-twist-featuring-bravo",
+          bucket_label: "DIRECTV Plot Twist Featuring Bravo",
+          metadata: {
+            bucket_type: "event",
+            bucket_key: "directv-plot-twist-featuring-bravo",
+            bucket_label: "DIRECTV Plot Twist Featuring Bravo",
+          },
+        }),
+      ],
+      showIdForApi: "show-1",
+      activeShowName: "The Real Housewives of Salt Lake City",
+      activeShowAcronym: buildShowAcronym("The Real Housewives of Salt Lake City"),
+      allKnownShowNameMatches: ["the real housewives of salt lake city"],
+      allKnownShowAcronymMatches: new Set(["RHOSLC"]),
+      allKnownShowIds: ["show-1"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+    });
+
+    expect(availability.hasBravoconMatches).toBe(true);
+    expect(availability.eventOptions).toEqual([
+      { key: "directv-plot-twist-featuring-bravo", label: "DIRECTV Plot Twist Featuring Bravo" },
+    ]);
   });
 
   it("matches selected other show by show_id", () => {
@@ -227,6 +272,7 @@ describe("person gallery media view helpers", () => {
       currentFilter: "wwhl",
       showContextEnabled: true,
       hasWwhlMatches: false,
+      hasBravoconMatches: false,
       hasEventMatches: false,
       hasOtherShowMatches: true,
       hasUnknownShowMatches: false,
@@ -243,6 +289,7 @@ describe("person gallery media view helpers", () => {
       currentFilter: "wwhl",
       showContextEnabled: true,
       hasWwhlMatches: false,
+      hasBravoconMatches: false,
       hasEventMatches: false,
       hasOtherShowMatches: true,
       hasUnknownShowMatches: false,
@@ -259,6 +306,7 @@ describe("person gallery media view helpers", () => {
       currentFilter: "other-shows",
       showContextEnabled: true,
       hasWwhlMatches: true,
+      hasBravoconMatches: false,
       hasEventMatches: false,
       hasOtherShowMatches: false,
       hasUnknownShowMatches: false,
@@ -456,6 +504,64 @@ describe("person gallery media view helpers", () => {
 
     expect(buckets.matchesEvents).toBe(true);
     expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
+  it("prioritizes explicit Getty/NBCUMV bucket metadata over caption heuristics", () => {
+    const showBuckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "getty",
+        bucket_type: "show",
+        bucket_key: "show-rhoslc",
+        bucket_label: "The Real Housewives of Salt Lake City",
+        resolved_show_id: "show-rhoslc",
+        resolved_show_name: "The Real Housewives of Salt Lake City",
+        metadata: {
+          bucket_type: "show",
+          resolved_show_id: "show-rhoslc",
+          resolved_show_name: "The Real Housewives of Salt Lake City",
+        },
+        caption: 'Reunion -- Pictured: Mary Cosby',
+      }),
+      showIdForApi: "show-rhoslc",
+      activeShowName: "The Real Housewives of Salt Lake City",
+      activeShowAcronym: "RHOSLC",
+      allKnownShowNameMatches: ["the real housewives of salt lake city"],
+      allKnownShowAcronymMatches: new Set(["RHOSLC"]),
+      allKnownShowIds: ["show-rhoslc"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(showBuckets.matchesThisShow).toBe(true);
+    expect(showBuckets.matchesEvents).toBe(false);
+
+    const bravoconBuckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "getty",
+        bucket_type: "bravocon",
+        bucket_key: "bravocon",
+        bucket_label: BRAVOCON_LABEL,
+        metadata: {
+          bucket_type: "bravocon",
+          bucket_key: "bravocon",
+          bucket_label: BRAVOCON_LABEL,
+        },
+        caption: "BravoCon Live with Andy Cohen Presents: The Bravos",
+      }),
+      showIdForApi: "show-rhoslc",
+      activeShowName: "The Real Housewives of Salt Lake City",
+      activeShowAcronym: "RHOSLC",
+      allKnownShowNameMatches: ["the real housewives of salt lake city"],
+      allKnownShowAcronymMatches: new Set(["RHOSLC"]),
+      allKnownShowIds: ["show-rhoslc"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(bravoconBuckets.matchesBravocon).toBe(true);
+    expect(bravoconBuckets.matchesThisShow).toBe(false);
   });
 
   it("routes unresolved IMDb episode rows to WWHL via imdb_fallback_show_name", () => {

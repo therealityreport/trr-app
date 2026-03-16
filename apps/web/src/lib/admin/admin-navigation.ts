@@ -51,9 +51,10 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "social-media",
     title: "Social Media",
-    href: "/social-media" as Route,
+    href: "/admin/social" as Route,
     description: "Manage social media pipelines, templates, and publishing workflows.",
     badge: "Social",
+    activeMatchPrefixes: ["/admin/social", "/admin/social-media", "/social-media"],
   },
   {
     key: "networks-streaming",

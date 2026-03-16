@@ -120,6 +120,9 @@ export const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   seasons_episodes: "Seasons & Episodes",
   photos: "Show/Season/Episode Media",
   cast_credits: "Cast & Credits",
+  videos: "Bravo Videos",
+  news: "Google News",
+  social_setup: "Social Setup",
 };
 
 export const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
@@ -133,6 +136,9 @@ export const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   photos_season_episode_images: "Season/Episode Media",
   cast_credits_show_cast: "Cast Credits",
   cast_credits_episode_appearances: "Episode Credits",
+  videos_bravo_import: "Bravo Videos",
+  news_google_sync: "Google News",
+  social_setup_seed: "Social Setup",
   sync_show_images: "Show Media",
   sync_imdb_mediaindex: "Show Media",
   sync_tmdb_seasons: "Season Media",

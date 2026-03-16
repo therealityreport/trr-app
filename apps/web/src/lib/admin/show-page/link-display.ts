@@ -13,6 +13,7 @@ const normalizeParsedPersonName = (value: string | null | undefined): string | n
   let cleaned = String(value || "").trim();
   if (!cleaned) return null;
   cleaned = cleaned.replace(PERSON_NAME_SOURCE_SUFFIX_RE, "").trim();
+  cleaned = cleaned.split("/", 1)[0]?.trim() ?? cleaned;
   cleaned = cleaned.replace(/\/gallery$/i, "").trim();
   cleaned = cleaned.replace(/\bgallery$/i, "").trim();
   cleaned = cleaned.replace(/\.(html?)$/i, "").trim();

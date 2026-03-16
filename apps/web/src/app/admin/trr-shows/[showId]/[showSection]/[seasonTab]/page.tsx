@@ -1,7 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import type { Route } from "next";
 import {
-  buildSeasonAdminUrl,
   cleanLegacyRoutingQuery,
   type SeasonAssetsSubTab,
   type SeasonAdminTab,
@@ -41,6 +40,37 @@ const serializeSearchParams = (input: Record<string, string | string[] | undefin
   return query.toString();
 };
 
+const buildInternalSeasonAdminUrl = ({
+  showId,
+  seasonNumber,
+  tab,
+  assetsSubTab,
+  query,
+}: {
+  showId: string;
+  seasonNumber: number;
+  tab: SeasonAdminTab;
+  assetsSubTab?: SeasonAssetsSubTab;
+  query: URLSearchParams;
+}): string => {
+  const nextQuery = new URLSearchParams(query.toString());
+  nextQuery.delete("tab");
+  nextQuery.delete("assets");
+
+  if (tab === "assets") {
+    nextQuery.set("tab", "assets");
+    if (assetsSubTab && assetsSubTab !== "images") {
+      nextQuery.set("assets", assetsSubTab);
+    }
+  } else if (tab !== "overview") {
+    nextQuery.set("tab", tab);
+  }
+
+  const search = nextQuery.toString();
+  const basePath = `/admin/trr-shows/${encodeURIComponent(showId)}/seasons/${seasonNumber}`;
+  return search ? `${basePath}?${search}` : basePath;
+};
+
 export default async function SeasonTabAliasPage({ params, searchParams }: SeasonTabAliasPageProps) {
   const { showId, showSection, seasonTab } = await params;
   const resolvedSearchParams = (searchParams ? await searchParams : {}) as Record<
@@ -78,8 +108,8 @@ export default async function SeasonTabAliasPage({ params, searchParams }: Seaso
     assetsSubTab = "images";
   }
 
-  const destination = buildSeasonAdminUrl({
-    showSlug: showId,
+  const destination = buildInternalSeasonAdminUrl({
+    showId,
     seasonNumber,
     tab: canonicalRouteTab,
     assetsSubTab,

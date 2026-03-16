@@ -30,7 +30,8 @@ export type PersonAdminTab =
   | "videos"
   | "news"
   | "credits"
-  | "fandom";
+  | "fandom"
+  | "social-growth";
 
 export type SocialAnalyticsViewSlug =
   | "official"
@@ -39,6 +40,7 @@ export type SocialAnalyticsViewSlug =
   | "hashtags"
   | "sentiment"
   | "advanced"
+  | "cast-content"
   | "tiktok-overview"
   | "tiktok-cast"
   | "tiktok-hashtags"
@@ -153,6 +155,7 @@ const PERSON_TAB_BY_PATH_SEGMENT: Record<string, PersonAdminTab> = {
   news: "news",
   credits: "credits",
   fandom: "fandom",
+  "social-growth": "social-growth",
 };
 
 const PERSON_TAB_BY_QUERY_ALIAS: Record<string, PersonAdminTab> = {
@@ -163,6 +166,7 @@ const PERSON_TAB_BY_QUERY_ALIAS: Record<string, PersonAdminTab> = {
   news: "news",
   credits: "credits",
   fandom: "fandom",
+  "social-growth": "social-growth",
 };
 
 const SOCIAL_ANALYTICS_VIEW_SLUG_ALIASES: Record<string, SocialAnalyticsViewSlug> = {
@@ -612,10 +616,14 @@ const toSocialAccountProfileTab = (value: string | null | undefined): SocialAcco
 
 export function parseSocialAccountProfilePath(pathname: string): ParsedSocialAccountProfileRoute | null {
   const segments = toSegments(pathname);
-  if (normalizeSegment(segments[0]) !== "social") return null;
-  const platform = toSocialPlatform(segments[1]);
-  const handle = normalizeHandleSlug(segments[2]);
-  const tab = toSocialAccountProfileTab(segments[3]);
+  const first = normalizeSegment(segments[0]);
+  const isAdminCanonical = first === "admin" && normalizeSegment(segments[1]) === "social";
+  const isLegacyPublic = first === "social";
+  if (!isAdminCanonical && !isLegacyPublic) return null;
+  const offset = isAdminCanonical ? 2 : 1;
+  const platform = toSocialPlatform(segments[offset]);
+  const handle = normalizeHandleSlug(segments[offset + 1]);
+  const tab = toSocialAccountProfileTab(segments[offset + 2]);
   if (!platform || !handle || !tab) return null;
   const canonicalPath = buildSocialAccountProfileUrl({ platform, handle, tab });
   return {
@@ -635,10 +643,13 @@ export function buildSocialAccountProfileUrl(input: {
   const platform = toSocialPlatform(input.platform);
   const handle = normalizeHandleSlug(input.handle);
   if (!platform || !handle) {
-    return appendQuery("/social", buildCanonicalQuery(input.query, { removeSocialView: true }));
+    return appendQuery("/admin/social", buildCanonicalQuery(input.query, { removeSocialView: true }));
   }
   const tab = input.tab ?? "stats";
-  const path = tab === "stats" ? `/social/${platform}/${handle}` : `/social/${platform}/${handle}/${tab}`;
+  const path =
+    tab === "stats"
+      ? `/admin/social/${platform}/${handle}`
+      : `/admin/social/${platform}/${handle}/${tab}`;
   const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
   nextQuery.delete("social_platform");
   nextQuery.delete("season_id");
@@ -788,9 +799,13 @@ export function toPersonSlug(value: string): string {
 export function buildPersonRouteSlug(input: {
   personName: string | null | undefined;
   personId: string;
+  includeIdPrefix?: boolean;
 }): string {
   const base = toPersonSlug(input.personName ?? "");
   const fallback = base || "person";
+  if (input.includeIdPrefix !== true) {
+    return fallback;
+  }
   const id = input.personId.trim().toLowerCase();
   if (!UUID_RE.test(id)) return fallback;
   return `${fallback}--${id.slice(0, 8)}`;

@@ -11,7 +11,9 @@ import {
   formatRefreshSourceLabel,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
+  normalizePersonRefreshSourceProgress,
   PERSON_REFRESH_PHASES,
+  summarizePersonRefreshSourceProgress,
   updatePersonRefreshPipelineSteps,
   updateSyncProgressTracker,
 } from "@/app/admin/trr-shows/people/[personId]/refresh-progress";
@@ -83,6 +85,42 @@ describe("person refresh progress mapping", () => {
     expect(formatRefreshSourceLabel("tmdb")).toBe("TMDb");
     expect(formatRefreshSourceLabel("nbcumv")).toBe("NBCUMV");
     expect(formatRefreshSourceLabel("getty")).toBe("Getty");
+    expect(formatRefreshSourceLabel("getty_nbcumv")).toBe("Getty / NBCUMV");
+  });
+
+  it("normalizes structured source progress rows and preserves source ordering", () => {
+    const sourceProgress = normalizePersonRefreshSourceProgress({
+      getty_nbcumv: {
+        status: "running",
+        discovered_total: 600,
+        scraped_current: 132,
+        saved_current: 18,
+        failed_current: 0,
+        skipped_current: 0,
+        remaining: 468,
+        message: "Matching Getty assets against NBCUMV...",
+      },
+      imdb: {
+        status: "completed",
+        discovered_total: 24,
+        scraped_current: 24,
+        saved_current: 24,
+        failed_current: 0,
+        skipped_current: 0,
+        remaining: 0,
+        message: "Synced IMDb (24 photos).",
+      },
+    });
+
+    expect(sourceProgress.map((entry) => entry.key)).toEqual(["imdb", "getty_nbcumv"]);
+    expect(sourceProgress[1]).toMatchObject({
+      label: "Getty / NBCUMV",
+      discoveredTotal: 600,
+      scrapedCurrent: 132,
+      savedCurrent: 18,
+      remaining: 468,
+    });
+    expect(summarizePersonRefreshSourceProgress(sourceProgress)).toEqual({ current: 1, total: 2 });
   });
 
   it("builds detailed heartbeat messages with source + elapsed context", () => {
@@ -242,11 +280,10 @@ describe("person refresh progress mapping", () => {
       "upserting",
       "metadata_repair",
       "mirroring",
-      "nbcumv_import",
     ]);
   });
 
-  it("tracks Getty / NBCUMV progress as a dedicated ingest step", () => {
+  it("routes Getty / NBCUMV stage updates into Source Sync", () => {
     const initial = createPersonRefreshPipelineSteps("ingest");
     const updated = updatePersonRefreshPipelineSteps(initial, {
       rawStage: "nbcumv_import",
@@ -255,11 +292,11 @@ describe("person refresh progress mapping", () => {
       total: 40,
     });
 
-    const nbcumvStep = updated.find((step) => step.id === "nbcumv_import");
-    expect(nbcumvStep?.label).toBe("Getty / NBCUMV");
-    expect(nbcumvStep?.status).toBe("running");
-    expect(nbcumvStep?.current).toBe(12);
-    expect(nbcumvStep?.total).toBe(40);
+    const sourceSyncStep = updated.find((step) => step.id === "source_sync");
+    expect(sourceSyncStep?.label).toBe("Source Sync");
+    expect(sourceSyncStep?.status).toBe("running");
+    expect(sourceSyncStep?.current).toBe(12);
+    expect(sourceSyncStep?.total).toBe(40);
   });
 
   it("finalizes step summaries with completed vs failed details", () => {

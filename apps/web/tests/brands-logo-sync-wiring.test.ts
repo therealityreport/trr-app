@@ -3,41 +3,32 @@ import fs from "node:fs";
 import path from "node:path";
 
 describe("brands logo sync wiring", () => {
-  it("wires global brands sync trigger", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/brands/page.tsx");
+  it("wires unified brands sync and removes legacy network-only controls", () => {
+    const filePath = path.resolve(__dirname, "../src/components/admin/UnifiedBrandsWorkspace.tsx");
+    const configPath = path.resolve(__dirname, "../src/lib/admin/brands-workspace.ts");
     const contents = fs.readFileSync(filePath, "utf8");
+    const configContents = fs.readFileSync(configPath, "utf8");
 
     expect(contents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/sync/);
     expect(contents).toMatch(/scope:\s*"all"/);
-    expect(contents).toMatch(/Sync All Brand Logos/);
-  });
-
-  it("wires news page sync, include_missing loading, and placeholder icon fallback", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/news/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
-
-    expect(contents).toMatch(/include_missing=true/);
-    expect(contents).toMatch(/scope:\s*"page"/);
-    expect(contents).toMatch(/page:\s*"news"/);
+    expect(contents).toMatch(/Sync Logos/);
+    expect(configContents).toMatch(/Table View/);
+    expect(configContents).toMatch(/Gallery View/);
+    expect(contents).toMatch(/Missing Icon/);
+    expect(contents).not.toMatch(/Sync\/Mirror Brands/);
+    expect(contents).not.toMatch(/Re-run Unresolved Only/);
+    expect(contents).not.toMatch(/Completion Gate/);
     expect(contents).toMatch(/PLACEHOLDER_ICON_PATH/);
     expect(contents).toMatch(/"\/icons\/brand-placeholder\.svg"/);
     expect(contents).toMatch(/allowDevAdminBypass:\s*true/);
     expect(contents).toMatch(/BrandLogoOptionsModal/);
   });
 
-  it("wires other and shows page-scoped logo sync", () => {
-    const otherPath = path.resolve(__dirname, "../src/app/admin/other/page.tsx");
-    const showsPath = path.resolve(__dirname, "../src/app/brands/shows-and-franchises/page.tsx");
-    const otherContents = fs.readFileSync(otherPath, "utf8");
-    const showsContents = fs.readFileSync(showsPath, "utf8");
+  it("keeps the page export pointed at the unified workspace component", () => {
+    const filePath = path.resolve(__dirname, "../src/app/admin/brands/page.tsx");
+    const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(otherContents).toMatch(/scope:\s*"page"/);
-    expect(otherContents).toMatch(/page:\s*"other"/);
-    expect(otherContents).toMatch(/allowDevAdminBypass:\s*true/);
-    expect(otherContents).toMatch(/BrandLogoOptionsModal/);
-    expect(showsContents).toMatch(/scope:\s*"page"/);
-    expect(showsContents).toMatch(/page:\s*"shows"/);
-    expect(showsContents).toMatch(/BrandLogoOptionsModal/);
+    expect(contents).toMatch(/UnifiedBrandsWorkspace/);
   });
 
   it("wires logo option proxy endpoints and modal save actions", () => {

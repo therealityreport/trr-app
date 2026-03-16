@@ -31,6 +31,32 @@ describe("social run scope wiring", () => {
     expect(contents).toMatch(/payload\.window_shard_hours =\s*singlePlatformTarget === "instagram" \|\| singlePlatformTarget === "tiktok" \? 12 : 24/);
   });
 
+  it("routes windowed posts_and_comments season syncs through sync sessions", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/season-social-analytics-section.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const useSyncSession =/);
+    expect(contents).toMatch(/effectiveIngestMode === "posts_and_comments"/);
+    expect(contents).toMatch(/social\/sync-sessions\?season_id=/);
+    expect(contents).toMatch(/buildSocialSyncSessionRequest\(/);
+  });
+
+  it("kicks off a non-blocking SocialBlade sidecar when a season run starts", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/season-social-analytics-section.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const triggerSeasonRunSocialBladeRefresh = useCallback/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/social-growth\/refresh-batch/);
+    expect(contents).toMatch(/source: "season_run"/);
+    expect(contents).toMatch(/void triggerSeasonRunSocialBladeRefresh\(\);/);
+  });
+
   it("scopes week-detail sync recovery and manual attach queries to the current tab window", () => {
     const filePath = path.resolve(
       __dirname,
@@ -41,7 +67,7 @@ describe("social run scope wiring", () => {
     expect(contents).toMatch(/const appendSyncRunScopeParams = useCallback/);
     expect(contents).toMatch(/params\.append\("platforms", platform\)/);
     expect(contents).toMatch(/params\.set\("week_index", String\(weekIndexInt\)\)/);
-    expect(contents).toMatch(/appendSyncRunScopeParams\(runsParams, \{/);
     expect(contents).toMatch(/appendSyncRunScopeParams\(runsParams\);/);
   });
+
 });

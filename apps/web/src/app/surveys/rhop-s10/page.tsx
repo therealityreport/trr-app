@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 export default function RHOPS10CoverPage() {
   return (
@@ -6,10 +7,17 @@ export default function RHOPS10CoverPage() {
       <div className="mx-auto max-w-4xl space-y-8">
         <div className="flex flex-col items-center gap-4 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.4em] text-white/70">RHOP · Season 10</p>
-          <h1 className="text-4xl font-semibold" style={{ fontFamily: "var(--font-rude-slab)" }}>
+          <h1
+            className="text-4xl font-semibold"
+            style={{ fontFamily: "var(--font-rude-slab)" }}
+            {...buildTypographyDataAttributes({ area: "surveys", pageKey: "rhop-survey", instanceKey: "landing", role: "title" })}
+          >
             Weekly Cast Heat Check
           </h1>
-          <p className="text-sm text-white/80">
+          <p
+            className="text-sm text-white/80"
+            {...buildTypographyDataAttributes({ area: "surveys", pageKey: "rhop-survey", instanceKey: "landing", role: "body" })}
+          >
             Rank the Potomac women from who’s carrying Season 10 to who’s coasting. Drag each portrait into place —
             tap once on mobile to reorder.
           </p>

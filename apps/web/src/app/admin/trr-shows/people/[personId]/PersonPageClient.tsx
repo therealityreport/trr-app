@@ -36,6 +36,7 @@ import ShowNewsTab from "@/components/admin/show-tabs/ShowNewsTab";
 import FandomSyncModal from "@/components/admin/FandomSyncModal";
 import ReassignImageModal from "@/components/admin/ReassignImageModal";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
+import SocialGrowthSection from "@/components/admin/social-growth-section";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import {
   type FandomDynamicSection,
@@ -66,6 +67,7 @@ import {
   type AdvancedFilterState,
 } from "@/lib/admin/advanced-filters";
 import {
+  BRAVOCON_LABEL,
   CANONICAL_SCOPED_SOURCE_ORDER,
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
@@ -77,6 +79,7 @@ import {
   WWHL_LABEL,
   type CanonicalScopedSource,
   type GalleryShowFilter,
+  type PersonGalleryEventOption,
 } from "@/lib/admin/person-gallery-media-view";
 import { formatPersonRefreshSummary } from "@/lib/admin/person-refresh-summary";
 import {
@@ -116,9 +119,12 @@ import {
   finalizePersonRefreshPipelineSteps,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
+  normalizePersonRefreshSourceProgress,
   PERSON_REFRESH_PHASES,
+  summarizePersonRefreshSourceProgress,
   type PersonRefreshPipelineMode,
   type PersonRefreshPipelineStepState,
+  type PersonRefreshSourceProgressState,
   updateSyncProgressTracker,
   updatePersonRefreshPipelineSteps,
 } from "./refresh-progress";
@@ -252,6 +258,8 @@ interface TrrPersonPhoto {
   id: string;
   person_id: string;
   source: string;
+  source_image_id?: string | null;
+  source_asset_id?: string | null;
   url: string | null;
   hosted_url: string | null;
   original_url?: string | null;
@@ -260,13 +268,21 @@ interface TrrPersonPhoto {
   detail_url?: string | null;
   crop_display_url?: string | null;
   crop_detail_url?: string | null;
+  hosted_sha256?: string | null;
   hosted_content_type?: string | null;
   caption: string | null;
   width: number | null;
   height: number | null;
   context_section: string | null;
   context_type: string | null;
+  bucket_type?: "show" | "wwhl" | "bravocon" | "event" | "unknown" | null;
+  bucket_key?: string | null;
+  bucket_label?: string | null;
+  resolved_show_id?: string | null;
+  resolved_show_name?: string | null;
+  getty_event_group_title?: string | null;
   season: number | null;
+  source_page_url?: string | null;
   // Metadata fields for lightbox display
   people_names: string[] | null;
   people_ids: string[] | null;
@@ -479,7 +495,7 @@ interface UnifiedNewsFacets {
   seasons: UnifiedNewsFacetSeason[];
 }
 
-type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom";
+type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom" | "social-growth";
 type ReprocessStageKey = "all" | "tagging" | "crop" | "id_text" | "resize";
 type StageTargetScope = "filtered" | "full";
 type StageTargets = {
@@ -1080,6 +1096,7 @@ function RefreshProgressBar({
   total,
   lastEventAt,
   steps,
+  sourceProgress,
 }: {
   show: boolean;
   phase?: string | null;
@@ -1088,6 +1105,7 @@ function RefreshProgressBar({
   total?: number | null;
   lastEventAt?: number | null;
   steps?: PersonRefreshPipelineStepState[] | null;
+  sourceProgress?: PersonRefreshSourceProgressState[] | null;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -1125,6 +1143,7 @@ function RefreshProgressBar({
   const failedStepCount = stepStates.filter((step) => step.status === "failed").length;
   const runningStep = stepStates.find((step) => step.status === "running") ?? null;
   const hasStepProgress = stepStates.length > 0;
+  const sourceStates = Array.isArray(sourceProgress) ? sourceProgress : [];
   const stepPercent = hasStepProgress ? Math.round((completedStepCount / stepStates.length) * 100) : 0;
   const percent = hasProgressBar
     ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
@@ -1170,6 +1189,30 @@ function RefreshProgressBar({
     if (status === "failed") return "border-red-200 bg-red-50 text-red-800";
     if (status === "skipped") return "border-zinc-200 bg-zinc-100 text-zinc-600";
     return "border-zinc-200 bg-white text-zinc-500";
+  };
+
+  const sourceToneClass = (status: PersonRefreshSourceProgressState["status"]): string => {
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    if (status === "running") return "border-blue-200 bg-blue-50 text-blue-800";
+    if (status === "failed") return "border-red-200 bg-red-50 text-red-800";
+    if (status === "skipped") return "border-zinc-200 bg-zinc-100 text-zinc-600";
+    return "border-zinc-200 bg-white text-zinc-500";
+  };
+
+  const renderSourceStatus = (source: PersonRefreshSourceProgressState): string => {
+    if (source.status === "running") return "In progress";
+    if (source.status === "completed") return "Done";
+    if (source.status === "skipped") return "Skipped";
+    if (source.status === "failed") return "Failed";
+    return "Pending";
+  };
+
+  const formatSourceCounts = (source: PersonRefreshSourceProgressState): string => {
+    const discoveredTotal =
+      typeof source.discoveredTotal === "number" ? source.discoveredTotal.toLocaleString() : "?";
+    const remaining =
+      typeof source.remaining === "number" ? source.remaining.toLocaleString() : "?";
+    return `scraped ${source.scrapedCurrent.toLocaleString()}/${discoveredTotal} · saved ${source.savedCurrent.toLocaleString()} · remaining ${remaining}`;
   };
 
   return (
@@ -1235,6 +1278,45 @@ function RefreshProgressBar({
               </div>
             );
           })}
+        </div>
+      )}
+      {sourceStates.length > 0 && (
+        <div className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 p-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+              Image Sources
+            </p>
+            <p className="text-[11px] tabular-nums text-zinc-500">
+              {sourceStates.filter((source) => source.status !== "pending").length.toLocaleString()}/
+              {sourceStates.length.toLocaleString()}
+            </p>
+          </div>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {sourceStates.map((source) => (
+              <div
+                key={source.key}
+                className={`rounded-md border px-2 py-1.5 ${sourceToneClass(source.status)}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em]">
+                    {source.label}
+                  </p>
+                  <p className="text-[11px] font-semibold tabular-nums">
+                    {renderSourceStatus(source)}
+                  </p>
+                </div>
+                <p className="mt-0.5 text-[11px] leading-tight">{formatSourceCounts(source)}</p>
+                {source.failedCurrent > 0 && (
+                  <p className="mt-0.5 text-[11px] leading-tight">
+                    failed {source.failedCurrent.toLocaleString()}
+                  </p>
+                )}
+                {source.message && (
+                  <p className="mt-0.5 text-[11px] leading-tight">{source.message}</p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -2804,6 +2886,7 @@ export default function PersonProfilePage() {
     attemptElapsedMs?: number | null;
     attemptTimeoutMs?: number | null;
     backendHost?: string | null;
+    sourceProgress?: PersonRefreshSourceProgressState[] | null;
   } | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -2982,6 +3065,9 @@ export default function PersonProfilePage() {
   // Gallery filter/sort state
   const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>("all");
   const [selectedOtherShowKey, setSelectedOtherShowKey] = useState<string>("all");
+  const [selectedEventBucketKey, setSelectedEventBucketKey] = useState<string>("all");
+  const [showEventsMenu, setShowEventsMenu] = useState(false);
+  const eventsMenuRef = useRef<HTMLDivElement | null>(null);
   const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
   const canonicalSourceOrderDirty = useMemo(
     () => canonicalSourceOrder.join("|") !== initialCanonicalSourceOrder.join("|"),
@@ -3041,8 +3127,21 @@ export default function PersonProfilePage() {
         acronym: buildShowAcronym(showName),
       });
     }
+    for (const photo of photos) {
+      if (photo.bucket_type !== "show") continue;
+      const showName = photo.resolved_show_name?.trim() ?? "";
+      if (!showName || isWwhlShowName(showName)) continue;
+      const key = photo.resolved_show_id ? `id:${photo.resolved_show_id}` : `name:${showName.toLowerCase()}`;
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        key,
+        showId: photo.resolved_show_id ?? null,
+        showName,
+        acronym: buildShowAcronym(showName),
+      });
+    }
     return Array.from(byKey.values()).sort((a, b) => a.showName.localeCompare(b.showName));
-  }, [galleryFilterCreditsSource]);
+  }, [galleryFilterCreditsSource, photos]);
   const activeShowOption = useMemo(() => {
     if (!activeShowName && !showIdForApi) return null;
     const targetShowId = showIdForApi?.trim();
@@ -3142,6 +3241,20 @@ export default function PersonProfilePage() {
     setSelectedOtherShowKey("all");
   }, [knownShowOptions, selectedOtherShowKey]);
 
+  useEffect(() => {
+    if (!showEventsMenu) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (eventsMenuRef.current?.contains(target)) return;
+      setShowEventsMenu(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [showEventsMenu]);
+
   const mediaViewAvailability = useMemo(() =>
     computePersonGalleryMediaViewAvailability({
       photos,
@@ -3165,8 +3278,31 @@ export default function PersonProfilePage() {
     showIdForApi,
   ]);
 
-  const { hasWwhlMatches, hasEventMatches, hasOtherShowMatches, hasUnknownShowMatches, hasNonThisShowMatches } =
-    mediaViewAvailability;
+  const {
+    hasWwhlMatches,
+    hasBravoconMatches,
+    hasEventMatches,
+    eventOptions,
+    hasOtherShowMatches,
+    hasUnknownShowMatches,
+    hasNonThisShowMatches,
+  } = mediaViewAvailability;
+
+  const selectedEventOption = useMemo<PersonGalleryEventOption | null>(
+    () => eventOptions.find((option) => option.key === selectedEventBucketKey) ?? null,
+    [eventOptions, selectedEventBucketKey]
+  );
+
+  useEffect(() => {
+    if (eventOptions.length === 0) {
+      setSelectedEventBucketKey("all");
+      setShowEventsMenu(false);
+      return;
+    }
+    if (selectedEventBucketKey === "all") return;
+    if (eventOptions.some((option) => option.key === selectedEventBucketKey)) return;
+    setSelectedEventBucketKey(eventOptions[0]?.key ?? "all");
+  }, [eventOptions, selectedEventBucketKey]);
 
   const hasSelectedOtherShowMatches = useMemo(() => {
     if (!selectedOtherShow) {
@@ -3200,11 +3336,46 @@ export default function PersonProfilePage() {
     showIdForApi,
   ]);
 
+  const hasSelectedEventMatches = useMemo(() => {
+    if (selectedEventBucketKey === "all") {
+      return eventOptions.length > 0;
+    }
+    return photos.some((photo) => {
+      const bucketMatches = computePersonPhotoShowBuckets({
+        photo,
+        showIdForApi,
+        activeShowName,
+        activeShowAcronym,
+        allKnownShowNameMatches,
+        allKnownShowAcronymMatches,
+        allKnownShowIds,
+        otherShowNameMatches,
+        otherShowAcronymMatches,
+        selectedOtherShow,
+      });
+      return bucketMatches.matchesEvents && bucketMatches.eventBucketKey === selectedEventBucketKey;
+    });
+  }, [
+    activeShowAcronym,
+    activeShowName,
+    allKnownShowAcronymMatches,
+    allKnownShowIds,
+    allKnownShowNameMatches,
+    eventOptions.length,
+    otherShowAcronymMatches,
+    otherShowNameMatches,
+    photos,
+    selectedEventBucketKey,
+    selectedOtherShow,
+    showIdForApi,
+  ]);
+
   useEffect(() => {
     const nextFilter = resolveGalleryShowFilterFallback({
       currentFilter: galleryShowFilter,
       showContextEnabled: Boolean(showIdParam),
       hasWwhlMatches,
+      hasBravoconMatches,
       hasEventMatches,
       hasOtherShowMatches,
       hasUnknownShowMatches,
@@ -3219,6 +3390,7 @@ export default function PersonProfilePage() {
   }, [
     galleryShowFilter,
     hasNonThisShowMatches,
+    hasBravoconMatches,
     hasEventMatches,
     hasOtherShowMatches,
     hasUnknownShowMatches,
@@ -3228,6 +3400,16 @@ export default function PersonProfilePage() {
     canSelectWwhlWithoutMatches,
     showIdParam,
   ]);
+
+  useEffect(() => {
+    if (galleryShowFilter !== "events") return;
+    if (hasSelectedEventMatches) return;
+    if (eventOptions[0]?.key) {
+      setSelectedEventBucketKey(eventOptions[0].key);
+      return;
+    }
+    setGalleryShowFilter(Boolean(showIdParam) ? "this-show" : "all");
+  }, [eventOptions, galleryShowFilter, hasSelectedEventMatches, showIdParam]);
 
   // Compute unique sources from photos
   const uniqueSources = useMemo(() => {
@@ -3306,7 +3488,13 @@ export default function PersonProfilePage() {
         if (galleryShowFilter === "wwhl") {
           return bucketMatches.matchesWwhl;
         }
+        if (galleryShowFilter === "bravocon") {
+          return bucketMatches.matchesBravocon;
+        }
         if (galleryShowFilter === "events") {
+          if (selectedEventBucketKey !== "all") {
+            return bucketMatches.matchesEvents && bucketMatches.eventBucketKey === selectedEventBucketKey;
+          }
           return bucketMatches.matchesEvents;
         }
         if (galleryShowFilter === "other-shows") {
@@ -3440,6 +3628,7 @@ export default function PersonProfilePage() {
     otherShowNameMatches,
     otherShowAcronymMatches,
     selectedOtherShow,
+    selectedEventBucketKey,
     getPhotoSortDate,
   ]);
 
@@ -3475,7 +3664,7 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     setPhotosVisibleCount(120);
-  }, [galleryShowFilter, selectedOtherShowKey, advancedFilters]);
+  }, [galleryShowFilter, selectedOtherShowKey, selectedEventBucketKey, advancedFilters]);
 
   // Helper to get auth headers
   const getAuthHeaders = useCallback(
@@ -5593,15 +5782,21 @@ export default function PersonProfilePage() {
                   typeof (payload as { backend_host?: unknown }).backend_host === "string"
                     ? ((payload as { backend_host: string }).backend_host)
                     : null;
+                const sourceProgress = normalizePersonRefreshSourceProgress(
+                  (payload as { source_progress?: unknown }).source_progress,
+                );
+                const sourceSyncCounts = summarizePersonRefreshSourceProgress(sourceProgress);
                 const syncCounts =
-                  !heartbeat && mappedPhase === PERSON_REFRESH_PHASES.syncing
-                    ? updateSyncProgressTracker(syncProgressTracker, {
-                        rawStage,
-                        message,
-                        current: numericCurrent,
-                        total: numericTotal,
-                      })
-                    : null;
+                  sourceSyncCounts && mappedPhase === PERSON_REFRESH_PHASES.syncing
+                    ? sourceSyncCounts
+                    : !heartbeat && mappedPhase === PERSON_REFRESH_PHASES.syncing
+                      ? updateSyncProgressTracker(syncProgressTracker, {
+                          rawStage,
+                          message,
+                          current: numericCurrent,
+                          total: numericTotal,
+                        })
+                      : null;
                 const connectDetailMessage = buildProxyConnectDetailMessage({
                   stage: rawStage,
                   message,
@@ -5691,6 +5886,7 @@ export default function PersonProfilePage() {
                       ? attemptTimeoutMs
                       : null,
                   backendHost,
+                  sourceProgress,
                 });
                 setRefreshPipelineSteps((prev) =>
                   updatePersonRefreshPipelineSteps(
@@ -5727,6 +5923,11 @@ export default function PersonProfilePage() {
                 const summary = payload && typeof payload === "object" && "summary" in payload
                   ? (payload as { summary?: unknown }).summary
                   : payload;
+                const sourceProgress = normalizePersonRefreshSourceProgress(
+                  summary && typeof summary === "object"
+                    ? (summary as { source_progress?: unknown }).source_progress
+                    : undefined,
+                );
                 const summaryText = formatPersonRefreshSummary(summary);
                 const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
                 const completionMessage =
@@ -5757,6 +5958,7 @@ export default function PersonProfilePage() {
                   attemptElapsedMs: prev?.attemptElapsedMs ?? null,
                   attemptTimeoutMs: prev?.attemptTimeoutMs ?? null,
                   backendHost: prev?.backendHost ?? null,
+                  sourceProgress,
                 }));
                 setRefreshNotice(
                   summaryText
@@ -7160,6 +7362,16 @@ export default function PersonProfilePage() {
     tvdb_id: rawExternalIds.tvdb,
   } : undefined;
 
+  // Resolve Instagram handle from external_ids (matches backend COALESCE chain)
+  const instagramHandle = useMemo(() => {
+    const ids = person?.external_ids as Record<string, unknown> | undefined;
+    if (!ids) return null;
+    const raw =
+      (typeof ids.instagram_id === "string" ? ids.instagram_id : null) ??
+      (typeof ids.instagram === "string" ? ids.instagram : null);
+    return raw?.trim() || null;
+  }, [person?.external_ids]);
+
   const canonical = useMemo(() => {
     return {
       birthday: resolveMultiSourceField(person?.birthday, canonicalSourceOrder),
@@ -7200,6 +7412,15 @@ export default function PersonProfilePage() {
   const breadcrumbShowHref = backShowTarget
     ? buildShowAdminUrl({ showSlug: backShowTarget })
     : undefined;
+  const breadcrumbCastHref =
+    backShowTarget && seasonNumber !== null
+      ? buildSeasonAdminUrl({
+          showSlug: backShowTarget,
+          seasonNumber,
+          tab: "social",
+          socialView: "cast-content",
+        })
+      : null;
   useEffect(() => {
     if (!showSlugForRouting || !breadcrumbShowName) return;
     recordAdminRecentShow({
@@ -7375,6 +7596,7 @@ export default function PersonProfilePage() {
                   personHref: breadcrumbPersonHref,
                   showName: breadcrumbShowName,
                   showHref: breadcrumbShowHref,
+                  castHref: breadcrumbCastHref,
                 })}
               />
             </div>
@@ -7486,6 +7708,7 @@ export default function PersonProfilePage() {
                   { id: "news", label: `News (${unifiedNews.length})` },
                   { id: "credits", label: `Credits (${credits.length})` },
                   { id: "fandom", label: fandomData.length > 0 ? `Fandom (${fandomData.length})` : "Fandom" },
+                  { id: "social-growth", label: "Social Growth" },
                 ] as const
               ).map((tab) => (
                 <button
@@ -7979,6 +8202,7 @@ export default function PersonProfilePage() {
                   total={refreshProgress?.total}
                   lastEventAt={refreshProgress?.lastEventAt}
                   steps={refreshPipelineSteps}
+                  sourceProgress={refreshProgress?.sourceProgress}
                 />
                 {refreshError && (
                   <p className="text-xs text-red-600">{refreshError}</p>
@@ -8025,6 +8249,7 @@ export default function PersonProfilePage() {
                 knownShowOptions.length > 0 ||
                 hasWwhlMatches ||
                 hasWwhlCredit ||
+                hasBravoconMatches ||
                 hasEventMatches ||
                 hasUnknownShowMatches) && (
                 <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -8075,18 +8300,63 @@ export default function PersonProfilePage() {
                           {WWHL_LABEL}
                       </button>
                     )}
-                    {hasEventMatches && (
+                    {hasBravoconMatches && (
                       <button
                         type="button"
-                        onClick={() => setGalleryShowFilter("events")}
+                        onClick={() => setGalleryShowFilter("bravocon")}
                         className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                          galleryShowFilter === "events"
+                          galleryShowFilter === "bravocon"
                             ? "border-zinc-900 bg-zinc-900 text-white"
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        Events
+                        {BRAVOCON_LABEL}
                       </button>
+                    )}
+                    {hasEventMatches && (
+                      <div className="relative" ref={eventsMenuRef}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (eventOptions.length === 0) {
+                              setGalleryShowFilter("events");
+                              return;
+                            }
+                            setShowEventsMenu((current) => !current);
+                          }}
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                            galleryShowFilter === "events"
+                              ? "border-zinc-900 bg-zinc-900 text-white"
+                              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                          }`}
+                        >
+                          {galleryShowFilter === "events" && selectedEventOption
+                            ? `Events: ${selectedEventOption.label}`
+                            : "Events"}
+                        </button>
+                        {showEventsMenu && eventOptions.length > 0 && (
+                          <div className="absolute left-0 top-full z-20 mt-2 min-w-64 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg">
+                            {eventOptions.map((option) => (
+                              <button
+                                type="button"
+                                key={option.key}
+                                onClick={() => {
+                                  setSelectedEventBucketKey(option.key);
+                                  setGalleryShowFilter("events");
+                                  setShowEventsMenu(false);
+                                }}
+                                className={`block w-full rounded-lg px-3 py-2 text-left text-xs font-medium transition ${
+                                  galleryShowFilter === "events" && selectedEventBucketKey === option.key
+                                    ? "bg-zinc-900 text-white"
+                                    : "text-zinc-700 hover:bg-zinc-50"
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                     {hasUnknownShowMatches && (
                       <button
@@ -8893,6 +9163,14 @@ export default function PersonProfilePage() {
                 ))
               )}
             </div>
+          )}
+
+          {/* Social Growth Tab */}
+          {activeTab === "social-growth" && (
+            <SocialGrowthSection
+              personId={personId}
+              instagramHandle={instagramHandle}
+            />
           )}
         </main>
 

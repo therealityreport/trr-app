@@ -1,5 +1,5 @@
 import React from "react";
-import { describe, it, expect } from "vitest";
+import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import MatrixLikertInput from "@/components/survey/MatrixLikertInput";
 
@@ -73,6 +73,39 @@ function makeQuestion(configOverride: Record<string, unknown> = {}) {
 }
 
 describe("MatrixLikertInput", () => {
+  const originalMatchMedia = window.matchMedia;
+  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+
+  beforeEach(() => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes("min-width") ? false : false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as typeof window.matchMedia;
+
+    HTMLElement.prototype.getBoundingClientRect = vi.fn(() => ({
+      width: 390,
+      height: 100,
+      top: 0,
+      left: 0,
+      right: 390,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })) as typeof HTMLElement.prototype.getBoundingClientRect;
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  });
+
   it("applies CDN-resolved font overrides to prompt, statement, and options", () => {
     render(
       <MatrixLikertInput
@@ -96,6 +129,93 @@ describe("MatrixLikertInput", () => {
       fontFamily: '"Plymouth Serial", var(--font-sans), sans-serif',
     });
     expect(screen.queryByTestId("matrix-likert-missing-fonts")).not.toBeInTheDocument();
+  });
+
+  it("uses exact fallback typography values instead of width interpolation", () => {
+    render(
+      <MatrixLikertInput
+        question={makeQuestion() as never}
+        value={{}}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("agree-likert-prompt")).toHaveStyle({
+      fontSize: "28px",
+      lineHeight: "1.05",
+      letterSpacing: "0em",
+    });
+    expect(screen.getByText("Statement one")).toHaveStyle({
+      fontSize: "24px",
+      lineHeight: "1.05",
+    });
+    expect(screen.getByRole("button", { name: "Select Strongly Agree for Statement one" })).toHaveStyle({
+      fontFamily: '"Plymouth Serial", var(--font-sans), sans-serif',
+    });
+    expect(within(screen.getByRole("button", { name: "Select Strongly Agree for Statement one" })).getByText("Strongly Agree")).toHaveStyle({
+      fontSize: "13px",
+      lineHeight: "1.2",
+    });
+  });
+
+  it("keeps text typography stable even when the container width changes", () => {
+    const narrowRect = vi.fn(() => ({
+      width: 390,
+      height: 100,
+      top: 0,
+      left: 0,
+      right: 390,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }));
+    const wideRect = vi.fn(() => ({
+      width: 1320,
+      height: 100,
+      top: 0,
+      left: 0,
+      right: 1320,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }));
+
+    HTMLElement.prototype.getBoundingClientRect = narrowRect as typeof HTMLElement.prototype.getBoundingClientRect;
+    const narrow = render(
+      <MatrixLikertInput
+        question={makeQuestion() as never}
+        value={{}}
+        onChange={() => {}}
+      />,
+    );
+
+    const narrowPrompt = screen.getByTestId("agree-likert-prompt");
+    const narrowStatement = screen.getByText("Statement one");
+    const narrowOptionLabel = within(screen.getByRole("button", { name: "Select Strongly Agree for Statement one" })).getByText("Strongly Agree");
+
+    const narrowStyles = {
+      prompt: narrowPrompt.getAttribute("style"),
+      statement: narrowStatement.getAttribute("style"),
+      option: narrowOptionLabel.getAttribute("style"),
+    };
+
+    narrow.unmount();
+
+    HTMLElement.prototype.getBoundingClientRect = wideRect as typeof HTMLElement.prototype.getBoundingClientRect;
+    render(
+      <MatrixLikertInput
+        question={makeQuestion() as never}
+        value={{}}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("agree-likert-prompt").getAttribute("style")).toContain("font-size: 28px");
+    expect(screen.getByTestId("agree-likert-prompt").getAttribute("style")).toBe(narrowStyles.prompt);
+    expect(screen.getByText("Statement one").getAttribute("style")).toBe(narrowStyles.statement);
+    expect(within(screen.getByRole("button", { name: "Select Strongly Agree for Statement one" })).getByText("Strongly Agree").getAttribute("style")).toBe(narrowStyles.option);
   });
 
   it("shows warning when required hosted fonts are missing", () => {

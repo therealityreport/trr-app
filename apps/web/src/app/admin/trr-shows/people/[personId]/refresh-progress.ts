@@ -67,6 +67,7 @@ const SOURCE_LABEL_BY_ID: Record<string, string> = {
   fandom_gallery: "Fandom Gallery",
   nbcumv: "NBCUMV",
   getty: "Getty",
+  getty_nbcumv: "Getty / NBCUMV",
 };
 
 const EXECUTION_OWNER_LABEL_BY_ID: Record<string, string> = {
@@ -102,6 +103,102 @@ export function formatRefreshSourceLabel(source: string | null | undefined): str
   const normalized = normalizeKey(source);
   if (!normalized) return null;
   return SOURCE_LABEL_BY_ID[normalized] ?? normalized.replace(/_/g, " ");
+}
+
+export type PersonRefreshSourceProgressStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "skipped"
+  | "failed";
+
+export interface PersonRefreshSourceProgressState {
+  key: string;
+  label: string;
+  status: PersonRefreshSourceProgressStatus;
+  discoveredTotal: number | null;
+  scrapedCurrent: number;
+  savedCurrent: number;
+  failedCurrent: number;
+  skippedCurrent: number;
+  remaining: number | null;
+  message: string | null;
+}
+
+const SOURCE_PROGRESS_ORDER = [
+  "imdb",
+  "tmdb",
+  "fandom",
+  "fandom_gallery",
+  "getty_nbcumv",
+] as const;
+
+function normalizeSourceProgressStatus(
+  value: unknown,
+): PersonRefreshSourceProgressStatus {
+  if (typeof value !== "string") return "pending";
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "completed" ||
+    normalized === "skipped" ||
+    normalized === "failed"
+  ) {
+    return normalized;
+  }
+  return "pending";
+}
+
+export function normalizePersonRefreshSourceProgress(
+  value: unknown,
+): PersonRefreshSourceProgressState[] {
+  if (!value || typeof value !== "object") return [];
+
+  const sourceProgress = Object.entries(value as Record<string, unknown>)
+    .map(([rawKey, rawEntry]) => {
+      const key = normalizeKey(rawKey);
+      if (!key || !rawEntry || typeof rawEntry !== "object") return null;
+      const entry = rawEntry as Record<string, unknown>;
+      return {
+        key,
+        label: formatRefreshSourceLabel(key) ?? key.replace(/_/g, " "),
+        status: normalizeSourceProgressStatus(entry.status),
+        discoveredTotal: toFiniteInt(entry.discovered_total),
+        scrapedCurrent: toFiniteInt(entry.scraped_current) ?? 0,
+        savedCurrent: toFiniteInt(entry.saved_current) ?? 0,
+        failedCurrent: toFiniteInt(entry.failed_current) ?? 0,
+        skippedCurrent: toFiniteInt(entry.skipped_current) ?? 0,
+        remaining: toFiniteInt(entry.remaining),
+        message:
+          typeof entry.message === "string" && entry.message.trim().length > 0
+            ? entry.message.trim()
+            : null,
+      } satisfies PersonRefreshSourceProgressState;
+    })
+    .filter((entry): entry is PersonRefreshSourceProgressState => entry !== null);
+
+  return sourceProgress.sort((left, right) => {
+    const leftIndex = SOURCE_PROGRESS_ORDER.indexOf(left.key as (typeof SOURCE_PROGRESS_ORDER)[number]);
+    const rightIndex = SOURCE_PROGRESS_ORDER.indexOf(right.key as (typeof SOURCE_PROGRESS_ORDER)[number]);
+    const safeLeftIndex = leftIndex === -1 ? SOURCE_PROGRESS_ORDER.length : leftIndex;
+    const safeRightIndex = rightIndex === -1 ? SOURCE_PROGRESS_ORDER.length : rightIndex;
+    if (safeLeftIndex !== safeRightIndex) return safeLeftIndex - safeRightIndex;
+    return left.label.localeCompare(right.label);
+  });
+}
+
+export function summarizePersonRefreshSourceProgress(
+  sourceProgress: PersonRefreshSourceProgressState[] | null | undefined,
+): { current: number; total: number } | null {
+  if (!Array.isArray(sourceProgress) || sourceProgress.length === 0) return null;
+  const completedCount = sourceProgress.filter(
+    (entry) =>
+      entry.status === "completed" ||
+      entry.status === "skipped" ||
+      entry.status === "failed",
+  ).length;
+  return { current: completedCount, total: sourceProgress.length };
 }
 
 function formatExecutionOwnerLabel(owner: string | null | undefined): string | null {
@@ -446,7 +543,6 @@ export type PersonRefreshPipelineStepId =
   | "upserting"
   | "metadata_repair"
   | "mirroring"
-  | "nbcumv_import"
   | "pruning"
   | "auto_count"
   | "word_id"
@@ -483,7 +579,6 @@ const REFRESH_PIPELINE_STEPS: PersonRefreshPipelineStepDefinition[] = [
   { id: "upserting", label: "Saving Photos", modes: new Set(["ingest", "refresh"]) },
   { id: "metadata_repair", label: "Fixing IMDb Details", modes: new Set(["ingest", "refresh", "reprocess"]) },
   { id: "mirroring", label: "S3 Mirroring", modes: new Set(["ingest", "refresh"]) },
-  { id: "nbcumv_import", label: "Getty / NBCUMV", modes: new Set(["ingest", "refresh"]) },
   { id: "pruning", label: "Pruning", modes: new Set(["refresh"]) },
   { id: "auto_count", label: "Tagging (Face Boxes + Identity)", modes: new Set(["refresh", "reprocess"]) },
   { id: "word_id", label: "Text Overlay", modes: new Set(["refresh", "reprocess"]) },
@@ -540,7 +635,7 @@ function mapStageToPipelineStep(rawStage: string | null | undefined): PersonRefr
   if (stage === "upserting") return "upserting";
   if (stage === "metadata_repair") return "metadata_repair";
   if (stage === "mirroring") return "mirroring";
-  if (stage === "nbcumv_import") return "nbcumv_import";
+  if (stage === "nbcumv_import") return "source_sync";
   if (stage === "pruning") return "pruning";
   if (stage === "auto_count") return "auto_count";
   if (stage === "word_id") return "word_id";

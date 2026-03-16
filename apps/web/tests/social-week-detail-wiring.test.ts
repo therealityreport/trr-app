@@ -60,7 +60,7 @@ describe("social week detail wiring", () => {
 
     expect(contents).toMatch(/social\/runs\/\$\{runId\}\/progress\?\$\{progressParams\.toString\(\)\}/);
     expect(contents).toMatch(/social\/analytics\/week\/\$\{weekIndex\}\/live-health\?\$\{params\.toString\(\)\}/);
-    expect(contents).toMatch(/social\/ingest\$\{ingestParams\.toString\(\) \? `\?\$\{ingestParams\.toString\(\)\}` : ""\}/);
+    expect(contents).toMatch(/social\/sync-sessions\$\{ingestParams\.toString\(\) \? `\?\$\{ingestParams\.toString\(\)\}` : ""\}/);
     expect(contents).toMatch(/progressParams = new URLSearchParams\(\{\s*recent_log_limit:\s*"40"/s);
   });
 
@@ -81,11 +81,53 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Week live health request timed out/);
     expect(contents).toMatch(/ingestKickoff:\s*210_000/);
     expect(contents).toMatch(/Sync kickoff request timed out/);
-    expect(contents).toMatch(/SYNC_KICKOFF_MAX_ATTEMPTS = 1/);
-    expect(contents).toMatch(/recoverSyncRunAfterKickoffError/);
+    expect(contents).toMatch(/social\/sync-sessions\/\$\{sessionId\}/);
+    expect(contents).toMatch(/Waiting for sync session follow-up/);
     expect(contents).toMatch(/SYNC_POLL_BACKOFF_MS/);
     expect(contents).toMatch(/syncPollFailureCountRef/);
     expect(contents).toMatch(/syncPollFailureCountRef\.current >= 2 && !isTransientDevRestartMessage\(message\)/);
+  });
+
+  it("shows detailed sync-session gap counters including comment media", () => {
+    const weekFilePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const weekContents = fs.readFileSync(weekFilePath, "utf8");
+
+    expect(weekContents).toMatch(/Missing comment media/);
+    expect(weekContents).toMatch(/missing_comment_media_count/);
+
+    const seasonFilePath = path.resolve(
+      __dirname,
+      "../src/components/admin/season-social-analytics-section.tsx",
+    );
+    const seasonContents = fs.readFileSync(seasonFilePath, "utf8");
+
+    expect(seasonContents).toMatch(/Missing comment media/);
+    expect(seasonContents).toMatch(/missing_comment_media_count/);
+  });
+
+  it("uses the sync-session stream helper with polling fallback", () => {
+    const weekFilePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const weekContents = fs.readFileSync(weekFilePath, "utf8");
+
+    expect(weekContents).toMatch(/consumeSocialSyncSessionStream/);
+    expect(weekContents).toMatch(/social\/sync-sessions\/\$\{syncSessionId\}.*\/stream/s);
+    expect(weekContents).toMatch(/if \(syncSessionStreamConnected\) return;/);
+
+    const seasonFilePath = path.resolve(
+      __dirname,
+      "../src/components/admin/season-social-analytics-section.tsx",
+    );
+    const seasonContents = fs.readFileSync(seasonFilePath, "utf8");
+
+    expect(seasonContents).toMatch(/consumeSocialSyncSessionStream/);
+    expect(seasonContents).toMatch(/social\/sync-sessions\/\$\{activeSyncSessionId\}\/stream/s);
+    expect(seasonContents).toMatch(/if \(activeSyncSessionStreamConnected\) return;/);
   });
 
   it("cleans up in-flight week requests without leaking rejected finally promises", () => {
@@ -175,17 +217,18 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/buildSeasonSocialWeekUrl\(\{\s*showSlug:\s*showSlugForRouting,/s);
   });
 
-  it("uses local state for platform tab clicks without week-route replacement", () => {
+  it("routes platform tab clicks through the canonical week subtab URL", () => {
     const filePath = path.resolve(
       __dirname,
       "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/onClick=\{\(\) => \{\s*setPlatformFilter\(tab\.key\);\s*\}\}/s);
-    expect(contents).not.toMatch(
-      /onClick=\{\(\) => \{\s*setPlatformFilter\(tab\.key\);[\s\S]*buildSeasonSocialWeekUrl\(\{[\s\S]*\}\);[\s\S]*compareAndReplaceGuarded\(nextRoute\);[\s\S]*\}\}/s,
-    );
+    expect(contents).toMatch(/const handlePlatformFilterSelect = useCallback\(/);
+    expect(contents).toMatch(/setPlatformFilter\(nextFilter\);/);
+    expect(contents).toMatch(/const nextRoute = buildSeasonSocialWeekUrl\(\{/);
+    expect(contents).toMatch(/compareAndReplaceGuarded\(nextRoute\);/);
+    expect(contents).toMatch(/onClick=\{\(\) => \{\s*handlePlatformFilterSelect\(tab\.key\);\s*\}\}/s);
   });
 
   it("guards duplicate route replacements to avoid replace loops", () => {
@@ -240,6 +283,8 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Asset Health/);
     expect(contents).toMatch(/syncHandleProgressCards\.map\(\(card\) => \(/);
     expect(contents).toMatch(/Runner lanes:/);
+    expect(contents).toMatch(/Pending start/);
+    expect(contents).toMatch(/Next stage/);
     expect(contents).toMatch(/formatSyncStageLabel\(stage\.stage\)/);
     const handleProgressIndex = contents.indexOf("Per-Handle Job Progress");
     const summaryIndex = contents.indexOf("/* Summary bar - Row 1");
@@ -269,22 +314,39 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/refresh\.comment_gap/);
     expect(contents).toMatch(/Refresh completed with warnings:/);
     expect(contents).toMatch(/Transcript/);
+    expect(contents).toMatch(/formatTranscriptErrorLabel/);
+    expect(contents).not.toMatch(/Unavailable: \{data\.transcript_error\}/);
+    expect(contents).toMatch(/shouldShowPostTitle/);
     expect(contents).toMatch(/Slide \{boundedInstagramDrawerSlideIndex \+ 1\} of/);
   });
 
-  it("uses coarse single-runner scheduling for manual single-platform sync kickoff", () => {
+  it("delegates manual single-platform sync kickoff shaping to the shared sync-session builder", () => {
     const filePath = path.resolve(
       __dirname,
       "../src/components/admin/social-week/WeekDetailPageView.tsx",
     );
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toMatch(/const singlePlatform = requestedPlatforms\.length === 1/);
-    expect(contents).toMatch(/const singleRunnerPass = pass === 1 && \(singlePlatform \|\| igTikTokOnly\)/);
-    expect(contents).toMatch(/singlePlatformTarget === "instagram" \|\| singlePlatformTarget === "tiktok"/);
-    expect(contents).toMatch(/runner_strategy: singleRunnerPass \? "single_runner" : "adaptive_dual_runner"/);
-    expect(contents).toMatch(/runner_count: singleRunnerPass \? 1 : 2/);
-    expect(contents).toMatch(/window_shard_hours: shardOptimizedPass \? optimizedWindowShardHours : 4/);
+    expect(contents).toMatch(/buildSocialSyncSessionRequest\(\{/);
+    expect(contents).toMatch(/platforms,/);
+    expect(contents).toMatch(/dateStart,/);
+    expect(contents).toMatch(/dateEnd,/);
+    expect(contents).not.toMatch(/runner_strategy: singleRunnerPass \? "single_runner" : "adaptive_dual_runner"/);
+  });
+
+  it("renders sync-session follow-up messaging and dimension-specific retry counts", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/display_status/);
+    expect(contents).toMatch(/status_reason/);
+    expect(contents).toMatch(/Follow-up dimensions:/);
+    expect(contents).toMatch(/Comment targets/);
+    expect(contents).toMatch(/Avatar targets/);
+    expect(contents).toMatch(/Comment media targets/);
   });
 
   it("separates running work from queued work in sync progress copy", () => {

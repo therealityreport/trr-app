@@ -26,12 +26,15 @@ export interface TrrShow {
   alternative_names: string[];
   imdb_id: string | null;
   tmdb_id: number | null;
+  external_ids?: Record<string, unknown> | null;
   show_total_seasons: number | null;
   show_total_episodes: number | null;
   description: string | null;
   premiere_date: string | null;
   genres: string[];
   networks: string[];
+  streaming_providers?: string[] | null;
+  watch_providers?: string[] | null;
   tags: string[];
   // Image fields (from primary_* columns or joined)
   primary_poster_image_id: string | null;
@@ -56,6 +59,13 @@ export interface UpdateTrrShowInput {
   description?: string | null;
   premiereDate?: string | null;
   alternativeNames?: string[];
+  imdbId?: string | null;
+  tmdbId?: number | null;
+  externalIds?: Record<string, unknown> | null;
+  genres?: string[];
+  networks?: string[];
+  streamingProviders?: string[];
+  tags?: string[];
   primaryPosterImageId?: string | null;
   primaryBackdropImageId?: string | null;
   primaryLogoImageId?: string | null;
@@ -146,6 +156,21 @@ export interface TrrPerson {
   created_at: string;
   updated_at: string;
 }
+
+const normalizeStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+};
+
+const normalizeTrrShowRow = (row: TrrShow): TrrShow => ({
+  ...row,
+  alternative_names: normalizeStringArray(row.alternative_names),
+  genres: normalizeStringArray(row.genres),
+  networks: normalizeStringArray(row.networks),
+  streaming_providers: normalizeStringArray(row.streaming_providers),
+  watch_providers: normalizeStringArray(row.watch_providers),
+  tags: normalizeStringArray(row.tags),
+});
 
 const CANONICAL_PROFILE_SOURCES = ["tmdb", "imdb", "fandom", "manual"] as const;
 type CanonicalProfileSource = (typeof CANONICAL_PROFILE_SOURCES)[number];
@@ -302,7 +327,7 @@ export async function searchShows(
     [like, limit, offset]
   );
 
-  return result.rows;
+  return result.rows.map(normalizeTrrShowRow);
 }
 
 /**
@@ -336,7 +361,8 @@ export async function getShowById(id: string): Promise<TrrShow | null> {
      LIMIT 1`,
     [id]
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  return row ? normalizeTrrShowRow(row) : null;
 }
 
 export const toShowSlug = (value: string): string => {
@@ -602,7 +628,8 @@ export async function getShowByImdbId(imdbId: string): Promise<TrrShow | null> {
      LIMIT 1`,
     [imdbId]
   );
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+  return row ? normalizeTrrShowRow(row) : null;
 }
 
 const normalizeFeaturedShowImageKind = (
@@ -665,6 +692,34 @@ export async function updateShowById(
     updates.push(`alternative_names = $${paramIndex++}::text[]`);
     values.push(input.alternativeNames);
   }
+  if (input.imdbId !== undefined) {
+    updates.push(`imdb_id = $${paramIndex++}::text`);
+    values.push(input.imdbId);
+  }
+  if (input.tmdbId !== undefined) {
+    updates.push(`tmdb_id = $${paramIndex++}::int`);
+    values.push(input.tmdbId);
+  }
+  if (input.externalIds !== undefined) {
+    updates.push(`external_ids = $${paramIndex++}::jsonb`);
+    values.push(JSON.stringify(input.externalIds ?? {}));
+  }
+  if (input.genres !== undefined) {
+    updates.push(`genres = $${paramIndex++}::text[]`);
+    values.push(input.genres);
+  }
+  if (input.networks !== undefined) {
+    updates.push(`networks = $${paramIndex++}::text[]`);
+    values.push(input.networks);
+  }
+  if (input.streamingProviders !== undefined) {
+    updates.push(`streaming_providers = $${paramIndex++}::text[]`);
+    values.push(input.streamingProviders);
+  }
+  if (input.tags !== undefined) {
+    updates.push(`tags = $${paramIndex++}::text[]`);
+    values.push(input.tags);
+  }
   if (input.primaryPosterImageId !== undefined) {
     updates.push(`primary_poster_image_id = $${paramIndex++}::uuid`);
     values.push(input.primaryPosterImageId);
@@ -695,7 +750,7 @@ export async function updateShowById(
 
   // Keep response shape aligned with getShowById.
   const withUrls = await getShowById(row.id);
-  return withUrls ?? row;
+  return withUrls ?? normalizeTrrShowRow(row);
 }
 
 // ============================================================================
@@ -1736,6 +1791,18 @@ const getMetadataString = (
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 };
 
+const getGalleryBucketMetadataValue = (
+  metadata: Record<string, unknown> | null | undefined,
+  key: string
+): string | null => {
+  const direct = getMetadataString(metadata, key);
+  if (direct) return direct;
+  const nested = metadata?.gallery_bucket;
+  if (!nested || typeof nested !== "object") return null;
+  const value = (nested as Record<string, unknown>)[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+};
+
 const pickUrlCandidate = (...values: Array<string | null | undefined>): string | null => {
   for (const value of values) {
     if (typeof value !== "string") continue;
@@ -1999,6 +2066,12 @@ export interface TrrPersonPhoto {
   height: number | null;
   context_section: string | null;
   context_type: string | null;
+  bucket_type?: "show" | "wwhl" | "bravocon" | "event" | "unknown" | null;
+  bucket_key?: string | null;
+  bucket_label?: string | null;
+  resolved_show_id?: string | null;
+  resolved_show_name?: string | null;
+  getty_event_group_title?: string | null;
   season: number | null;
   source_page_url?: string | null;
   // Metadata fields
@@ -2726,6 +2799,12 @@ export async function getPhotosByPersonId(
       source: normalizedFandom.source,
       metadata: normalizedFandom.metadata,
       created_at: (photo as { created_at?: string | null }).created_at ?? photo.fetched_at ?? null,
+      bucket_type: (getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_type") as TrrPersonPhoto["bucket_type"]) ?? null,
+      bucket_key: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_key"),
+      bucket_label: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_label"),
+      resolved_show_id: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_id"),
+      resolved_show_name: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_name"),
+      getty_event_group_title: getGalleryBucketMetadataValue(normalizedFandom.metadata, "getty_event_group_title"),
       people_ids: null,
       people_count: mdPeopleCount,
       people_count_source: mdPeopleCountSource as "auto" | "manual" | null,
@@ -2936,6 +3015,12 @@ export async function getPhotosByPersonId(
           height: row.height,
           context_section: (context as { context_section?: string | null } | null)?.context_section ?? null,
           context_type: (context as { context_type?: string | null } | null)?.context_type ?? null,
+          bucket_type: (getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_type") as TrrPersonPhoto["bucket_type"]) ?? null,
+          bucket_key: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_key"),
+          bucket_label: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_label"),
+          resolved_show_id: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_id"),
+          resolved_show_name: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_name"),
+          getty_event_group_title: getGalleryBucketMetadataValue(normalizedFandom.metadata, "getty_event_group_title"),
           season: contextSeason ?? contextSeasonNumber ?? metadataSeasonNumber ?? null,
           source_page_url: sourcePageUrl,
           people_names: peopleNames,

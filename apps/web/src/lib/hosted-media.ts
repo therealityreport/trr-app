@@ -17,6 +17,9 @@ const LEGACY_HOSTED_MEDIA_HOST_MARKERS = [
 
 const SAME_ORIGIN_HOSTED_PATH_PREFIXES = [
   "/media/",
+  "/media-variants/",
+  "/cast-photo-variants/",
+  "/face-crops/",
   "/images/",
   "/icons/",
   "/social/",

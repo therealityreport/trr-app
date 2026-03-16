@@ -11,6 +11,7 @@ import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-aut
 import { adminStream } from "@/lib/admin/admin-fetch";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 import {
   PeopleSearchMultiSelect,
   type PersonOption,
@@ -1307,7 +1308,7 @@ export default function ScrapeImagesPage() {
                         onClick={() => toggleImageSelection(img.id)}
                       >
                         <Image
-                          src={img.thumbnail_url}
+                          src={canonicalizeHostedMediaUrl(img.thumbnail_url) ?? img.thumbnail_url}
                           alt={img.alt_text || "Scraped image"}
                           fill
                           className="object-cover"
@@ -1677,7 +1678,7 @@ export default function ScrapeImagesPage() {
                         className="relative aspect-square overflow-hidden rounded-lg bg-white"
                       >
                         <Image
-                          src={asset.hosted_url}
+                          src={canonicalizeHostedMediaUrl(asset.hosted_url) ?? asset.hosted_url}
                           alt={asset.caption || "Imported image"}
                           fill
                           className="object-cover"

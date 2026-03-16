@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { MultiSelectChoiceConfig } from "@/lib/surveys/question-config-types";
 import {
@@ -239,6 +240,22 @@ export default function MultiSelectInput({
     () => Math.round(interpolate(18, 29, responsiveProgress)),
     [responsiveProgress],
   );
+  const optionTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "multi-select",
+      instanceKey: "text-multiple-choice",
+      role: "option",
+    },
+    {
+      fontFamily: figmaOptionFontFamily,
+      fontWeight: "800",
+      fontSize: `${figmaOptionFontSize}px`,
+      lineHeight: "1.2",
+      letterSpacing: "0.03em",
+      textTransform: "uppercase",
+    },
+  );
 
   const handleToggle = React.useCallback(
     (optionKey: string) => {
@@ -336,12 +353,7 @@ export default function MultiSelectInput({
               paddingRight: `${figmaOptionPaddingX}px`,
               backgroundColor: isSelected ? figmaOptionBgSelected : figmaOptionBg,
               color: isSelected ? figmaOptionTextColorSelected : figmaOptionTextColor,
-              fontFamily: figmaOptionFontFamily,
-              fontWeight: 800,
-              fontSize: `${figmaOptionFontSize}px`,
-              lineHeight: "1.2",
-              letterSpacing: "0.03em",
-              textTransform: "uppercase",
+              ...optionTypographyStyle,
               boxShadow: isSelected ? "0 0 0 2px rgba(255, 255, 255, 0.35) inset" : "none",
             }}
             data-testid={`multi-select-option-${option.option_key}`}

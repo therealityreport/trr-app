@@ -4,10 +4,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 const {
   fetchAdminWithAuthMock,
   buildPaletteFromImageDataMock,
+  extractPaletteFromImageDataMock,
   buildThemesMock,
 } = vi.hoisted(() => ({
   fetchAdminWithAuthMock: vi.fn(),
   buildPaletteFromImageDataMock: vi.fn(),
+  extractPaletteFromImageDataMock: vi.fn(),
   buildThemesMock: vi.fn(),
 }));
 
@@ -17,6 +19,7 @@ vi.mock("@/lib/admin/client-auth", () => ({
 
 vi.mock("@/lib/admin/color-lab/palette-extraction", () => ({
   buildPaletteFromImageData: buildPaletteFromImageDataMock,
+  extractPaletteFromImageData: extractPaletteFromImageDataMock,
 }));
 
 vi.mock("@/lib/admin/color-lab/theme-contrast", async () => {
@@ -97,6 +100,7 @@ describe("ImagePaletteLab", () => {
   beforeEach(() => {
     fetchAdminWithAuthMock.mockReset();
     buildPaletteFromImageDataMock.mockReset();
+    extractPaletteFromImageDataMock.mockReset();
     buildThemesMock.mockReset();
 
     buildThemesMock.mockReturnValue([
@@ -115,6 +119,7 @@ describe("ImagePaletteLab", () => {
       ],
       colors: ["#111111", "#222222", "#333333", "#444444", "#555555"],
     });
+    extractPaletteFromImageDataMock.mockReturnValue(["#ABCDEF"]);
 
     fetchAdminWithAuthMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -268,5 +273,62 @@ describe("ImagePaletteLab", () => {
     await waitFor(() => {
       expect(screen.getByText("Palette name is required.")).toBeInTheDocument();
     });
+  });
+
+  it("updates only the dragged marker color when moving a palette marker", async () => {
+    render(<ImagePaletteLab title="Test Palette Lab" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use Upload Source" }));
+
+    const image = await screen.findByAltText("Palette sampling source");
+    const stage = image.parentElement as HTMLDivElement;
+    Object.defineProperty(image, "naturalWidth", { configurable: true, value: 640 });
+    Object.defineProperty(image, "naturalHeight", { configurable: true, value: 360 });
+    Object.defineProperty(stage, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 400,
+        bottom: 225,
+        width: 400,
+        height: 225,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(image, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 400,
+        bottom: 225,
+        width: 400,
+        height: 225,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.load(image);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Palette marker 1" })).toBeInTheDocument();
+    });
+
+    const marker = screen.getByRole("button", { name: "Palette marker 1" });
+    fireEvent.pointerDown(marker, { clientX: 80, clientY: 45 });
+    fireEvent.pointerMove(window, { clientX: 240, clientY: 135 });
+    fireEvent.pointerUp(window);
+
+    await waitFor(() => {
+      expect(extractPaletteFromImageDataMock).toHaveBeenCalled();
+      expect(screen.getByTitle("#ABCDEF (marker 1)")).toBeInTheDocument();
+    });
+    expect(screen.getByTitle("#222222 (marker 2)")).toBeInTheDocument();
   });
 });

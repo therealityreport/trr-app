@@ -123,6 +123,7 @@ describe("admin host proxy", () => {
     "/dev-dashboard",
     "/docs",
     "/groups",
+    "/shows/settings",
     "/settings",
     "/surveys",
     "/users",
@@ -192,7 +193,9 @@ describe("admin host proxy", () => {
   });
 
   it.each([
-    ["/social-media", "http://admin.localhost:3000/admin/social-media"],
+    ["/social-media", "http://admin.localhost:3000/admin/social"],
+    ["/admin/social-media", "http://admin.localhost:3000/admin/social"],
+    ["/social/instagram/bravotv", "http://admin.localhost:3000/admin/social/instagram/bravotv"],
     ["/shows", "http://admin.localhost:3000/admin/shows"],
     ["/shows/rhoslc", "http://admin.localhost:3000/rhoslc"],
   ])("redirects %s to the canonical admin-host URL", (pathname, expectedLocation) => {
@@ -208,12 +211,25 @@ describe("admin host proxy", () => {
   });
 
   it.each([
+    ["/shows/settings", "http://admin.localhost:3000/admin/shows/settings"],
     ["/rhoslc", "http://admin.localhost:3000/admin/trr-shows/rhoslc"],
     ["/rhoslc/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
+    ["/rhoslc/social/reddit", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social?social_view=reddit"],
+    ["/rhoslc/assets/videos", "http://admin.localhost:3000/admin/trr-shows/rhoslc/assets/videos"],
     ["/rhoslc/social/s6", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
     ["/rhoslc/social/s6/w0/instagram", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
     ["/rhoslc/s6", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6"],
     ["/rhoslc/s6/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social"],
+    ["/rhoslc/s6/social/reddit", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social&social_view=reddit"],
+    ["/rhoslc/s6/assets/videos", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=assets&assets=videos"],
+    [
+      "/rhoslc/s6/social/w0/details",
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0",
+    ],
+    [
+      "/rhoslc/s6/social/w0/youtube",
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0/youtube",
+    ],
   ])("rewrites %s to the internal admin surface while keeping the short URL visible", (pathname, expectedRewrite) => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -248,7 +264,7 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "http://admin.localhost:3000/brands/networks-and-streaming",
+      "http://admin.localhost:3000/brands",
     );
   });
 
@@ -265,6 +281,20 @@ describe("admin host proxy", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
       "http://admin.localhost:3000/brands/networks-and-streaming/network/bravo",
+    );
+  });
+
+  it("redirects legacy /admin/brands brand slugs to canonical /brands brand profile routes", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/admin/brands/instagram");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "http://admin.localhost:3000/brands/instagram",
     );
   });
 
@@ -422,6 +452,18 @@ describe("admin host proxy", () => {
       "http://admin.localhost:3000/admin/trr-shows/rhoslc/people/mary-cosby/gallery",
       "http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc",
     ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0",
+      "http://admin.localhost:3000/rhoslc/s6/social/w0/details",
+    ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0/youtube",
+      "http://admin.localhost:3000/rhoslc/s6/social/w0/youtube",
+    ],
+    [
+      "http://admin.localhost:3000/rhoslc/seasons/6/social/week/0/youtube",
+      "http://admin.localhost:3000/rhoslc/s6/social/w0/youtube",
+    ],
   ])("redirects legacy internal admin URLs back to the short canonical URL: %s", (inputUrl, expectedLocation) => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
@@ -433,6 +475,45 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(expectedLocation);
+  });
+
+  it("redirects unmatched show-level public routes away from guard pages and back into the admin workspace", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/rhoslc/unmatched-public-route");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin/trr-shows/rhoslc");
+  });
+
+  it("rewrites unmatched season-level public routes into the admin season workspace", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/rhoslc/s6/unmatched-public-route");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6",
+    );
+  });
+
+  it("does not canonicalize malformed internal season aliases into public placeholder routes", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/admin/trr-shows/rhoslc/season-index/videos");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
   it("allows /people root on admin host", () => {
@@ -448,7 +529,7 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("allows root show routes on admin host", () => {
+  it("rewrites root show reddit routes on admin host into the admin season workspace", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -458,7 +539,9 @@ describe("admin host proxy", () => {
     const response = proxy(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social&social_view=reddit",
+    );
   });
 
   it("uses host header precedence when URL hostname differs in local dev", () => {

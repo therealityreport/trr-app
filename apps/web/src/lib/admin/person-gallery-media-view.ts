@@ -1,12 +1,24 @@
 import type { TrrPersonPhoto } from "@/lib/server/trr-api/trr-shows-repository";
 
-export type GalleryShowFilter = "all" | "this-show" | "wwhl" | "events" | "other-shows" | "other";
+export type GalleryShowFilter =
+  | "all"
+  | "this-show"
+  | "wwhl"
+  | "bravocon"
+  | "events"
+  | "other-shows"
+  | "other";
 
 export type PersonGalleryOtherShowOption = {
   key: string;
   showId: string | null;
   showName: string;
   acronym: string | null;
+};
+
+export type PersonGalleryEventOption = {
+  key: string;
+  label: string;
 };
 
 export type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery" | "getty" | "nbcumv";
@@ -21,6 +33,8 @@ export const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
 ];
 
 export const WWHL_LABEL = "WWHL";
+export const BRAVOCON_LABEL = "BravoCon";
+
 const TRUSTED_IMDB_SHOW_CONTEXT_SOURCES = new Set([
   "episode_table",
   "imdb_title_fallback",
@@ -125,6 +139,21 @@ function normalizedTextIncludesShowName(
   return normalizedText.includes(normalizedShow);
 }
 
+function readGalleryBucketString(
+  photo: TrrPersonPhoto,
+  metadata: Record<string, unknown>,
+  key: string
+): string | null {
+  const directValue = (photo as unknown as Record<string, unknown>)[key];
+  if (typeof directValue === "string" && directValue.trim()) return directValue.trim();
+  const metadataValue = metadata[key];
+  if (typeof metadataValue === "string" && metadataValue.trim()) return metadataValue.trim();
+  const nested = metadata.gallery_bucket;
+  if (!nested || typeof nested !== "object") return null;
+  const nestedValue = (nested as Record<string, unknown>)[key];
+  return typeof nestedValue === "string" && nestedValue.trim() ? nestedValue.trim() : null;
+}
+
 function hasImdbEpisodeEvidence(
   photo: TrrPersonPhoto,
   metadata: Record<string, unknown>
@@ -151,10 +180,13 @@ function hasImdbEpisodeEvidence(
 export type PersonPhotoShowBuckets = {
   matchesThisShow: boolean;
   matchesWwhl: boolean;
+  matchesBravocon: boolean;
   matchesEvents: boolean;
   matchesOtherShows: boolean;
   matchesSelectedOtherShow: boolean;
   matchesUnknownShows: boolean;
+  eventBucketKey: string | null;
+  eventBucketLabel: string | null;
 };
 
 export type PersonGalleryImportContext = {
@@ -224,6 +256,11 @@ export function computePersonPhotoShowBuckets(input: {
 }): PersonPhotoShowBuckets {
   const { photo, showIdForApi, activeShowName, activeShowAcronym } = input;
   const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+  const bucketType = readGalleryBucketString(photo, metadata, "bucket_type")?.toLowerCase() ?? null;
+  const bucketKey = readGalleryBucketString(photo, metadata, "bucket_key");
+  const bucketLabel = readGalleryBucketString(photo, metadata, "bucket_label");
+  const resolvedBucketShowId = readGalleryBucketString(photo, metadata, "resolved_show_id");
+  const resolvedBucketShowName = readGalleryBucketString(photo, metadata, "resolved_show_name");
   const rawMetaShowId = typeof metadata.show_id === "string" ? metadata.show_id : null;
   const rawMetaShowName = typeof metadata.show_name === "string" ? metadata.show_name.trim() : null;
   const rawMetaFallbackShowName =
@@ -299,10 +336,12 @@ export function computePersonPhotoShowBuckets(input: {
   const directWwhlMetadataSignal =
     isWwhlShowName(rawMetaShowName) || isWwhlShowName(rawMetaFallbackShowName);
   const matchesWwhl =
+    bucketType === "wwhl" ||
     isWwhlShowName(text) ||
     isWwhlShowName(metadataShowNameRaw) ||
     directWwhlMetadataSignal ||
     acronyms.has(WWHL_LABEL);
+  const matchesBravocon = bucketType === "bravocon";
   const rawImdbImageType =
     typeof metadata.imdb_image_type === "string" ? metadata.imdb_image_type.trim().toLowerCase() : null;
   const rawContentType =
@@ -311,7 +350,8 @@ export function computePersonPhotoShowBuckets(input: {
     typeof metadata.fandom_section_tag === "string" ? metadata.fandom_section_tag.trim().toLowerCase() : null;
   const rawContextType = typeof photo.context_type === "string" ? photo.context_type.trim().toLowerCase() : null;
   const matchesEvents = Boolean(
-    (rawImdbImageType && EVENT_IMAGE_TYPES.has(rawImdbImageType)) ||
+    bucketType === "event" ||
+      (rawImdbImageType && EVENT_IMAGE_TYPES.has(rawImdbImageType)) ||
       rawContentType === "event" ||
       rawSectionTag === "event" ||
       rawContextType === "event"
@@ -319,11 +359,16 @@ export function computePersonPhotoShowBuckets(input: {
   const ignoreMetaShowIdForImdb = sourceNormalized === "imdb" && !trustImdbMetadata;
   const metaShowId = ignoreMetaShowIdForImdb || !trustImdbMetadata ? null : rawMetaShowId;
   const metaShowIdMatches = Boolean(showIdForApi && metaShowId && metaShowId === showIdForApi);
-  const metadataMatchesThisShow =
-    Boolean(metadataShowNameRaw) &&
-    ((trustImdbMetadata && !ignoreMetaShowIdForImdb) || episodeEvidencedImdbFallback) &&
-    normalizedShowNamesMatch(metadataShowNameRaw, activeShowName);
+  const metadataMatchesThisShow = Boolean(
+    (Boolean(metadataShowNameRaw) &&
+      ((trustImdbMetadata && !ignoreMetaShowIdForImdb) || episodeEvidencedImdbFallback) &&
+      normalizedShowNamesMatch(metadataShowNameRaw, activeShowName)) ||
+      normalizedShowNamesMatch(resolvedBucketShowName, activeShowName)
+  );
   const matchesThisShow =
+    (bucketType === "show" &&
+      ((Boolean(showIdForApi) && resolvedBucketShowId === showIdForApi) ||
+        normalizedShowNamesMatch(resolvedBucketShowName, activeShowName))) ||
     metaShowIdMatches ||
     matchesShowName ||
     matchesShowAcronym ||
@@ -336,7 +381,10 @@ export function computePersonPhotoShowBuckets(input: {
     input.otherShowAcronymMatches.has(acro)
   );
   const knownShowIds = new Set(input.allKnownShowIds);
-  const matchesKnownShowById = Boolean(metaShowId && knownShowIds.has(metaShowId));
+  const matchesKnownShowById = Boolean(
+    (metaShowId && knownShowIds.has(metaShowId)) ||
+      (resolvedBucketShowId && knownShowIds.has(resolvedBucketShowId))
+  );
   const matchesKnownShowByName = input.allKnownShowNameMatches.some((name) =>
     normalizedTextIncludesShowName(textNormalized, name)
   );
@@ -344,10 +392,11 @@ export function computePersonPhotoShowBuckets(input: {
     input.allKnownShowAcronymMatches.has(acro)
   );
   const metadataMatchesKnownShow =
-    Boolean(metadataShowNameRaw) &&
-    ((trustImdbMetadata && !ignoreMetaShowIdForImdb) || episodeEvidencedImdbFallback)
-    ? input.allKnownShowNameMatches.some((name) => normalizedShowNamesMatch(metadataShowNameRaw, name))
-    : false;
+    (Boolean(metadataShowNameRaw) &&
+      ((trustImdbMetadata && !ignoreMetaShowIdForImdb) || episodeEvidencedImdbFallback)
+      ? input.allKnownShowNameMatches.some((name) => normalizedShowNamesMatch(metadataShowNameRaw, name))
+      : false) ||
+    input.allKnownShowNameMatches.some((name) => normalizedShowNamesMatch(resolvedBucketShowName, name));
   const matchesAnyKnownShow =
     matchesKnownShowById ||
     matchesKnownShowByName ||
@@ -357,19 +406,23 @@ export function computePersonPhotoShowBuckets(input: {
     matchesThisShow ||
     metadataMatchesKnownShow;
 
-  const matchesOtherShows = matchesAnyKnownShow && !matchesThisShow && !matchesWwhl;
-  const matchesUnknownShows = !matchesThisShow && !matchesWwhl && !matchesEvents && !matchesAnyKnownShow;
+  const matchesOtherShows = matchesAnyKnownShow && !matchesThisShow && !matchesWwhl && !matchesBravocon;
+  const matchesUnknownShows =
+    !matchesThisShow && !matchesWwhl && !matchesBravocon && !matchesEvents && !matchesAnyKnownShow;
 
   let matchesSelectedOtherShow = false;
   if (input.selectedOtherShow) {
     const selectedOtherName = input.selectedOtherShow.showName;
     const selectedOtherAcronym = input.selectedOtherShow.acronym?.toUpperCase() ?? null;
     const matchesSelectedById = Boolean(
-      input.selectedOtherShow.showId && metaShowId === input.selectedOtherShow.showId
+      input.selectedOtherShow.showId &&
+        (metaShowId === input.selectedOtherShow.showId ||
+          resolvedBucketShowId === input.selectedOtherShow.showId)
     );
     const matchesSelectedByName =
       normalizedTextIncludesShowName(textNormalized, selectedOtherName) ||
-      normalizedShowNamesMatch(metadataShowNameRaw, selectedOtherName);
+      normalizedShowNamesMatch(metadataShowNameRaw, selectedOtherName) ||
+      normalizedShowNamesMatch(resolvedBucketShowName, selectedOtherName);
     const matchesSelectedByAcronym = selectedOtherAcronym
       ? acronyms.has(selectedOtherAcronym) || metadataShowAcronym === selectedOtherAcronym
       : false;
@@ -377,13 +430,69 @@ export function computePersonPhotoShowBuckets(input: {
       matchesSelectedById || matchesSelectedByName || matchesSelectedByAcronym;
   }
 
+  if (bucketType === "wwhl") {
+    return {
+      matchesThisShow: false,
+      matchesWwhl: true,
+      matchesBravocon: false,
+      matchesEvents: false,
+      matchesOtherShows: false,
+      matchesSelectedOtherShow: false,
+      matchesUnknownShows: false,
+      eventBucketKey: null,
+      eventBucketLabel: null,
+    };
+  }
+  if (bucketType === "bravocon") {
+    return {
+      matchesThisShow: false,
+      matchesWwhl: false,
+      matchesBravocon: true,
+      matchesEvents: false,
+      matchesOtherShows: false,
+      matchesSelectedOtherShow: false,
+      matchesUnknownShows: false,
+      eventBucketKey: null,
+      eventBucketLabel: null,
+    };
+  }
+  if (bucketType === "event") {
+    return {
+      matchesThisShow: false,
+      matchesWwhl: false,
+      matchesBravocon: false,
+      matchesEvents: true,
+      matchesOtherShows: false,
+      matchesSelectedOtherShow: false,
+      matchesUnknownShows: false,
+      eventBucketKey: bucketKey,
+      eventBucketLabel: bucketLabel,
+    };
+  }
+  if (bucketType === "show") {
+    return {
+      matchesThisShow,
+      matchesWwhl: false,
+      matchesBravocon: false,
+      matchesEvents: false,
+      matchesOtherShows,
+      matchesSelectedOtherShow,
+      matchesUnknownShows: false,
+      eventBucketKey: null,
+      eventBucketLabel: null,
+    };
+  }
+
   return {
     matchesThisShow,
     matchesWwhl,
+    matchesBravocon,
     matchesEvents,
     matchesOtherShows,
     matchesSelectedOtherShow,
     matchesUnknownShows,
+    eventBucketKey: bucketType === "event" ? bucketKey : null,
+    eventBucketLabel: bucketType === "event" ? bucketLabel : null,
   };
 }
 
@@ -399,15 +508,19 @@ export function computePersonGalleryMediaViewAvailability(input: {
   otherShowAcronymMatches: ReadonlySet<string>;
 }): {
   hasWwhlMatches: boolean;
+  hasBravoconMatches: boolean;
   hasEventMatches: boolean;
+  eventOptions: PersonGalleryEventOption[];
   hasOtherShowMatches: boolean;
   hasUnknownShowMatches: boolean;
   hasNonThisShowMatches: boolean;
 } {
   let hasWwhlMatches = false;
+  let hasBravoconMatches = false;
   let hasEventMatches = false;
   let hasOtherShowMatches = false;
   let hasUnknownShowMatches = false;
+  const eventOptionsByKey = new Map<string, PersonGalleryEventOption>();
 
   for (const photo of input.photos) {
     const buckets = computePersonPhotoShowBuckets({
@@ -423,18 +536,29 @@ export function computePersonGalleryMediaViewAvailability(input: {
       selectedOtherShow: null,
     });
     if (buckets.matchesWwhl) hasWwhlMatches = true;
+    if (buckets.matchesBravocon) hasBravoconMatches = true;
     if (buckets.matchesEvents) hasEventMatches = true;
+    if (buckets.matchesEvents && buckets.eventBucketKey && buckets.eventBucketLabel) {
+      eventOptionsByKey.set(buckets.eventBucketKey, {
+        key: buckets.eventBucketKey,
+        label: buckets.eventBucketLabel,
+      });
+    }
     if (buckets.matchesOtherShows) hasOtherShowMatches = true;
     if (buckets.matchesUnknownShows) hasUnknownShowMatches = true;
-    if (hasWwhlMatches && hasEventMatches && hasOtherShowMatches && hasUnknownShowMatches) break;
   }
 
   return {
     hasWwhlMatches,
+    hasBravoconMatches,
     hasEventMatches,
+    eventOptions: Array.from(eventOptionsByKey.values()).sort((left, right) =>
+      left.label.localeCompare(right.label)
+    ),
     hasOtherShowMatches,
     hasUnknownShowMatches,
-    hasNonThisShowMatches: hasWwhlMatches || hasEventMatches || hasOtherShowMatches || hasUnknownShowMatches,
+    hasNonThisShowMatches:
+      hasWwhlMatches || hasBravoconMatches || hasEventMatches || hasOtherShowMatches || hasUnknownShowMatches,
   };
 }
 
@@ -442,6 +566,7 @@ export function resolveGalleryShowFilterFallback(input: {
   currentFilter: GalleryShowFilter;
   showContextEnabled: boolean;
   hasWwhlMatches: boolean;
+  hasBravoconMatches: boolean;
   hasEventMatches: boolean;
   hasOtherShowMatches: boolean;
   hasUnknownShowMatches: boolean;
@@ -455,11 +580,14 @@ export function resolveGalleryShowFilterFallback(input: {
   const allowStickyOtherShow = input.canSelectOtherShowWithoutMatches === true;
 
   if (input.currentFilter === "wwhl" && !input.hasWwhlMatches && !allowStickyWwhl) return fallback;
+  if (input.currentFilter === "bravocon" && !input.hasBravoconMatches) return fallback;
   if (input.currentFilter === "events" && !input.hasEventMatches) return fallback;
-  if (input.currentFilter === "other-shows" && !input.hasOtherShowMatches && !allowStickyOtherShow)
+  if (input.currentFilter === "other-shows" && !input.hasOtherShowMatches && !allowStickyOtherShow) {
     return fallback;
-  if (input.currentFilter === "other-shows" && !input.hasSelectedOtherShowMatches && !allowStickyOtherShow)
+  }
+  if (input.currentFilter === "other-shows" && !input.hasSelectedOtherShowMatches && !allowStickyOtherShow) {
     return fallback;
+  }
   if (input.currentFilter === "other" && !input.hasUnknownShowMatches) return fallback;
   if (input.currentFilter === "all" && !input.hasNonThisShowMatches) return fallback;
   return input.currentFilter;

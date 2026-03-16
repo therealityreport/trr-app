@@ -10,6 +10,7 @@ import { formatRealiteaseDisplayDate, getRealiteaseDateKey } from "@/lib/realite
 import type { RealiteaseGameSnapshot } from "@/lib/realitease/types";
 import { User } from "firebase/auth";
 import GameHeader from "@/components/GameHeader";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 function RealiteaseIcon() {
   return (
@@ -222,10 +223,18 @@ export default function RealiteaseCover() {
             <RealiteaseIcon />
           </div>
           <div className="space-y-3 px-2">
-            <h1 className="text-4xl font-bold tracking-wide text-white sm:text-5xl" style={{ fontFamily: "var(--font-rude-slab)" }}>
+            <h1
+              className="text-4xl font-bold tracking-wide text-white sm:text-5xl"
+              style={{ fontFamily: "var(--font-rude-slab)" }}
+              {...buildTypographyDataAttributes({ area: "surveys", pageKey: "realitease-cover", instanceKey: "hero", role: "title" })}
+            >
               Realitease
             </h1>
-            <p className="text-3xl leading-snug text-white" style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}>
+            <p
+              className="text-3xl leading-snug text-white"
+              style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
+              {...buildTypographyDataAttributes({ area: "surveys", pageKey: "realitease-cover", instanceKey: "hero", role: "subtitle" })}
+            >
               Get 8 chances to guess the Reality TV Star
             </p>
           </div>
@@ -262,7 +271,13 @@ export default function RealiteaseCover() {
           <div className="absolute inset-0 bg-black/50" aria-hidden onClick={() => setSettingsOpen(false)} />
           <div className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
             <div className="mb-4 flex items-start justify-between">
-              <h2 className="text-2xl font-extrabold" style={{ fontFamily: "var(--font-rude-slab)" }}>Realitease Settings</h2>
+              <h2
+                className="text-2xl font-extrabold"
+                style={{ fontFamily: "var(--font-rude-slab)" }}
+                {...buildTypographyDataAttributes({ area: "surveys", pageKey: "realitease-cover", instanceKey: "hero", role: "settingsHeading" })}
+              >
+                Realitease Settings
+              </h2>
               <button
                 type="button"
                 onClick={() => setSettingsOpen(false)}

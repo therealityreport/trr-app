@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { CastSingleSelectConfig } from "@/lib/surveys/question-config-types";
 import SurveyContinueButton from "./SurveyContinueButton";
@@ -328,6 +329,21 @@ export default function SingleSelectCastInput({
     () => Math.round(interpolate(20, 30, progress)),
     [progress],
   );
+  const headingTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "cast-single-select",
+      instanceKey: "question",
+      role: "heading",
+    },
+    {
+      fontFamily: headingFontFamily,
+      fontSize: `${headingSize}px`,
+      fontWeight: "800",
+      lineHeight: `${headingLineHeight}px`,
+      letterSpacing: `${headingLetterSpacing}em`,
+    },
+  );
 
   return (
     <div
@@ -348,11 +364,7 @@ export default function SingleSelectCastInput({
           marginTop: `${headingMarginTop}px`,
           maxWidth: "min(100%, 1120px)",
           color: headingColor,
-          fontFamily: headingFontFamily,
-          fontSize: `${headingSize}px`,
-          fontWeight: 800,
-          lineHeight: `${headingLineHeight}px`,
-          letterSpacing: `${headingLetterSpacing}em`,
+          ...headingTypographyStyle,
         }}
       >
         {question.question_text}

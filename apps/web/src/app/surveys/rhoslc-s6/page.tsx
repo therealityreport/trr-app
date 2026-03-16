@@ -8,6 +8,7 @@ import { AuthDebugger } from "@/lib/debug";
 import { useSurveyManager } from "@/lib/surveys/manager";
 import { RHOSLC_EPISODE_ID, RHOSLC_SEASON_ID, RHOSLC_SHOW_ID, RHOSLC_SURVEY_ID } from "@/lib/surveys/config";
 import type { SurveyEpisodeMeta } from "@/lib/surveys/types";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 const IDENTIFIERS = {
   showId: RHOSLC_SHOW_ID,
@@ -171,8 +172,16 @@ export default function RhoslcCoverPage() {
           </button>
           <SurveyIcon />
           <div className="space-y-1">
-            <p className="font-rude-slab text-sm uppercase tracking-[0.4em] text-rose-600">Survey</p>
-            <h1 className="font-rude-slab text-4xl font-bold text-rose-900">
+            <p
+              className="font-rude-slab text-sm uppercase tracking-[0.4em] text-rose-600"
+              {...buildTypographyDataAttributes({ area: "surveys", pageKey: "rhoslc-survey", instanceKey: "landing", role: "eyebrow" })}
+            >
+              Survey
+            </p>
+            <h1
+              className="font-rude-slab text-4xl font-bold text-rose-900"
+              {...buildTypographyDataAttributes({ area: "surveys", pageKey: "rhoslc-survey", instanceKey: "landing", role: "title" })}
+            >
               RHOSLC Season 6 Flashback Ranking
             </h1>
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-rose-700">Episode {meta?.episodeId ?? ""}</p>
@@ -192,7 +201,10 @@ export default function RhoslcCoverPage() {
 
           <section className="grid gap-8 rounded-2xl border border-rose-100 bg-rose-50 p-6 shadow-inner">
             <article className="rounded-xl border border-white bg-white p-6 text-left shadow-sm">
-              <h2 className="font-rude-slab text-2xl font-bold uppercase tracking-wide text-rose-900">
+              <h2
+                className="font-rude-slab text-2xl font-bold uppercase tracking-wide text-rose-900"
+                {...buildTypographyDataAttributes({ area: "surveys", pageKey: "rhoslc-survey", instanceKey: "landing", role: "sectionHeading" })}
+              >
                 This Week’s Prompt
               </h2>
               <p className="mt-3 text-sm text-rose-700">
@@ -203,7 +215,10 @@ export default function RhoslcCoverPage() {
             </article>
 
             <article className="rounded-xl border border-white bg-white p-6 text-left shadow-sm">
-              <h3 className="font-rude-slab text-xl font-bold uppercase tracking-wide text-rose-900">
+              <h3
+                className="font-rude-slab text-xl font-bold uppercase tracking-wide text-rose-900"
+                {...buildTypographyDataAttributes({ area: "surveys", pageKey: "rhoslc-survey", instanceKey: "landing", role: "sectionHeading" })}
+              >
                 How it works
               </h3>
               <ul className="mt-3 space-y-2 text-sm text-rose-700">

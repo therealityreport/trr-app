@@ -602,6 +602,12 @@ const jsonResponse = (body: unknown): Response =>
     json: async () => body,
   }) as Response;
 
+const syncSessionStreamResponse = (body: unknown): Response =>
+  new Response(`event: sync_session\ndata: ${JSON.stringify(body)}\n\n`, {
+    status: 200,
+    headers: { "content-type": "text/event-stream; charset=utf-8" },
+  });
+
 const defaultWeekDetailResponse = (weekIndex: number) => {
   if (weekIndex !== 1) {
     return {
@@ -796,6 +802,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.getByText("Production Path")).toBeInTheDocument();
     expect(screen.getByText("Matched posts")).toBeInTheDocument();
     expect(screen.getByText("Review queue")).toBeInTheDocument();
+    expect(screen.getByText("Retained unassigned")).toBeInTheDocument();
   });
 
   it("formats summary count cards with compact number notation", async () => {
@@ -3882,6 +3889,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("supports day-specific ingest runs", async () => {
     const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
     const capturedPayloads: Array<Record<string, unknown>> = [];
+    const syncSessionId = "44444444-4444-4444-8444-444444444444";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
@@ -3894,11 +3902,48 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
-      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+      if (url.includes(`/social/sync-sessions/${syncSessionId}/stream`)) {
+        return syncSessionStreamResponse({
+          sync_session: {
+            sync_session_id: syncSessionId,
+            season_id: "season-1",
+            status: "pass_running",
+            current_pass_kind: "posts_and_comments",
+            current_pass_attempt: 1,
+            current_run_id: runId,
+            pass_sequence: 1,
+            completeness_snapshot: { up_to_date: false },
+            current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+          },
+          run_progress: null,
+        });
+      }
+      if (url.includes(`/social/sync-sessions/${syncSessionId}`)) {
+        return jsonResponse({
+          sync_session_id: syncSessionId,
+          season_id: "season-1",
+          status: "pass_running",
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          pass_sequence: 1,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
+      }
+      if (url.includes("/social/sync-sessions") && (init?.method ?? "GET") === "POST") {
         if (typeof init?.body === "string") {
           capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
         }
-        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+        return jsonResponse({
+          status: "created",
+          sync_session_id: syncSessionId,
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
       }
       throw new Error(`Unexpected fetch URL: ${url}`);
     });
@@ -3939,6 +3984,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   it("supports week-specific platform ingest runs from Ingest + Export", async () => {
     const runId = "run-week-platform-1";
     const capturedPayloads: Array<Record<string, unknown>> = [];
+    const syncSessionId = "88888888-8888-4888-8888-888888888888";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
@@ -3947,11 +3993,48 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
-      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+      if (url.includes(`/social/sync-sessions/${syncSessionId}/stream`)) {
+        return syncSessionStreamResponse({
+          sync_session: {
+            sync_session_id: syncSessionId,
+            season_id: "season-1",
+            status: "pass_running",
+            current_pass_kind: "posts_and_comments",
+            current_pass_attempt: 1,
+            current_run_id: runId,
+            pass_sequence: 1,
+            completeness_snapshot: { up_to_date: false },
+            current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+          },
+          run_progress: null,
+        });
+      }
+      if (url.includes(`/social/sync-sessions/${syncSessionId}`)) {
+        return jsonResponse({
+          sync_session_id: syncSessionId,
+          season_id: "season-1",
+          status: "pass_running",
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          pass_sequence: 1,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
+      }
+      if (url.includes("/social/sync-sessions") && (init?.method ?? "GET") === "POST") {
         if (typeof init?.body === "string") {
           capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
         }
-        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+        return jsonResponse({
+          status: "created",
+          sync_session_id: syncSessionId,
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
       }
       throw new Error(`Unexpected fetch URL: ${url}`);
     });
@@ -3980,7 +4063,6 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
     const payload = capturedPayloads[0];
     expect(payload.platforms).toEqual(["youtube"]);
-    expect(payload.week_index).toBe(2);
     expect(payload.date_start).toBe("2026-01-14T00:00:00Z");
     expect(payload.date_end).toBe("2026-01-20T23:59:59Z");
   });
@@ -4047,10 +4129,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync X" })).toBeInTheDocument();
   });
 
-  it("Sync All triggers posts_and_comments ingest for the selected week", async () => {
-    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+  it("Sync Instagram sends uncapped comment and reply limits for the selected window", async () => {
+    const runId = "run-instagram-uncapped";
     const capturedPayloads: Array<Record<string, unknown>> = [];
-    const ingestUrls: string[] = [];
+    const syncSessionId = "55555555-5555-4555-8555-555555555555";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
@@ -4060,12 +4142,137 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
-      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+      if (url.includes(`/social/sync-sessions/${syncSessionId}/stream`)) {
+        return syncSessionStreamResponse({
+          sync_session: {
+            sync_session_id: syncSessionId,
+            season_id: "season-1",
+            status: "pass_running",
+            current_pass_kind: "posts_and_comments",
+            current_pass_attempt: 1,
+            current_run_id: runId,
+            pass_sequence: 1,
+            completeness_snapshot: { up_to_date: false },
+            current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+          },
+          run_progress: null,
+        });
+      }
+      if (url.includes(`/social/sync-sessions/${syncSessionId}`)) {
+        return jsonResponse({
+          sync_session_id: syncSessionId,
+          season_id: "season-1",
+          status: "pass_running",
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          pass_sequence: 1,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
+      }
+      if (url.includes("/social/sync-sessions") && (init?.method ?? "GET") === "POST") {
+        if (typeof init?.body === "string") {
+          capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
+        }
+        return jsonResponse({
+          status: "created",
+          sync_session_id: syncSessionId,
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official?social_platform=instagram");
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const weekOneRow = (await screen.findByRole("link", { name: /S6\.E1/i })).closest("tr");
+    expect(weekOneRow).not.toBeNull();
+    fireEvent.click(within(weekOneRow as HTMLElement).getByRole("button", { name: "Sync Instagram" }));
+
+    await waitFor(() => {
+      expect(capturedPayloads.length).toBeGreaterThan(0);
+    });
+
+    const payload = capturedPayloads[0];
+    expect(payload.platforms).toEqual(["instagram"]);
+    expect(payload.max_posts_per_target).toBe(0);
+    expect(payload.max_comments_per_post).toBe(0);
+    expect(payload.max_replies_per_post).toBe(0);
+    expect(payload.date_start).toBe("2026-01-07T00:00:00Z");
+    expect(payload.date_end).toBe("2026-01-13T23:59:59Z");
+  });
+
+  it("Sync All triggers posts_and_comments ingest for the selected week", async () => {
+    const runId = "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb";
+    const capturedPayloads: Array<Record<string, unknown>> = [];
+    const ingestUrls: string[] = [];
+    const syncSessionId = "66666666-6666-4666-8666-666666666666";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/social/analytics/week/")) return jsonResponse(defaultWeekDetailResponse(1));
+      if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
+      if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
+      if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
+      if (url.includes(`/social/sync-sessions/${syncSessionId}/stream`)) {
+        return syncSessionStreamResponse({
+          sync_session: {
+            sync_session_id: syncSessionId,
+            season_id: "season-1",
+            status: "pass_running",
+            current_pass_kind: "posts_and_comments",
+            current_pass_attempt: 1,
+            current_run_id: runId,
+            pass_sequence: 1,
+            completeness_snapshot: { up_to_date: false },
+            current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+          },
+          run_progress: null,
+        });
+      }
+      if (url.includes(`/social/sync-sessions/${syncSessionId}`)) {
+        return jsonResponse({
+          sync_session_id: syncSessionId,
+          season_id: "season-1",
+          status: "pass_running",
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          pass_sequence: 1,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
+      }
+      if (url.includes("/social/sync-sessions") && (init?.method ?? "GET") === "POST") {
         ingestUrls.push(url);
         if (typeof init?.body === "string") {
           capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
         }
-        return jsonResponse({ run_id: runId, stages: ["posts", "comments"], queued_or_started_jobs: 2 });
+        return jsonResponse({
+          status: "created",
+          sync_session_id: syncSessionId,
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: runId,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: runId, status: "running", summary: { total_jobs: 2 } },
+        });
       }
       throw new Error(`Unexpected fetch URL: ${url}`);
     });
@@ -4090,11 +4297,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
 
     const payload = capturedPayloads[0];
-    expect(payload.ingest_mode).toBe("posts_and_comments");
     expect(payload.sync_strategy).toBe("incremental");
-    expect(payload.comment_refresh_policy).toBeUndefined();
-    expect(payload.comment_anchor_source_ids).toBeUndefined();
-    expect(payload.week_index).toBe(1);
     expect(payload.date_start).toBe("2026-01-07T00:00:00Z");
     expect(payload.date_end).toBe("2026-01-13T23:59:59Z");
     expect(payload.platforms).toBeUndefined();
@@ -4103,6 +4306,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
   it("Sync All does not short-circuit when comments are already up-to-date", async () => {
     const capturedPayloads: Array<Record<string, unknown>> = [];
+    const syncSessionId = "77777777-7777-4777-8777-777777777777";
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
@@ -4112,11 +4316,48 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
-      if (url.includes("/social/ingest") && (init?.method ?? "GET") === "POST") {
+      if (url.includes(`/social/sync-sessions/${syncSessionId}/stream`)) {
+        return syncSessionStreamResponse({
+          sync_session: {
+            sync_session_id: syncSessionId,
+            season_id: "season-1",
+            status: "pass_running",
+            current_pass_kind: "posts_and_comments",
+            current_pass_attempt: 1,
+            current_run_id: "run-sync-metrics",
+            pass_sequence: 1,
+            completeness_snapshot: { up_to_date: false },
+            current_run: { id: "run-sync-metrics", status: "running", summary: { total_jobs: 1 } },
+          },
+          run_progress: null,
+        });
+      }
+      if (url.includes(`/social/sync-sessions/${syncSessionId}`)) {
+        return jsonResponse({
+          sync_session_id: syncSessionId,
+          season_id: "season-1",
+          status: "pass_running",
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: "run-sync-metrics",
+          pass_sequence: 1,
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: "run-sync-metrics", status: "running", summary: { total_jobs: 1 } },
+        });
+      }
+      if (url.includes("/social/sync-sessions") && (init?.method ?? "GET") === "POST") {
         if (typeof init?.body === "string") {
           capturedPayloads.push(JSON.parse(init.body) as Record<string, unknown>);
         }
-        return jsonResponse({ run_id: "run-sync-metrics", stages: ["posts", "comments"], queued_or_started_jobs: 1 });
+        return jsonResponse({
+          status: "created",
+          sync_session_id: syncSessionId,
+          current_pass_kind: "posts_and_comments",
+          current_pass_attempt: 1,
+          current_run_id: "run-sync-metrics",
+          completeness_snapshot: { up_to_date: false },
+          current_run: { id: "run-sync-metrics", status: "running", summary: { total_jobs: 1 } },
+        });
       }
       throw new Error(`Unexpected fetch URL: ${url}`);
     });
@@ -4139,7 +4380,8 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await waitFor(() => {
       expect(capturedPayloads).toHaveLength(1);
     });
-    expect(capturedPayloads[0]?.ingest_mode).toBe("posts_and_comments");
+    expect(capturedPayloads[0]?.date_start).toBe("2026-01-07T00:00:00Z");
+    expect(capturedPayloads[0]?.date_end).toBe("2026-01-13T23:59:59Z");
   });
 
   it("formats worker-unavailable proxy detail into actionable guidance", () => {

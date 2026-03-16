@@ -131,7 +131,7 @@ describe("admin-breadcrumb helpers", () => {
     ).toEqual([
       { label: "Admin", href: "/admin" },
       { label: "Brands", href: "/brands" },
-      { label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
+      { label: "Networks & Streaming Services", href: "/brands?category=all" },
       { label: "Bravo", href: "/brands/networks-and-streaming/network/bravo" },
     ]);
   });

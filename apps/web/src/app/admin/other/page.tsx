@@ -11,6 +11,7 @@ import BrandLogoOptionsModal from "@/components/admin/BrandLogoOptionsModal";
 import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 interface BrandLogoRow {
   id: string;
@@ -150,7 +151,13 @@ export default function AdminOtherBrandsPage() {
   const cards = useMemo<BrandLogoCard[]>(() => {
     const grouped = new Map<string, BrandLogoCard>();
     const chooseHostedUrl = (row: BrandLogoRow): string | null =>
-      row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url || null;
+      canonicalizeHostedMediaUrl(
+        row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url,
+      ) ??
+      row.hosted_logo_url ??
+      row.hosted_logo_black_url ??
+      row.hosted_logo_white_url ??
+      null;
 
     for (const row of rows) {
       const key = `${row.target_type}:${row.target_key}`;

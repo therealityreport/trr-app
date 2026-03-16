@@ -130,4 +130,35 @@ describe("image-url-candidates", () => {
 
     expect(candidates[0]).toBe("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media/aa/bb.webp");
   });
+
+  it("keeps stale gallery variant candidates first but canonicalizes them off legacy CloudFront", () => {
+    const candidates = getPersonPhotoCardUrlCandidates({
+      display_url: "https://d1fmdyqfafwim3.cloudfront.net/media-variants/asset-1/base/card.webp",
+      hosted_url: "https://d1fmdyqfafwim3.cloudfront.net/images/people/example/photo.jpg",
+      original_url: "https://www.bravotv.com/sites/bravo/files/2025/08/rhoslc_s6_lisa_1x1.png",
+      url: "https://www.bravotv.com/people/lisa-barlow",
+    });
+
+    expect(candidates).toEqual([
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/media-variants/asset-1/base/card.webp",
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/images/people/example/photo.jpg",
+      "https://www.bravotv.com/sites/bravo/files/2025/08/rhoslc_s6_lisa_1x1.png",
+      "https://www.bravotv.com/people/lisa-barlow",
+    ]);
+  });
+
+  it("canonicalizes legacy cast-photo variant candidates for gallery card rendering", () => {
+    const candidates = getPersonPhotoCardUrlCandidates({
+      display_url: "https://d1fmdyqfafwim3.cloudfront.net/cast-photo-variants/asset-1/base/card.webp",
+      thumb_url: "https://d1fmdyqfafwim3.cloudfront.net/cast-photo-variants/asset-1/base/thumb.webp",
+      detail_url: "https://d1fmdyqfafwim3.cloudfront.net/cast-photo-variants/asset-1/base/detail.webp",
+      hosted_url: "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/images/people/example/photo.jpg",
+    });
+
+    expect(candidates).toEqual([
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/cast-photo-variants/asset-1/base/thumb.webp",
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/cast-photo-variants/asset-1/base/card.webp",
+      "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/images/people/example/photo.jpg",
+    ]);
+  });
 });

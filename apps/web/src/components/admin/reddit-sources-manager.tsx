@@ -66,6 +66,8 @@ interface RedditCommunityResponse extends Omit<RedditCommunity, "assigned_thread
   assigned_threads?: RedditThreadResponse[];
 }
 
+type RedditCommunityScopeType = "show" | "franchise" | "network";
+
 type PeriodPostMatchType = "flair" | "scan" | "all";
 
 interface DiscoveryThread {
@@ -1035,6 +1037,12 @@ const normalizeFlairList = (value: unknown): string[] => {
 
 const pushListValue = (list: string[], rawValue: string): string[] => normalizeFlairList([...list, rawValue]);
 
+const deriveCommunityScope = (community: Pick<RedditCommunity, "is_show_focused" | "network_focus_targets" | "franchise_focus_targets">): RedditCommunityScopeType => {
+  if (community.is_show_focused) return "show";
+  if ((community.franchise_focus_targets?.length ?? 0) > 0) return "franchise";
+  return "network";
+};
+
 const toIsoDate = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const parsed = new Date(value);
@@ -1986,6 +1994,9 @@ const resolveRouteRedditCommunityContextFromPath = (
   if (!pathname) {
     return { showSlug: null, communitySlug: null, seasonNumber: null };
   }
+  if (pathname.startsWith("/admin/social/") || pathname.startsWith("/admin/social-media/")) {
+    return { showSlug: null, communitySlug: null, seasonNumber: null };
+  }
   const match = pathname.match(/^\/([^/]+)\/social\/reddit(?:\/([^/]+)(?:\/s(\d+))?)?/i);
   if (!match) {
     return { showSlug: null, communitySlug: null, seasonNumber: null };
@@ -2037,7 +2048,7 @@ export default function RedditSourcesManager({
   const [communityNotes, setCommunityNotes] = useState("");
   const [communityShowId, setCommunityShowId] = useState(showId ?? "");
   const [communityShowName, setCommunityShowName] = useState(showName ?? "");
-  const [communityIsShowFocused, setCommunityIsShowFocused] = useState(mode === "season");
+  const [communityScope, setCommunityScope] = useState<RedditCommunityScopeType>(mode === "season" ? "show" : "network");
   const [communityNetworkTargets, setCommunityNetworkTargets] = useState<string[]>([]);
   const [communityFranchiseTargets, setCommunityFranchiseTargets] = useState<string[]>([]);
   const [communityNetworkTargetInput, setCommunityNetworkTargetInput] = useState("");
@@ -2497,6 +2508,10 @@ export default function RedditSourcesManager({
   const selectedCommunity = useMemo(
     () => communities.find((community) => community.id === selectedCommunityId) ?? null,
     [communities, selectedCommunityId],
+  );
+  const selectedCommunityScope = useMemo<RedditCommunityScopeType>(
+    () => (selectedCommunity ? deriveCommunityScope(selectedCommunity) : "show"),
+    [selectedCommunity],
   );
   const selectedCommunityIdValue = selectedCommunity?.id ?? null;
   const selectedCommunityShowId = selectedCommunity?.trr_show_id ?? null;
@@ -3995,7 +4010,7 @@ export default function RedditSourcesManager({
         });
       }
     }
-    return `/admin/social-media/reddit/communities/${encodeURIComponent(community.id)}`;
+    return `/admin/social/reddit/communities/${encodeURIComponent(community.id)}`;
   }, [
     routeRedditPathContext.showSlug,
     routeShowSlugFromPath,
@@ -4306,7 +4321,7 @@ export default function RedditSourcesManager({
   const isDedicatedCommunityView = hideCommunityList;
   const allowCreateActions = mode === "global" && !hideCommunityList;
   const seasonScopeLabel = isSeasonLandingView ? resolveShowLabel(showName?.trim() || "Show", null) : null;
-  const dedicatedBackHref = backHref?.trim() || "/admin/social-media";
+  const dedicatedBackHref = backHref?.trim() || "/admin/social";
   const dedicatedCommunityTypeLabel = useMemo(() => {
     if (!isDedicatedCommunityView || !selectedCommunity) return "Community";
     const badges = getCommunityTypeBadges(selectedCommunity);
@@ -4449,7 +4464,7 @@ export default function RedditSourcesManager({
     setCommunitySubreddit("");
     setCommunityDisplayName("");
     setCommunityNotes("");
-    setCommunityIsShowFocused(mode === "season");
+    setCommunityScope(mode === "season" ? "show" : "network");
     setCommunityNetworkTargets([]);
     setCommunityFranchiseTargets([]);
     setCommunityNetworkTargetInput("");
@@ -4490,9 +4505,9 @@ export default function RedditSourcesManager({
           subreddit: communitySubreddit,
           display_name: communityDisplayName || null,
           notes: communityNotes || null,
-          is_show_focused: communityIsShowFocused,
-          network_focus_targets: communityIsShowFocused ? [] : communityNetworkTargets,
-          franchise_focus_targets: communityIsShowFocused ? [] : communityFranchiseTargets,
+          is_show_focused: communityScope === "show",
+          network_focus_targets: communityScope === "network" ? communityNetworkTargets : [],
+          franchise_focus_targets: communityScope === "franchise" ? communityFranchiseTargets : [],
         }),
       });
       if (!response.ok) {
@@ -7090,20 +7105,27 @@ export default function RedditSourcesManager({
             </div>
 
             <div className="md:col-span-2 rounded-lg border border-zinc-200 p-3">
-              <label className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-700">
-                <input
-                  type="checkbox"
-                  checked={communityIsShowFocused}
-                  onChange={(event) => setCommunityIsShowFocused(event.target.checked)}
-                />
-                Show-focused community
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                Scope
               </label>
+              <select
+                value={communityScope}
+                onChange={(event) => {
+                  const nextScope = event.target.value as RedditCommunityScopeType;
+                  setCommunityScope(nextScope);
+                }}
+                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+              >
+                <option value="show">Show-based</option>
+                <option value="franchise">Franchise-based</option>
+                <option value="network">Network-based</option>
+              </select>
               <p className="mt-1 text-xs text-zinc-500">
-                Show-focused communities include all discovered posts and do not require flair assignment.
+                Use show-based for show-specific subs, franchise-based for umbrella Bravo universes, and network-based for broad Bravo communities.
               </p>
             </div>
 
-            {!communityIsShowFocused && (
+            {communityScope === "network" && (
               <>
                 <div className="md:col-span-2 rounded-lg border border-zinc-200 p-3">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
@@ -7167,7 +7189,11 @@ export default function RedditSourcesManager({
                       ))}
                   </div>
                 </div>
+              </>
+            )}
 
+            {communityScope === "franchise" && (
+              <>
                 <div className="md:col-span-2 rounded-lg border border-zinc-200 p-3">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
                     Franchise Targets
@@ -7229,7 +7255,7 @@ export default function RedditSourcesManager({
                         >
                           + {target}
                         </button>
-                      ))}
+                    ))}
                   </div>
                 </div>
               </>
@@ -7773,43 +7799,51 @@ export default function RedditSourcesManager({
                     <div className="rounded-lg border border-zinc-200 p-3">
                       <div className="mb-2 flex items-center justify-between">
                         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                          Community Focus
+                          Community Scope
                         </p>
-                        {selectedCommunity.is_show_focused ? (
-                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                            Show-focused
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
-                            Network/Franchise-focused
-                          </span>
-                        )}
+                        <span
+                          className={
+                            selectedCommunityScope === "show"
+                              ? "rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                              : "rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                          }
+                        >
+                          {selectedCommunityScope === "show"
+                            ? "Show-based"
+                            : selectedCommunityScope === "franchise"
+                              ? "Franchise-based"
+                              : "Network-based"}
+                        </span>
                       </div>
-                      <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
-                        <input
-                          type="checkbox"
-                          checked={selectedCommunity.is_show_focused}
-                          disabled={isBusy}
-                          onChange={(event) => {
-                            void persistCommunityFocus(selectedCommunity.id, {
-                              isShowFocused: event.target.checked,
-                              networkFocusTargets: event.target.checked
-                                ? []
-                                : selectedCommunity.network_focus_targets,
-                              franchiseFocusTargets: event.target.checked
-                                ? []
-                                : selectedCommunity.franchise_focus_targets,
-                            });
-                          }}
-                        />
-                        Show-focused community
-                      </label>
+                      <select
+                        value={selectedCommunityScope}
+                        disabled={isBusy}
+                        onChange={(event) => {
+                          const nextScope = event.target.value as RedditCommunityScopeType;
+                          void persistCommunityFocus(selectedCommunity.id, {
+                            isShowFocused: nextScope === "show",
+                            networkFocusTargets:
+                              nextScope === "network"
+                                ? selectedCommunity.network_focus_targets
+                                : [],
+                            franchiseFocusTargets:
+                              nextScope === "franchise"
+                                ? selectedCommunity.franchise_focus_targets
+                                : [],
+                          });
+                        }}
+                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:opacity-60"
+                      >
+                        <option value="show">Show-based</option>
+                        <option value="franchise">Franchise-based</option>
+                        <option value="network">Network-based</option>
+                      </select>
                       <p className="mt-1 text-xs text-zinc-500">
-                        Show-focused communities include all discovered posts and skip flair assignment.
+                        Show-based communities include all discovered posts. Franchise-based and network-based communities use their configured focus targets.
                       </p>
                     </div>
 
-                    {!selectedCommunity.is_show_focused && (
+                    {selectedCommunityScope === "network" && (
                       <>
                         <div className="rounded-lg border border-zinc-200 p-3">
                           <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
@@ -7898,6 +7932,11 @@ export default function RedditSourcesManager({
                           </div>
                         </div>
 
+                      </>
+                    )}
+
+                    {selectedCommunityScope === "franchise" && (
+                      <>
                         <div className="rounded-lg border border-zinc-200 p-3">
                           <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
                             Franchise Targets
@@ -7987,7 +8026,7 @@ export default function RedditSourcesManager({
                       </>
                     )}
 
-                    {selectedCommunity.is_show_focused ? (
+                    {selectedCommunityScope === "show" ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
                         Show-focused mode enabled. All discovered posts are eligible (including no-flair posts).
                       </div>

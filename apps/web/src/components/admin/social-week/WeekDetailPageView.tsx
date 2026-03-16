@@ -35,6 +35,12 @@ import {
   markAdminRunSessionStatus,
   upsertAdminRunSession,
 } from "@/lib/admin/run-session";
+import {
+  buildSocialSyncSessionRequest,
+  consumeSocialSyncSessionStream,
+  type SocialSyncSessionProgressSnapshot,
+  type SocialSyncSessionStreamPayload,
+} from "@/lib/admin/social-sync-session";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 import {
   pickFirstNonVideoUrl,
@@ -595,6 +601,9 @@ interface RunProgressPerHandlePayload extends RunProgressStagePayload {
   platform: string;
   account_handle: string;
   stage: string;
+  runner_lanes?: string[];
+  has_started?: boolean;
+  next_stage?: string | null;
 }
 
 interface RunProgressLogEntry {
@@ -655,7 +664,6 @@ type SortField = "engagement" | "likes" | "views" | "comments_count" | "shares" 
 type SortDir = "desc" | "asc";
 type SummaryTokenKey = "collaborators" | "tags" | "mentions" | "hashtags";
 type SourceScope = "bravo" | "creator" | "community";
-type IngestMode = "posts_only" | "posts_and_comments" | "comments_only" | "details_refresh";
 type SocialMediaType = "image" | "video" | "embed";
 type SeasonTabId = "overview" | "episodes" | "assets" | "news" | "fandom" | "cast" | "surveys" | "social";
 type SocialAnalyticsViewId = "bravo" | "sentiment" | "hashtags" | "advanced" | "reddit";
@@ -702,6 +710,8 @@ interface HandleJobProgressCard {
   handle: string;
   handleLabel: string;
   runnerLanes: string[];
+  hasStarted: boolean;
+  nextStage: string | null;
   totals: StageProgressSnapshot;
   stages: HandleStageProgressSnapshot[];
 }
@@ -955,7 +965,7 @@ const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^\d{4}-\d{2}-\d{2}$/;
 const COMMENT_SYNC_MAX_PASSES = 1;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
-const SYNC_GALLERY_REFRESH_MS = 20_000;
+const SYNC_GALLERY_REFRESH_MS = 4_000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
@@ -978,9 +988,6 @@ const REQUEST_TIMEOUT_MS = {
   workerHealth: 20_000,
 } as const;
 const SYNC_KICKOFF_TIMEOUT_MESSAGE = "Sync kickoff request timed out";
-const SYNC_KICKOFF_MAX_ATTEMPTS = 1;
-const SYNC_KICKOFF_RECOVERY_LOOKBACK_MS = 5 * 60 * 1000;
-const SYNC_KICKOFF_RECOVERY_LIMIT = 25;
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 const SYNC_ACTIVE_POLL_INTERVAL_MS = 4_000;
 const RHOSLC_REQUIRED_HASHTAG = "RHOSLC";
@@ -1368,6 +1375,29 @@ function normalizeCaptionPreviewText(platform: string, text: string | null | und
   if (!raw.trim()) return "";
   if (platform !== "twitter") return raw;
   return raw.replace(TWITTER_TEXT_URL_RE, "").replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function shouldShowPostTitle(post: AnyPost): boolean {
+  const title = getStr(post, "title").trim();
+  if (!title) return false;
+  return !(getStr(post, "platform") === "youtube" && Boolean(post.is_short));
+}
+
+function formatTranscriptErrorLabel(error: string | null | undefined): string {
+  const raw = String(error ?? "").trim();
+  if (!raw) return "Transcript unavailable";
+  if (raw === "captions_unavailable") return "No captions available for this video";
+  if (raw === "yt_dlp_unavailable") return "Transcript unavailable in this environment";
+  if (raw === "transcript_disabled") return "Transcript ingest is disabled";
+  if (raw === "yt_dlp_failed" || raw === "fetch_exception") return "Transcript fetch failed";
+  if (
+    raw.startsWith("caption_download_failed:") ||
+    raw.startsWith("caption_parse_failed:") ||
+    raw.startsWith("yt_dlp_exception:")
+  ) {
+    return "Transcript fetch failed";
+  }
+  return raw.replaceAll("_", " ");
 }
 
 function getActualCommentsForPost(platform: string, post: AnyPost): number {
@@ -1884,10 +1914,6 @@ function buildInstagramDrawerSlides(data: PostDetailResponse): InstagramDrawerSl
     ...(data.hosted_media_urls ?? []),
     ...mediaAssetUrls.hostedMediaUrls,
   ]);
-  const mediaUrls = buildNormalizedMediaUrlList([
-    ...((data.media_urls ?? []).length > 0 ? (data.media_urls ?? []) : sourceMediaUrls),
-    ...sourceMediaUrls,
-  ]);
   const childPosts = getInstagramChildPostRecords(data);
   const childPostsBySlide = new Map<number, Record<string, unknown>>();
   for (const childPost of childPosts) {
@@ -1896,19 +1922,16 @@ function buildInstagramDrawerSlides(data: PostDetailResponse): InstagramDrawerSl
     }
   }
 
-  const totalSlides = Math.max(mediaUrls.length, sourceMediaUrls.length, hostedMediaUrls.length, childPosts.length);
+  const totalSlides = Math.max(sourceMediaUrls.length, hostedMediaUrls.length, childPosts.length);
   const slides: InstagramDrawerSlide[] = [];
 
   for (let index = 0; index < totalSlides; index += 1) {
     const childPostRecord = childPostsBySlide.get(index) ?? childPosts[index]?.record ?? null;
     const childMediaSrc = childPostRecord ? resolveInstagramChildPostMediaSrc(childPostRecord) : null;
-    const preferredPair = selectPreferredMediaUrlPair(
-      pickFirstUrl([sourceMediaUrls[index], mediaUrls[index], childMediaSrc]),
-      hostedMediaUrls[index] ?? null,
-    );
+    const preferredPair = selectPreferredMediaUrlPair(pickFirstUrl([sourceMediaUrls[index], childMediaSrc]), hostedMediaUrls[index] ?? null);
     const src =
-      pickFirstNonHtmlUrl([preferredPair.src, mediaUrls[index], sourceMediaUrls[index], hostedMediaUrls[index], childMediaSrc]) ??
-      pickFirstUrl([preferredPair.src, mediaUrls[index], sourceMediaUrls[index], hostedMediaUrls[index], childMediaSrc]);
+      pickFirstNonHtmlUrl([preferredPair.src, sourceMediaUrls[index], hostedMediaUrls[index], childMediaSrc]) ??
+      pickFirstUrl([preferredPair.src, sourceMediaUrls[index], hostedMediaUrls[index], childMediaSrc]);
     if (!src) continue;
     slides.push({ index, src });
   }
@@ -1918,6 +1941,26 @@ function buildInstagramDrawerSlides(data: PostDetailResponse): InstagramDrawerSl
   const fallbackSrc = getPostDetailThumbnailUrl(data);
   if (!fallbackSrc) return [];
   return [{ index: 0, src: fallbackSrc }];
+}
+
+function buildPostDetailPreviewCandidates(
+  data: PostDetailResponse,
+  preferredPreviewUrl: string | null | undefined,
+): string[] {
+  const mediaAssetUrls = extractMediaAssetUrls(data.media_asset_meta);
+  return buildNormalizedMediaUrlList([
+    preferredPreviewUrl,
+    getPostDetailThumbnailUrl(data),
+    data.hosted_thumbnail_url,
+    mediaAssetUrls.hostedThumbnailUrl,
+    data.thumbnail_url,
+    data.source_thumbnail_url,
+    mediaAssetUrls.sourceThumbnailUrl,
+    ...(data.hosted_media_urls ?? []),
+    ...((data.source_media_urls ?? []).length > 0 ? (data.source_media_urls ?? []) : (data.media_urls ?? [])),
+    ...mediaAssetUrls.hostedMediaUrls,
+    ...mediaAssetUrls.sourceMediaUrls,
+  ]);
 }
 
 function mergePostWithDetailMedia(post: AnyPost, detailMedia: PostDetailMediaFields | null | undefined): AnyPost {
@@ -3416,6 +3459,7 @@ function PostStatsDrawer({
   const [hasRefreshed, setHasRefreshed] = useState(false);
   const [replyQuoteMode, setReplyQuoteMode] = useState<"replies" | "quotes">("replies");
   const [instagramDrawerSlideIndex, setInstagramDrawerSlideIndex] = useState(0);
+  const [failedDrawerPreviewUrls, setFailedDrawerPreviewUrls] = useState<string[]>([]);
 
   const fetchPostStats = useCallback(async (): Promise<PostDetailResponse> => {
     const headers = await getClientAuthHeaders({ allowDevAdminBypass: true });
@@ -3582,10 +3626,8 @@ function PostStatsDrawer({
       : 0;
   const activeInstagramDrawerSlide =
     instagramDrawerSlides[boundedInstagramDrawerSlideIndex] ?? null;
-  const hasInstagramDrawerSlideNavigation =
-    (data?.platform === "instagram" && data.post_format === "carousel") ||
-    (data?.platform === "instagram" && instagramDrawerSlides.length > 1);
-  const drawerThumbnailUrl = data
+  const hasInstagramDrawerSlideNavigation = data?.platform === "instagram" && instagramDrawerSlides.length > 1;
+  const preferredDrawerPreviewUrl = data
     ? data.platform === "instagram"
       ? activeInstagramDrawerSlide?.src ?? getPostDetailThumbnailUrl(data)
       : getPostDetailThumbnailUrl(data)
@@ -3595,6 +3637,16 @@ function PostStatsDrawer({
       ? activeInstagramDrawerSlide?.src ?? getPreferredPostDetailMediaSrc(data)
       : getPreferredPostDetailMediaSrc(data)
     : null;
+  const drawerPreviewCandidates = useMemo(() => {
+    if (!data) return [];
+    return buildPostDetailPreviewCandidates(data, preferredDrawerPreviewUrl);
+  }, [data, preferredDrawerPreviewUrl]);
+  const drawerPreviewCandidateKey = drawerPreviewCandidates.join("|");
+  const failedDrawerPreviewUrlSet = useMemo(() => new Set(failedDrawerPreviewUrls), [failedDrawerPreviewUrls]);
+  const drawerThumbnailUrl =
+    drawerPreviewCandidates.find((candidate) => !failedDrawerPreviewUrlSet.has(candidate)) ??
+    drawerPreviewCandidates[drawerPreviewCandidates.length - 1] ??
+    null;
   const detailExternalUrl = data ? resolvePostExternalUrl(data.platform, data) : null;
   const instagramTagMarkers =
     data?.platform === "instagram"
@@ -3612,6 +3664,10 @@ function PostStatsDrawer({
       setInstagramDrawerSlideIndex(instagramDrawerSlides.length - 1);
     }
   }, [instagramDrawerSlideIndex, instagramDrawerSlides.length]);
+
+  useEffect(() => {
+    setFailedDrawerPreviewUrls([]);
+  }, [drawerPreviewCandidateKey]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -3722,12 +3778,16 @@ function PostStatsDrawer({
                         <div className="relative inline-block max-w-full">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
+                            data-testid={`post-drawer-preview-${data.source_id}`}
                             src={drawerThumbnailUrl}
                             alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
                             loading="lazy"
                             referrerPolicy="no-referrer"
-                            onError={(event) => {
-                              event.currentTarget.style.display = "none";
+                            onError={() => {
+                              if (!drawerThumbnailUrl) return;
+                              setFailedDrawerPreviewUrls((current) =>
+                                current.includes(drawerThumbnailUrl) ? current : [...current, drawerThumbnailUrl],
+                              );
                             }}
                             className="block max-h-[360px] max-w-full h-auto w-auto object-contain bg-black/5"
                           />
@@ -3743,12 +3803,16 @@ function PostStatsDrawer({
                       <div className="relative inline-block max-w-full">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
+                          data-testid={`post-drawer-preview-${data.source_id}`}
                           src={drawerThumbnailUrl}
                           alt={`${PLATFORM_LABELS[data.platform] ?? data.platform} post thumbnail`}
                           loading="lazy"
                           referrerPolicy="no-referrer"
-                          onError={(event) => {
-                            event.currentTarget.style.display = "none";
+                          onError={() => {
+                            if (!drawerThumbnailUrl) return;
+                            setFailedDrawerPreviewUrls((current) =>
+                              current.includes(drawerThumbnailUrl) ? current : [...current, drawerThumbnailUrl],
+                            );
                           }}
                           className="block max-h-[360px] max-w-full h-auto w-auto object-contain bg-black/5"
                         />
@@ -3794,7 +3858,7 @@ function PostStatsDrawer({
                     ) : null}
                   </div>
                 )}
-                {data.title && (
+                {shouldShowPostTitle(data) && (
                   <h3 className="text-sm font-semibold text-gray-900 mb-1">{data.title}</h3>
                 )}
                 <p className="text-sm text-gray-700 whitespace-pre-wrap break-words mb-3">
@@ -3868,11 +3932,12 @@ function PostStatsDrawer({
                     View on {PLATFORM_LABELS[data.platform] ?? data.platform} ↗
                   </a>
                 )}
-                {data.platform === "youtube" && (data.transcript_text || data.transcript_error) && (
+                {data.platform === "youtube" &&
+                  (data.transcript_text || (data.transcript_error && data.transcript_error !== "transcript_disabled")) && (
                   <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
                     <p className="text-xs font-semibold text-gray-700 mb-1">Transcript</p>
                     {data.transcript_error ? (
-                      <p className="text-xs text-amber-700">Unavailable: {data.transcript_error}</p>
+                      <p className="text-xs text-amber-700">Unavailable: {formatTranscriptErrorLabel(data.transcript_error)}</p>
                     ) : (
                       <>
                         <p className="text-xs text-gray-500 mb-1">
@@ -4450,6 +4515,10 @@ export default function WeekDetailPage() {
   const [syncingComments, setSyncingComments] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSessionId, setSyncSessionId] = useState<string | null>(null);
+  const [syncSessionProgress, setSyncSessionProgress] = useState<SocialSyncSessionProgressSnapshot | null>(null);
+  const [syncSessionRetryKind, setSyncSessionRetryKind] = useState<string | null>(null);
+  const [syncSessionStreamConnected, setSyncSessionStreamConnected] = useState(false);
   const [syncRunId, setSyncRunId] = useState<string | null>(null);
   const [syncRun, setSyncRun] = useState<SocialRun | null>(null);
   const [syncResumeBanner, setSyncResumeBanner] = useState<string | null>(null);
@@ -4483,6 +4552,7 @@ export default function WeekDetailPage() {
   const syncPollAbortRef = useRef<AbortController | null>(null);
   const syncStartTimeRef = useRef<number | null>(null);
   const syncSessionGenerationRef = useRef(0);
+  const syncSessionLastRefreshAtRef = useRef(0);
   const hasLoadedWeekDetailRef = useRef(false);
   const weekDetailRequestSeqRef = useRef(0);
   const weekDetailContextRef = useRef("");
@@ -5286,14 +5356,16 @@ export default function WeekDetailPage() {
   }, [fetchData, hasMorePosts, isLoadingMore, isRefreshingGallery, loading, platformFilter, postOffset, sortDir, sortField]);
 
   const handleCancelSync = useCallback(async () => {
-    if (!syncRunId) return;
+    if (!syncRunId && !syncSessionId) return;
     try {
       const headers = await getSyncRunRequestHeaders();
       const cancelParams = new URLSearchParams();
       if (resolvedSeasonId) {
         cancelParams.set("season_id", resolvedSeasonId);
       }
-      const cancelPath = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs/${syncRunId}/cancel`;
+      const cancelPath = syncSessionId
+        ? `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/sync-sessions/${syncSessionId}/cancel`
+        : `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs/${syncRunId}/cancel`;
       const cancelResponse = await fetchWithTimeout(
         cancelParams.toString() ? `${cancelPath}?${cancelParams.toString()}` : cancelPath,
         {
@@ -5322,6 +5394,7 @@ export default function WeekDetailPage() {
     resolvedSeasonId,
     seasonNumber,
     showIdForApi,
+    syncSessionId,
     syncOperationFlowScope,
     syncRunFlowScope,
     syncRunId,
@@ -5404,198 +5477,24 @@ export default function WeekDetailPage() {
     ],
   );
 
-  const recoverSyncRunAfterKickoffError = useCallback(
-    async ({
-      headers,
-      pass,
-      dateStart,
-      dateEnd,
-      platforms,
-      kickoffStartedAtMs,
-    }: {
-      headers: Record<string, string>;
-      pass: number;
-      dateStart: string;
-      dateEnd: string;
-      platforms: Array<Exclude<PlatformFilter, "all">> | null;
-      kickoffStartedAtMs: number;
-    }): Promise<{ runId: string; jobs: number } | null> => {
-      if (!hasValidNumericPathParams) return null;
-
-      const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
-      const expectedPlatforms = platforms && platforms.length > 0 ? [...platforms].sort() : null;
-      const runsParams = new URLSearchParams({
-        source_scope: sourceScope,
-        limit: String(SYNC_KICKOFF_RECOVERY_LIMIT),
-      });
-      if (resolvedSeasonId) {
-        runsParams.set("season_id", resolvedSeasonId);
-      }
-      appendSyncRunScopeParams(runsParams, {
-        platforms,
-        dateStart,
-        dateEnd,
-      });
-      const response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/runs?${runsParams.toString()}`,
-        { headers, cache: "no-store" },
-        REQUEST_TIMEOUT_MS.syncRuns,
-        "Sync run recovery request timed out",
-      );
-      if (!response.ok) return null;
-      const runsPayload = await parseResponseJson<{ runs?: SocialRun[] }>(response, "Failed to load sync runs");
-      const runs = Array.isArray(runsPayload.runs) ? runsPayload.runs : [];
-
-      const toTimestamp = (value: unknown): number | null => {
-        if (typeof value !== "string" || !value.trim()) return null;
-        const parsed = Date.parse(value);
-        return Number.isFinite(parsed) ? parsed : null;
-      };
-      const normalizeRunPlatforms = (value: unknown): string[] | null => {
-        if (Array.isArray(value)) {
-          const normalized = value
-            .map((item) => String(item ?? "").trim().toLowerCase())
-            .filter((item) => item.length > 0)
-            .sort();
-          return normalized.length > 0 ? normalized : null;
-        }
-        if (typeof value === "string" && value.trim().toLowerCase() === "all") {
-          return null;
-        }
-        return null;
-      };
-      const windowsMatch = (candidate: unknown, expectedIso: string): boolean => {
-        if (typeof candidate !== "string" || !candidate.trim()) return true;
-        const candidateMs = Date.parse(candidate);
-        const expectedMs = Date.parse(expectedIso);
-        if (Number.isFinite(candidateMs) && Number.isFinite(expectedMs)) {
-          return candidateMs === expectedMs;
-        }
-        return candidate.trim() === expectedIso.trim();
-      };
-
-      const recoveredRun =
-        runs.find((run) => {
-          if (!run?.id) return false;
-          const config = isRecord(run.config) ? run.config : {};
-          const createdAtMs = toTimestamp(run.created_at);
-          if (
-            createdAtMs !== null &&
-            createdAtMs < kickoffStartedAtMs - SYNC_KICKOFF_RECOVERY_LOOKBACK_MS
-          ) {
-            return false;
-          }
-          const runScope =
-            (typeof run.source_scope === "string" && run.source_scope.trim().toLowerCase()) ||
-            (typeof config.source_scope === "string" && config.source_scope.trim().toLowerCase()) ||
-            "";
-          if (runScope && runScope !== sourceScope) return false;
-          const runMode =
-            typeof config.ingest_mode === "string" ? config.ingest_mode.trim().toLowerCase() : "";
-          if (runMode && runMode !== ingestMode) return false;
-          if (!windowsMatch(config.date_start, dateStart) || !windowsMatch(config.date_end, dateEnd)) {
-            return false;
-          }
-          const runPlatforms = normalizeRunPlatforms(config.platforms);
-          if (expectedPlatforms && expectedPlatforms.length > 0) {
-            if (!runPlatforms || runPlatforms.length !== expectedPlatforms.length) return false;
-            return expectedPlatforms.every((platform, index) => runPlatforms[index] === platform);
-          }
-          return runPlatforms === null;
-        }) ?? null;
-
-      if (!recoveredRun?.id) return null;
-      const summary = recoveredRun.summary ?? {};
-      const totalJobs = Number(summary.total_jobs ?? 0);
-      const completedJobs = Number(summary.completed_jobs ?? 0);
-      const failedJobs = Number(summary.failed_jobs ?? 0);
-      const activeJobs = Number(summary.active_jobs ?? 0);
-      const jobs = Math.max(0, totalJobs, completedJobs + failedJobs + activeJobs);
-      return { runId: recoveredRun.id, jobs };
-    },
-    [
-      appendSyncRunScopeParams,
-      hasValidNumericPathParams,
-      resolvedSeasonId,
-      seasonNumber,
-      showIdForApi,
-      sourceScope,
-    ],
-  );
-
   const queueSyncPass = useCallback(
     async ({
-      pass,
       dateStart,
       dateEnd,
       platforms,
     }: {
-      pass: number;
+      pass?: number;
       dateStart: string;
       dateEnd: string;
       platforms: Array<Exclude<PlatformFilter, "all">> | null;
     }) => {
-      const kickoffStartedAtMs = Date.now();
       const headers = await getSyncRunRequestHeaders();
-      const ingestMode: IngestMode = pass > 1 ? "details_refresh" : "posts_and_comments";
-      const payload: {
-        source_scope: SourceScope;
-        platforms?: Array<Exclude<PlatformFilter, "all">>;
-        accounts_override?: string[];
-        hashtags_override?: string[];
-        keywords_override?: string[];
-        max_posts_per_target: number;
-        max_comments_per_post: number;
-        max_replies_per_post: number;
-        fetch_replies: boolean;
-        ingest_mode: IngestMode;
-        sync_strategy: "incremental";
-        runner_strategy: "single_runner" | "adaptive_dual_runner";
-        runner_count: 1 | 2;
-        window_shard_hours: number;
-        day_weight_profile: "rhoslc_default";
-        priority_mode: "episode_peak_weighted";
-        allow_inline_dev_fallback: boolean;
-        date_start: string;
-        date_end: string;
-      } = (() => {
-        const requestedPlatforms =
-          platforms && platforms.length > 0
-            ? platforms
-            : (["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"] as Array<
-                Exclude<PlatformFilter, "all">
-              >);
-        const singlePlatform = requestedPlatforms.length === 1;
-        const singlePlatformTarget = singlePlatform ? requestedPlatforms[0] : null;
-        const igTikTokOnly = requestedPlatforms.every((platform) => platform === "instagram" || platform === "tiktok");
-        const shardOptimizedPass = pass === 1 && (igTikTokOnly || singlePlatform);
-        const singleRunnerPass = pass === 1 && (singlePlatform || igTikTokOnly);
-        const optimizedWindowShardHours = singleRunnerPass
-          ? singlePlatformTarget === "instagram" || singlePlatformTarget === "tiktok"
-            ? 12
-            : 24
-          : 4;
-        return {
-          source_scope: sourceScope,
-          max_posts_per_target: 0,
-          max_comments_per_post: igTikTokOnly ? 3000 : 10000,
-          max_replies_per_post: igTikTokOnly ? 500 : 2000,
-          fetch_replies: !igTikTokOnly,
-          ingest_mode: ingestMode,
-          sync_strategy: "incremental",
-          runner_strategy: singleRunnerPass ? "single_runner" : "adaptive_dual_runner",
-          runner_count: singleRunnerPass ? 1 : 2,
-          window_shard_hours: shardOptimizedPass ? optimizedWindowShardHours : 4,
-          day_weight_profile: "rhoslc_default",
-          priority_mode: "episode_peak_weighted",
-          allow_inline_dev_fallback: false,
-          date_start: dateStart,
-          date_end: dateEnd,
-        };
-      })();
-      if (platforms && platforms.length > 0) {
-        payload.platforms = platforms;
-      }
+      const payload = buildSocialSyncSessionRequest({
+        sourceScope: sourceScope as SourceScope,
+        platforms,
+        dateStart,
+        dateEnd,
+      });
       const isRhoslcInstagramSync =
         sourceScope === "bravo" &&
         isRhoslcSeason &&
@@ -5610,7 +5509,7 @@ export default function WeekDetailPage() {
       if (resolvedSeasonId) {
         ingestParams.set("season_id", resolvedSeasonId);
       }
-      const kickoffUrl = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/ingest${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`;
+      const kickoffUrl = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/sync-sessions${ingestParams.toString() ? `?${ingestParams.toString()}` : ""}`;
       const kickoffInit: RequestInit = {
         method: "POST",
         headers: {
@@ -5619,7 +5518,10 @@ export default function WeekDetailPage() {
         },
         body: JSON.stringify(payload),
       };
-      const adoptRun = (runId: string, operationId?: string | null) => {
+      const adoptRun = (runId: string | null, syncSessionIdValue: string, operationId?: string | null) => {
+        setSyncSessionId(syncSessionIdValue);
+        setSyncSessionProgress(null);
+        if (!runId) return;
         upsertAdminRunSession(syncRunFlowScope, {
           runId,
           flowKey: syncRunFlowKey,
@@ -5649,90 +5551,60 @@ export default function WeekDetailPage() {
         if (!syncStartTimeRef.current) {
           syncStartTimeRef.current = Date.now();
         }
-        setSyncPass(pass);
+        setSyncPass(1);
         void fetchSyncProgress(runId).catch(() => {});
       };
-      let response: Response | null = null;
-      let kickoffRecoverableErrorMessage: string | null = null;
-      for (let attempt = 1; attempt <= SYNC_KICKOFF_MAX_ATTEMPTS; attempt += 1) {
-        try {
-          response = await fetchWithTimeout(
-            kickoffUrl,
-            kickoffInit,
-            REQUEST_TIMEOUT_MS.ingestKickoff,
-            SYNC_KICKOFF_TIMEOUT_MESSAGE,
-          );
-          break;
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          if (!isRecoverableSyncKickoffMessage(errorMessage)) {
-            throw error;
-          }
-          kickoffRecoverableErrorMessage = errorMessage;
-          if (attempt >= SYNC_KICKOFF_MAX_ATTEMPTS) {
-            break;
-          }
-        }
-      }
-      if (!response) {
-        const recovered = await recoverSyncRunAfterKickoffError({
-          headers,
-          pass,
-          dateStart,
-          dateEnd,
-          platforms,
-          kickoffStartedAtMs,
-        }).catch(() => null);
-        if (recovered?.runId) {
-          adoptRun(recovered.runId);
-          return recovered;
-        }
-        throw new Error(kickoffRecoverableErrorMessage ?? `Failed to start sync pass ${pass}`);
-      }
+      const response = await fetchWithTimeout(
+        kickoffUrl,
+        kickoffInit,
+        REQUEST_TIMEOUT_MS.ingestKickoff,
+        SYNC_KICKOFF_TIMEOUT_MESSAGE,
+      );
       if (!response.ok) {
-        const kickoffError = await readApiErrorMessage(response, `Failed to start sync pass ${pass}`);
-        if (isRecoverableSyncKickoffMessage(kickoffError)) {
-          const recovered = await recoverSyncRunAfterKickoffError({
-            headers,
-            pass,
-            dateStart,
-            dateEnd,
-            platforms,
-            kickoffStartedAtMs,
-          }).catch(() => null);
-          if (recovered?.runId) {
-            adoptRun(recovered.runId);
-            return recovered;
-          }
-        }
+        const kickoffError = await readApiErrorMessage(response, "Failed to start sync session");
         throw new Error(kickoffError);
       }
 
       const result = (await response.json().catch(() => ({}))) as {
-        run_id?: string;
-        operation_id?: string;
-        queued_or_started_jobs?: number;
+        status?: string;
+        sync_session_id?: string;
+        current_run_id?: string;
+        current_run?: { id?: string | null; summary?: Record<string, unknown> } | null;
+        completeness_snapshot?: { up_to_date?: boolean };
       };
-      const runId = typeof result.run_id === "string" ? result.run_id : null;
-      const operationId = typeof result.operation_id === "string" ? result.operation_id : null;
-      const jobs = Number(result.queued_or_started_jobs ?? 0);
-      if (!runId) {
-        const recovered = await recoverSyncRunAfterKickoffError({
-          headers,
-          pass,
-          dateStart,
-          dateEnd,
-          platforms,
-          kickoffStartedAtMs,
-        }).catch(() => null);
-        if (recovered?.runId) {
-          adoptRun(recovered.runId);
-          return recovered;
-        }
-        throw new Error(`Sync pass ${pass} started without a run id`);
+      if (result.status === "already_up_to_date") {
+        setSyncSessionId(null);
+        setSyncSessionProgress(null);
+        return {
+          syncSessionId: null,
+          runId: null,
+          status: "already_up_to_date" as const,
+          jobs: 0,
+        };
       }
-      adoptRun(runId, operationId);
-      return { runId, jobs, operationId };
+      const syncSessionIdValue =
+        typeof result.sync_session_id === "string" && result.sync_session_id.trim().length > 0
+          ? result.sync_session_id
+          : null;
+      const runId =
+        typeof result.current_run_id === "string" && result.current_run_id.trim().length > 0
+          ? result.current_run_id
+          : typeof result.current_run?.id === "string" && result.current_run.id.trim().length > 0
+            ? result.current_run.id
+            : null;
+      if (!syncSessionIdValue) {
+        throw new Error("Sync session started without a session id");
+      }
+      adoptRun(runId, syncSessionIdValue, null);
+      return {
+        syncSessionId: syncSessionIdValue,
+        runId,
+        status: (typeof result.status === "string" ? result.status : "created") as "created" | "attached",
+        jobs:
+          typeof result.current_run?.summary === "object" && result.current_run?.summary
+            ? Number((result.current_run.summary as Record<string, unknown>).total_jobs ?? 0)
+            : 0,
+      };
     },
     [
       fetchSyncProgress,
@@ -5741,7 +5613,6 @@ export default function WeekDetailPage() {
       syncRunFlowKey,
       syncRunFlowScope,
       isRhoslcSeason,
-      recoverSyncRunAfterKickoffError,
       resolvedSeasonId,
       seasonNumber,
       showIdForApi,
@@ -5800,6 +5671,135 @@ export default function WeekDetailPage() {
     syncingComments,
     syncRunId,
   ]);
+
+  const fetchSyncSessionProgress = useCallback(
+    async (sessionId: string) => {
+      if (!hasValidNumericPathParams) {
+        throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
+      }
+      const headers = await getSyncRunRequestHeaders();
+      const params = new URLSearchParams();
+      if (resolvedSeasonId) {
+        params.set("season_id", resolvedSeasonId);
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/sync-sessions/${sessionId}${params.toString() ? `?${params.toString()}` : ""}`,
+        { headers, cache: "no-store" },
+        REQUEST_TIMEOUT_MS.syncRuns,
+        "Sync session request timed out",
+      );
+      if (!response.ok) {
+        const message = await readApiErrorMessage(response, "Failed to load sync session");
+        throw new Error(message);
+      }
+      const payload = await parseResponseJson<SocialSyncSessionProgressSnapshot>(
+        response,
+        "Failed to load sync session",
+      );
+      setSyncSessionProgress(payload);
+      setSyncPass(Math.max(1, Number(payload.pass_sequence ?? 1) || 1));
+      const snapshot = payload.completeness_snapshot ?? {};
+      if (snapshot.comments_coverage && typeof snapshot.comments_coverage === "object") {
+        setSyncCoveragePreview(snapshot.comments_coverage as unknown as CommentsCoverageResponse);
+      }
+      if (snapshot.asset_coverage && typeof snapshot.asset_coverage === "object") {
+        setSyncMirrorCoveragePreview(snapshot.asset_coverage as unknown as MirrorCoverageResponse);
+      }
+      const nextRunId =
+        (typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0
+          ? payload.current_run_id
+          : typeof payload.current_run?.id === "string" && payload.current_run.id.trim().length > 0
+            ? payload.current_run.id
+            : null) ?? null;
+      if (nextRunId && nextRunId !== syncRunId) {
+        setSyncRunId(nextRunId);
+        setSyncRun(null);
+        setSyncJobs([]);
+        setSyncRunProgress(null);
+        void fetchSyncProgress(nextRunId, {
+          preserveLastGoodJobsIfEmpty: true,
+          preserveLastGoodRunIfMissing: true,
+        }).catch(() => undefined);
+      }
+      return payload;
+    },
+    [
+      fetchSyncProgress,
+      getSyncRunRequestHeaders,
+      hasValidNumericPathParams,
+      invalidPathParamsError,
+      resolvedSeasonId,
+      seasonNumber,
+      showIdForApi,
+      syncRunId,
+    ],
+  );
+
+  const retrySyncSession = useCallback(
+    async (retryKind: "retry_missing_comments" | "retry_failed_media" | "retry_missing_avatars" | "retry_missing_comment_media") => {
+      if (!syncSessionId || !hasValidNumericPathParams) return;
+      setSyncSessionRetryKind(retryKind);
+      try {
+        const headers = await getSyncRunRequestHeaders();
+        const params = new URLSearchParams();
+        if (resolvedSeasonId) {
+          params.set("season_id", resolvedSeasonId);
+        }
+        const response = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/sync-sessions/${syncSessionId}/retry${params.toString() ? `?${params.toString()}` : ""}`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ retry_kind: retryKind }),
+          },
+          REQUEST_TIMEOUT_MS.ingestKickoff,
+          "Sync session retry request timed out",
+        );
+        if (!response.ok) {
+          const message = await readApiErrorMessage(response, "Failed to retry sync session");
+          throw new Error(message);
+        }
+        const payload = await parseResponseJson<SocialSyncSessionProgressSnapshot>(
+          response,
+          "Failed to retry sync session",
+        );
+        setSyncSessionProgress(payload);
+        setSyncMessage(`Retry queued for ${retryKind.replaceAll("_", " ")}.`);
+        setSyncError(null);
+        setSyncPollError(null);
+        setSyncingComments(true);
+        const nextRunId =
+          typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0
+            ? payload.current_run_id
+            : typeof payload.current_run?.id === "string" && payload.current_run.id.trim().length > 0
+              ? payload.current_run.id
+              : null;
+        if (nextRunId) {
+          setSyncRunId(nextRunId);
+          void fetchSyncProgress(nextRunId, {
+            preserveLastGoodJobsIfEmpty: true,
+            preserveLastGoodRunIfMissing: true,
+          }).catch(() => undefined);
+        }
+      } catch (err) {
+        setSyncError(err instanceof Error ? err.message : "Failed to retry sync session");
+      } finally {
+        setSyncSessionRetryKind(null);
+      }
+    },
+    [
+      fetchSyncProgress,
+      getSyncRunRequestHeaders,
+      hasValidNumericPathParams,
+      resolvedSeasonId,
+      seasonNumber,
+      showIdForApi,
+      syncSessionId,
+    ],
+  );
 
   const handleManualAttachRun = useCallback(async () => {
     const runId = selectedManualAttachRunId.trim();
@@ -6101,7 +6101,7 @@ export default function WeekDetailPage() {
         dateStart: data.week.start,
         dateEnd: data.week.end,
         platforms: selectedPlatforms,
-        maxPasses: COMMENT_SYNC_MAX_PASSES,
+        maxPasses: 3,
         maxDurationMs: COMMENT_SYNC_MAX_DURATION_MS,
         startedAtMs: Date.now(),
         pass: 1,
@@ -6122,12 +6122,17 @@ export default function WeekDetailPage() {
         }
       }
       const kickoff = await queueSyncPass({
-        pass: 1,
         dateStart: data.week.start,
         dateEnd: data.week.end,
         platforms: selectedPlatforms,
       });
       if (generation !== syncSessionGenerationRef.current) return;
+      if (kickoff.status === "already_up_to_date") {
+        setSyncMessage(`${weekLabel} (${platformLabel}) is already up to date.`);
+        setSyncingComments(false);
+        syncSessionStateRef.current = null;
+        return;
+      }
       const isRhoslcInstagramSync =
         sourceScope === "bravo" &&
         isRhoslcSeason &&
@@ -6136,7 +6141,9 @@ export default function WeekDetailPage() {
         selectedPlatforms[0] === "instagram";
       const kickoffTargetHint = isRhoslcInstagramSync ? " · #RHOSLC" : "";
       setSyncMessage(
-        `Pass 1/${COMMENT_SYNC_MAX_PASSES} queued for ${weekLabel} (${platformLabel}) · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · ${
+        `Sync session ${kickoff.status === "attached" ? "attached" : "created"} for ${weekLabel} (${platformLabel})${
+          kickoff.runId ? ` · run ${kickoff.runId.slice(0, 8)}` : ""
+        } · ${
           SOCIAL_FULL_SYNC_MIRROR_ENABLED
             ? "Full Sync + Mirror started."
             : `Sync ${platformFilter === "all" ? "Metrics" : getSyncActionPlatformLabel(platformFilter)} started.`
@@ -6228,6 +6235,220 @@ export default function WeekDetailPage() {
   }, [fetchManualAttachRunCandidates, hasValidNumericPathParams, isAdmin, syncingComments]);
 
   useEffect(() => {
+    if (!syncSessionId || !syncingComments) {
+      setSyncSessionStreamConnected(false);
+      return;
+    }
+    let cancelled = false;
+    const abortController = new AbortController();
+
+    const refreshLiveWeekData = async () => {
+      const now = Date.now();
+      if (now - syncSessionLastRefreshAtRef.current < 2_500) return;
+      syncSessionLastRefreshAtRef.current = now;
+      await Promise.allSettled([
+        fetchData({
+          refreshGalleryOnly: true,
+          platformFilterValue: platformFilter,
+          sortFieldValue: sortField,
+          sortDirValue: sortDir,
+        }),
+        fetchSyncWeekLiveHealth(),
+      ]);
+    };
+
+    const consume = async () => {
+      try {
+        const headers = await getSyncRunRequestHeaders();
+        await consumeSocialSyncSessionStream({
+          url: `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/sync-sessions/${syncSessionId}/stream${resolvedSeasonId ? `?season_id=${encodeURIComponent(resolvedSeasonId)}` : ""}`,
+          headers,
+          signal: abortController.signal,
+          onOpen: () => {
+            if (cancelled) return;
+            setSyncSessionStreamConnected(true);
+            setSyncPollError(null);
+          },
+          onMessage: async (event: SocialSyncSessionStreamPayload) => {
+            if (cancelled) return;
+            const payload = event.sync_session;
+            setSyncSessionProgress(payload);
+            setSyncPass(Math.max(1, Number(payload.pass_sequence ?? 1) || 1));
+            const snapshot = payload.completeness_snapshot ?? {};
+            if (snapshot.comments_coverage && typeof snapshot.comments_coverage === "object") {
+              setSyncCoveragePreview(snapshot.comments_coverage as unknown as CommentsCoverageResponse);
+            }
+            if (snapshot.asset_coverage && typeof snapshot.asset_coverage === "object") {
+              setSyncMirrorCoveragePreview(snapshot.asset_coverage as unknown as MirrorCoverageResponse);
+            }
+            if (event.run_progress && typeof event.run_progress === "object") {
+              setSyncRunProgress(event.run_progress as unknown as RunProgressSnapshot);
+              setSyncLastSuccessAt(new Date());
+            }
+            const nextRunId =
+              (typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0
+                ? payload.current_run_id
+                : typeof payload.current_run?.id === "string" && payload.current_run.id.trim().length > 0
+                  ? payload.current_run.id
+                  : null) ?? null;
+            if (nextRunId && nextRunId !== syncRunId) {
+              setSyncRunId(nextRunId);
+              setSyncRun(null);
+              setSyncJobs([]);
+              setSyncRunProgress(null);
+              void fetchSyncProgress(nextRunId, {
+                preserveLastGoodJobsIfEmpty: true,
+                preserveLastGoodRunIfMissing: true,
+              }).catch(() => undefined);
+            } else {
+              void refreshLiveWeekData();
+            }
+            const sessionStatus = String(payload.status || "").toLowerCase();
+            const passLabel = payload.current_pass_kind
+              ? payload.current_pass_kind.replaceAll("_", " ")
+              : "sync";
+            const dateLabel =
+              payload.date_start && payload.date_end ? `${payload.date_start} to ${payload.date_end}` : "selected window";
+            if (sessionStatus === "completed") {
+              const completeness = payload.completeness_snapshot ?? {};
+              const coverage = completeness.comments_coverage as CommentsCoverageResponse | undefined;
+              const assets = completeness.asset_coverage as MirrorCoverageResponse | undefined;
+              const coverageLabel = coverage
+                ? formatCoverageLabel(
+                    Number(coverage.total_saved_comments ?? 0),
+                    Number(coverage.total_reported_comments ?? 0),
+                  )
+                : "n/a";
+              const mirrorLabel = assets
+                ? formatMirrorCoverageLabel(
+                    Number(assets.posts_scanned ?? 0) - Number(assets.needs_mirror_count ?? 0),
+                    Number(assets.posts_scanned ?? 0),
+                  )
+                : "n/a";
+              setSyncMessage(
+                `Sync complete for ${dateLabel} · coverage ${coverageLabel}${
+                  SOCIAL_FULL_SYNC_MIRROR_ENABLED ? ` · mirror ${mirrorLabel}` : ""
+                }.`,
+              );
+              setSyncingComments(false);
+              setSyncSessionStreamConnected(false);
+              void fetchData({ sortFieldValue: sortField, sortDirValue: sortDir });
+              return;
+            }
+            if (sessionStatus === "failed" || sessionStatus === "cancelled") {
+              setSyncMessage(
+                sessionStatus === "cancelled"
+                  ? `Sync cancelled for ${dateLabel}.`
+                  : `Sync failed during ${passLabel} for ${dateLabel}.`,
+              );
+              setSyncingComments(false);
+              setSyncSessionStreamConnected(false);
+              return;
+            }
+            setSyncMessage(
+              `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel} · ${dateLabel}.`,
+            );
+          },
+        });
+      } catch (err) {
+        if (cancelled || abortController.signal.aborted) return;
+        setSyncSessionStreamConnected(false);
+        setSyncPollError(err instanceof Error ? err.message : "Failed to stream sync session");
+      }
+    };
+
+    void consume();
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+  }, [
+    fetchData,
+    fetchSyncProgress,
+    fetchSyncWeekLiveHealth,
+    getSyncRunRequestHeaders,
+    resolvedSeasonId,
+    seasonNumber,
+    showIdForApi,
+    sortDir,
+    sortField,
+    syncRunId,
+    syncSessionId,
+    syncingComments,
+    platformFilter,
+  ]);
+
+  useEffect(() => {
+    if (!syncSessionId || !syncingComments) return;
+    if (syncSessionStreamConnected) return;
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const payload = await fetchSyncSessionProgress(syncSessionId);
+        if (cancelled) return;
+        const sessionStatus = String(payload.status || "").toLowerCase();
+        const passLabel = payload.current_pass_kind
+          ? payload.current_pass_kind.replaceAll("_", " ")
+          : "sync";
+        const dateLabel =
+          payload.date_start && payload.date_end ? `${payload.date_start} to ${payload.date_end}` : "selected window";
+        if (sessionStatus === "completed") {
+          const completeness = payload.completeness_snapshot ?? {};
+          const coverage = completeness.comments_coverage as CommentsCoverageResponse | undefined;
+          const assets = completeness.asset_coverage as MirrorCoverageResponse | undefined;
+          const coverageLabel = coverage
+            ? formatCoverageLabel(
+                Number(coverage.total_saved_comments ?? 0),
+                Number(coverage.total_reported_comments ?? 0),
+              )
+            : "n/a";
+          const mirrorLabel = assets
+            ? formatMirrorCoverageLabel(
+                Number(assets.posts_scanned ?? 0) - Number(assets.needs_mirror_count ?? 0),
+                Number(assets.posts_scanned ?? 0),
+              )
+            : "n/a";
+          setSyncMessage(
+            `Sync complete for ${dateLabel} · coverage ${coverageLabel}${
+              SOCIAL_FULL_SYNC_MIRROR_ENABLED ? ` · mirror ${mirrorLabel}` : ""
+            }.`,
+          );
+          setSyncingComments(false);
+          return;
+        }
+        if (sessionStatus === "failed" || sessionStatus === "cancelled") {
+          setSyncMessage(
+            sessionStatus === "cancelled"
+              ? `Sync cancelled for ${dateLabel}.`
+              : `Sync failed during ${passLabel} for ${dateLabel}.`,
+          );
+          setSyncingComments(false);
+          return;
+        }
+        setSyncMessage(
+          `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel} · ${dateLabel}.`,
+        );
+      } catch (err) {
+        if (cancelled) return;
+        setSyncPollError(err instanceof Error ? err.message : "Failed to refresh sync session");
+      }
+      if (cancelled) return;
+      timeoutId = window.setTimeout(() => {
+        void poll();
+      }, SYNC_ACTIVE_POLL_INTERVAL_MS);
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [fetchSyncSessionProgress, syncSessionId, syncSessionStreamConnected, syncingComments]);
+
+  useEffect(() => {
     if (!syncRunId || !syncingComments) return;
 
     syncPollAbortRef.current?.abort();
@@ -6235,7 +6456,7 @@ export default function WeekDetailPage() {
     syncPollAbortRef.current = abortController;
 
     let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let timeoutId: number | null = null;
     const generation = ++syncPollGenerationRef.current;
 
     const nextPollDelayMs = (failureCount: number): number => {
@@ -6258,6 +6479,13 @@ export default function WeekDetailPage() {
         setSyncLastSuccessAt(new Date());
         const currentRun = snapshot.run;
         if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
+          if (syncSessionId) {
+            const elapsed = syncStartedAt ? ` in ${Math.round((Date.now() - syncStartedAt.getTime()) / 1000)}s` : "";
+            setSyncMessage(
+              `Pass ${syncPass || 1}/3 complete${elapsed}. Waiting for sync session follow-up...`,
+            );
+            return;
+          }
           const terminalSessionStatus =
             currentRun.status === "cancelled"
               ? "cancelled"
@@ -6425,10 +6653,11 @@ export default function WeekDetailPage() {
             platforms: session.platforms,
           });
           if (cancelled || generation !== syncPollGenerationRef.current) return;
+          const kickoffRunLabel = kickoff.runId ? kickoff.runId.slice(0, 8) : "pending";
           setSyncMessage(
             SOCIAL_FULL_SYNC_MIRROR_ENABLED
-              ? `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel} · Mirror ${mirrorLabel}.`
-              : `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoff.runId.slice(0, 8)} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel}.`,
+              ? `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoffRunLabel} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel} · Mirror ${mirrorLabel}.`
+              : `Pass ${session.pass}/${session.maxPasses} queued · run ${kickoffRunLabel} · ${kickoff.jobs} job(s) · Coverage ${coverageLabel}.`,
           );
           return;
         }
@@ -6457,7 +6686,7 @@ export default function WeekDetailPage() {
 
       if (cancelled || generation !== syncPollGenerationRef.current) return;
       const delayMs = nextPollDelayMs(syncPollFailureCountRef.current);
-      timeoutId = setTimeout(() => {
+      timeoutId = window.setTimeout(() => {
         void poll();
       }, delayMs);
     };
@@ -6477,9 +6706,11 @@ export default function WeekDetailPage() {
     requeueMirrorJobs,
     sortDir,
     sortField,
+    syncPass,
     syncRunId,
     syncOperationFlowScope,
     syncRunFlowScope,
+    syncSessionId,
     syncStartedAt,
     syncingComments,
   ]);
@@ -6487,7 +6718,7 @@ export default function WeekDetailPage() {
   useEffect(() => {
     if (!syncingComments || !hasValidNumericPathParams) return;
     let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let timeoutId: number | null = null;
 
     const pollLiveHealth = async () => {
       if (cancelled) return;
@@ -6497,7 +6728,7 @@ export default function WeekDetailPage() {
         // Keep sync polling resilient when live-health is temporarily unavailable.
       }
       if (cancelled) return;
-      timeoutId = setTimeout(() => {
+      timeoutId = window.setTimeout(() => {
         void pollLiveHealth();
       }, SYNC_ACTIVE_POLL_INTERVAL_MS);
     };
@@ -6519,6 +6750,8 @@ export default function WeekDetailPage() {
     if (!syncingComments) {
       syncSessionStateRef.current = null;
       syncStartTimeRef.current = null;
+      setSyncSessionId(null);
+      setSyncSessionProgress(null);
       setSyncElapsedDisplay("");
     }
   }, [syncingComments]);
@@ -6542,6 +6775,7 @@ export default function WeekDetailPage() {
 
   useEffect(() => {
     if (!syncingComments || !hasValidNumericPathParams) return;
+    if (syncSessionStreamConnected) return;
     const intervalId = setInterval(() => {
       void fetchData({
         refreshGalleryOnly: true,
@@ -6553,7 +6787,7 @@ export default function WeekDetailPage() {
     return () => {
       clearInterval(intervalId);
     };
-  }, [fetchData, hasValidNumericPathParams, platformFilter, sortDir, sortField, syncingComments]);
+  }, [fetchData, hasValidNumericPathParams, platformFilter, sortDir, sortField, syncSessionStreamConnected, syncingComments]);
 
   const openPostMediaLightbox = useCallback(
     (platform: string, post: AnyPost, initialIndex = 0) => {
@@ -7361,7 +7595,9 @@ export default function WeekDetailPage() {
           platformLabel: PLATFORM_LABELS[platform] ?? platform,
           handle,
           handleLabel: formatHandleLabel(handle),
-          runnerLanes: [...syncRuntimeLanes],
+          runnerLanes: [],
+          hasStarted: false,
+          nextStage: null,
           totals: { total: 0, completed: 0, failed: 0, active: 0, running: 0, waiting: 0, scraped: 0, saved: 0 },
           stages: [],
         };
@@ -7384,12 +7620,24 @@ export default function WeekDetailPage() {
         existing.totals.waiting += stageSnapshot.waiting;
         existing.totals.scraped += stageSnapshot.scraped;
         existing.totals.saved += stageSnapshot.saved;
+        const entryRunnerLanes = (entry.runner_lanes ?? [])
+          .map((lane) => String(lane || "").trim())
+          .filter((lane) => lane.length > 0);
+        if (entryRunnerLanes.length > 0) {
+          const nextRunnerLanes = new Set([...existing.runnerLanes, ...entryRunnerLanes]);
+          existing.runnerLanes = [...nextRunnerLanes].sort();
+        }
+        existing.hasStarted = existing.hasStarted || Boolean(entry.has_started);
+        if (!existing.nextStage && typeof entry.next_stage === "string" && entry.next_stage.trim()) {
+          existing.nextStage = entry.next_stage.trim();
+        }
         existing.stages.push(stageSnapshot);
         cards.set(cardId, existing);
       }
       return [...cards.values()]
         .map((card) => ({
           ...card,
+          runnerLanes: card.runnerLanes.length > 0 ? card.runnerLanes : [...syncRuntimeLanes],
           stages: [...card.stages].sort((left, right) => {
             const leftOrder = stageSortOrder[left.stage] ?? 50;
             const rightOrder = stageSortOrder[right.stage] ?? 50;
@@ -7545,6 +7793,29 @@ export default function WeekDetailPage() {
     [buildSeasonTabHref, compareAndReplaceGuarded],
   );
 
+  const handlePlatformFilterSelect = useCallback(
+    (nextFilter: PlatformFilter) => {
+      setPlatformFilter(nextFilter);
+      const nextQuery = new URLSearchParams(searchParams.toString());
+      nextQuery.delete("social_platform");
+      const nextRoute = buildSeasonSocialWeekUrl({
+        showSlug: showSlugForRouting,
+        seasonNumber,
+        weekIndex: weekIndexInt,
+        platform: nextFilter === "all" ? undefined : nextFilter,
+        query: nextQuery,
+      });
+      compareAndReplaceGuarded(nextRoute);
+    },
+    [
+      compareAndReplaceGuarded,
+      searchParams,
+      seasonNumber,
+      showSlugForRouting,
+      weekIndexInt,
+    ],
+  );
+
   if (authLoading || !isAdmin) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500">
@@ -7571,7 +7842,7 @@ export default function WeekDetailPage() {
     );
   }
 
-  const activePlatformForRoute = socialPlatform ?? undefined;
+  const activePlatformForRoute = platformFilter === "all" ? undefined : platformFilter;
   const breadcrumbShowHref = buildShowAdminUrl({ showSlug: showSlugForRouting });
   const breadcrumbSeasonHref = buildSeasonAdminUrl({
     showSlug: showSlugForRouting,
@@ -7705,7 +7976,7 @@ export default function WeekDetailPage() {
                 key={tab.key}
                 type="button"
                 onClick={() => {
-                  setPlatformFilter(tab.key);
+                  handlePlatformFilterSelect(tab.key);
                 }}
                 disabled={isRefreshingGallery || isLoadingMore || loading}
                 aria-pressed={platformFilter === tab.key}
@@ -7784,10 +8055,10 @@ export default function WeekDetailPage() {
             </button>
 
             {/* Result count */}
-            <span className="text-xs text-gray-500">
-              {allPosts.length} {allPosts.length === 1 ? "post" : "posts"}
-            </span>
-          </div>
+          <span className="text-xs text-gray-500">
+            {allPosts.length} {allPosts.length === 1 ? "post" : "posts"}
+          </span>
+        </div>
 
           {(syncMessage || syncError) && (
             <div
@@ -7800,6 +8071,86 @@ export default function WeekDetailPage() {
               {syncError ?? syncMessage}
             </div>
           )}
+
+          {syncSessionProgress && (() => {
+            const snapshot = syncSessionProgress.completeness_snapshot ?? {};
+            const syncStatus = String(syncSessionProgress.status || "").toLowerCase();
+            const retryDisabled = new Set(["initializing", "pass_running", "pass_evaluating", "completing", "cancelling"]).has(syncStatus);
+            const passLabel = String(syncSessionProgress.current_pass_kind || "sync").replaceAll("_", " ");
+            const displayStatus = String(syncSessionProgress.display_status || syncSessionProgress.status || "Sync").trim();
+            const windowLabel =
+              syncSessionProgress.date_start && syncSessionProgress.date_end
+                ? `${syncSessionProgress.date_start} to ${syncSessionProgress.date_end}`
+                : "selected window";
+            const statChipClass = "inline-flex rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700";
+            const followUpDimensions = (syncSessionProgress.follow_up_dimensions ?? snapshot.follow_up_dimensions ?? [])
+              .map((dimension) => String(dimension || "").trim())
+              .filter((dimension) => dimension.length > 0);
+            const retryActions = [
+              Number(snapshot.comment_target_count ?? snapshot.targeted_anchor_count ?? 0) > 0
+                ? ["retry_missing_comments", "Retry Comments"]
+                : null,
+              Number(snapshot.detail_target_count ?? 0) > 0 || Number(snapshot.missing_asset_count ?? 0) > 0
+                ? ["retry_failed_media", "Retry Media"]
+                : null,
+              Number(snapshot.avatar_target_count ?? 0) > 0 || Number(snapshot.missing_avatar_count ?? 0) > 0
+                ? ["retry_missing_avatars", "Retry Avatars"]
+                : null,
+              Number(snapshot.comment_media_target_count ?? 0) > 0 || Number(snapshot.missing_comment_media_count ?? 0) > 0
+                ? ["retry_missing_comment_media", "Retry Comment Media"]
+                : null,
+            ].filter((value): value is [string, string] => Array.isArray(value));
+            return (
+              <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">Sync Session</span>
+                  <span className={statChipClass}>{displayStatus}</span>
+                  <span className={statChipClass}>Pass {Math.max(1, Number(syncSessionProgress.pass_sequence ?? 1) || 1)}/3</span>
+                  <span className={statChipClass}>{passLabel}</span>
+                  <span className={statChipClass}>Attempt {Math.max(1, Number(syncSessionProgress.current_pass_attempt ?? 1) || 1)}</span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-600">{windowLabel}</p>
+                {syncSessionProgress.status_reason ? (
+                  <p className="mt-1 text-xs text-zinc-700">{syncSessionProgress.status_reason}</p>
+                ) : null}
+                {followUpDimensions.length > 0 ? (
+                  <p className="mt-1 text-xs text-zinc-600">Follow-up dimensions: {followUpDimensions.join(", ")}</p>
+                ) : null}
+                {syncSessionProgress.expected_after_current_pass ? (
+                  <p className="mt-1 text-xs text-zinc-500">{syncSessionProgress.expected_after_current_pass}</p>
+                ) : null}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className={statChipClass}>Incomplete posts {Number(snapshot.incomplete_post_count ?? 0)}</span>
+                  <span className={statChipClass}>Missing media {Number(snapshot.missing_asset_count ?? 0)}</span>
+                  <span className={statChipClass}>
+                    Missing comment media {Number(snapshot.missing_comment_media_count ?? 0)}
+                  </span>
+                  <span className={statChipClass}>Missing avatars {Number(snapshot.missing_avatar_count ?? 0)}</span>
+                  <span className={statChipClass}>Comment targets {Number(snapshot.comment_target_count ?? snapshot.targeted_anchor_count ?? 0)}</span>
+                  <span className={statChipClass}>Detail targets {Number(snapshot.detail_target_count ?? 0)}</span>
+                  <span className={statChipClass}>Avatar targets {Number(snapshot.avatar_target_count ?? 0)}</span>
+                  <span className={statChipClass}>Comment media targets {Number(snapshot.comment_media_target_count ?? 0)}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {retryActions.map(([retryKind, label]) => (
+                    <button
+                      key={retryKind}
+                      type="button"
+                      onClick={() => {
+                        void retrySyncSession(
+                          retryKind as "retry_missing_comments" | "retry_failed_media" | "retry_missing_avatars" | "retry_missing_comment_media",
+                        );
+                      }}
+                      disabled={retryDisabled || syncSessionRetryKind !== null}
+                      className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {syncSessionRetryKind === retryKind ? "Retrying..." : label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {syncResumeBanner && (
             <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
@@ -8086,6 +8437,10 @@ export default function WeekDetailPage() {
                       </div>
                       <p className="mt-1 text-[11px] text-gray-500">
                         Runner lanes: {card.runnerLanes.length > 0 ? card.runnerLanes.join(", ") : "Pending"}
+                      </p>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        {card.hasStarted ? "Started" : "Pending start"}
+                        {card.nextStage ? ` · Next stage ${formatSyncStageLabel(card.nextStage)}` : ""}
                       </p>
                       <p className="mt-1 text-[11px] tabular-nums text-gray-600">
                         {card.totals.completed + card.totals.failed}/{card.totals.total || "?"} complete

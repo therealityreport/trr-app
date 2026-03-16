@@ -24,6 +24,7 @@ const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "realations",
   "realitease",
   "settings",
+  "social",
   "social-media",
   "shows",
   "surveys",
@@ -72,6 +73,22 @@ const ROOT_SHOW_ROUTE_ADMIN_SEASON_TABS = new Set([
   "surveys",
   "videos",
 ]);
+const ROOT_SHOW_ROUTE_ADMIN_SEASON_ASSET_SEGMENTS = new Map<string, "images" | "videos" | "branding">([
+  ["images", "images"],
+  ["gallery", "images"],
+  ["media", "images"],
+  ["videos", "videos"],
+  ["branding", "branding"],
+  ["brand", "branding"],
+]);
+const ROOT_SHOW_ROUTE_ADMIN_SHOW_ASSET_SEGMENTS = new Map<string, "images" | "videos" | "branding">([
+  ["images", "images"],
+  ["gallery", "images"],
+  ["media", "images"],
+  ["videos", "videos"],
+  ["branding", "branding"],
+  ["brand", "branding"],
+]);
 const PERSON_ROUTE_ADMIN_TAB_SEGMENTS = new Set([
   "overview",
   "details",
@@ -80,6 +97,22 @@ const PERSON_ROUTE_ADMIN_TAB_SEGMENTS = new Set([
   "news",
   "credits",
   "fandom",
+]);
+const SOCIAL_WEEK_PLATFORM_SEGMENTS = new Set([
+  "instagram",
+  "tiktok",
+  "twitter",
+  "youtube",
+  "facebook",
+  "threads",
+]);
+const SOCIAL_ACCOUNT_PROFILE_PLATFORM_SEGMENTS = new Set([
+  "instagram",
+  "tiktok",
+  "twitter",
+  "youtube",
+  "facebook",
+  "threads",
 ]);
 
 function parseOptionalBoolean(value: string | undefined): boolean | null {
@@ -189,6 +222,10 @@ function isStaticPath(pathname: string): boolean {
   return /\.[^/]+$/.test(pathname);
 }
 
+function isShowsSettingsPath(pathname: string): boolean {
+  return pathname === "/shows/settings" || pathname.startsWith("/shows/settings/");
+}
+
 function isSeasonToken(value: string): boolean {
   return /^s[0-9]{1,3}$/i.test(value);
 }
@@ -221,11 +258,163 @@ function appendSearch(pathname: string, searchParams?: URLSearchParams): string 
   return search ? `${pathname}?${search}` : pathname;
 }
 
+function buildBrandsWorkspaceRedirect(
+  category: string,
+  searchParams?: URLSearchParams,
+): string {
+  const params = new URLSearchParams(searchParams?.toString() ?? "");
+  if (category === "all") {
+    params.delete("category");
+  } else {
+    params.set("category", category);
+  }
+  const search = params.toString();
+  return search ? `/brands?${search}` : "/brands";
+}
+
+function isWeekToken(value: string): boolean {
+  return /^w[0-9]{1,3}$/i.test(value);
+}
+
+function resolveSocialWeekSubTab(value: string | undefined): string | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (!normalized) return null;
+  if (normalized === "details" || normalized === "overview") return "details";
+  if (SOCIAL_WEEK_PLATFORM_SEGMENTS.has(normalized)) return normalized;
+  return null;
+}
+
+function resolveSocialAccountProfileTab(value: string | undefined): string | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (!normalized) return "stats";
+  if (normalized === "posts") return "posts";
+  if (normalized === "hashtags" || normalized === "hashtag") return "hashtags";
+  if (
+    normalized === "collaborators-tags" ||
+    normalized === "collaborators_tags" ||
+    normalized === "collaborators" ||
+    normalized === "tags"
+  ) {
+    return "collaborators-tags";
+  }
+  return null;
+}
+
+function normalizeSocialAccountHandle(value: string | undefined): string | null {
+  const normalized = value?.trim().replace(/^@+/, "").toLowerCase() ?? "";
+  if (!normalized) return null;
+  return /^[a-z0-9._-]{1,64}$/i.test(normalized) ? normalized : null;
+}
+
+function parseSocialAccountProfilePath(pathname: string): {
+  platform: string;
+  handle: string;
+  tab: string;
+  canonicalPath: string;
+} | null {
+  const segments = toPathSegments(pathname);
+  if (segments.length === 0) return null;
+
+  let offset = -1;
+  const first = segments[0]?.toLowerCase() ?? "";
+  const second = segments[1]?.toLowerCase() ?? "";
+  if (first === "social") {
+    offset = 1;
+  } else if (first === "admin" && second === "social") {
+    offset = 2;
+  } else {
+    return null;
+  }
+
+  if (segments.length < offset + 2 || segments.length > offset + 3) return null;
+
+  const platform = segments[offset]?.trim().toLowerCase() ?? "";
+  const handle = normalizeSocialAccountHandle(segments[offset + 1]);
+  const tab = resolveSocialAccountProfileTab(segments[offset + 2]);
+  if (!SOCIAL_ACCOUNT_PROFILE_PLATFORM_SEGMENTS.has(platform) || !handle || !tab) return null;
+
+  return {
+    platform,
+    handle,
+    tab,
+    canonicalPath:
+      tab === "stats"
+        ? `/admin/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`
+        : `/admin/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/${tab}`,
+  };
+}
+
+function mapLegacyAdminSocialPath(pathname: string, searchParams?: URLSearchParams): string | null {
+  if (pathname === "/social-media" || pathname === "/admin/social-media") {
+    return appendSearch("/admin/social", searchParams);
+  }
+  if (pathname.startsWith("/admin/social-media/")) {
+    return appendSearch(`/admin/social/${pathname.slice("/admin/social-media/".length)}`, searchParams);
+  }
+  return null;
+}
+
+function parseShortSeasonSocialWeekPath(segments: string[]): {
+  showSegment: string;
+  seasonNumber: string;
+  weekNumber: string;
+  subTab: string | null;
+} | null {
+  if (segments.length < 4 || segments.length > 5) return null;
+  const [showSegment, seasonToken, socialSegment, weekToken, subTabSegment] = segments;
+  if (!showSegment || !isSeasonToken(seasonToken ?? "")) return null;
+  if ((socialSegment ?? "").trim().toLowerCase() !== "social") return null;
+  if (!isWeekToken(weekToken ?? "")) return null;
+  const subTab = resolveSocialWeekSubTab(subTabSegment);
+  if (segments.length === 5 && !subTab) return null;
+  return {
+    showSegment,
+    seasonNumber: (seasonToken ?? "").slice(1),
+    weekNumber: (weekToken ?? "").slice(1),
+    subTab,
+  };
+}
+
+function parseLongSeasonSocialWeekPath(segments: string[]): {
+  showSegment: string;
+  seasonNumber: string;
+  weekNumber: string;
+  subTab: string | null;
+} | null {
+  if (segments.length < 6 || segments.length > 7) return null;
+  const [showSegment, seasonsSegment, seasonNumber, socialSegment, weekSegment, weekNumber, subTabSegment] =
+    segments;
+  if (!showSegment) return null;
+  if ((seasonsSegment ?? "").trim().toLowerCase() !== "seasons") return null;
+  if (!/^[0-9]{1,3}$/.test(seasonNumber ?? "")) return null;
+  if ((socialSegment ?? "").trim().toLowerCase() !== "social") return null;
+  if ((weekSegment ?? "").trim().toLowerCase() !== "week") return null;
+  if (!/^[0-9]{1,3}$/.test(weekNumber ?? "")) return null;
+  const subTab = resolveSocialWeekSubTab(subTabSegment);
+  if (segments.length === 7 && !subTab) return null;
+  return {
+    showSegment,
+    seasonNumber: seasonNumber ?? "",
+    weekNumber: weekNumber ?? "",
+    subTab,
+  };
+}
+
 function isCanonicalShortAdminPath(pathname: string): boolean {
-  return isRootShowUiPath(pathname) || isPublicPersonDetailPath(pathname);
+  return isRootShowUiPath(pathname) || isPublicPersonDetailPath(pathname) || isShowsSettingsPath(pathname);
 }
 
 function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchParams): string | null {
+  const legacyAdminSocialPath = mapLegacyAdminSocialPath(pathname, searchParams);
+  if (legacyAdminSocialPath) {
+    return legacyAdminSocialPath;
+  }
+
+  const socialAccountProfilePath = parseSocialAccountProfilePath(pathname);
+  if (socialAccountProfilePath && pathname !== socialAccountProfilePath.canonicalPath) {
+    return appendSearch(socialAccountProfilePath.canonicalPath, searchParams);
+  }
+
   const segments = toPathSegments(pathname);
   if (segments.length === 0) {
     return null;
@@ -236,6 +425,9 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   const normalizedSecond = secondSegment?.toLowerCase() ?? "";
 
   if (normalizedFirst === "shows" && secondSegment) {
+    if (normalizedSecond === "settings") {
+      return null;
+    }
     if (segments.length === 2) {
       return appendSearch(`/${encodeURIComponent(secondSegment)}`, searchParams);
     }
@@ -251,6 +443,15 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
         searchParams,
       );
     }
+  }
+
+  const longSeasonSocialWeekPath = parseLongSeasonSocialWeekPath(segments);
+  if (longSeasonSocialWeekPath) {
+    const canonicalSubTab = longSeasonSocialWeekPath.subTab ?? "details";
+    return appendSearch(
+      `/${encodeURIComponent(longSeasonSocialWeekPath.showSegment)}/s${longSeasonSocialWeekPath.seasonNumber}/social/w${longSeasonSocialWeekPath.weekNumber}/${canonicalSubTab}`,
+      searchParams,
+    );
   }
 
   if (normalizedFirst === "people" && secondSegment && segments.length === 2) {
@@ -302,10 +503,38 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
     return appendSearch(`/${encodedShowSegment}`, searchParams);
   }
 
+  if (
+    showTail.length >= 5 &&
+    showTail[0]?.toLowerCase() === "seasons" &&
+    /^[0-9]{1,3}$/.test(showTail[1] ?? "") &&
+    showTail[2]?.toLowerCase() === "social" &&
+    showTail[3]?.toLowerCase() === "week" &&
+    /^[0-9]{1,3}$/.test(showTail[4] ?? "")
+  ) {
+    const canonicalSubTab = resolveSocialWeekSubTab(showTail[5]) ?? "details";
+    return appendSearch(
+      `/${encodedShowSegment}/s${showTail[1]}/social/w${showTail[4]}/${canonicalSubTab}`,
+      searchParams,
+    );
+  }
+
   const firstTail = showTail[0] ?? "";
   const normalizedFirstTail = firstTail.trim().toLowerCase();
   if (normalizedFirstTail === "overview" || normalizedFirstTail === "details") {
     return appendSearch(`/${encodedShowSegment}`, searchParams);
+  }
+  if (normalizedFirstTail.startsWith("season-")) {
+    const validSeasonAlias = /^season-([0-9]{1,3})$/i.test(normalizedFirstTail);
+    if (!validSeasonAlias) {
+      return null;
+    }
+  }
+  if (
+    normalizedFirstTail === "seasons" &&
+    showTail.length > 1 &&
+    !/^[0-9]{1,3}$/.test(showTail[1] ?? "")
+  ) {
+    return null;
   }
 
   const seasonMatch = normalizedFirstTail.match(/^season-([0-9]{1,3})$/i);
@@ -329,6 +558,18 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
 }
 
 function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchParams): string | null {
+  const legacyAdminSocialPath = mapLegacyAdminSocialPath(pathname, searchParams);
+  if (legacyAdminSocialPath) {
+    return legacyAdminSocialPath;
+  }
+
+  const socialAccountProfilePath = parseSocialAccountProfilePath(pathname);
+  if (socialAccountProfilePath) {
+    return pathname === socialAccountProfilePath.canonicalPath
+      ? null
+      : appendSearch(socialAccountProfilePath.canonicalPath, searchParams);
+  }
+
   const segments = toPathSegments(pathname);
   if (segments.length === 0) {
     return null;
@@ -340,12 +581,15 @@ function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchPa
   const normalizedThird = thirdSegment?.toLowerCase() ?? "";
 
   if (pathname === "/social-media") {
-    return "/admin/social-media";
+    return "/admin/social";
   }
 
   if (normalizedFirst === "shows") {
     if (segments.length === 1) {
       return "/admin/shows";
+    }
+    if (segments.length === 2 && normalizedSecond === "settings") {
+      return "/admin/shows/settings";
     }
     if (segments.length === 2 && secondSegment) {
       return `/admin/trr-shows/${encodeURIComponent(secondSegment)}`;
@@ -382,6 +626,15 @@ function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchPa
     return null;
   }
 
+  const shortSeasonSocialWeekPath = parseShortSeasonSocialWeekPath(segments);
+  if (shortSeasonSocialWeekPath) {
+    const basePath = `/admin/trr-shows/${encodeURIComponent(shortSeasonSocialWeekPath.showSegment)}/seasons/${encodeURIComponent(shortSeasonSocialWeekPath.seasonNumber)}/social/week/${encodeURIComponent(shortSeasonSocialWeekPath.weekNumber)}`;
+    if (!shortSeasonSocialWeekPath.subTab || shortSeasonSocialWeekPath.subTab === "details") {
+      return basePath;
+    }
+    return `${basePath}/${encodeURIComponent(shortSeasonSocialWeekPath.subTab)}`;
+  }
+
   if (segments.length === 1) {
     return `/admin/trr-shows/${encodeURIComponent(firstSegment)}`;
   }
@@ -390,15 +643,18 @@ function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchPa
     const normalizedFourth = fourthSegment?.toLowerCase() ?? "";
     const isRedditFamily =
       normalizedThird === "reddit" || (normalizedThird === "official" && normalizedFourth === "reddit");
-    if (!isRedditFamily) {
-      return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/social`;
+    const query = new URLSearchParams();
+    if (isRedditFamily) {
+      query.set("social_view", "reddit");
     }
+    return appendSearch(`/admin/trr-shows/${encodeURIComponent(firstSegment)}/social`, query);
   }
 
   if (isSeasonToken(secondSegment ?? "")) {
     const seasonNumber = (secondSegment ?? "").slice(1);
+    const basePath = `/admin/trr-shows/${encodeURIComponent(firstSegment)}/seasons/${encodeURIComponent(seasonNumber)}`;
     if (segments.length === 2) {
-      return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/seasons/${encodeURIComponent(seasonNumber)}`;
+      return basePath;
     }
     if (segments.length === 3 && ROOT_SHOW_ROUTE_ADMIN_SEASON_TABS.has(normalizedThird)) {
       const query = new URLSearchParams();
@@ -407,17 +663,50 @@ function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchPa
       } else if (normalizedThird !== "overview" && normalizedThird !== "details") {
         query.set("tab", normalizedThird);
       }
-      const basePath = `/admin/trr-shows/${encodeURIComponent(firstSegment)}/seasons/${encodeURIComponent(seasonNumber)}`;
       return appendSearch(basePath, query);
     }
-    return null;
+    if (segments.length === 4 && (normalizedThird === "assets" || normalizedThird === "media")) {
+      const assetSubTab = ROOT_SHOW_ROUTE_ADMIN_SEASON_ASSET_SEGMENTS.get(fourthSegment?.toLowerCase() ?? "");
+      if (!assetSubTab) {
+        return basePath;
+      }
+      const query = new URLSearchParams();
+      query.set("tab", "assets");
+      if (assetSubTab !== "images") {
+        query.set("assets", assetSubTab);
+      }
+      return appendSearch(basePath, query);
+    }
+    if (normalizedThird === "social") {
+      const query = new URLSearchParams();
+      query.set("tab", "social");
+      const normalizedFourth = fourthSegment?.toLowerCase() ?? "";
+      const normalizedFifth = segments[4]?.toLowerCase() ?? "";
+      const isRedditFamily =
+        normalizedFourth === "reddit" || (normalizedFourth === "official" && normalizedFifth === "reddit");
+      if (isRedditFamily) {
+        query.set("social_view", "reddit");
+      }
+      return appendSearch(basePath, query);
+    }
+    return basePath;
   }
 
   if (segments.length === 2 && ROOT_SHOW_ROUTE_ADMIN_SECTION_SEGMENTS.has(normalizedSecond)) {
     return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/${normalizedSecond}`;
   }
+  if (segments.length === 3 && (normalizedSecond === "assets" || normalizedSecond === "media")) {
+    const assetSubTab = ROOT_SHOW_ROUTE_ADMIN_SHOW_ASSET_SEGMENTS.get(normalizedThird);
+    if (!assetSubTab) {
+      return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/assets`;
+    }
+    if (assetSubTab === "images") {
+      return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/assets`;
+    }
+    return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/assets/${assetSubTab}`;
+  }
 
-  return null;
+  return `/admin/trr-shows/${encodeURIComponent(firstSegment)}`;
 }
 
 function isPublicPersonDetailPath(pathname: string): boolean {
@@ -429,7 +718,7 @@ function isPublicUiPath(pathname: string): boolean {
     pathname === "/social-media" ||
     pathname.startsWith("/social-media/") ||
     pathname === "/shows" ||
-    pathname.startsWith("/shows/") ||
+    (pathname.startsWith("/shows/") && !isShowsSettingsPath(pathname)) ||
     isRootShowUiPath(pathname) ||
     isPublicPersonDetailPath(pathname)
   );
@@ -453,6 +742,7 @@ function isAdminUiPath(pathname: string): boolean {
     pathname.startsWith("/groups/") ||
     pathname === "/settings" ||
     pathname.startsWith("/settings/") ||
+    isShowsSettingsPath(pathname) ||
     pathname === "/surveys" ||
     pathname.startsWith("/surveys/") ||
     pathname === "/users" ||
@@ -461,19 +751,36 @@ function isAdminUiPath(pathname: string): boolean {
   );
 }
 
-function mapLegacyBrandsPath(pathname: string): string | null {
-  if (pathname === "/admin/brands") return "/brands";
-  if (pathname === "/admin/networks-and-streaming") return "/brands/networks-and-streaming";
+function mapLegacyBrandsPath(pathname: string, searchParams?: URLSearchParams): string | null {
+  if (pathname === "/admin/brands") return appendSearch("/brands", searchParams);
+  if (pathname.startsWith("/admin/brands/")) {
+    return appendSearch(pathname.replace("/admin/brands/", "/brands/"), searchParams);
+  }
+  if (pathname === "/brands/networks-and-streaming" || pathname === "/admin/networks-and-streaming") {
+    return buildBrandsWorkspaceRedirect("all", searchParams);
+  }
   if (pathname.startsWith("/admin/networks-and-streaming/")) {
-    return pathname.replace("/admin/networks-and-streaming/", "/brands/networks-and-streaming/");
+    return appendSearch(
+      pathname.replace("/admin/networks-and-streaming/", "/brands/networks-and-streaming/"),
+      searchParams,
+    );
   }
-  if (pathname === "/admin/networks") return "/brands/networks-and-streaming";
+  if (pathname === "/admin/networks") return buildBrandsWorkspaceRedirect("all", searchParams);
   if (pathname.startsWith("/admin/networks/")) {
-    return pathname.replace("/admin/networks/", "/brands/networks-and-streaming/");
+    return appendSearch(pathname.replace("/admin/networks/", "/brands/networks-and-streaming/"), searchParams);
   }
-  if (pathname === "/admin/production-companies") return "/brands/production-companies";
-  if (pathname === "/admin/news") return "/brands/news";
-  if (pathname === "/admin/other") return "/brands/other";
+  if (pathname === "/brands/production-companies" || pathname === "/admin/production-companies") {
+    return buildBrandsWorkspaceRedirect("production", searchParams);
+  }
+  if (pathname === "/brands/shows-and-franchises") {
+    return buildBrandsWorkspaceRedirect("shows", searchParams);
+  }
+  if (pathname === "/brands/news" || pathname === "/admin/news") {
+    return buildBrandsWorkspaceRedirect("publication", searchParams);
+  }
+  if (pathname === "/brands/other" || pathname === "/admin/other") {
+    return buildBrandsWorkspaceRedirect("other", searchParams);
+  }
   return null;
 }
 
@@ -499,7 +806,7 @@ export function proxy(request: NextRequest): NextResponse {
   const requestHost = normalizeHost(request.headers.get("host")) ?? normalizeHost(request.nextUrl.hostname);
   const onCanonicalAdminHost = hostsMatch(canonicalAdminHost, requestHost);
   const isInternalAdminRewrite = request.headers.get(INTERNAL_ADMIN_REWRITE_HEADER) === "1";
-  const legacyBrandsPath = mapLegacyBrandsPath(pathname);
+  const legacyBrandsPath = mapLegacyBrandsPath(pathname, request.nextUrl.searchParams);
 
   if (legacyBrandsPath) {
     const redirectOrigin = onCanonicalAdminHost ? request.nextUrl.origin : adminOrigin;

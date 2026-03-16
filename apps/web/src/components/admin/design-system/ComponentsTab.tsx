@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import CastCircleToken from "@/components/survey/CastCircleToken";
 import IconRatingInput from "@/components/survey/IconRatingInput";
 import type { DesignSystemSubtabId } from "@/lib/admin/design-system-routing";
-import { RHOSLC_S6_CAST_MEMBERS, RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL } from "@/lib/surveys/rhoslc-assets";
+import { RHOSLC_S6_CAST_MEMBERS, RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH } from "@/lib/surveys/rhoslc-assets";
 
 type ComponentScope = "shared" | "admin-only" | "survey-only";
 type ComponentSectionId = "ui" | "admin" | "survey" | "layout" | "overlays";
@@ -689,7 +689,7 @@ function IconRatingPreview() {
         min={0}
         max={5}
         step={0.5}
-        iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL}
+        iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH}
         iconCount={5}
         sizePx={30}
         fillColor="#0EA5E9"

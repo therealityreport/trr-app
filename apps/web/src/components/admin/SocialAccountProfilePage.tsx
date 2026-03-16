@@ -316,7 +316,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const headerTitle = `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} · @${handle}`;
   const breadcrumbs = [
-    ...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social-media"),
+    ...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social"),
     { label: `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} @${handle}`, href: buildSocialAccountProfileUrl({ platform, handle }) },
   ];
 

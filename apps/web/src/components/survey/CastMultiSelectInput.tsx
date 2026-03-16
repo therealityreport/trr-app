@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { CastMultiSelectConfig } from "@/lib/surveys/question-config-types";
 import SurveyContinueButton from "./SurveyContinueButton";
@@ -371,6 +372,37 @@ export default function CastMultiSelectInput({
     () => Math.round(interpolate(20, 30, progress)),
     [progress],
   );
+  const headingTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "cast-multi-select",
+      instanceKey: "question",
+      role: "heading",
+    },
+    {
+      fontFamily: headingFontFamily,
+      fontSize: `${headingSize}px`,
+      fontWeight: "800",
+      lineHeight: "0.95",
+      letterSpacing: "0.01em",
+    },
+  );
+  const subheadingTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "cast-multi-select",
+      instanceKey: "question",
+      role: "subheading",
+    },
+    {
+      fontFamily: subheadingFontFamily,
+      fontSize: `${subheadingSize}px`,
+      fontWeight: "700",
+      lineHeight: "1",
+      letterSpacing: "0.03em",
+      textTransform: "uppercase",
+    },
+  );
 
   return (
     <div
@@ -392,10 +424,7 @@ export default function CastMultiSelectInput({
           marginTop: `${headingMarginTop}px`,
           maxWidth: "min(100%, 1120px)",
           color: headingColor,
-          fontFamily: headingFontFamily,
-          fontSize: `${headingSize}px`,
-          fontWeight: 800,
-          letterSpacing: "0.01em",
+          ...headingTypographyStyle,
         }}
       >
         {question.question_text}
@@ -406,10 +435,7 @@ export default function CastMultiSelectInput({
         style={{
           marginTop: `${subheadingMarginTop}px`,
           color: subheadingColor,
-          fontFamily: subheadingFontFamily,
-          fontSize: `${subheadingSize}px`,
-          fontWeight: 700,
-          letterSpacing: "0.03em",
+          ...subheadingTypographyStyle,
         }}
       >
         {selectionPrompt}

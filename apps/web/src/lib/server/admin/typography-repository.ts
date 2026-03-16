@@ -1,0 +1,376 @@
+import "server-only";
+
+import { query } from "@/lib/server/postgres";
+import { buildSeededTypographyState, buildTypographyStateSnapshot } from "@/lib/server/admin/typography-seed";
+import { normalizeRoleConfig } from "@/lib/typography/runtime";
+import type {
+  TypographyArea,
+  TypographyAssignment,
+  TypographyRoleConfig,
+  TypographySet,
+  TypographyState,
+} from "@/lib/typography/types";
+
+type TypographySetRow = {
+  id: string;
+  slug: string;
+  name: string;
+  area: TypographyArea;
+  seed_source: string;
+  roles: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+type TypographyAssignmentRow = {
+  id: string;
+  area: TypographyArea;
+  page_key: string | null;
+  instance_key: string | null;
+  set_id: string;
+  source_path: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+let schemaEnsured = false;
+let schemaEnsuring: Promise<void> | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseRoles(value: unknown): Record<string, TypographyRoleConfig> {
+  if (!isRecord(value)) return {};
+  const next: Record<string, TypographyRoleConfig> = {};
+  for (const [key, role] of Object.entries(value)) {
+    const normalized = normalizeRoleConfig(role as Partial<TypographyRoleConfig>);
+    if (!normalized) continue;
+    next[key] = normalized;
+  }
+  return next;
+}
+
+function mapSet(row: TypographySetRow): TypographySet {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    area: row.area,
+    seedSource: row.seed_source,
+    roles: parseRoles(row.roles),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapAssignment(row: TypographyAssignmentRow): TypographyAssignment {
+  return {
+    id: row.id,
+    area: row.area,
+    pageKey: row.page_key,
+    instanceKey: row.instance_key,
+    setId: row.set_id,
+    sourcePath: row.source_path,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function isConcurrentUpdateError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown };
+  return record.code === "XX000" && typeof record.message === "string" && record.message.includes("tuple concurrently updated");
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureTypographySchema(): Promise<void> {
+  if (schemaEnsured) return;
+  if (schemaEnsuring) return schemaEnsuring;
+
+  schemaEnsuring = (async () => {
+    await query(`
+      CREATE TABLE IF NOT EXISTS site_typography_sets (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        slug text NOT NULL UNIQUE,
+        name text NOT NULL,
+        area text NOT NULL CHECK (area IN ('user-frontend', 'surveys', 'admin')),
+        seed_source text NOT NULL,
+        roles jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS site_typography_assignments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        area text NOT NULL CHECK (area IN ('user-frontend', 'surveys', 'admin')),
+        page_key text,
+        instance_key text,
+        set_id uuid NOT NULL REFERENCES site_typography_sets(id) ON DELETE RESTRICT,
+        source_path text NOT NULL,
+        notes text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    await query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_site_typography_assignments_scope
+      ON site_typography_assignments (
+        area,
+        COALESCE(page_key, ''),
+        COALESCE(instance_key, '')
+      )
+    `);
+
+    await query(`
+      CREATE INDEX IF NOT EXISTS idx_site_typography_assignments_set_id
+      ON site_typography_assignments (set_id)
+    `);
+
+    await query(`
+      CREATE OR REPLACE FUNCTION set_site_typography_updated_at()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        NEW.updated_at = now();
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    `);
+
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgname = 'trg_site_typography_sets_updated_at'
+        ) THEN
+          CREATE TRIGGER trg_site_typography_sets_updated_at
+          BEFORE UPDATE ON site_typography_sets
+          FOR EACH ROW EXECUTE FUNCTION set_site_typography_updated_at();
+        END IF;
+      END;
+      $$;
+    `);
+
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgname = 'trg_site_typography_assignments_updated_at'
+        ) THEN
+          CREATE TRIGGER trg_site_typography_assignments_updated_at
+          BEFORE UPDATE ON site_typography_assignments
+          FOR EACH ROW EXECUTE FUNCTION set_site_typography_updated_at();
+        END IF;
+      END;
+      $$;
+    `);
+
+    schemaEnsured = true;
+    schemaEnsuring = null;
+  })();
+
+  return schemaEnsuring;
+}
+
+async function seedTypographyIfMissing(): Promise<void> {
+  await ensureTypographySchema();
+
+  const seeded = buildSeededTypographyState();
+
+  for (const set of seeded.sets) {
+    await query(
+      `INSERT INTO site_typography_sets (slug, name, area, seed_source, roles)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       ON CONFLICT (slug) DO NOTHING`,
+      [set.slug, set.name, set.area, set.seedSource, JSON.stringify(set.roles)],
+    );
+  }
+
+  const existingSetsResult = await query<TypographySetRow>(
+    `SELECT id, slug, name, area, seed_source, roles, created_at, updated_at
+     FROM site_typography_sets`
+  );
+  const setIdBySlug = new Map(existingSetsResult.rows.map((row) => [row.slug, row.id]));
+
+  for (const assignment of seeded.assignments) {
+    const setId = setIdBySlug.get(assignment.setSlug);
+    if (!setId) continue;
+    await query(
+      `INSERT INTO site_typography_assignments (area, page_key, instance_key, set_id, source_path, notes)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (
+         area,
+         COALESCE(page_key, ''),
+         COALESCE(instance_key, '')
+       ) DO NOTHING`,
+      [assignment.area, assignment.pageKey, assignment.instanceKey, setId, assignment.sourcePath, assignment.notes],
+    );
+  }
+}
+
+export async function getTypographyState(): Promise<TypographyState> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await seedTypographyIfMissing();
+      const [setsResult, assignmentsResult] = await Promise.all([
+        query<TypographySetRow>(
+          `SELECT id, slug, name, area, seed_source, roles, created_at, updated_at
+           FROM site_typography_sets
+           ORDER BY area ASC, name ASC`
+        ),
+        query<TypographyAssignmentRow>(
+          `SELECT id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at
+           FROM site_typography_assignments
+           ORDER BY area ASC, page_key ASC NULLS FIRST, instance_key ASC NULLS FIRST, source_path ASC`
+        ),
+      ]);
+
+      if (setsResult.rows.length > 0 || assignmentsResult.rows.length > 0) {
+        return {
+          sets: setsResult.rows.map(mapSet),
+          assignments: assignmentsResult.rows.map(mapAssignment),
+        };
+      }
+    } catch (error) {
+      if (!isConcurrentUpdateError(error) || attempt === 3) {
+        throw error;
+      }
+    }
+
+    await sleep(50 * attempt);
+  }
+
+  return buildTypographyStateSnapshot();
+}
+
+export interface CreateTypographySetInput {
+  slug?: string;
+  name: string;
+  area: TypographyArea;
+  seedSource: string;
+  roles: Record<string, TypographyRoleConfig>;
+}
+
+export async function createTypographySet(input: CreateTypographySetInput): Promise<TypographySet> {
+  await seedTypographyIfMissing();
+  const slug = (input.slug?.trim() || input.name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const result = await query<TypographySetRow>(
+    `INSERT INTO site_typography_sets (slug, name, area, seed_source, roles)
+     VALUES ($1, $2, $3, $4, $5::jsonb)
+     RETURNING id, slug, name, area, seed_source, roles, created_at, updated_at`,
+    [slug, input.name.trim(), input.area, input.seedSource.trim(), JSON.stringify(input.roles)],
+  );
+  return mapSet(result.rows[0]!);
+}
+
+export interface UpdateTypographySetInput {
+  name?: string;
+  area?: TypographyArea;
+  seedSource?: string;
+  roles?: Record<string, TypographyRoleConfig>;
+}
+
+export async function updateTypographySet(setId: string, input: UpdateTypographySetInput): Promise<TypographySet | null> {
+  await seedTypographyIfMissing();
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let index = 1;
+
+  if (input.name !== undefined) {
+    updates.push(`name = $${index++}`);
+    values.push(input.name.trim());
+  }
+  if (input.area !== undefined) {
+    updates.push(`area = $${index++}`);
+    values.push(input.area);
+  }
+  if (input.seedSource !== undefined) {
+    updates.push(`seed_source = $${index++}`);
+    values.push(input.seedSource.trim());
+  }
+  if (input.roles !== undefined) {
+    updates.push(`roles = $${index++}::jsonb`);
+    values.push(JSON.stringify(input.roles));
+  }
+
+  if (updates.length === 0) {
+    const state = await getTypographyState();
+    return state.sets.find((set) => set.id === setId) ?? null;
+  }
+
+  values.push(setId);
+  const result = await query<TypographySetRow>(
+    `UPDATE site_typography_sets
+     SET ${updates.join(", ")}
+     WHERE id = $${index}
+     RETURNING id, slug, name, area, seed_source, roles, created_at, updated_at`,
+    values,
+  );
+  return result.rows[0] ? mapSet(result.rows[0]) : null;
+}
+
+export async function deleteTypographySet(setId: string): Promise<"deleted" | "in-use" | "missing"> {
+  await seedTypographyIfMissing();
+  const assignments = await query<{ count: string }>(
+    `SELECT count(*)::text AS count
+     FROM site_typography_assignments
+     WHERE set_id = $1`,
+    [setId],
+  );
+  if (Number(assignments.rows[0]?.count ?? "0") > 0) {
+    return "in-use";
+  }
+  const result = await query(`DELETE FROM site_typography_sets WHERE id = $1`, [setId]);
+  return (result.rowCount ?? 0) > 0 ? "deleted" : "missing";
+}
+
+export interface UpdateTypographyAssignmentInput {
+  area: TypographyArea;
+  pageKey?: string | null;
+  instanceKey?: string | null;
+  setId: string;
+  sourcePath: string;
+  notes?: string | null;
+}
+
+export async function upsertTypographyAssignment(input: UpdateTypographyAssignmentInput): Promise<TypographyAssignment> {
+  await seedTypographyIfMissing();
+  const existing = await query<TypographyAssignmentRow>(
+    `SELECT id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at
+     FROM site_typography_assignments
+     WHERE area = $1
+       AND COALESCE(page_key, '') = COALESCE($2, '')
+       AND COALESCE(instance_key, '') = COALESCE($3, '')`,
+    [input.area, input.pageKey ?? null, input.instanceKey ?? null],
+  );
+
+  if (existing.rows[0]) {
+    const updated = await query<TypographyAssignmentRow>(
+      `UPDATE site_typography_assignments
+       SET set_id = $1, source_path = $2, notes = $3
+       WHERE id = $4
+       RETURNING id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at`,
+      [input.setId, input.sourcePath.trim(), input.notes ?? null, existing.rows[0].id],
+    );
+    return mapAssignment(updated.rows[0]!);
+  }
+
+  const inserted = await query<TypographyAssignmentRow>(
+    `INSERT INTO site_typography_assignments (area, page_key, instance_key, set_id, source_path, notes)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at`,
+    [input.area, input.pageKey ?? null, input.instanceKey ?? null, input.setId, input.sourcePath.trim(), input.notes ?? null],
+  );
+  return mapAssignment(inserted.rows[0]!);
+}

@@ -12,6 +12,7 @@ import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { buildShowAdminUrl } from "@/lib/admin/show-admin-routes";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 interface TrrShow {
   id: string;
@@ -24,7 +25,7 @@ interface TrrShow {
   show_total_seasons: number | null;
   show_total_episodes: number | null;
   description: string | null;
-  networks: string[];
+  networks?: string[] | null;
   genres: string[];
   tmdb_status: string | null;
   tmdb_vote_average: number | null;
@@ -144,8 +145,12 @@ const normalizePosterUrl = (value: unknown): string | null => {
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return canonicalizeHostedMediaUrl(trimmed) ?? trimmed;
+  }
+  if (trimmed.startsWith("//")) {
+    return canonicalizeHostedMediaUrl(`https:${trimmed}`) ?? `https:${trimmed}`;
+  }
   if (trimmed.startsWith("/")) return `https://image.tmdb.org/t/p/original${trimmed}`;
   return null;
 };
@@ -436,7 +441,29 @@ export default function TrrShowsPage() {
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Shows", "/shows")} className="mb-1" />
-              <h1 className="text-3xl font-bold text-zinc-900">Shows</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-bold text-zinc-900">Shows</h1>
+                <Link
+                  href="/shows/settings"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-100"
+                  aria-label="Open show settings"
+                  title="Open show settings"
+                >
+                  <svg
+                    className="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                </Link>
+              </div>
               <p className="text-sm text-zinc-500">
                 Browse shows from the TRR metadata database. Create surveys and
                 manage social posts.
@@ -500,7 +527,7 @@ export default function TrrShowsPage() {
                       {results.shows.map((show) => {
                         const isCovered = coveredShowIds.has(show.id);
                         const displayName = getShowDisplayName(show);
-                        const networks = show.networks.slice(0, 2).join(" · ");
+                        const networks = (show.networks ?? []).slice(0, 2).join(" · ");
                         const routeSlug = resolvePreferredShowRouteSlug({
                           alternativeNames: show.alternative_names,
                           canonicalSlug: show.canonical_slug,

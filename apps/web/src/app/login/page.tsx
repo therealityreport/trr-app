@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, signInWithGoogle } from "@/lib/firebase";
 import { getUserProfile } from "@/lib/db/users";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 interface FieldErrors {
   email?: string;
@@ -111,7 +112,7 @@ function LoginContent() {
         
         {/* Heading Container */}
         <div className="w-full flex items-center justify-center mb-6">
-          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
+          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "heroTitle" })}>
             Log in to your account
           </h2>
         </div>
@@ -134,7 +135,7 @@ function LoginContent() {
           {/* Email Field Container */}
           <div className="w-full">
             <div className="h-[21px] mb-2">
-              <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+              <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "label" })}>
                 Email address
               </label>
             </div>
@@ -147,6 +148,7 @@ function LoginContent() {
                 autoCapitalize="off"
                 autoComplete="username"
                 className="w-full h-full bg-white rounded-[3px] border border-zinc-500 px-3 pr-12 text-black text-base font-hamburg font-medium outline-none"
+                {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "input" })}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={pending}
@@ -160,13 +162,13 @@ function LoginContent() {
                 Edit
               </button>
             </div>
-            {errors.email && <p className="text-sm text-red-600 font-hamburg">{errors.email}</p>}
+            {errors.email && <p className="text-sm text-red-600 font-hamburg" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "body" })}>{errors.email}</p>}
           </div>
 
           {/* Password Field Container */}
           <div className="w-full">
             <div className="h-[21px] mb-2">
-              <label htmlFor="password" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+              <label htmlFor="password" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "label" })}>
                 Password
               </label>
             </div>
@@ -178,19 +180,21 @@ function LoginContent() {
                 maxLength={128}
                 autoComplete="current-password"
                 className="w-full h-full bg-white rounded-[3px] border border-zinc-500 px-3 text-black text-base font-hamburg font-medium outline-none"
+                {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "input" })}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={pending}
                 required
               />
             </div>
-            {errors.password && <p className="text-sm text-red-600 font-hamburg">{errors.password}</p>}
+            {errors.password && <p className="text-sm text-red-600 font-hamburg" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "body" })}>{errors.password}</p>}
           </div>
 
           {/* Log In Button Container */}
           <button 
             type="submit"
             className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center disabled:opacity-60"
+            {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "cta" })}
             disabled={pending}
           >
             {pending ? "Logging in…" : "Log in"}
@@ -230,7 +234,7 @@ function LoginContent() {
             <path fillRule="evenodd" clipRule="evenodd" d="M4.09409 11.1498C3.91409 10.6098 3.81182 10.033 3.81182 9.43983C3.81182 8.84664 3.91409 8.26983 4.09409 7.72983V5.39801H1.08728C0.477732 6.61301 0.130005 7.98755 0.130005 9.43983C0.130005 10.8921 0.477732 12.2666 1.08728 13.4816L4.09409 11.1498Z" fill="#FBBC05"/>
             <path fillRule="evenodd" clipRule="evenodd" d="M9.12976 4.01955C10.4511 4.01955 11.6375 4.47364 12.5702 5.36545L15.1516 2.78409C13.5929 1.33182 11.5557 0.440002 9.12976 0.440002C5.61158 0.440002 2.56795 2.45682 1.08704 5.39818L4.09386 7.73C4.80159 5.60273 6.78567 4.01955 9.12976 4.01955Z" fill="#EA4335"/>
           </svg>
-          <span className="text-neutral-900 text-base font-hamburg font-normal leading-6">
+          <span className="text-neutral-900 text-base font-hamburg font-normal leading-6" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "body" })}>
             {pending ? "Opening Google…" : "Continue with Google"}
           </span>
         </button>
@@ -248,7 +252,7 @@ function LoginContent() {
 
         {/* Link to register */}
         <div className="w-full text-center">
-          <p className="text-black text-sm font-hamburg font-normal leading-[21px]">
+          <p className="text-black text-sm font-hamburg font-normal leading-[21px]" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "login", instanceKey: "auth-form", role: "body" })}>
             Don&apos;t have an account?{" "}
             <button
               type="button"

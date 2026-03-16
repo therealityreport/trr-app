@@ -1,16 +1,12 @@
-/* eslint-disable @next/next/no-img-element */
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import AdminBrandsPage from "@/app/admin/brands/page";
 
-vi.mock("next/image", () => ({
-  __esModule: true,
-  default: (props: React.ImgHTMLAttributes<HTMLImageElement> & { fill?: boolean; unoptimized?: boolean }) => {
-    const { fill, unoptimized, ...rest } = props;
-    void fill;
-    void unoptimized;
-    return <img {...rest} alt={props.alt ?? ""} />;
-  },
+const navigationState = vi.hoisted(() => ({
+  pathname: "/brands",
+  search: "category=publication&view=gallery",
+  replace: vi.fn(),
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -20,6 +16,12 @@ const mocks = vi.hoisted(() => ({
     checking: false,
     hasAccess: true,
   },
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => navigationState.pathname,
+  useRouter: () => ({ replace: navigationState.replace }),
+  useSearchParams: () => new URLSearchParams(navigationState.search),
 }));
 
 vi.mock("@/lib/admin/client-auth", () => ({
@@ -36,31 +38,16 @@ vi.mock("@/components/ClientOnly", () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/components/admin/AdminGlobalHeader", () => ({
-  __esModule: true,
-  default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("@/components/admin/AdminBreadcrumbs", () => ({
-  __esModule: true,
-  default: () => <nav aria-label="Breadcrumb" />,
-}));
-
-vi.mock("@/components/admin/BrandsTabs", () => ({
-  __esModule: true,
-  default: () => <div data-testid="brands-tabs" />,
-}));
-
-import AdminNewsPage from "@/app/admin/news/page";
-
 const jsonResponse = (body: unknown): Response =>
   new Response(JSON.stringify(body), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
 
-describe("admin news page auth bypass", () => {
+describe("unified brands publication view auth bypass", () => {
   beforeEach(() => {
+    navigationState.search = "category=publication&view=gallery";
+    navigationState.replace.mockReset();
     mocks.fetchAdminWithAuth.mockReset();
     mocks.fetchAdminWithAuth.mockImplementation((_input: RequestInfo | URL, _init?: RequestInit, options?: { allowDevAdminBypass?: boolean }) => {
       if (!options?.allowDevAdminBypass) {
@@ -70,11 +57,12 @@ describe("admin news page auth bypass", () => {
     });
   });
 
-  it("passes allowDevAdminBypass=true to all admin requests", async () => {
-    render(<AdminNewsPage />);
+  it("passes allowDevAdminBypass=true while rendering the publication/news gallery filter", async () => {
+    render(<AdminBrandsPage />);
 
     await waitFor(() => {
       expect(mocks.fetchAdminWithAuth.mock.calls.length).toBeGreaterThan(0);
+      expect(screen.getByRole("button", { name: "Gallery View" })).toBeInTheDocument();
     });
 
     for (const call of mocks.fetchAdminWithAuth.mock.calls) {
@@ -83,96 +71,7 @@ describe("admin news page auth bypass", () => {
         preferredUser: mocks.guardState.user,
       });
     }
-  });
 
-  it("renders brand stats, filters missing rows, and humanizes source labels", async () => {
-    mocks.fetchAdminWithAuth.mockReset();
-    mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL, _init?: RequestInit, options?: { allowDevAdminBypass?: boolean }) => {
-      if (!options?.allowDevAdminBypass) {
-        return Promise.reject(new Error("Not authenticated"));
-      }
-      const url = String(input);
-      if (url.includes("target_type=publication")) {
-        return Promise.resolve(
-          jsonResponse({
-            rows: [
-              {
-                id: "pub-complete",
-                target_type: "publication",
-                target_key: "trakt.tv",
-                target_label: "trakt.tv",
-                source_provider: "official_site",
-                discovered_from: "https://trakt.tv",
-                hosted_logo_url: "https://cdn.example.com/trakt-wordmark.svg",
-                hosted_logo_white_url: "https://cdn.example.com/trakt-icon.svg",
-                logo_role: "wordmark",
-                is_primary: true,
-                updated_at: "2026-03-07T12:00:00Z",
-              },
-              {
-                id: "pub-complete-icon",
-                target_type: "publication",
-                target_key: "trakt.tv",
-                target_label: "trakt.tv",
-                source_provider: "official_site",
-                hosted_logo_url: "https://cdn.example.com/trakt-icon.svg",
-                logo_role: "icon",
-                is_primary: false,
-                updated_at: "2026-03-07T12:00:00Z",
-              },
-              {
-                id: "pub-missing",
-                target_type: "publication",
-                target_key: "bravotv.com",
-                target_label: "bravotv.com",
-                source_provider: "wikimedia_commons",
-                discovered_from: "https://commons.wikimedia.org",
-                hosted_logo_url: "https://cdn.example.com/bravo-wordmark.svg",
-                logo_role: "wordmark",
-                is_primary: true,
-                updated_at: "2026-03-07T11:00:00Z",
-              },
-            ],
-          }),
-        );
-      }
-      if (url.includes("target_type=social")) {
-        return Promise.resolve(
-          jsonResponse({
-            rows: [
-              {
-                id: "social-missing",
-                target_type: "social",
-                target_key: "youtube.com",
-                target_label: "youtube.com",
-                source_provider: "brand_guidelines",
-                hosted_logo_url: "https://cdn.example.com/youtube-wordmark.svg",
-                logo_role: "wordmark",
-                is_primary: true,
-                updated_at: "2026-03-07T10:00:00Z",
-              },
-            ],
-          }),
-        );
-      }
-      return Promise.resolve(jsonResponse({ rows: [] }));
-    });
-
-    render(<AdminNewsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Tracked Brands")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("Missing Icons")).toBeInTheDocument();
-    expect(screen.getByText("Official Site")).toBeInTheDocument();
-    expect(screen.getByText("Brand Guidelines")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Needs Attention (2)" }));
-
-    expect(screen.queryAllByText("trakt.tv")).toHaveLength(0);
-    expect(screen.getAllByText("bravotv.com").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("youtube.com").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Publications/News" })).toHaveClass("text-white");
   });
 });

@@ -36,6 +36,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "pub-a3c452f3df0d40319f7c585253a4776c.r2.dev",
       },
+      {
+        protocol: "https",
+        hostname: "deadline.com",
+      },
     ],
   },
   async redirects() {
@@ -51,12 +55,12 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       {
-        source: "/shows/:showId/:rest*",
+        source: "/shows/:showId((?!settings$)[^/]+)/:rest*",
         destination: "/:showId/:rest*",
         permanent: false,
       },
       {
-        source: "/shows/:showId",
+        source: "/shows/:showId((?!settings$)[^/]+)",
         destination: "/:showId",
         permanent: false,
       },

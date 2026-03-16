@@ -121,7 +121,7 @@ export const buildNetworkDetailBreadcrumb = (
   entityLabel: string,
   entityHref: string,
 ): AdminBreadcrumbItem[] => [
-  ...buildBrandsPageBreadcrumb("Networks & Streaming Services", "/brands/networks-and-streaming"),
+  ...buildBrandsPageBreadcrumb("Networks & Streaming Services", "/brands?category=all"),
   { label: entityLabel, href: entityHref },
 ];
 
@@ -150,10 +150,12 @@ export const buildPersonBreadcrumb = (
     personHref: string;
     showName?: string | null;
     showHref?: string;
+    castHref?: string | null;
   },
 ): AdminBreadcrumbItem[] => {
   const showName = options?.showName?.trim();
   const showHref = options?.showHref?.trim() || SHOWS_SECTION_HREF;
+  const castHref = options?.castHref?.trim() || null;
   const personHref = options.personHref.trim() || SHOWS_SECTION_HREF;
   if (!showName) {
     return [
@@ -161,11 +163,15 @@ export const buildPersonBreadcrumb = (
       { label: personName, href: personHref },
     ];
   }
-  return [
+  const trail: AdminBreadcrumbItem[] = [
     ...buildAdminSectionBreadcrumb("Shows", SHOWS_SECTION_HREF),
     { label: showName, href: showHref },
-    { label: personName, href: personHref },
   ];
+  if (castHref) {
+    trail.push({ label: "Cast", href: castHref });
+  }
+  trail.push({ label: personName, href: personHref });
+  return trail;
 };
 
 export const buildSeasonSocialBreadcrumb = (

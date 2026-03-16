@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 
 export interface SurveyContinueButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   label?: string;
@@ -64,6 +65,21 @@ export default function SurveyContinueButton({
   const fontSizePx = Math.round(FIGMA_TEXT_SIZE * scale * 1000) / 1000;
   const lineHeightPx = Math.round(FIGMA_LINE_HEIGHT * scale * 1000) / 1000;
   const letterSpacingPx = Math.round(FIGMA_LETTER_SPACING * scale * 1000) / 1000;
+  const typographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "continue-button",
+      instanceKey: "shared",
+      role: "button",
+    },
+    {
+      fontFamily,
+      fontWeight: "700",
+      fontSize: `${fontSizePx}px`,
+      lineHeight: `${lineHeightPx}px`,
+      letterSpacing: `${letterSpacingPx}px`,
+    },
+  );
 
   return (
     <button
@@ -77,11 +93,7 @@ export default function SurveyContinueButton({
         borderRadius: `${radiusPx}px`,
         backgroundColor,
         color: textColor,
-        fontFamily,
-        fontWeight: 700,
-        fontSize: `${fontSizePx}px`,
-        lineHeight: `${lineHeightPx}px`,
-        letterSpacing: `${letterSpacingPx}px`,
+        ...typographyStyle,
         ...style,
       }}
       {...buttonProps}

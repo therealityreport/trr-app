@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload font files from a local directory to S3 with proper caching headers.
+"""Upload font files from a local directory to S3-compatible object storage.
 
 Recursively finds .ttf, .otf, .woff, and .woff2 files under --source,
 preserves the directory structure relative to source, and uploads to
@@ -14,8 +14,8 @@ Usage examples::
     python scripts/upload-fonts-to-s3.py \\
         --source "$FONT_SRC" --bucket trr-backend --dry-run
 
-    # Real upload using the 'trr' AWS profile
-    AWS_PROFILE=trr python scripts/upload-fonts-to-s3.py \\
+    # Real upload using the configured object-storage profile
+    OBJECT_STORAGE_PROFILE=trr python scripts/upload-fonts-to-s3.py \\
         --source "$FONT_SRC" --bucket trr-backend
 """
 
@@ -90,7 +90,7 @@ def upload_font(s3_client, font_path: Path, bucket: str, key: str) -> None:
 
 
 def build_s3_client(region: str):
-    """Create a boto3 S3 client, respecting AWS_PROFILE or key-based auth."""
+    """Create a boto3 S3 client using the shared object-storage env contract."""
     try:
         import boto3
     except ImportError:
@@ -98,17 +98,29 @@ def build_s3_client(region: str):
         sys.exit(1)
 
     session_kwargs: dict[str, str] = {}
-    profile = os.environ.get("AWS_PROFILE")
+    profile = os.environ.get("OBJECT_STORAGE_PROFILE")
     if profile:
         session_kwargs["profile_name"] = profile
 
     session = boto3.Session(region_name=region, **session_kwargs)
-    return session.client("s3")
+    client_kwargs: dict[str, str] = {}
+    endpoint = os.environ.get("OBJECT_STORAGE_ENDPOINT_URL")
+    if endpoint:
+        client_kwargs["endpoint_url"] = endpoint
+    access_key = os.environ.get("OBJECT_STORAGE_ACCESS_KEY_ID")
+    secret_key = os.environ.get("OBJECT_STORAGE_SECRET_ACCESS_KEY")
+    if access_key and secret_key:
+        client_kwargs["aws_access_key_id"] = access_key
+        client_kwargs["aws_secret_access_key"] = secret_key
+        session_token = os.environ.get("OBJECT_STORAGE_SESSION_TOKEN")
+        if session_token:
+            client_kwargs["aws_session_token"] = session_token
+    return session.client("s3", **client_kwargs)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Upload font files to S3 with immutable caching headers.",
+        description="Upload font files to S3-compatible object storage with immutable caching headers.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -120,12 +132,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--bucket",
         required=True,
-        help="Target S3 bucket name.",
+        help="Target object-storage bucket name.",
     )
     parser.add_argument(
         "--prefix",
         default="fonts",
-        help="S3 key prefix (default: fonts).",
+        help="Object key prefix (default: fonts).",
     )
     parser.add_argument(
         "--dry-run",
@@ -159,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     # ---- Build S3 client (skip in dry-run) ----------------------------------
     s3_client = None
     if not args.dry_run:
-        region = os.environ.get("AWS_REGION", "us-east-1")
+        region = os.environ.get("OBJECT_STORAGE_REGION", "us-east-1")
         s3_client = build_s3_client(region)
 
     # ---- Process each font --------------------------------------------------

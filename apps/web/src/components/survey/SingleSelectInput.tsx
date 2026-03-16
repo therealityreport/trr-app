@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import {
   isCloudfrontCdnFontCandidate,
@@ -253,6 +254,22 @@ export default function SingleSelectInput({
       optionLetterSpacing: interpolate(0.03, 0.03, progress),
     };
   }, [containerWidth]);
+  const optionTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "single-select",
+      instanceKey: "text-multiple-choice",
+      role: "option",
+    },
+    {
+      fontFamily: figmaOptionFontFamily,
+      fontWeight: "800",
+      fontSize: `${responsiveSizing.optionFontSize}px`,
+      lineHeight: "1.2",
+      letterSpacing: `${responsiveSizing.optionLetterSpacing}em`,
+      textTransform: "uppercase",
+    },
+  );
 
   if (layout === "horizontal") {
     // Horizontal layout for likert-scale
@@ -358,12 +375,7 @@ export default function SingleSelectInput({
               paddingRight: `${responsiveSizing.optionPaddingX}px`,
               backgroundColor: isSelected ? figmaOptionBgSelected : figmaOptionBg,
               color: isSelected ? figmaOptionTextColorSelected : figmaOptionTextColor,
-              fontFamily: figmaOptionFontFamily,
-              fontWeight: 800,
-              fontSize: `${responsiveSizing.optionFontSize}px`,
-              lineHeight: "1.2",
-              letterSpacing: `${responsiveSizing.optionLetterSpacing}em`,
-              textTransform: "uppercase",
+              ...optionTypographyStyle,
               display: "flex",
               alignItems: "center",
               justifyContent: "flex-start",
