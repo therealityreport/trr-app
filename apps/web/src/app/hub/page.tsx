@@ -3,6 +3,7 @@ import React from "react";
 import Image from "next/image";
 import Link from "next/link";
 import ClientAuthGuard from "@/components/ClientAuthGuard";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 type GameCard = {
   title: string;
@@ -51,6 +52,7 @@ function GameTile({ card }: { card: GameCard }) {
           <h3
             className="text-center text-2xl font-bold text-zinc-900"
             style={{ fontFamily: "var(--font-rude-slab)", fontWeight: 900 }}
+            {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub", instanceKey: "game-grid", role: "cardTitle" })}
           >
             {card.title}
           </h3>
@@ -99,10 +101,11 @@ export default async function Page() {
       <main
         className="min-h-screen bg-white px-6 py-16 text-black"
         style={{ fontFamily: "var(--font-plymouth-serial)", fontWeight: 800 }}
+        {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub", instanceKey: "game-grid", role: "body" })}
       >
         <section className="mx-auto max-w-6xl">
           <header className="mb-10 text-center">
-            <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100">Pick a game</h1>
+            <h1 className="font-serif text-4xl tracking-tight text-zinc-900 dark:text-zinc-100" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "hub", instanceKey: "game-grid", role: "pageTitle" })}>Pick a game</h1>
             <p className="mt-2 text-zinc-600 dark:text-zinc-400">
               Daily puzzles and prototypes. Surveys now live on the Surveys tab. More coming soon.
             </p>

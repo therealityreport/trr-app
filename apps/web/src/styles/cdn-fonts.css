@@ -1844,3 +1844,1454 @@
   font-display: swap;
 }
 
+
+/* ============================================================
+   Beton — added missing weights
+   ============================================================ */
+
+@font-face {
+  font-family: "Beton";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Beton/BetonLight-1105482.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Beton";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Beton/BetonDemiBold-1105484.otf") format("opentype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Beton";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Beton/BetonBold-1105486.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Beton";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Beton/BetonExtraBold-1105488.otf") format("opentype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Beton";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Beton/BetonBoldCondensed-1105492.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Beton";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Beton/BetonBoldCompressed-1105490.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: extra-condensed;
+  font-display: swap;
+}
+
+/* ============================================================
+   Cheltenham — added missing weights/condensed
+   ============================================================ */
+
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamRoman-1083228.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamItalic-1083230.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamBold-1083232.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamBoldItalic-1083234.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamBoldCondensed-1083223.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamBoldCondensedItalic-1083225.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamBoldExtraCondensed-1083220.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: extra-condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamBoldHeadline-1083214.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Cheltenham";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Cheltenham/CheltenhamBoldItalicHeadline-1083217.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   Franklin Gothic — added condensed variants
+   ============================================================ */
+
+@font-face {
+  font-family: "Franklin Gothic";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicCondensedMedium-5515862.TTF") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Franklin Gothic";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Franklin%20Gothic/FranklinGothicCondensedDemi-5515849.TTF") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+
+/* ============================================================
+   Futura Now Display
+   ============================================================ */
+
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayThin-6060309.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayThinItalic-6060310.ttf") format("truetype");
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayLight-6060307.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayLightItalic-6060308.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayRegular-6060301.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayItalic-6060306.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayBold-6060302.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayBoldItalic-6060303.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayExtraBold-6060311.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayExtraBoldItalic-6060312.ttf") format("truetype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayBlack-6060304.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Display";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowDisplayBlackItalic-6060305.ttf") format("truetype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   Futura Now Headline
+   ============================================================ */
+
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineThin-6078050.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineThinItalic-6078053.ttf") format("truetype");
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineExtraLight-6078023.ttf") format("truetype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineExtraLightItalic-6078026.ttf") format("truetype");
+  font-weight: 200;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineLight-6078033.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineLightItalic-6078036.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineRegular-6078046.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineItalic-6078029.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineMedium-6078040.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineMediumItalic-6078043.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineBold-6077939.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineBoldItalic-6077942.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineExtraBold-6078016.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineExtraBoldItalic-6078019.ttf") format("truetype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineBlack-6077932.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineBlackItalic-6077935.ttf") format("truetype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedThin-6078002.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedThinItalic-6078005.ttf") format("truetype");
+  font-weight: 100;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedExtraLight-6077974.ttf") format("truetype");
+  font-weight: 200;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedExtraLightItalic-6077977.ttf") format("truetype");
+  font-weight: 200;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedLight-6077985.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedLightItalic-6077988.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedRegular-6077998.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedItalic-6077981.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedMedium-6077992.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedMediumItalic-6077995.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedBold-6077953.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedBoldItalic-6077956.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedExtraBold-6077967.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedExtraBoldItalic-6077970.ttf") format("truetype");
+  font-weight: 800;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedBlack-6077946.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Headline";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowHeadlineCondensedBlackItalic-6077949.ttf") format("truetype");
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+
+/* ============================================================
+   Futura Now Text
+   ============================================================ */
+
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextThin-6078180.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextThinItalic-6078183.ttf") format("truetype");
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextExtraLight-6078153.ttf") format("truetype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextExtraLightItalic-6078156.ttf") format("truetype");
+  font-weight: 200;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextLight-6078163.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextLightItalic-6078166.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextRegular-6078176.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextItalic-6078159.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextMedium-6078170.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextMediumItalic-6078173.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextBold-6078069.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextBoldItalic-6078072.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextExtraBold-6078146.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextExtraBoldItalic-6078149.ttf") format("truetype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextBlack-6078062.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextBlackItalic-6078065.ttf") format("truetype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensed-6078076.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedItalic-6078114.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedThin-6078132.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedThinItalic-6078135.ttf") format("truetype");
+  font-weight: 100;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedExtraLight-6078108.ttf") format("truetype");
+  font-weight: 200;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedExtraLightItalic-6078111.ttf") format("truetype");
+  font-weight: 200;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedLight-6078118.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedLightItalic-6078121.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedMedium-6078125.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedMediumItalic-6078128.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedBold-6078087.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedBoldItalic-6078090.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedExtraBold-6078101.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedExtraBoldItalic-6078104.ttf") format("truetype");
+  font-weight: 800;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedBlack-6078080.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Futura Now Text";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Futura%20Now/FuturaNowTextCondensedBlackItalic-6078083.ttf") format("truetype");
+  font-weight: 900;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+
+/* ============================================================
+   Geometric Slabserif 703 — added condensed variants
+   ============================================================ */
+
+@font-face {
+  font-family: "Geometric Slabserif 703";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703MediumCondensed-1084325.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geometric Slabserif 703";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703BoldCondensed-1084327.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geometric Slabserif 703";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20703/GeometricSlabserif703ExtraBoldCondensed-1084317.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+
+/* ============================================================
+   Geometric Slabserif 712 — added missing weights
+   ============================================================ */
+
+@font-face {
+  font-family: "Geometric Slabserif 712";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/GeometricSlabserif712Light-1084343.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geometric Slabserif 712";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/GeometricSlabserif712LightItalic-1084345.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geometric Slabserif 712";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/GeometricSlabserif712Medium-1084348.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geometric Slabserif 712";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/GeometricSlabserif712MediumItalic-1084350.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geometric Slabserif 712";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/GeometricSlabserif712Bold-1084352.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geometric Slabserif 712";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Geometric%20Slabserif%20712/GeometricSlabserif712ExtraBold-1084340.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   Gloucester — added missing/extended variants
+   ============================================================ */
+
+@font-face {
+  font-family: "Gloucester";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/GloucesterBold-5735711.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gloucester";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/GloucesterBoldCondensed-5735712.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gloucester";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/GloucesterBoldExtraCondensed-5735714.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: extra-condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gloucester";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Gloucester/GloucesterBoldExtended-5735715.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: expanded;
+  font-display: swap;
+}
+
+/* ============================================================
+   Hamburg Serial — added italic variants
+   ============================================================ */
+
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialExtraLightItalic-930108100.otf") format("opentype");
+  font-weight: 200;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialLightItalic-930108036.otf") format("opentype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialItalic-930108010.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialMediumItalic-930108055.otf") format("opentype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialBoldItalic-930107982.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialExtraBoldItalic-930108085.otf") format("opentype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hamburg Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Hamburg%20Serial/HamburgSerialHeavyItalic-930108006.otf") format("opentype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   ITC Franklin Gothic LT — added condensed/compressed variants
+   ============================================================ */
+
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBookCondensed-5739964.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBookCondensedItalic-5739967.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTMediumCondensed-5739976.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTMediumCondensedItalic-5739979.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemiCondensed-5739970.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemiCondensedItalic-5739973.ttf") format("truetype");
+  font-weight: 600;
+  font-style: italic;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBookCompressed-5739952.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: ultra-condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBookCompressedItalic-5739955.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-stretch: ultra-condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBookExtraCompressed-5739988.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: extra-condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemiCompressed-5739958.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-stretch: ultra-condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemiCompressedItalic-5739961.ttf") format("truetype");
+  font-weight: 600;
+  font-style: italic;
+  font-stretch: ultra-condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ITC Franklin Gothic LT";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTDemiExtraCompressed-5739991.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-stretch: extra-condensed;
+  font-display: swap;
+}
+
+/* ============================================================
+   Malden Sans Condensed
+   ============================================================ */
+
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedThin-5698416.otf") format("opentype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedThinItalic-5698418.otf") format("opentype");
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedLight-5698404.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedLightItalic-5698406.otf") format("opentype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedRegular-5698413.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedItalic-5698401.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedMedium-5698409.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedMediumItalic-5698411.otf") format("opentype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedBold-5698391.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedBoldItalic-5698393.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedExtraBold-5698396.otf") format("opentype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Malden Sans Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Malden%20Sans/MaldenSansCondensedExtraBoldItalic-5698398.otf") format("opentype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   News Gothic — added light weight
+   ============================================================ */
+
+@font-face {
+  font-family: "News Gothic";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic/news-got-tlig.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   News Gothic No. 2 — added missing weights
+   ============================================================ */
+
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2Thin-229143.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2ThinItalic-229144.ttf") format("truetype");
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2Light-229126.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2LightItalic-229127.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2Roman-229129.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2Italic-229130.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2Medium-229132.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2MediumItalic-229133.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2Bold-229135.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2BoldItalic-229137.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2Black-229139.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "News Gothic No. 2";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/News%20Gothic%20No.%202/NewsGothicNo2BlackItalic-229141.ttf") format("truetype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   Newston — added decorative variants
+   ============================================================ */
+
+@font-face {
+  font-family: "Newston";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Newston/NewstonInline-6509909.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Newston";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Newston/NewstonOutline-6509910.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   Plymouth Serial — added italic variants
+   ============================================================ */
+
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialLightItalic-10035213.otf") format("opentype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialItalic-10035286.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialMediumItalic-10035215.otf") format("opentype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialBoldItalic-10035258.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialExtraBoldItalic-10035227.otf") format("opentype");
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialHeavyItalic-10035271.otf") format("opentype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialBlack-10035212.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plymouth Serial";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Plymouth%20Serial/PlymouthSerialBlackItalic-10035284.otf") format("opentype");
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   Rockwell — added missing weights
+   ============================================================ */
+
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellLight-5610246.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellLightItalic-5610247.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellRoman-5610239.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellItalic-5610245.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellBold-5610240.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellBoldItalic-5610242.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellBoldCondensed-5610241.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellCondensed-5610243.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell/RockwellExtraBold-5610244.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   Rockwell Nova Condensed
+   ============================================================ */
+
+@font-face {
+  font-family: "Rockwell Nova Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaCondensedLight-5368880.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell Nova Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaCondensedLightItalic-5368882.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell Nova Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaCondensed-5368873.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell Nova Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaCondensedItalic-5368877.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell Nova Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaCondensedBold-5368875.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Rockwell Nova Condensed";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Rockwell%20Nova/RockwellNovaCondensedBoldItalic-5551343.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ============================================================
+   Stymie — added missing weights
+   ============================================================ */
+
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieLight-1086426.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieLightItalic-1086430.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieMediumItalic-1086423.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieMediumCondensed-1126156.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieBold-1086428.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieBoldItalic-1086432.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieBoldCondensed-1126153.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Stymie";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie/StymieBlack-1126151.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   Stymie Extra Bold — added condensed
+   ============================================================ */
+
+@font-face {
+  font-family: "Stymie Extra Bold";
+  src: url("https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/monotype/Stymie%20Extra%20Bold/StymieExtraBoldCondensed-1086418.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-stretch: condensed;
+  font-display: swap;
+}
+

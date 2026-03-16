@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { TwoChoiceSliderConfig } from "@/lib/surveys/question-config-types";
 import SurveyContinueButton from "./SurveyContinueButton";
@@ -304,6 +305,21 @@ export default function TwoChoiceCast({
       </button>
     );
   };
+  const headingTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "two-choice",
+      instanceKey: "question",
+      role: "heading",
+    },
+    {
+      fontFamily: headingFontFamily,
+      fontWeight: "800",
+      fontSize: `${headingFontSize}px`,
+      lineHeight: "0.95",
+      letterSpacing: "0.01em",
+    },
+  );
 
   return (
     <div
@@ -323,10 +339,7 @@ export default function TwoChoiceCast({
         <h3
           className="mx-auto text-center leading-[0.95]"
           style={{
-            fontFamily: headingFontFamily,
-            fontWeight: 800,
-            letterSpacing: "0.01em",
-            fontSize: `${headingFontSize}px`,
+            ...headingTypographyStyle,
             color: questionTextColor,
             maxWidth: `${headingMaxWidth}px`,
           }}

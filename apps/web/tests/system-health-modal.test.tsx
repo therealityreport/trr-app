@@ -5,7 +5,7 @@ import SystemHealthModal, { HealthIndicator } from "@/components/admin/SystemHea
 
 const { fetchAdminWithAuthMock, usePathnameMock } = vi.hoisted(() => ({
   fetchAdminWithAuthMock: vi.fn(),
-  usePathnameMock: vi.fn(() => "/admin/social-media"),
+  usePathnameMock: vi.fn(() => "/admin/social"),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -70,7 +70,7 @@ describe("SystemHealthModal polling", () => {
     vi.useRealTimers();
     vi.spyOn(Math, "random").mockReturnValue(0);
     fetchAdminWithAuthMock.mockReset();
-    usePathnameMock.mockReturnValue("/admin/social-media");
+    usePathnameMock.mockReturnValue("/admin/social");
     delete (window as Window & { __trr_admin_health_dot_poller__?: unknown }).__trr_admin_health_dot_poller__;
     window.localStorage.removeItem("trr:admin:health-dot:leader:v1");
     window.localStorage.removeItem("trr:admin:health-dot:snapshot:v1");

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "rea
 
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import type { PaletteLibrarySourceType } from "@/lib/admin/color-lab/types";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 type SourceTab = "upload" | "url" | "library";
 
@@ -436,33 +437,37 @@ export default function ImageSourceModal({
                 <p className="text-sm text-zinc-500">No media loaded yet. Choose show/season and click Load Media.</p>
               ) : (
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-                  {libraryAssets.map((asset) => (
-                    <button
-                      key={`${asset.id}:${asset.hosted_url}`}
-                      type="button"
-                      onClick={() => {
-                        onSelect({
-                          imageUrl: toProxyUrl(asset.hosted_url),
-                          imageIdentity: `library:${asset.id}:${asset.hosted_url}`,
-                          sourceType: "media_library",
-                          sourceImageUrl: asset.hosted_url,
-                          trrShowId: selectedShowId,
-                          seasonNumber: selectedSeason,
-                        });
-                        onClose();
-                      }}
-                      className="rounded-lg border border-zinc-200 p-2 text-left transition hover:bg-zinc-50"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={asset.hosted_url}
-                        alt={asset.caption ?? asset.kind ?? "Library asset"}
-                        className="h-28 w-full rounded object-cover"
-                      />
-                      <p className="mt-2 truncate text-xs font-semibold text-zinc-700">{asset.kind}</p>
-                      <p className="truncate text-xs text-zinc-500">{asset.caption ?? asset.source ?? "Asset"}</p>
-                    </button>
-                  ))}
+                  {libraryAssets.map((asset) => {
+                    const canonicalHostedUrl =
+                      canonicalizeHostedMediaUrl(asset.hosted_url) ?? asset.hosted_url;
+                    return (
+                      <button
+                        key={`${asset.id}:${asset.hosted_url}`}
+                        type="button"
+                        onClick={() => {
+                          onSelect({
+                            imageUrl: toProxyUrl(canonicalHostedUrl),
+                            imageIdentity: `library:${asset.id}:${asset.hosted_url}`,
+                            sourceType: "media_library",
+                            sourceImageUrl: canonicalHostedUrl,
+                            trrShowId: selectedShowId,
+                            seasonNumber: selectedSeason,
+                          });
+                          onClose();
+                        }}
+                        className="rounded-lg border border-zinc-200 p-2 text-left transition hover:bg-zinc-50"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={canonicalHostedUrl}
+                          alt={asset.caption ?? asset.kind ?? "Library asset"}
+                          className="h-28 w-full rounded object-cover"
+                        />
+                        <p className="mt-2 truncate text-xs font-semibold text-zinc-700">{asset.kind}</p>
+                        <p className="truncate text-xs text-zinc-500">{asset.caption ?? asset.source ?? "Asset"}</p>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </section>

@@ -21,7 +21,7 @@ const BRANDS_TABS: readonly BrandsTab[] = [
   { id: "brands", label: "Brands", href: "/brands" },
   { id: "networks-streaming", label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
   { id: "production-companies", label: "Production Companies", href: "/brands/production-companies" },
-  { id: "shows", label: "Shows & Franchises", href: "/brands/shows-and-franchises" },
+  { id: "shows", label: "Shows & Branding", href: "/brands/shows-and-franchises" },
   { id: "news", label: "Publications / News", href: "/brands/news" },
   { id: "other", label: "Other", href: "/brands/other" },
 ];

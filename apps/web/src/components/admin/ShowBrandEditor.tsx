@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import ImagePaletteLab from "@/components/admin/color-lab/ImagePaletteLab";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 // ============================================================================
 // Types (Client-facing mirrors of server records)
@@ -485,7 +486,7 @@ function BrandSeasonEditor({
       if (deduped.has(key)) continue;
       deduped.set(key, {
         name,
-        image: asset.hosted_url,
+        image: canonicalizeHostedMediaUrl(asset.hosted_url) ?? asset.hosted_url,
         status: "main",
         trrPersonId: personId,
         sourceUrl: toAssetSourceUrl(asset) ?? undefined,
@@ -690,11 +691,13 @@ export default function ShowBrandEditor({
   trrShowName,
   trrSeasons,
   trrCast,
+  showDefaultMediaSection = true,
 }: {
   trrShowId: string;
   trrShowName: string;
   trrSeasons: TrrSeasonLike[];
   trrCast: TrrCastMemberLike[];
+  showDefaultMediaSection?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -851,8 +854,9 @@ export default function ShowBrandEditor({
   }, [fetchBrand]);
 
   useEffect(() => {
+    if (!showDefaultMediaSection) return;
     void fetchShowMediaAssets();
-  }, [fetchShowMediaAssets]);
+  }, [fetchShowMediaAssets, showDefaultMediaSection]);
 
   useEffect(() => {
     void fetchShowIcons();
@@ -1003,19 +1007,23 @@ export default function ShowBrandEditor({
             ...(showRecord.fonts ?? {}),
             heading: fontsHeading || undefined,
             body: fontsBody || undefined,
-            defaultPosterAssetId: defaultPosterAssetId || undefined,
-            defaultPosterUrl:
-              (defaultPosterAssetId ? showAssetUrlById.get(defaultPosterAssetId) : null) ??
-              undefined,
-            defaultBackdropAssetId: defaultBackdropAssetId || undefined,
-            defaultBackdropUrl:
-              (defaultBackdropAssetId
-                ? showAssetUrlById.get(defaultBackdropAssetId)
-                : null) ?? undefined,
-            defaultLogoAssetId: defaultLogoAssetId || undefined,
-            defaultLogoUrl:
-              (defaultLogoAssetId ? showAssetUrlById.get(defaultLogoAssetId) : null) ??
-              undefined,
+            ...(showDefaultMediaSection
+              ? {
+                  defaultPosterAssetId: defaultPosterAssetId || undefined,
+                  defaultPosterUrl:
+                    (defaultPosterAssetId ? showAssetUrlById.get(defaultPosterAssetId) : null) ??
+                    undefined,
+                  defaultBackdropAssetId: defaultBackdropAssetId || undefined,
+                  defaultBackdropUrl:
+                    (defaultBackdropAssetId
+                      ? showAssetUrlById.get(defaultBackdropAssetId)
+                      : null) ?? undefined,
+                  defaultLogoAssetId: defaultLogoAssetId || undefined,
+                  defaultLogoUrl:
+                    (defaultLogoAssetId ? showAssetUrlById.get(defaultLogoAssetId) : null) ??
+                    undefined,
+                }
+              : {}),
           },
           iconUrl: iconUrl || null,
           wordmarkUrl: wordmarkUrl || null,
@@ -1225,86 +1233,88 @@ export default function ShowBrandEditor({
           </div>
         )}
 
-        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-            Default Media
-          </p>
-          <p className="mt-1 text-sm text-zinc-600">
-            Choose brand defaults from imported show media.
-          </p>
-          <div className="mt-3 grid gap-4 lg:grid-cols-3">
-            <div className="rounded-lg border border-zinc-200 bg-white p-3">
-              <p className="text-sm font-semibold text-zinc-700">Default Poster</p>
-              <button
-                type="button"
-                onClick={() => openDefaultMediaPicker("poster")}
-                className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
-                disabled={showMediaLoading || showPosterAssets.length === 0}
-              >
-                {defaultPosterAssetId ? "Change Poster" : "Choose Poster"}
-              </button>
-              {defaultPosterAssetId && showAssetUrlById.get(defaultPosterAssetId) && (
-                <img
-                  src={showAssetUrlById.get(defaultPosterAssetId)!}
-                  alt="Default poster"
-                  className="mt-2 h-24 w-full rounded object-cover"
-                />
-              )}
-              <p className="mt-2 text-xs text-zinc-500">
-                Recommended: {recommendedPosterAsset ? recommendedPosterAsset.id : "None"}
-              </p>
-            </div>
+        {showDefaultMediaSection && (
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+              Default Media
+            </p>
+            <p className="mt-1 text-sm text-zinc-600">
+              Choose brand defaults from imported show media.
+            </p>
+            <div className="mt-3 grid gap-4 lg:grid-cols-3">
+              <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                <p className="text-sm font-semibold text-zinc-700">Default Poster</p>
+                <button
+                  type="button"
+                  onClick={() => openDefaultMediaPicker("poster")}
+                  className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
+                  disabled={showMediaLoading || showPosterAssets.length === 0}
+                >
+                  {defaultPosterAssetId ? "Change Poster" : "Choose Poster"}
+                </button>
+                {defaultPosterAssetId && showAssetUrlById.get(defaultPosterAssetId) && (
+                  <img
+                    src={showAssetUrlById.get(defaultPosterAssetId)!}
+                    alt="Default poster"
+                    className="mt-2 h-24 w-full rounded object-cover"
+                  />
+                )}
+                <p className="mt-2 text-xs text-zinc-500">
+                  Recommended: {recommendedPosterAsset ? recommendedPosterAsset.id : "None"}
+                </p>
+              </div>
 
-            <div className="rounded-lg border border-zinc-200 bg-white p-3">
-              <p className="text-sm font-semibold text-zinc-700">Default Backdrop</p>
-              <button
-                type="button"
-                onClick={() => openDefaultMediaPicker("backdrop")}
-                className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
-                disabled={showMediaLoading || showBackdropAssets.length === 0}
-              >
-                {defaultBackdropAssetId ? "Change Backdrop" : "Choose Backdrop"}
-              </button>
-              {defaultBackdropAssetId && showAssetUrlById.get(defaultBackdropAssetId) && (
-                <img
-                  src={showAssetUrlById.get(defaultBackdropAssetId)!}
-                  alt="Default backdrop"
-                  className="mt-2 h-24 w-full rounded object-cover"
-                />
-              )}
-              <p className="mt-2 text-xs text-zinc-500">
-                Recommended: {recommendedBackdropAsset ? recommendedBackdropAsset.id : "None"}
-              </p>
-            </div>
+              <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                <p className="text-sm font-semibold text-zinc-700">Default Backdrop</p>
+                <button
+                  type="button"
+                  onClick={() => openDefaultMediaPicker("backdrop")}
+                  className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
+                  disabled={showMediaLoading || showBackdropAssets.length === 0}
+                >
+                  {defaultBackdropAssetId ? "Change Backdrop" : "Choose Backdrop"}
+                </button>
+                {defaultBackdropAssetId && showAssetUrlById.get(defaultBackdropAssetId) && (
+                  <img
+                    src={showAssetUrlById.get(defaultBackdropAssetId)!}
+                    alt="Default backdrop"
+                    className="mt-2 h-24 w-full rounded object-cover"
+                  />
+                )}
+                <p className="mt-2 text-xs text-zinc-500">
+                  Recommended: {recommendedBackdropAsset ? recommendedBackdropAsset.id : "None"}
+                </p>
+              </div>
 
-            <div className="rounded-lg border border-zinc-200 bg-white p-3">
-              <p className="text-sm font-semibold text-zinc-700">Default Logo</p>
-              <button
-                type="button"
-                onClick={() => openDefaultMediaPicker("logo")}
-                className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
-                disabled={showMediaLoading || showLogoAssets.length === 0}
-              >
-                {defaultLogoAssetId ? "Change Logo" : "Choose Logo"}
-              </button>
-              {defaultLogoAssetId && showAssetUrlById.get(defaultLogoAssetId) && (
-                <img
-                  src={showAssetUrlById.get(defaultLogoAssetId)!}
-                  alt="Default logo"
-                  className="mt-2 h-24 w-full rounded object-contain bg-zinc-100"
-                />
-              )}
-              <p className="mt-2 text-xs text-zinc-500">
-                Recommended: {recommendedLogoAsset ? recommendedLogoAsset.id : "None"}
-              </p>
+              <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                <p className="text-sm font-semibold text-zinc-700">Default Logo</p>
+                <button
+                  type="button"
+                  onClick={() => openDefaultMediaPicker("logo")}
+                  className="mt-2 w-full rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-50"
+                  disabled={showMediaLoading || showLogoAssets.length === 0}
+                >
+                  {defaultLogoAssetId ? "Change Logo" : "Choose Logo"}
+                </button>
+                {defaultLogoAssetId && showAssetUrlById.get(defaultLogoAssetId) && (
+                  <img
+                    src={showAssetUrlById.get(defaultLogoAssetId)!}
+                    alt="Default logo"
+                    className="mt-2 h-24 w-full rounded object-contain bg-zinc-100"
+                  />
+                )}
+                <p className="mt-2 text-xs text-zinc-500">
+                  Recommended: {recommendedLogoAsset ? recommendedLogoAsset.id : "None"}
+                </p>
+              </div>
             </div>
+            <p className="mt-3 text-xs text-zinc-500">
+              {showMediaLoading
+                ? "Loading show media..."
+                : `${showPosterAssets.length} posters, ${showBackdropAssets.length} backdrops, ${showLogoAssets.length} logos available.`}
+            </p>
           </div>
-          <p className="mt-3 text-xs text-zinc-500">
-            {showMediaLoading
-              ? "Loading show media..."
-              : `${showPosterAssets.length} posters, ${showBackdropAssets.length} backdrops, ${showLogoAssets.length} logos available.`}
-          </p>
-        </div>
+        )}
 
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
@@ -1411,23 +1421,26 @@ export default function ShowBrandEditor({
                     <span className="text-xs text-zinc-500">Loading icons...</span>
                   ) : showIcons.length === 0 ? (
                     <span className="text-xs text-zinc-500">No uploaded icons yet.</span>
-                  ) : (
-                    showIcons.map((icon) => (
-                      <div
-                        key={icon.id}
-                        className={`rounded-md border p-1 ${iconUrl === icon.hosted_url ? "border-zinc-900" : "border-zinc-200"}`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setIconUrl(icon.hosted_url)}
-                          className="block"
-                          title="Set as show icon"
-                        >
-                          <img
-                            src={icon.hosted_url}
-                            alt={icon.filename}
-                            className="h-10 w-10 rounded object-cover"
-                          />
+	                  ) : (
+	                    showIcons.map((icon) => {
+                        const canonicalIconUrl =
+                          canonicalizeHostedMediaUrl(icon.hosted_url) ?? icon.hosted_url;
+                        return (
+	                      <div
+	                        key={icon.id}
+	                        className={`rounded-md border p-1 ${iconUrl === canonicalIconUrl ? "border-zinc-900" : "border-zinc-200"}`}
+	                      >
+	                        <button
+	                          type="button"
+	                          onClick={() => setIconUrl(canonicalIconUrl)}
+	                          className="block"
+	                          title="Set as show icon"
+	                        >
+	                          <img
+	                            src={canonicalIconUrl}
+	                            alt={icon.filename}
+	                            className="h-10 w-10 rounded object-cover"
+	                          />
                         </button>
                         <button
                           type="button"
@@ -1435,11 +1448,12 @@ export default function ShowBrandEditor({
                           disabled={showIconsDeleteBusyId === icon.id}
                           className="mt-1 w-full text-[10px] font-semibold uppercase tracking-[0.08em] text-red-600 disabled:opacity-50"
                         >
-                          {showIconsDeleteBusyId === icon.id ? "..." : "Delete"}
-                        </button>
-                      </div>
-                    ))
-                  )}
+	                          {showIconsDeleteBusyId === icon.id ? "..." : "Delete"}
+	                        </button>
+	                      </div>
+                        );
+                      })
+	                  )}
                 </div>
               </div>
             </div>
@@ -1467,7 +1481,7 @@ export default function ShowBrandEditor({
         </div>
       </section>
 
-      {defaultMediaPickerKind && (
+      {showDefaultMediaSection && defaultMediaPickerKind && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
           onClick={closeDefaultMediaPicker}
@@ -1498,22 +1512,22 @@ export default function ShowBrandEditor({
                 <p className="text-sm text-zinc-600">No assets available for this default.</p>
               ) : (
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-                  {mediaPickerAssets.map((asset) => (
-                    <button
-                      key={asset.id}
-                      type="button"
-                      onClick={() => selectDefaultMediaAsset(asset.id)}
+	                  {mediaPickerAssets.map((asset) => (
+	                    <button
+	                      key={asset.id}
+	                      type="button"
+	                      onClick={() => selectDefaultMediaAsset(asset.id)}
                       className={`rounded-lg border p-2 text-left transition ${
                         selectedDefaultAssetId === asset.id
                           ? "border-zinc-900 bg-zinc-100"
                           : "border-zinc-200 bg-white hover:bg-zinc-50"
-                      }`}
-                    >
-                      <img
-                        src={asset.hosted_url}
-                        alt={`${defaultMediaPickerKind} candidate`}
-                        className={`h-28 w-full rounded ${
-                          defaultMediaPickerKind === "logo" ? "object-contain bg-zinc-100" : "object-cover"
+	                      }`}
+	                    >
+	                      <img
+	                        src={canonicalizeHostedMediaUrl(asset.hosted_url) ?? asset.hosted_url}
+	                        alt={`${defaultMediaPickerKind} candidate`}
+	                        className={`h-28 w-full rounded ${
+	                          defaultMediaPickerKind === "logo" ? "object-contain bg-zinc-100" : "object-cover"
                         }`}
                       />
                       <p className="mt-2 truncate text-xs font-semibold text-zinc-700">{asset.id}</p>

@@ -34,7 +34,14 @@ export type TabId =
 export type ShowCastSource = "episode_evidence" | "show_fallback" | "imdb_show_membership";
 export type ShowCastRosterMode = "episode_evidence" | "imdb_show_membership";
 export type CastPhotoFallbackMode = "none" | "bravo";
-export type ShowRefreshTarget = "details" | "seasons_episodes" | "photos" | "cast_credits";
+export type ShowRefreshTarget =
+  | "details"
+  | "seasons_episodes"
+  | "photos"
+  | "cast_credits"
+  | "videos"
+  | "news"
+  | "social_setup";
 
 export type ShowTab = { id: TabId; label: string; icon?: "home" };
 
@@ -128,4 +135,13 @@ export type ShowDetailsForm = {
   altNamesText: string;
   description: string;
   premiereDate: string;
+  imdbId: string;
+  tmdbId: string;
+  tvdbId: string;
+  wikidataId: string;
+  tvRageId: string;
+  genresText: string;
+  networksText: string;
+  streamingProvidersText: string;
+  tagsText: string;
 };

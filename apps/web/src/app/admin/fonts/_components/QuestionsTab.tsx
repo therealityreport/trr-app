@@ -18,7 +18,7 @@ import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-ty
 import {
   getRhoslcS6CastImagePath,
   RHOSLC_S6_CAST_MEMBERS,
-  RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL,
+  RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH,
 } from "@/lib/surveys/rhoslc-assets";
 import type { SurveyRankingItem } from "@/lib/surveys/types";
 import MultiSelectPills from "@/components/survey/MultiSelectPills";
@@ -155,6 +155,11 @@ const TEMPLATE_EDITOR_STORAGE_PREFIX = "trr.questions-tab.template-editor.v2";
 const SURVEY_QUESTION_DEFAULTS_STORAGE_KEY = "trr.questions-tab.survey-defaults.v1";
 const SURVEY_PREVIEW_SOURCE_STORAGE_KEY = "trr.questions-tab.preview-source.v1";
 const DEFAULT_SURVEY_PREVIEW_SOURCE = "RHOSLC S6 Survey";
+
+function resolvePreviewSourceIconUrl(previewSource: string): string | null {
+  return /rhoslc/i.test(previewSource) ? RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH : null;
+}
+
 type TemplateEditorStringKey =
   | "titleText"
   | "subText"
@@ -1149,7 +1154,7 @@ function CardHeader({
   children,
 }: {
   entry: CatalogEntry;
-  badge: string;
+  badge: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
@@ -1587,11 +1592,15 @@ function SurveyPreviewCard({
   baseColors,
   surveyDefaults,
   selectedPreviewSource,
+  previewSourceOptions,
+  onPreviewSourceChange,
 }: {
   entry: CatalogEntry;
   baseColors: string[];
   surveyDefaults: SurveyQuestionDefaultsState;
   selectedPreviewSource: string;
+  previewSourceOptions: string[];
+  onPreviewSourceChange: (next: string) => void;
 }) {
   const examples = useMemo(() => {
     const allExamples = entry.examples ?? [];
@@ -1600,9 +1609,12 @@ function SurveyPreviewCard({
     const sourceMatched = allExamples.filter((exampleValue) => exampleValue.source === selectedPreviewSource);
     if (sourceMatched.length) return sourceMatched;
 
-    const nonRhopFallback = allExamples.filter((exampleValue) => !/rhop/i.test(exampleValue.source));
-    return nonRhopFallback.length ? nonRhopFallback : allExamples;
+    return allExamples;
   }, [entry.examples, selectedPreviewSource]);
+  const previewIconUrl = useMemo(
+    () => resolvePreviewSourceIconUrl(selectedPreviewSource),
+    [selectedPreviewSource],
+  );
   const sourceKey = selectedPreviewSource.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-") || "default";
   const storageKey = `${TEMPLATE_EDITOR_STORAGE_PREFIX}.survey.${entry.key}.${sourceKey}`;
   const [exampleIdx, setExampleIdx] = useState(0);
@@ -2019,6 +2031,7 @@ function SurveyPreviewCard({
               question={previewQuestion}
               value={values[safeExampleIdx]}
               onChange={handleChange}
+              showIconUrl={previewIconUrl}
             />
           </div>
         </div>
@@ -2028,7 +2041,23 @@ function SurveyPreviewCard({
 
   return (
     <div className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden flex flex-col">
-      <CardHeader entry={entry} badge={example.source}>
+      <CardHeader
+        entry={entry}
+        badge={
+          <select
+            value={selectedPreviewSource}
+            onChange={(event) => onPreviewSourceChange(event.target.value)}
+            aria-label={`${entry.displayName} preview survey`}
+            className="max-w-[180px] rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-700 ring-1 ring-inset ring-indigo-200 focus:border-indigo-300 focus:outline-none"
+          >
+            {previewSourceOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        }
+      >
         {examples.length > 1 && (
           <div className="mt-2">
             <select
@@ -2916,7 +2945,7 @@ function StandaloneFieldPreview({
             min={0}
             max={5}
             step={0.5}
-            iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL}
+            iconSrc={RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH}
             iconCount={5}
             sizePx={42}
             fillColor="#0EA5E9"
@@ -2962,7 +2991,6 @@ export default function QuestionsTab({ baseColors, sectionFilter = null }: Quest
     const values = new Set<string>();
     for (const entry of SURVEY_CATALOG) {
       for (const example of entry.examples ?? []) {
-        if (/rhop/i.test(example.source)) continue;
         values.add(example.source);
       }
     }
@@ -3022,7 +3050,6 @@ export default function QuestionsTab({ baseColors, sectionFilter = null }: Quest
       const raw = window.localStorage.getItem(SURVEY_PREVIEW_SOURCE_STORAGE_KEY);
       if (!raw) return;
       if (typeof raw !== "string" || raw.trim().length === 0) return;
-      if (/rhop/i.test(raw)) return;
       setSelectedPreviewSource(raw);
     } catch {
       // Ignore persisted preview-source failures.
@@ -3083,6 +3110,8 @@ export default function QuestionsTab({ baseColors, sectionFilter = null }: Quest
               baseColors={editorBaseColors}
               surveyDefaults={surveyDefaults}
               selectedPreviewSource={selectedPreviewSource}
+              previewSourceOptions={previewSourceOptions}
+              onPreviewSourceChange={setSelectedPreviewSource}
             />
           ))}
         </div>
@@ -3188,6 +3217,8 @@ export default function QuestionsTab({ baseColors, sectionFilter = null }: Quest
                   baseColors={editorBaseColors}
                   surveyDefaults={surveyDefaults}
                   selectedPreviewSource={selectedPreviewSource}
+                  previewSourceOptions={previewSourceOptions}
+                  onPreviewSourceChange={setSelectedPreviewSource}
                 />
               ))}
             </div>

@@ -1,15 +1,27 @@
 import React from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import AdminNetworksPage from "@/app/admin/networks/page";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import AdminBrandsPage from "@/app/admin/brands/page";
+
+const navigationState = vi.hoisted(() => ({
+  pathname: "/brands",
+  search: "",
+  replace: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   fetchAdminWithAuth: vi.fn(),
   guardState: {
-    user: { email: "admin@example.com" },
+    user: { email: "admin@example.com", uid: "admin-1" },
     checking: false,
     hasAccess: true,
   },
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => navigationState.pathname,
+  useRouter: () => ({ replace: navigationState.replace }),
+  useSearchParams: () => new URLSearchParams(navigationState.search),
 }));
 
 vi.mock("@/lib/admin/client-auth", () => ({
@@ -17,13 +29,13 @@ vi.mock("@/lib/admin/client-auth", () => ({
     (mocks.fetchAdminWithAuth as (...inner: unknown[]) => unknown)(...args),
 }));
 
+vi.mock("@/lib/admin/useAdminGuard", () => ({
+  useAdminGuard: () => mocks.guardState,
+}));
+
 vi.mock("@/components/ClientOnly", () => ({
   __esModule: true,
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("@/lib/admin/useAdminGuard", () => ({
-  useAdminGuard: () => mocks.guardState,
 }));
 
 vi.mock("@/components/admin/BrandLogoOptionsModal", () => ({
@@ -38,556 +50,397 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-describe("Admin networks page auth + sync UI", () => {
+const buildSummaryPayload = () => ({
+  totals: { total_available_shows: 18, total_added_shows: 7 },
+  rows: [
+    {
+      type: "network",
+      name: "Bravo",
+      available_show_count: 8,
+      added_show_count: 3,
+      hosted_logo_url: "https://cdn.example.com/bravo-wordmark.svg",
+      hosted_logo_black_url: null,
+      hosted_logo_white_url: null,
+      wikidata_id: "Q123",
+      wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
+      tmdb_entity_id: "74",
+      homepage_url: "https://bravotv.com",
+      has_logo: true,
+      has_bw_variants: false,
+      has_links: true,
+    },
+    {
+      type: "streaming",
+      name: "Peacock Premium",
+      available_show_count: 6,
+      added_show_count: 3,
+      hosted_logo_url: "https://cdn.example.com/peacock-wordmark.svg",
+      hosted_logo_black_url: "https://cdn.example.com/peacock-icon-black.svg",
+      hosted_logo_white_url: "https://cdn.example.com/peacock-icon-white.svg",
+      wikidata_id: "Q67765302",
+      wikipedia_url: "https://en.wikipedia.org/wiki/Peacock_(streaming_service)",
+      tmdb_entity_id: "387",
+      homepage_url: "https://peacocktv.com",
+      has_logo: true,
+      has_bw_variants: true,
+      has_links: true,
+    },
+    {
+      type: "production",
+      name: "Shed Media",
+      available_show_count: 4,
+      added_show_count: 1,
+      hosted_logo_url: null,
+      hosted_logo_black_url: null,
+      hosted_logo_white_url: null,
+      wikidata_id: null,
+      wikipedia_url: null,
+      tmdb_entity_id: null,
+      homepage_url: null,
+      has_logo: false,
+      has_bw_variants: false,
+      has_links: false,
+    },
+  ],
+  generated_at: "2026-03-16T18:00:00.000Z",
+});
+
+const buildShowsPayload = () => ({
+  rows: [
+    {
+      show_id: "show-1",
+      show_name: "The Valley",
+      canonical_slug: "the-valley",
+      networks: ["Bravo"],
+      franchise_key: "the-valley-universe",
+      franchise_name: "The Valley Universe",
+      explicit_fandom_url: null,
+      fallback_fandom_url: null,
+      effective_fandom_url: null,
+      effective_source: "none",
+      rule_candidates: [],
+      include_allpages_scan: false,
+    },
+  ],
+  count: 1,
+});
+
+const buildLogoPayload = (targetType: string) => {
+  switch (targetType) {
+    case "publication":
+      return {
+        rows: [
+          {
+            id: "pub-1",
+            target_type: "publication",
+            target_key: "deadline.com",
+            target_label: "Deadline",
+            source_url: "https://deadline.com",
+            source_provider: "official_site",
+            hosted_logo_url: "https://cdn.example.com/deadline-wordmark.svg",
+            hosted_logo_black_url: null,
+            hosted_logo_white_url: null,
+            logo_role: "wordmark",
+            is_primary: true,
+            is_selected_for_role: true,
+            updated_at: "2026-03-16T18:00:00Z",
+          },
+        ],
+        count: 1,
+      };
+    case "social":
+      return {
+        rows: [
+          {
+            id: "social-1",
+            target_type: "social",
+            target_key: "instagram.com",
+            target_label: "Instagram",
+            source_url: "https://instagram.com",
+            source_provider: "official_site",
+            hosted_logo_url: "https://cdn.example.com/instagram-wordmark.svg",
+            hosted_logo_black_url: null,
+            hosted_logo_white_url: null,
+            logo_role: "wordmark",
+            is_primary: true,
+            is_selected_for_role: true,
+            updated_at: "2026-03-16T18:00:00Z",
+          },
+        ],
+        count: 1,
+      };
+    case "other":
+      return {
+        rows: [],
+        count: 0,
+      };
+    case "show":
+      return {
+        rows: [
+          {
+            id: "show-wordmark",
+            target_type: "show",
+            target_key: "show-1",
+            target_label: "The Valley",
+            source_url: "https://example.com/the-valley",
+            source_provider: "manual_import_url",
+            hosted_logo_url: "https://cdn.example.com/the-valley-wordmark.svg",
+            hosted_logo_black_url: null,
+            hosted_logo_white_url: null,
+            logo_role: "wordmark",
+            is_primary: true,
+            is_selected_for_role: true,
+            updated_at: "2026-03-16T18:00:00Z",
+          },
+        ],
+        count: 1,
+      };
+    case "franchise":
+      return {
+        rows: [],
+        count: 0,
+      };
+    default:
+      return { rows: [], count: 0 };
+  }
+};
+
+describe("unified brands workspace", () => {
   beforeEach(() => {
+    navigationState.pathname = "/brands";
+    navigationState.search = "";
+    navigationState.replace.mockReset();
     mocks.fetchAdminWithAuth.mockReset();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
-
-  it("loads via shared auth helper and renders unresolved sync details", async () => {
-    const summaryPayload = {
-      totals: { total_available_shows: 10, total_added_shows: 4 },
-      rows: [
-        {
-          type: "network",
-          name: "Bravo",
-          available_show_count: 8,
-          added_show_count: 3,
-          hosted_logo_url: "https://cdn.example.com/bravo.png",
-          hosted_logo_black_url: null,
-          hosted_logo_white_url: null,
-          wikidata_id: "Q123",
-          wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-          resolution_status: "manual_required",
-          resolution_reason: "missing_bw_variants",
-          last_attempt_at: "2026-02-19T00:00:00Z",
-          has_logo: true,
-          has_bw_variants: false,
-          has_links: true,
-        },
-        {
-          type: "streaming",
-          name: "Peacock Premium",
-          available_show_count: 9,
-          added_show_count: 4,
-          hosted_logo_url: "https://cdn.example.com/peacock.png",
-          hosted_logo_black_url: "https://cdn.example.com/peacock-black.png",
-          hosted_logo_white_url: "https://cdn.example.com/peacock-white.png",
-          wikidata_id: "Q67765302",
-          wikipedia_url: "https://en.wikipedia.org/wiki/Peacock_(streaming_service)",
-          resolution_status: "resolved",
-          resolution_reason: null,
-          last_attempt_at: "2026-02-19T00:00:00Z",
-          has_logo: true,
-          has_bw_variants: true,
-          has_links: true,
-        },
-        {
-          type: "production",
-          name: "Shed Media",
-          available_show_count: 4,
-          added_show_count: 1,
-          hosted_logo_url: null,
-          hosted_logo_black_url: null,
-          hosted_logo_white_url: null,
-          wikidata_id: null,
-          wikipedia_url: null,
-          resolution_status: "manual_required",
-          resolution_reason: "incomplete_metadata",
-          last_attempt_at: "2026-02-19T00:00:00Z",
-          has_logo: false,
-          has_bw_variants: false,
-          has_links: false,
-        },
-      ],
-      generated_at: "2026-02-19T00:00:00.000Z",
-    };
-    const syncPayload = {
-      run_id: "network-streaming-20260224T210000Z",
-      status: "stopped",
-      resume_cursor: { entity_type: "network", entity_key: "bravo" },
-      entities_synced: 2,
-      providers_synced: 4,
-      links_enriched: 3,
-      logos_mirrored: 2,
-      variants_black_mirrored: 1,
-      variants_white_mirrored: 1,
-      completion_total: 2,
-      completion_resolved: 1,
-      completion_unresolved: 1,
-      completion_unresolved_total: 1,
-      completion_unresolved_network: 1,
-      completion_unresolved_streaming: 0,
-      completion_unresolved_production: 0,
-      production_missing_logos: 1,
-      production_missing_bw_variants: 1,
-      completion_percent: 50,
-      completion_gate_passed: false,
-      missing_columns: [],
-      unresolved_logos_count: 2,
-      unresolved_logos_truncated: true,
-      unresolved_logos: [
-        { type: "network", id: "77", name: "Bravo", reason: "no_logo_claim" },
-        { type: "production", id: "501", name: "Shed Media", reason: "incomplete_metadata" },
-      ],
-      failures: 0,
-    };
-    const overridesPayload: unknown[] = [];
-
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/admin/networks-streaming/summary")) {
-        return jsonResponse(summaryPayload);
+        return jsonResponse(buildSummaryPayload());
       }
-      if (url.includes("/api/admin/networks-streaming/overrides")) {
-        return jsonResponse(overridesPayload);
+      if (url.includes("/api/admin/trr-api/brands/shows-franchises")) {
+        return jsonResponse(buildShowsPayload());
       }
-      if (url.endsWith("/api/admin/networks-streaming/sync")) {
-        return jsonResponse(syncPayload);
+      if (url.includes("/api/admin/trr-api/brands/logos?")) {
+        const parsed = new URL(url, "http://localhost");
+        return jsonResponse(buildLogoPayload(parsed.searchParams.get("target_type") ?? ""));
+      }
+      if (url.endsWith("/api/admin/trr-api/brands/logos/sync")) {
+        return jsonResponse({
+          targets_scanned: 8,
+          imports_created: 2,
+          imports_updated: 1,
+          unresolved: 3,
+        });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
+  });
 
-    render(<AdminNetworksPage />);
+  it("renders the unified table workspace and removes legacy network-only controls", async () => {
+    render(<AdminBrandsPage />);
 
     await waitFor(() => {
-      expect(mocks.fetchAdminWithAuth).toHaveBeenCalled();
+      expect(screen.getByRole("heading", { name: "Brands" })).toBeInTheDocument();
       expect(screen.getByText("Bravo")).toBeInTheDocument();
     });
-    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
-    const breadcrumbNav = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(breadcrumbNav).toBeInTheDocument();
-    expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
-    expect(within(breadcrumbNav).getByText("Brands")).toBeInTheDocument();
+
+    expect(screen.getByText("Manual Fixes Required")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Table View" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gallery View" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Shows" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publications/News" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Social Media" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Other" })).toBeInTheDocument();
+    expect(screen.getByText(/Missing Icon:/)).toBeInTheDocument();
+
+    expect(screen.queryByText("Completion Gate")).not.toBeInTheDocument();
+    expect(screen.queryByText("Schema Health")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sync/Mirror Brands")).not.toBeInTheDocument();
+    expect(screen.queryByText("Re-run Unresolved Only")).not.toBeInTheDocument();
+    expect(screen.queryByText("Overrides backend is unavailable right now. Summary rows are still available.")).not.toBeInTheDocument();
 
     expect(screen.getByRole("link", { name: "Bravo" })).toHaveAttribute(
       "href",
       "/brands/networks-and-streaming/network/bravo",
     );
-    expect(screen.getByRole("link", { name: "Peacock Premium" })).toHaveAttribute(
-      "href",
-      "/brands/networks-and-streaming/streaming/peacock-premium",
-    );
 
-    const summaryCall = mocks.fetchAdminWithAuth.mock.calls.find((call: unknown[]) =>
-      String(call[0]).endsWith("/api/admin/networks-streaming/summary"),
-    );
-    expect(summaryCall).toBeTruthy();
-    expect(screen.getByText(/Missing B\/W Variants: 2/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Bravo" }).closest("tr") as HTMLElement);
+    expect(await screen.findByTestId("brand-logo-modal")).toHaveTextContent("Bravo");
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync/Mirror Brands" }));
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some((call: unknown[]) =>
+        String(call[0]).includes("/api/admin/networks-streaming/overrides"),
+      ),
+    ).toBe(false);
+  });
+
+  it("syncs through the generic brands pipeline for the active category filter", async () => {
+    navigationState.search = "category=shows&view=gallery";
+
+    render(<AdminBrandsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Sync complete")).toBeInTheDocument();
+      expect(screen.getByText("The Valley")).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync Logos" }));
+
     await waitFor(() => {
-      expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
+      expect(screen.getByText(/Scanned 8 show and franchise logos/)).toBeInTheDocument();
     });
 
     const syncCall = mocks.fetchAdminWithAuth.mock.calls.find((call: unknown[]) =>
-      String(call[0]).endsWith("/api/admin/networks-streaming/sync"),
+      String(call[0]).endsWith("/api/admin/trr-api/brands/logos/sync"),
     );
     expect(syncCall?.[1]).toMatchObject({
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        unresolved_only: false,
-        refresh_external_sources: false,
-        batch_size: 25,
-        max_runtime_sec: 840,
+        scope: "all",
+        target_types: ["show", "franchise"],
+        only_missing: true,
+        force: false,
+        limit: 200,
       }),
-    });
-    expect(screen.getByText("Unresolved production entities: 1")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Re-run Unresolved Production Only" }));
-
-    await waitFor(() => {
-      const calls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
-        String(call[0]).endsWith("/api/admin/networks-streaming/sync"),
-      );
-      expect(calls.length).toBeGreaterThanOrEqual(2);
-    });
-
-    const syncCalls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
-      String(call[0]).endsWith("/api/admin/networks-streaming/sync"),
-    );
-    const productionSyncCall = syncCalls[syncCalls.length - 1];
-    expect(productionSyncCall?.[1]).toMatchObject({
-      body: JSON.stringify({
-        unresolved_only: true,
-        refresh_external_sources: false,
-        batch_size: 25,
-        max_runtime_sec: 840,
-        entity_type: "production",
-        entity_keys: ["shed media"],
-      }),
-    });
-
-    expect(screen.getByText(/Run: network-streaming-20260224T210000Z/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Resume Sync" })).toBeInTheDocument();
-
-    expect(screen.getByRole("button", { name: /Hide unresolved/ })).toBeInTheDocument();
-    expect(screen.getAllByText("Bravo").length).toBeGreaterThan(0);
-    expect(screen.getByText(/Showing first 300 unresolved entries from sync payload/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Streaming Services" }));
-    await waitFor(() => {
-      expect(screen.getByText("Peacock Premium")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("missing_bw_variants")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Network" }));
-    expect(screen.getAllByText("Bravo").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Peacock Premium")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
-    expect(screen.getByText("Peacock Premium")).toBeInTheDocument();
-  });
-
-  it("does not open the logo picker when inner network links are clicked", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/admin/networks-streaming/summary")) {
-        return jsonResponse({
-          totals: { total_available_shows: 1, total_added_shows: 1 },
-          rows: [
-            {
-              type: "network",
-              name: "Bravo",
-              available_show_count: 8,
-              added_show_count: 3,
-              hosted_logo_url: "https://cdn.example.com/bravo.png",
-              hosted_logo_black_url: null,
-              hosted_logo_white_url: null,
-              wikidata_id: "Q123",
-              wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-              resolution_status: "manual_required",
-              resolution_reason: "missing_bw_variants",
-              last_attempt_at: "2026-02-19T00:00:00Z",
-              has_logo: true,
-              has_bw_variants: false,
-              has_links: true,
-            },
-          ],
-          generated_at: "2026-02-19T00:00:00.000Z",
-        });
-      }
-      if (url.includes("/api/admin/networks-streaming/overrides")) {
-        return jsonResponse([]);
-      }
-      throw new Error(`Unexpected URL: ${url}`);
-    });
-
-    render(<AdminNetworksPage />);
-
-    const bravoLink = await screen.findByRole("link", { name: "Bravo" });
-    fireEvent.click(bravoLink);
-
-    expect(screen.queryByTestId("brand-logo-modal")).toBeNull();
-
-    fireEvent.click(bravoLink.closest("tr") as HTMLElement);
-    expect(await screen.findByTestId("brand-logo-modal")).toHaveTextContent("Bravo");
-  });
-
-  it("starts live summary polling while sync is active", async () => {
-    let resolveSync: ((response: Response) => void) | null = null;
-    const pendingSync = new Promise<Response>((resolve) => {
-      resolveSync = resolve;
-    });
-    const setIntervalSpy = vi.spyOn(window, "setInterval");
-
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/admin/networks-streaming/summary")) {
-        return jsonResponse({
-          totals: { total_available_shows: 2, total_added_shows: 2 },
-          rows: [
-            {
-              type: "network",
-              name: "Bravo",
-              available_show_count: 2,
-              added_show_count: 2,
-              hosted_logo_url: "https://cdn.example.com/bravo.png",
-              hosted_logo_black_url: null,
-              hosted_logo_white_url: null,
-              wikidata_id: "Q123",
-              wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-              resolution_status: "manual_required",
-              resolution_reason: "missing_bw_variants",
-              last_attempt_at: "2026-02-19T00:00:00Z",
-              has_logo: true,
-              has_bw_variants: false,
-              has_links: true,
-            },
-          ],
-          generated_at: "2026-02-19T00:00:00.000Z",
-        });
-      }
-      if (url.includes("/api/admin/networks-streaming/overrides")) {
-        return jsonResponse([]);
-      }
-      if (url.endsWith("/api/admin/networks-streaming/sync")) {
-        return pendingSync;
-      }
-      throw new Error(`Unexpected URL: ${url}`);
-    });
-
-    render(<AdminNetworksPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Bravo")).toBeInTheDocument();
-    });
-    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
-
-    const initialSummaryCalls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
-      String(call[0]).endsWith("/api/admin/networks-streaming/summary"),
-    ).length;
-
-    fireEvent.click(screen.getByRole("button", { name: "Sync/Mirror Brands" }));
-
-    await waitFor(() => {
-      const summaryCalls = mocks.fetchAdminWithAuth.mock.calls.filter((call: unknown[]) =>
-        String(call[0]).endsWith("/api/admin/networks-streaming/summary"),
-      ).length;
-      expect(summaryCalls).toBeGreaterThan(initialSummaryCalls);
-    });
-    expect(screen.getByTestId("completion-gate-progress-bar")).toBeInTheDocument();
-    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 3500);
-
-    resolveSync?.(
-      jsonResponse({
-        run_id: "network-streaming-20260225T020000Z",
-        status: "completed",
-        resume_cursor: null,
-        entities_synced: 1,
-        providers_synced: 1,
-        links_enriched: 1,
-        logos_mirrored: 1,
-        variants_black_mirrored: 0,
-        variants_white_mirrored: 0,
-        completion_total: 1,
-        completion_resolved: 1,
-        completion_unresolved: 0,
-        completion_unresolved_total: 0,
-        completion_unresolved_network: 0,
-        completion_unresolved_streaming: 0,
-        completion_unresolved_production: 0,
-        production_missing_logos: 0,
-        production_missing_bw_variants: 0,
-        completion_percent: 100,
-        completion_gate_passed: true,
-        missing_columns: [],
-        unresolved_logos_count: 0,
-        unresolved_logos_truncated: false,
-        unresolved_logos: [],
-        failures: 0,
-      }),
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText("Sync complete")).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
     });
   });
 
-  it("shows active progress animation while manual refresh is loading", async () => {
-    let resolveRefreshSummary: ((response: Response) => void) | null = null;
-    const pendingRefreshSummary = new Promise<Response>((resolve) => {
-      resolveRefreshSummary = resolve;
-    });
-    let summaryCallCount = 0;
-
+  it("keeps available brand cards visible when one logo endpoint fails", async () => {
+    navigationState.search = "view=gallery";
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/admin/networks-streaming/summary")) {
-        summaryCallCount += 1;
-        if (summaryCallCount === 2) {
-          return pendingRefreshSummary;
+        return jsonResponse(buildSummaryPayload());
+      }
+      if (url.includes("/api/admin/trr-api/brands/shows-franchises")) {
+        return jsonResponse(buildShowsPayload());
+      }
+      if (url.includes("/api/admin/trr-api/brands/logos?")) {
+        const parsed = new URL(url, "http://localhost");
+        if (parsed.searchParams.get("target_type") === "show") {
+          return jsonResponse({ error: "Failed to fetch brand logos" }, 500);
         }
-        return jsonResponse({
-          totals: { total_available_shows: 2, total_added_shows: 2 },
-          rows: [
-            {
-              type: "network",
-              name: "Bravo",
-              available_show_count: 2,
-              added_show_count: 2,
-              hosted_logo_url: "https://cdn.example.com/bravo.png",
-              hosted_logo_black_url: null,
-              hosted_logo_white_url: null,
-              wikidata_id: "Q123",
-              wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-              resolution_status: "manual_required",
-              resolution_reason: "missing_bw_variants",
-              last_attempt_at: "2026-02-19T00:00:00Z",
-              has_logo: true,
-              has_bw_variants: false,
-              has_links: true,
-            },
-          ],
-          generated_at: "2026-02-19T00:00:00.000Z",
-        });
+        return jsonResponse(buildLogoPayload(parsed.searchParams.get("target_type") ?? ""));
       }
-      if (url.includes("/api/admin/networks-streaming/overrides")) {
-        return jsonResponse([]);
+      if (url.endsWith("/api/admin/trr-api/brands/logos/sync")) {
+        return jsonResponse({
+          targets_scanned: 8,
+          imports_created: 2,
+          imports_updated: 1,
+          unresolved: 3,
+        });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    render(<AdminNetworksPage />);
+    render(<AdminBrandsPage />);
 
     await waitFor(() => {
       expect(screen.getByText("Bravo")).toBeInTheDocument();
+      expect(screen.getByText("Deadline")).toBeInTheDocument();
     });
-    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Refreshing..." })).toBeDisabled();
-      expect(screen.getByTestId("completion-gate-progress-bar")).toBeInTheDocument();
-    });
-    expect(screen.getByTestId("completion-gate-progress-bar").className).toContain("animate-pulse");
-
-    resolveRefreshSummary?.(
-      jsonResponse({
-        totals: { total_available_shows: 2, total_added_shows: 2 },
-        rows: [
-          {
-            type: "network",
-            name: "Bravo",
-            available_show_count: 2,
-            added_show_count: 2,
-            hosted_logo_url: "https://cdn.example.com/bravo.png",
-            hosted_logo_black_url: "https://cdn.example.com/bravo-black.png",
-            hosted_logo_white_url: "https://cdn.example.com/bravo-white.png",
-            wikidata_id: "Q123",
-            wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
-            resolution_status: "resolved",
-            resolution_reason: null,
-            last_attempt_at: "2026-02-19T00:00:00Z",
-            has_logo: true,
-            has_bw_variants: true,
-            has_links: true,
-          },
-        ],
-        generated_at: "2026-02-19T00:00:00.000Z",
-      }),
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
-    });
-    expect(screen.queryByTestId("completion-gate-progress-bar")).not.toBeInTheDocument();
+    expect(screen.getByText(/Some brand sources failed to load: show logos/)).toBeInTheDocument();
+    expect(screen.queryByText("No cards available for this category.")).not.toBeInTheDocument();
   });
 
-  it("keeps the page in loading/recovery state while auth fetch is in-flight and then recovers", async () => {
-    let resolveSummary: ((response: Response) => void) | null = null;
-    const pendingSummary = new Promise<Response>((resolve) => {
-      resolveSummary = resolve;
-    });
-
+  it("routes social-media domains from publication and other rows into the social category", async () => {
+    navigationState.search = "category=social&view=gallery";
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/admin/networks-streaming/summary")) {
-        return pendingSummary;
+        return jsonResponse(buildSummaryPayload());
       }
-      if (url.includes("/api/admin/networks-streaming/overrides")) {
-        return jsonResponse([]);
+      if (url.includes("/api/admin/trr-api/brands/shows-franchises")) {
+        return jsonResponse(buildShowsPayload());
       }
-      throw new Error(`Unexpected URL: ${url}`);
-    });
-
-    render(<AdminNetworksPage />);
-
-    expect(screen.getByText("Loading brands summary...")).toBeInTheDocument();
-    expect(screen.queryByText("Not authenticated")).not.toBeInTheDocument();
-
-    resolveSummary?.(
-      jsonResponse({
-        totals: { total_available_shows: 1, total_added_shows: 1 },
-        rows: [],
-        generated_at: "2026-02-19T00:00:00.000Z",
-      }),
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/Available Shows:\s*1/)).toBeInTheDocument();
-      expect(screen.queryByText("Loading brands summary...")).not.toBeInTheDocument();
-    });
-    expect(screen.queryByText("Not authenticated")).not.toBeInTheDocument();
-  });
-
-  it("keeps summary rows visible and switches overrides to read-only when override auth fails", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/admin/networks-streaming/summary")) {
+      if (url.includes("/api/admin/trr-api/brands/logos?")) {
+        const parsed = new URL(url, "http://localhost");
+        const targetType = parsed.searchParams.get("target_type") ?? "";
+        if (targetType === "publication") {
+          return jsonResponse({
+            rows: [
+              {
+                id: "publication-facebook",
+                target_type: "publication",
+                target_key: "facebook.com",
+                target_label: "Facebook",
+                source_url: "https://www.facebook.com/bravo",
+                source_domain: "facebook.com",
+                source_provider: "official_site",
+                hosted_logo_url: "https://cdn.example.com/facebook-wordmark.svg",
+                hosted_logo_black_url: null,
+                hosted_logo_white_url: null,
+                logo_role: "wordmark",
+                is_primary: true,
+                is_selected_for_role: true,
+                updated_at: "2026-03-16T18:00:00Z",
+              },
+              {
+                id: "publication-deadline",
+                target_type: "publication",
+                target_key: "deadline.com",
+                target_label: "Deadline",
+                source_url: "https://deadline.com",
+                source_domain: "deadline.com",
+                source_provider: "official_site",
+                hosted_logo_url: "https://cdn.example.com/deadline-wordmark.svg",
+                hosted_logo_black_url: null,
+                hosted_logo_white_url: null,
+                logo_role: "wordmark",
+                is_primary: true,
+                is_selected_for_role: true,
+                updated_at: "2026-03-16T18:00:00Z",
+              },
+            ],
+            count: 2,
+          });
+        }
+        if (targetType === "other") {
+          return jsonResponse({
+            rows: [
+              {
+                id: "other-reddit",
+                target_type: "other",
+                target_key: "reddit.com",
+                target_label: "Reddit",
+                source_url: "https://www.reddit.com/r/BravoRealHousewives",
+                source_domain: "reddit.com",
+                source_provider: "official_site",
+                hosted_logo_url: "https://cdn.example.com/reddit-wordmark.svg",
+                hosted_logo_black_url: null,
+                hosted_logo_white_url: null,
+                logo_role: "wordmark",
+                is_primary: true,
+                is_selected_for_role: true,
+                updated_at: "2026-03-16T18:00:00Z",
+              },
+            ],
+            count: 1,
+          });
+        }
+        if (targetType === "social") {
+          return jsonResponse({ rows: [], count: 0 });
+        }
+        return jsonResponse(buildLogoPayload(targetType));
+      }
+      if (url.endsWith("/api/admin/trr-api/brands/logos/sync")) {
         return jsonResponse({
-          totals: { total_available_shows: 1, total_added_shows: 1 },
-          rows: [
-            {
-              type: "network",
-              name: "Bravo",
-              available_show_count: 1,
-              added_show_count: 1,
-              hosted_logo_url: null,
-              hosted_logo_black_url: null,
-              hosted_logo_white_url: null,
-              wikidata_id: null,
-              wikipedia_url: null,
-              resolution_status: "manual_required",
-              resolution_reason: "missing_logo",
-              last_attempt_at: "2026-02-19T00:00:00Z",
-              has_logo: false,
-              has_bw_variants: false,
-              has_links: false,
-            },
-          ],
-          generated_at: "2026-02-19T00:00:00.000Z",
+          targets_scanned: 8,
+          imports_created: 2,
+          imports_updated: 1,
+          unresolved: 3,
         });
       }
-      if (url.includes("/api/admin/networks-streaming/overrides")) {
-        return jsonResponse(
-          {
-            error: "Not authenticated. Backend override request failed.",
-            error_code: "not_authenticated_for_overrides",
-          },
-          403,
-        );
-      }
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    render(<AdminNetworksPage />);
+    render(<AdminBrandsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Bravo")).toBeInTheDocument();
+      expect(screen.getByText("Facebook")).toBeInTheDocument();
+      expect(screen.getByText("Reddit")).toBeInTheDocument();
     });
-    expect(
-      screen.getByText("Overrides are read-only for this session. Summary rows loaded successfully."),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("Not authenticated. Backend override request failed.")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Show unresolved/ }));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Read-only session" })).toBeDisabled();
-    });
-  });
-
-  it("shows terminal auth error when helper rejects after retries are exhausted", async () => {
-    mocks.fetchAdminWithAuth.mockRejectedValue(new Error("Not authenticated"));
-
-    render(<AdminNetworksPage />);
-
-    await waitFor(() => {
-      expect(screen.getAllByText("Not authenticated").length).toBeGreaterThan(0);
-    });
+    expect(screen.queryByText("Deadline")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Social Media").length).toBeGreaterThan(0);
   });
 });

@@ -11,6 +11,7 @@ import { logEvent } from "firebase/analytics";
 import type { User } from "firebase/auth";
 import { checkUserExists, isFirestoreUnavailableError } from "@/lib/db/users";
 import { AuthDebugger, EnvUtils } from "@/lib/debug";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
 export default function Page() {
   const router = useRouter();
@@ -144,16 +145,17 @@ export default function Page() {
       {user ? (
         // Authenticated user - show welcome message and navigation
         <div className="w-full max-w-md mx-auto mt-16 px-4 text-center">
-          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 mb-6">
+          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 mb-6" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "heroTitle" })}>
             Welcome back!
           </h2>
-          <p className="text-gray-600 font-hamburg mb-8">
+          <p className="text-gray-600 font-hamburg mb-8" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
             You&apos;re signed in as {user.email}
           </p>
           <div className="space-y-4">
             <button
               onClick={handleHubNavigation}
               className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center"
+              {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "cta" })}
             >
               Go to Hub
             </button>
@@ -204,7 +206,7 @@ export default function Page() {
         
         {/* Heading Container */}
         <div className="w-full flex items-center justify-center mb-6">
-          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
+          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "heroTitle" })}>
             Log in or create an account
           </h2>
         </div>
@@ -212,7 +214,7 @@ export default function Page() {
         {/* Email Field */}
         <div className="w-full mb-4">
           <div className="h-[21px] mb-2">
-            <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+            <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
               Email address
             </label>
           </div>
@@ -232,6 +234,7 @@ export default function Page() {
         <button 
           type="submit"
           className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center mb-4"
+          {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "cta" })}
         >
           Continue
         </button>
@@ -255,14 +258,14 @@ export default function Page() {
             <path fillRule="evenodd" clipRule="evenodd" d="M4.09409 11.1498C3.91409 10.6098 3.81182 10.033 3.81182 9.43983C3.81182 8.84664 3.91409 8.26983 4.09409 7.72983V5.39801H1.08728C0.477732 6.61301 0.130005 7.98755 0.130005 9.43983C0.130005 10.8921 0.477732 12.2666 1.08728 13.4816L4.09409 11.1498Z" fill="#FBBC05"/>
             <path fillRule="evenodd" clipRule="evenodd" d="M9.12976 4.01955C10.4511 4.01955 11.6375 4.47364 12.5702 5.36545L15.1516 2.78409C13.5929 1.33182 11.5557 0.440002 9.12976 0.440002C5.61158 0.440002 2.56795 2.45682 1.08704 5.39818L4.09386 7.73C4.80159 5.60273 6.78567 4.01955 9.12976 4.01955Z" fill="#EA4335"/>
           </svg>
-          <span className="text-neutral-900 text-base font-hamburg font-normal leading-6">
+          <span className="text-neutral-900 text-base font-hamburg font-normal leading-6" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
             Continue with Google
           </span>
         </button>
 
         {/* Terms Text Container */}
         <div className="w-full flex items-center justify-center">
-          <p className="text-black text-sm font-hamburg font-normal leading-[21px] text-center">
+          <p className="text-black text-sm font-hamburg font-normal leading-[21px] text-center" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
             By continuing, you agree to the{" "}
             <Link href="/terms-of-sale" className="underline">
               Terms of Sale

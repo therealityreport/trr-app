@@ -14,6 +14,7 @@ import {
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { parseEntityType, toEntitySlug, type NetworkStreamingEntityType } from "@/lib/admin/networks-streaming-entity";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 interface NetworkStreamingDetailShowRow {
   trr_show_id: string;
@@ -496,7 +497,14 @@ export default function AdminNetworkStreamingDetailPage() {
                     <div className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Color Logo</div>
                     {detail.core.hosted_logo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={detail.core.hosted_logo_url} alt={`${detail.display_name} logo`} className="mt-2 h-12 object-contain" />
+                      <img
+                        src={
+                          canonicalizeHostedMediaUrl(detail.core.hosted_logo_url) ??
+                          detail.core.hosted_logo_url
+                        }
+                        alt={`${detail.display_name} logo`}
+                        className="mt-2 h-12 object-contain"
+                      />
                     ) : (
                       <p className="mt-2 text-sm text-zinc-500">Missing</p>
                     )}
@@ -505,7 +513,14 @@ export default function AdminNetworkStreamingDetailPage() {
                     <div className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-500">Black Variant</div>
                     {detail.core.hosted_logo_black_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={detail.core.hosted_logo_black_url} alt={`${detail.display_name} black logo`} className="mt-2 h-12 object-contain" />
+                      <img
+                        src={
+                          canonicalizeHostedMediaUrl(detail.core.hosted_logo_black_url) ??
+                          detail.core.hosted_logo_black_url
+                        }
+                        alt={`${detail.display_name} black logo`}
+                        className="mt-2 h-12 object-contain"
+                      />
                     ) : (
                       <p className="mt-2 text-sm text-zinc-500">Missing</p>
                     )}
@@ -514,7 +529,14 @@ export default function AdminNetworkStreamingDetailPage() {
                     <div className="text-xs font-semibold uppercase tracking-[0.1em] text-zinc-100">White Variant</div>
                     {detail.core.hosted_logo_white_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={detail.core.hosted_logo_white_url} alt={`${detail.display_name} white logo`} className="mt-2 h-12 object-contain" />
+                      <img
+                        src={
+                          canonicalizeHostedMediaUrl(detail.core.hosted_logo_white_url) ??
+                          detail.core.hosted_logo_white_url
+                        }
+                        alt={`${detail.display_name} white logo`}
+                        className="mt-2 h-12 object-contain"
+                      />
                     ) : (
                       <p className="mt-2 text-sm text-zinc-300">Missing</p>
                     )}
@@ -580,7 +602,11 @@ export default function AdminNetworkStreamingDetailPage() {
                           <div className="mt-2 h-14 rounded border border-zinc-200 bg-zinc-50 p-2">
                             {asset.hosted_logo_url ? (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img src={asset.hosted_logo_url} alt={`${detail.display_name} ${asset.source} logo`} className="h-full w-full object-contain" />
+                              <img
+                                src={canonicalizeHostedMediaUrl(asset.hosted_logo_url) ?? asset.hosted_logo_url}
+                                alt={`${detail.display_name} ${asset.source} logo`}
+                                className="h-full w-full object-contain"
+                              />
                             ) : (
                               <p className="text-xs text-zinc-500">No hosted asset</p>
                             )}
@@ -793,7 +819,11 @@ export default function AdminNetworkStreamingDetailPage() {
                               <td className="px-3 py-2">
                                 {show.poster_url ? (
                                   // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={show.poster_url} alt={`${show.show_name} poster`} className="h-12 w-8 rounded object-cover" />
+                                  <img
+                                    src={canonicalizeHostedMediaUrl(show.poster_url) ?? show.poster_url}
+                                    alt={`${show.show_name} poster`}
+                                    className="h-12 w-8 rounded object-cover"
+                                  />
                                 ) : (
                                   <span className="text-zinc-500">Missing</span>
                                 )}

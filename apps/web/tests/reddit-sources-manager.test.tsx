@@ -5,7 +5,7 @@ import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { auth } from "@/lib/firebase";
 
 const { usePathnameMock, useSearchParamsMock, useRouterPushMock, useRouterReplaceMock } = vi.hoisted(() => ({
-  usePathnameMock: vi.fn(() => "/admin/social-media"),
+  usePathnameMock: vi.fn(() => "/admin/social"),
   useSearchParamsMock: vi.fn(() => new URLSearchParams()),
   useRouterPushMock: vi.fn(),
   useRouterReplaceMock: vi.fn(),
@@ -297,7 +297,7 @@ const cardHasPendingRefresh = (label: string): boolean => {
 
 describe("RedditSourcesManager", () => {
   beforeEach(() => {
-    usePathnameMock.mockReturnValue("/admin/social-media");
+    usePathnameMock.mockReturnValue("/admin/social");
     useSearchParamsMock.mockReturnValue(new URLSearchParams());
     useRouterPushMock.mockReset();
     useRouterReplaceMock.mockReset();
@@ -1074,13 +1074,13 @@ describe("RedditSourcesManager", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
 
-    expect(screen.queryByText("Community Focus")).not.toBeInTheDocument();
+    expect(screen.queryByText("Community Scope")).not.toBeInTheDocument();
     expect(screen.queryByText("All Posts With Flair")).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Open community settings" }));
 
     expect(await screen.findByText("Community Settings")).toBeInTheDocument();
-    expect(screen.getByText("Community Focus")).toBeInTheDocument();
+    expect(screen.getByText("Community Scope")).toBeInTheDocument();
     expect(screen.getAllByText("All Posts With Flair").length).toBeGreaterThan(0);
   });
 

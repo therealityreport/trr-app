@@ -5,6 +5,7 @@ import Image from "next/image";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { adminStream } from "@/lib/admin/admin-fetch";
 import { formatImageCandidateBadgeText } from "@/lib/image-scrape-preview";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 function normalizePersonName(value: string): string {
   return value
@@ -1522,7 +1523,7 @@ export function ImageScrapeDrawer({
                         onClick={() => toggleImageSelection(img.id)}
                       >
                         <Image
-                          src={img.thumbnail_url}
+                          src={canonicalizeHostedMediaUrl(img.thumbnail_url) ?? img.thumbnail_url}
                           alt={img.alt_text || "Scraped image"}
                           fill
                           className="object-cover"
@@ -1843,7 +1844,7 @@ export function ImageScrapeDrawer({
                         className="relative aspect-square overflow-hidden rounded bg-white"
                       >
                         <Image
-                          src={asset.hosted_url}
+                          src={canonicalizeHostedMediaUrl(asset.hosted_url) ?? asset.hosted_url}
                           alt={asset.caption || "Imported image"}
                           fill
                           className="object-cover"

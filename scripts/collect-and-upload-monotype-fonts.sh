@@ -4,7 +4,8 @@
 #
 # Step 1: Collects all Monotype subscription fonts from ~/Library/Fonts
 #         into ~/Desktop/FONTS/ organized by family name.
-# Step 2: Uploads the collected fonts to S3 (trr-backend bucket, fonts/ prefix)
+# Step 2: Uploads the collected fonts to S3-compatible object storage
+#         (trr-backend bucket, fonts/ prefix)
 #         using the existing upload-fonts-to-s3.py script.
 #
 # Usage:
@@ -167,11 +168,11 @@ collect_fonts() {
 }
 
 # ============================================================================
-# STEP 2: Upload to S3
+# STEP 2: Upload to object storage
 # ============================================================================
 upload_fonts() {
   echo "============================================="
-  echo "  STEP 2: Uploading to S3 ($S3_BUCKET)"
+  echo "  STEP 2: Uploading to object storage ($S3_BUCKET)"
   echo "============================================="
   echo ""
 
@@ -190,10 +191,11 @@ upload_fonts() {
   echo "  Using: $(command -v $PYTHON3) ($($PYTHON3 --version 2>&1))"
   echo ""
 
-  # Check AWS credentials
-  if ! aws sts get-caller-identity &>/dev/null; then
-    echo "ERROR: AWS credentials not configured."
-    echo "Run: aws configure  (or set AWS_PROFILE=trr)"
+  # Check object-storage credentials/profile configuration
+  if [ -z "${OBJECT_STORAGE_PROFILE:-}" ] \
+    && { [ -z "${OBJECT_STORAGE_ACCESS_KEY_ID:-}" ] || [ -z "${OBJECT_STORAGE_SECRET_ACCESS_KEY:-}" ]; }; then
+    echo "ERROR: Object-storage credentials are not configured."
+    echo "Set OBJECT_STORAGE_PROFILE or both OBJECT_STORAGE_ACCESS_KEY_ID and OBJECT_STORAGE_SECRET_ACCESS_KEY."
     exit 1
   fi
 
@@ -214,7 +216,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Source:  $FONT_SOURCE"
 echo "  Staging: $DEST_BASE"
-echo "  Bucket:  s3://$S3_BUCKET/fonts/monotype/"
+echo "  Bucket:  $S3_BUCKET/fonts/monotype/"
 echo "  CDN:     https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/"
 echo ""
 

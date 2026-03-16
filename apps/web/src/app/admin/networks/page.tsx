@@ -18,6 +18,7 @@ import {
 } from "@/lib/admin/async-handles";
 import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 type NetworksStreamingType = "network" | "streaming" | "production";
 
@@ -1158,7 +1159,11 @@ export default function AdminNetworksPage() {
                                 <div className="relative h-8 w-[120px] overflow-hidden rounded border border-zinc-200 bg-zinc-50">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
-                                    src={row.hosted_logo_url || PLACEHOLDER_ICON_PATH}
+                                    src={
+                                      canonicalizeHostedMediaUrl(row.hosted_logo_url) ||
+                                      row.hosted_logo_url ||
+                                      PLACEHOLDER_ICON_PATH
+                                    }
                                     alt={`${row.name} wordmark`}
                                     className="h-full w-full object-contain p-1"
                                   />
@@ -1166,7 +1171,14 @@ export default function AdminNetworksPage() {
                                 <div className="relative h-8 w-8 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
-                                    src={row.hosted_logo_black_url || row.hosted_logo_white_url || PLACEHOLDER_ICON_PATH}
+                                    src={
+                                      canonicalizeHostedMediaUrl(
+                                        row.hosted_logo_black_url || row.hosted_logo_white_url,
+                                      ) ||
+                                      row.hosted_logo_black_url ||
+                                      row.hosted_logo_white_url ||
+                                      PLACEHOLDER_ICON_PATH
+                                    }
                                     alt={`${row.name} icon`}
                                     className="h-full w-full object-contain p-1"
                                   />

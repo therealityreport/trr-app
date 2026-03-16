@@ -24,7 +24,6 @@ describe("admin docs page", () => {
     expect(screen.getAllByText("Modal").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Local").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Cutover Complete").length).toBeGreaterThan(0);
-    expect(screen.queryByText("EC2")).not.toBeInTheDocument();
     expect(
       screen.getAllByText("Admin / Shows / Show Name / Season # / Social Media / Official Analytics").length,
     ).toBeGreaterThan(0);

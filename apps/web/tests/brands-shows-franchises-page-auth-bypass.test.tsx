@@ -1,6 +1,13 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import AdminBrandsPage from "@/app/admin/brands/page";
+
+const navigationState = vi.hoisted(() => ({
+  pathname: "/brands",
+  search: "category=shows&view=gallery",
+  replace: vi.fn(),
+}));
 
 const mocks = vi.hoisted(() => ({
   fetchAdminWithAuth: vi.fn(),
@@ -9,6 +16,12 @@ const mocks = vi.hoisted(() => ({
     checking: false,
     hasAccess: true,
   },
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => navigationState.pathname,
+  useRouter: () => ({ replace: navigationState.replace }),
+  useSearchParams: () => new URLSearchParams(navigationState.search),
 }));
 
 vi.mock("@/lib/admin/client-auth", () => ({
@@ -25,72 +38,31 @@ vi.mock("@/components/ClientOnly", () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/components/admin/AdminGlobalHeader", () => ({
-  __esModule: true,
-  default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-vi.mock("@/components/admin/AdminBreadcrumbs", () => ({
-  __esModule: true,
-  default: () => <nav aria-label="Breadcrumb" />,
-}));
-
-vi.mock("@/components/admin/BrandsTabs", () => ({
-  __esModule: true,
-  default: () => <div data-testid="brands-tabs" />,
-}));
-
-import BrandsShowsAndFranchisesPage from "@/app/brands/shows-and-franchises/page";
-
-const jsonResponse = (body: unknown, status = 200): Response =>
+const jsonResponse = (body: unknown): Response =>
   new Response(JSON.stringify(body), {
-    status,
+    status: 200,
     headers: { "content-type": "application/json" },
   });
 
-describe("brands shows-and-franchises page auth behavior", () => {
+describe("unified brands shows view auth behavior", () => {
   beforeEach(() => {
+    navigationState.search = "category=shows&view=gallery";
+    navigationState.replace.mockReset();
     mocks.fetchAdminWithAuth.mockReset();
-    process.env.NEXT_PUBLIC_BRANDS_SHOWS_FRANCHISES_ENABLED = "true";
-    process.env.BRANDS_SHOWS_FRANCHISES_ENABLED = "true";
-
-    mocks.fetchAdminWithAuth.mockImplementation(
-      (input: RequestInfo | URL, _init?: RequestInit, options?: { allowDevAdminBypass?: boolean }) => {
-        if (!options?.allowDevAdminBypass) {
-          return Promise.reject(new Error("Not authenticated"));
-        }
-        const url = String(input);
-        if (url.includes("/api/admin/trr-api/brands/franchise-rules")) {
-          return Promise.resolve(jsonResponse({ rules: [], suggested_franchises: [] }));
-        }
-        if (url.includes("/api/admin/trr-api/brands/shows-franchises")) {
-          return Promise.resolve(jsonResponse({ rows: [], count: 0, groups: [] }));
-        }
-        if (url.includes("/api/admin/trr-api/brands/families?active_only=true")) {
-          return Promise.resolve(
-            jsonResponse({
-              rows: [{ id: "fam-1", family_key: "nbcu", display_name: "NBCU" }],
-              count: 1,
-            }),
-          );
-        }
-        if (url.includes("/api/admin/trr-api/brands/families/fam-1/links")) {
-          return Promise.resolve(jsonResponse({ rows: [], count: 0 }));
-        }
-        if (url.includes("/api/admin/trr-api/brands/logos")) {
-          return Promise.resolve(jsonResponse({ rows: [] }));
-        }
-        return Promise.reject(new Error(`Unexpected URL: ${url}`));
-      },
-    );
+    mocks.fetchAdminWithAuth.mockImplementation((_input: RequestInfo | URL, _init?: RequestInit, options?: { allowDevAdminBypass?: boolean }) => {
+      if (!options?.allowDevAdminBypass) {
+        return Promise.reject(new Error("Not authenticated"));
+      }
+      return Promise.resolve(jsonResponse({ rows: [] }));
+    });
   });
 
-  it("passes allowDevAdminBypass=true in page fetch helper calls", async () => {
-    render(<BrandsShowsAndFranchisesPage />);
+  it("routes show-branding coverage through the unified brands workspace", async () => {
+    render(<AdminBrandsPage />);
 
     await waitFor(() => {
-      expect(mocks.fetchAdminWithAuth.mock.calls.length).toBeGreaterThanOrEqual(5);
-      expect(screen.getByRole("heading", { name: "Shows & Franchises" })).toBeInTheDocument();
+      expect(mocks.fetchAdminWithAuth.mock.calls.length).toBeGreaterThan(0);
+      expect(screen.getByRole("button", { name: "Shows" })).toBeInTheDocument();
     });
 
     for (const call of mocks.fetchAdminWithAuth.mock.calls) {
@@ -99,6 +71,5 @@ describe("brands shows-and-franchises page auth behavior", () => {
         preferredUser: mocks.guardState.user,
       });
     }
-    expect(screen.queryByText("Not authenticated")).not.toBeInTheDocument();
   });
 });

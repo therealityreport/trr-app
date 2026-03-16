@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import {
   isCloudfrontCdnFontCandidate,
@@ -322,6 +323,37 @@ export default function PosterSingleSelect({
   const cardWidth = clampNumber(Math.min(preferredCardWidth, maxCardWidthFromContainer), 70, 205);
   const gridWidth = cardWidth * columns + gridGap * (columns - 1);
   const cardHeight = Math.round(cardWidth / CARD_ASPECT_RATIO);
+  const headingTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "poster-single-select",
+      instanceKey: "question",
+      role: "heading",
+    },
+    {
+      fontFamily: headingFontFamily,
+      fontSize: `${headingSize}px`,
+      fontWeight: "700",
+      lineHeight: `${headingLineHeight}px`,
+      letterSpacing: `${headingLetterSpacing}em`,
+    },
+  );
+  const cardLabelTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "poster-single-select",
+      instanceKey: "question",
+      role: "cardLabel",
+    },
+    {
+      fontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
+      fontSize: `${Math.max(11, Math.round(cardHeight * 0.12))}px`,
+      fontWeight: "700",
+      lineHeight: "1.1",
+      letterSpacing: "0.02em",
+      textTransform: "uppercase",
+    },
+  );
 
   return (
     <div
@@ -341,11 +373,7 @@ export default function PosterSingleSelect({
         className="max-w-[1000px]"
         style={{
           color: headingColor,
-          fontFamily: headingFontFamily,
-          fontSize: `${headingSize}px`,
-          fontWeight: 700,
-          lineHeight: `${headingLineHeight}px`,
-          letterSpacing: `${headingLetterSpacing}em`,
+          ...headingTypographyStyle,
         }}
       >
         {question.question_text}
@@ -397,11 +425,7 @@ export default function PosterSingleSelect({
                   className="absolute inset-0 flex items-center justify-center px-2 text-center uppercase"
                   style={{
                     color: placeholderLabelColor,
-                    fontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
-                    fontSize: `${Math.max(11, Math.round(cardHeight * 0.12))}px`,
-                    fontWeight: 700,
-                    letterSpacing: "0.02em",
-                    lineHeight: 1.1,
+                    ...cardLabelTypographyStyle,
                   }}
                 >
                   {option.option_text}

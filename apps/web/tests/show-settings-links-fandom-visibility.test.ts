@@ -33,6 +33,7 @@ describe("show settings links UI structure", () => {
     expect(contents).toMatch(/approvedLinks,/);
     expect(contents).toMatch(/missingSources,/);
     expect(contents).toMatch(/const getCastMemberLinkText = \(link: EntityLink, personName: string\): string =>/);
+    expect(contents).toMatch(/if \(badgeKind === "fandom"\) \{\s+return resolveLinkPageTitle\(link\) \|\| personName;/);
     expect(contents).toMatch(/const resolveCastMemberNameFromLinks = \(/);
     expect(contents).toMatch(/Missing \/ Unvalidated Sources/);
     expect(contents).toMatch(/No validated source URL found/);

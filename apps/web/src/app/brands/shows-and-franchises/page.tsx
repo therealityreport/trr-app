@@ -5,69 +5,18 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
-import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import BrandLogoOptionsModal from "@/components/admin/BrandLogoOptionsModal";
+import BrandsTabs from "@/components/admin/BrandsTabs";
 import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
-import {
-  BrandShowFranchiseRow,
-  FranchiseRule,
-  FranchiseRuleApplyResult,
-  GenericLinkRule,
-} from "@/lib/admin/brands-shows-franchises";
+import { BrandShowFranchiseRow } from "@/lib/admin/brands-shows-franchises";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
-type RuleDraft = {
-  name: string;
-  primary_url: string;
-  review_allpages_url: string;
-  match_terms_csv: string;
-  aliases_csv: string;
-  network_terms_csv: string;
-  source_rank: string;
-  include_allpages_scan: boolean;
-  is_active: boolean;
-};
-
-type BrandFamilySummary = {
+type BrandLogoRow = {
   id: string;
-  family_key: string;
-  display_name: string;
-};
-
-type FamilyLinkRuleDraft = {
-  link_group: "official" | "social" | "knowledge" | "cast_announcements" | "other";
-  link_kind: string;
-  label: string;
-  url: string;
-  coverage_type:
-    | "family_all_shows"
-    | "family_network_shows"
-    | "family_streaming_shows"
-    | "franchise_rule"
-    | "show_wikidata_exact"
-    | "show_name_contains";
-  coverage_value: string;
-  auto_apply: boolean;
-  is_active: boolean;
-  priority: string;
-};
-
-type FamilyLinksApplyResult = {
-  family_id: string;
-  rule_count: number;
-  matched_show_count: number;
-  applied_show_count: number;
-  skipped_existing_manual: number;
-  updated_derived_count: number;
-  dry_run: boolean;
-  errors: Array<Record<string, unknown>>;
-};
-
-type FranchiseLogoRow = {
-  id: string;
-  target_type: string;
+  target_type: "show" | "franchise";
   target_key: string;
   target_label: string;
   hosted_logo_url: string | null;
@@ -76,12 +25,22 @@ type FranchiseLogoRow = {
   is_primary: boolean;
   logo_role?: string | null;
   source_provider?: string | null;
-  discovered_from?: string | null;
   is_selected_for_role?: boolean | null;
 };
 
+type LogoCard = {
+  targetType: "show" | "franchise";
+  targetKey: string;
+  targetLabel: string;
+  subtitle: string | null;
+  wordmarkUrl: string | null;
+  iconUrl: string | null;
+  assetCount: number;
+  sourceProvider: string | null;
+};
+
 type LogoPickerState = {
-  targetType: "franchise";
+  targetType: "show" | "franchise";
   targetKey: string;
   targetLabel: string;
 };
@@ -92,26 +51,6 @@ const SHOWS_FRANCHISES_ENABLED =
   (process.env.NEXT_PUBLIC_BRANDS_SHOWS_FRANCHISES_ENABLED ??
     process.env.BRANDS_SHOWS_FRANCHISES_ENABLED ??
     "true") !== "false";
-
-const csvToList = (value: string): string[] =>
-  value
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-
-const listToCsv = (value: string[] | null | undefined): string => (Array.isArray(value) ? value.join(", ") : "");
-
-const DEFAULT_FAMILY_LINK_RULE_DRAFT: FamilyLinkRuleDraft = {
-  link_group: "knowledge",
-  link_kind: "wikipedia",
-  label: "",
-  url: "",
-  coverage_type: "family_all_shows",
-  coverage_value: "",
-  auto_apply: true,
-  is_active: true,
-  priority: "100",
-};
 
 const parseErrorPayload = async (response: Response): Promise<string> => {
   const fallback = `Request failed (${response.status})`;
@@ -126,17 +65,47 @@ const parseErrorPayload = async (response: Response): Promise<string> => {
   }
 };
 
-const toDraft = (rule: FranchiseRule): RuleDraft => ({
-  name: rule.name ?? "",
-  primary_url: rule.primary_url ?? "",
-  review_allpages_url: rule.review_allpages_url ?? "",
-  match_terms_csv: listToCsv(rule.match_terms),
-  aliases_csv: listToCsv(rule.aliases),
-  network_terms_csv: listToCsv(rule.network_terms),
-  source_rank: String(rule.source_rank ?? 100),
-  include_allpages_scan: Boolean(rule.include_allpages_scan),
-  is_active: Boolean(rule.is_active),
-});
+const normalizeProviderLabel = (value: string | null | undefined): string =>
+  String(value ?? "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase()) || "Manual";
+
+const pickDisplayUrl = (row: Pick<BrandLogoRow, "hosted_logo_url" | "hosted_logo_black_url" | "hosted_logo_white_url">) =>
+  canonicalizeHostedMediaUrl(
+    row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url,
+  ) ??
+  row.hosted_logo_url ??
+  row.hosted_logo_black_url ??
+  row.hosted_logo_white_url ??
+  null;
+
+const updateCardFromLogoRow = (card: LogoCard, row: BrandLogoRow) => {
+  const role = String(row.logo_role ?? "").trim().toLowerCase();
+  const url = pickDisplayUrl(row);
+  if (!url) return;
+
+  if (role === "icon") {
+    if (row.is_selected_for_role || !card.iconUrl) card.iconUrl = url;
+  } else if (role === "wordmark") {
+    if (row.is_selected_for_role || !card.wordmarkUrl) card.wordmarkUrl = url;
+  } else if (row.is_primary) {
+    if (!card.wordmarkUrl) card.wordmarkUrl = url;
+  } else if (!card.iconUrl) {
+    card.iconUrl = url;
+  } else if (!card.wordmarkUrl) {
+    card.wordmarkUrl = url;
+  }
+
+  card.assetCount += 1;
+  if (!card.sourceProvider && row.source_provider) {
+    card.sourceProvider = row.source_provider;
+  }
+};
+
+const getCardStatus = (card: LogoCard): "complete" | "needs_attention" =>
+  card.wordmarkUrl && card.iconUrl ? "complete" : "needs_attention";
 
 export default function BrandsShowsAndFranchisesPage() {
   const { user, checking, hasAccess } = useAdminGuard();
@@ -148,32 +117,17 @@ export default function BrandsShowsAndFranchisesPage() {
   const [rowsLoading, setRowsLoading] = useState(false);
   const [rowsError, setRowsError] = useState<string | null>(null);
 
-  const [rules, setRules] = useState<FranchiseRule[]>([]);
-  const [ruleDrafts, setRuleDrafts] = useState<Record<string, RuleDraft>>({});
-  const [suggestedFranchises, setSuggestedFranchises] = useState<string[]>([]);
-  const [rulesLoading, setRulesLoading] = useState(false);
-  const [rulesError, setRulesError] = useState<string | null>(null);
-  const [savingRuleKey, setSavingRuleKey] = useState<string | null>(null);
-  const [applyRunningKey, setApplyRunningKey] = useState<string | null>(null);
-  const [applyResult, setApplyResult] = useState<FranchiseRuleApplyResult | null>(null);
-  const [franchiseLogoRows, setFranchiseLogoRows] = useState<FranchiseLogoRow[]>([]);
-  const [genericLinkRules, setGenericLinkRules] = useState<GenericLinkRule[]>([]);
-  const [franchiseLogoError, setFranchiseLogoError] = useState<string | null>(null);
+  const [showLogoRows, setShowLogoRows] = useState<BrandLogoRow[]>([]);
+  const [franchiseLogoRows, setFranchiseLogoRows] = useState<BrandLogoRow[]>([]);
+  const [showLogoLoading, setShowLogoLoading] = useState(false);
   const [franchiseLogoLoading, setFranchiseLogoLoading] = useState(false);
+  const [showLogoError, setShowLogoError] = useState<string | null>(null);
+  const [franchiseLogoError, setFranchiseLogoError] = useState<string | null>(null);
+
   const [syncingPageLogos, setSyncingPageLogos] = useState(false);
   const [syncPageNotice, setSyncPageNotice] = useState<string | null>(null);
   const [syncPageError, setSyncPageError] = useState<string | null>(null);
   const [logoPickerState, setLogoPickerState] = useState<LogoPickerState | null>(null);
-  const [familyRows, setFamilyRows] = useState<BrandFamilySummary[]>([]);
-  const [selectedFamilyId, setSelectedFamilyId] = useState("");
-  const [selectedFamilyRuleId, setSelectedFamilyRuleId] = useState("");
-  const [familyRules, setFamilyRules] = useState<GenericLinkRule[]>([]);
-  const [familyRuleDraft, setFamilyRuleDraft] = useState<FamilyLinkRuleDraft>(DEFAULT_FAMILY_LINK_RULE_DRAFT);
-  const [familyRulesLoading, setFamilyRulesLoading] = useState(false);
-  const [familyRulesError, setFamilyRulesError] = useState<string | null>(null);
-  const [familyRuleCreateBusy, setFamilyRuleCreateBusy] = useState(false);
-  const [familyRuleApplyBusy, setFamilyRuleApplyBusy] = useState<string | null>(null);
-  const [familyApplyResult, setFamilyApplyResult] = useState<FamilyLinksApplyResult | null>(null);
 
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
@@ -188,186 +142,77 @@ export default function BrandsShowsAndFranchisesPage() {
     setRowsLoading(true);
     setRowsError(null);
     try {
-      const query = new URLSearchParams({
-        limit: "300",
-      });
+      const query = new URLSearchParams({ limit: "500" });
       if (showQuery.trim().length > 0) {
         query.set("q", showQuery.trim());
       }
-      const response = await fetchWithAuth(`/api/admin/trr-api/brands/shows-franchises?${query.toString()}`, {
-        method: "GET",
-        cache: "no-store",
-      });
+      const response = await fetchWithAuth(
+        `/api/admin/trr-api/brands/shows-franchises?${query.toString()}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        },
+      );
       if (!response.ok) {
         setRowsError(await parseErrorPayload(response));
         setRows([]);
         setRowsCount(0);
         return;
       }
-      const payload = (await response.json()) as {
-        rows?: BrandShowFranchiseRow[];
-        count?: number;
-        link_rules?: GenericLinkRule[];
-      };
+      const payload = (await response.json()) as { rows?: BrandShowFranchiseRow[]; count?: number };
       const nextRows = Array.isArray(payload.rows) ? payload.rows : [];
       setRows(nextRows);
       setRowsCount(typeof payload.count === "number" ? payload.count : nextRows.length);
-      setGenericLinkRules(Array.isArray(payload.link_rules) ? payload.link_rules : []);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load shows & franchises";
       setRowsError(message);
       setRows([]);
       setRowsCount(0);
-      setGenericLinkRules([]);
     } finally {
       setRowsLoading(false);
     }
   }, [fetchWithAuth, showQuery]);
 
-  const loadRules = useCallback(async () => {
-    setRulesLoading(true);
-    setRulesError(null);
-    try {
-      const response = await fetchWithAuth("/api/admin/trr-api/brands/franchise-rules", {
-        method: "GET",
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        setRulesError(await parseErrorPayload(response));
-        setRules([]);
-        setSuggestedFranchises([]);
-        return;
-      }
-      const payload = (await response.json()) as {
-        rules?: FranchiseRule[];
-        suggested_franchises?: string[];
-      };
-      const nextRules = Array.isArray(payload.rules) ? payload.rules : [];
-      setRules(nextRules);
-      setSuggestedFranchises(Array.isArray(payload.suggested_franchises) ? payload.suggested_franchises : []);
-      setRuleDrafts((previous) => {
-        const next = { ...previous };
-        for (const rule of nextRules) {
-          if (!next[rule.key]) {
-            next[rule.key] = toDraft(rule);
-          }
-        }
-        return next;
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load franchise rules";
-      setRulesError(message);
-      setRules([]);
-      setSuggestedFranchises([]);
-    } finally {
-      setRulesLoading(false);
-    }
-  }, [fetchWithAuth]);
-
-  const loadFranchiseLogos = useCallback(async () => {
-    setFranchiseLogoLoading(true);
-    setFranchiseLogoError(null);
-    try {
-      const query = new URLSearchParams({
-        target_type: "franchise",
-        limit: "500",
-      });
-      if (showQuery.trim().length > 0) {
-        query.set("q", showQuery.trim());
-      }
-      const response = await fetchWithAuth(`/api/admin/trr-api/brands/logos?${query.toString()}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        setFranchiseLogoError(await parseErrorPayload(response));
-        setFranchiseLogoRows([]);
-        return;
-      }
-      const payload = (await response.json().catch(() => ({}))) as { rows?: FranchiseLogoRow[] };
-      setFranchiseLogoRows(Array.isArray(payload.rows) ? payload.rows : []);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load franchise logos";
-      setFranchiseLogoError(message);
-      setFranchiseLogoRows([]);
-    } finally {
-      setFranchiseLogoLoading(false);
-    }
-  }, [fetchWithAuth, showQuery]);
-
-  const loadFamilies = useCallback(async () => {
-    setFamilyRulesError(null);
-    try {
-      const response = await fetchWithAuth("/api/admin/trr-api/brands/families?active_only=true", {
-        method: "GET",
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        setFamilyRows([]);
-        setSelectedFamilyId("");
-        setFamilyRules([]);
-        setFamilyRulesError(await parseErrorPayload(response));
-        return;
-      }
-      const payload = (await response.json()) as { rows?: BrandFamilySummary[] };
-      const nextRows = Array.isArray(payload.rows) ? payload.rows : [];
-      setFamilyRows(nextRows);
-      setSelectedFamilyId((previous) => {
-        if (previous && nextRows.some((row) => row.id === previous)) return previous;
-        return nextRows[0]?.id ?? "";
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load brand families";
-      setFamilyRows([]);
-      setSelectedFamilyId("");
-      setFamilyRules([]);
-      setFamilyRulesError(message);
-    }
-  }, [fetchWithAuth]);
-
-  const loadSelectedFamilyRules = useCallback(
-    async (familyId: string) => {
-      if (!familyId) {
-        setFamilyRulesLoading(false);
-        setFamilyRules([]);
-        setSelectedFamilyRuleId("");
-        return;
-      }
-      setFamilyRulesLoading(true);
-      setFamilyRulesError(null);
+  const loadLogoRows = useCallback(
+    async (targetType: "show" | "franchise") => {
+      const setLoading = targetType === "show" ? setShowLogoLoading : setFranchiseLogoLoading;
+      const setError = targetType === "show" ? setShowLogoError : setFranchiseLogoError;
+      const setRowsState = targetType === "show" ? setShowLogoRows : setFranchiseLogoRows;
+      setLoading(true);
+      setError(null);
       try {
-        const response = await fetchWithAuth(`/api/admin/trr-api/brands/families/${encodeURIComponent(familyId)}/links`, {
+        const query = new URLSearchParams({
+          target_type: targetType,
+          limit: targetType === "show" ? "1200" : "500",
+        });
+        if (showQuery.trim().length > 0) {
+          query.set("q", showQuery.trim());
+        }
+        const response = await fetchWithAuth(`/api/admin/trr-api/brands/logos?${query.toString()}`, {
           method: "GET",
           cache: "no-store",
         });
         if (!response.ok) {
-          setFamilyRules([]);
-          setSelectedFamilyRuleId("");
-          setFamilyRulesError(await parseErrorPayload(response));
+          setError(await parseErrorPayload(response));
+          setRowsState([]);
           return;
         }
-        const payload = (await response.json()) as { rows?: GenericLinkRule[] };
-        const nextRows = Array.isArray(payload.rows) ? payload.rows : [];
-        setFamilyRules(nextRows);
-        setSelectedFamilyRuleId((previous) => {
-          if (previous && nextRows.some((row) => row.id === previous)) return previous;
-          return "";
-        });
+        const payload = (await response.json().catch(() => ({}))) as { rows?: BrandLogoRow[] };
+        setRowsState(Array.isArray(payload.rows) ? payload.rows : []);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to load family link rules";
-        setFamilyRules([]);
-        setSelectedFamilyRuleId("");
-        setFamilyRulesError(message);
+        const message = error instanceof Error ? error.message : `Failed to load ${targetType} logos`;
+        setError(message);
+        setRowsState([]);
       } finally {
-        setFamilyRulesLoading(false);
+        setLoading(false);
       }
     },
-    [fetchWithAuth],
+    [fetchWithAuth, showQuery],
   );
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadRules(), loadShows(), loadFranchiseLogos(), loadFamilies()]);
-  }, [loadFamilies, loadFranchiseLogos, loadRules, loadShows]);
+    await Promise.all([loadShows(), loadLogoRows("show"), loadLogoRows("franchise")]);
+  }, [loadLogoRows, loadShows]);
 
   const syncShowsPageLogos = useCallback(async () => {
     setSyncingPageLogos(true);
@@ -403,201 +248,19 @@ export default function BrandsShowsAndFranchisesPage() {
           Number(payload.imports_created ?? 0) + Number(payload.imports_updated ?? 0)
         }, unresolved ${Number(payload.unresolved ?? 0)}.`,
       );
-      await Promise.all([loadShows(), loadFranchiseLogos()]);
+      await refreshAll();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to sync show/franchise logos";
       setSyncPageError(message);
     } finally {
       setSyncingPageLogos(false);
     }
-  }, [fetchWithAuth, loadFranchiseLogos, loadShows]);
+  }, [fetchWithAuth, refreshAll]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !SHOWS_FRANCHISES_ENABLED) return;
     void refreshAll();
   }, [checking, hasAccess, refreshAll, user]);
-
-  useEffect(() => {
-    if (checking || !user || !hasAccess || !SHOWS_FRANCHISES_ENABLED) return;
-    void loadSelectedFamilyRules(selectedFamilyId);
-  }, [checking, hasAccess, loadSelectedFamilyRules, selectedFamilyId, user]);
-
-  const onChangeRuleDraft = useCallback((key: string, patch: Partial<RuleDraft>) => {
-    setRuleDrafts((previous) => ({
-      ...previous,
-      [key]: {
-        ...previous[key],
-        ...patch,
-      },
-    }));
-  }, []);
-
-  const onSaveRule = useCallback(
-    async (key: string) => {
-      const draft = ruleDrafts[key];
-      if (!draft) return;
-      if (!draft.primary_url.trim()) {
-        setRulesError("Primary Fandom URL is required before saving a rule.");
-        return;
-      }
-
-      setSavingRuleKey(key);
-      setRulesError(null);
-      try {
-        const response = await fetchWithAuth(`/api/admin/trr-api/brands/franchise-rules/${encodeURIComponent(key)}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: draft.name.trim(),
-            primary_url: draft.primary_url.trim(),
-            review_allpages_url: draft.review_allpages_url.trim() || null,
-            match_terms: csvToList(draft.match_terms_csv),
-            aliases: csvToList(draft.aliases_csv),
-            network_terms: csvToList(draft.network_terms_csv),
-            include_allpages_scan: draft.include_allpages_scan,
-            source_rank: Math.max(0, Number.parseInt(draft.source_rank, 10) || 0),
-            is_active: draft.is_active,
-          }),
-        });
-        if (!response.ok) {
-          setRulesError(await parseErrorPayload(response));
-          return;
-        }
-        await refreshAll();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to save rule";
-        setRulesError(message);
-      } finally {
-        setSavingRuleKey(null);
-      }
-    },
-    [fetchWithAuth, refreshAll, ruleDrafts],
-  );
-
-  const onApplyRule = useCallback(
-    async (key: string, dryRun: boolean) => {
-      setApplyRunningKey(`${key}:${dryRun ? "dry" : "apply"}`);
-      setRulesError(null);
-      try {
-        const response = await fetchWithAuth(
-          `/api/admin/trr-api/brands/franchise-rules/${encodeURIComponent(key)}/apply`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              missing_only: true,
-              dry_run: dryRun,
-            }),
-          },
-        );
-        if (!response.ok) {
-          setRulesError(await parseErrorPayload(response));
-          return;
-        }
-        const payload = (await response.json()) as FranchiseRuleApplyResult;
-        setApplyResult(payload);
-        await refreshAll();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to apply franchise rule";
-        setRulesError(message);
-      } finally {
-        setApplyRunningKey(null);
-      }
-    },
-    [fetchWithAuth, refreshAll],
-  );
-
-  const onCreateFamilyRule = useCallback(async () => {
-    if (!selectedFamilyId) {
-      setFamilyRulesError("Select a family before creating a rule.");
-      return;
-    }
-    if (!familyRuleDraft.url.trim()) {
-      setFamilyRulesError("URL is required.");
-      return;
-    }
-    if (!familyRuleDraft.link_kind.trim()) {
-      setFamilyRulesError("Link kind is required.");
-      return;
-    }
-
-    setFamilyRuleCreateBusy(true);
-    setFamilyRulesError(null);
-    try {
-      const response = await fetchWithAuth(`/api/admin/trr-api/brands/families/${encodeURIComponent(selectedFamilyId)}/links`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          link_group: familyRuleDraft.link_group,
-          link_kind: familyRuleDraft.link_kind.trim(),
-          label: familyRuleDraft.label.trim() || null,
-          url: familyRuleDraft.url.trim(),
-          coverage_type: familyRuleDraft.coverage_type,
-          coverage_value: familyRuleDraft.coverage_value.trim() || null,
-          auto_apply: familyRuleDraft.auto_apply,
-          is_active: familyRuleDraft.is_active,
-          priority: Math.max(0, Number.parseInt(familyRuleDraft.priority, 10) || 0),
-          source: "manual",
-        }),
-      });
-      if (!response.ok) {
-        setFamilyRulesError(await parseErrorPayload(response));
-        return;
-      }
-      setFamilyRuleDraft((previous) => ({ ...previous, url: "", label: "", coverage_value: "" }));
-      await Promise.all([loadSelectedFamilyRules(selectedFamilyId), loadShows()]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to create family link rule";
-      setFamilyRulesError(message);
-    } finally {
-      setFamilyRuleCreateBusy(false);
-    }
-  }, [familyRuleDraft, fetchWithAuth, loadSelectedFamilyRules, loadShows, selectedFamilyId]);
-
-  const onApplyFamilyRules = useCallback(
-    async (dryRun: boolean) => {
-      if (!selectedFamilyId) {
-        setFamilyRulesError("Select a family before running apply.");
-        return;
-      }
-      setFamilyRuleApplyBusy(dryRun ? "dry_run" : "apply");
-      setFamilyRulesError(null);
-      try {
-        const response = await fetchWithAuth(
-          `/api/admin/trr-api/brands/families/${encodeURIComponent(selectedFamilyId)}/links/apply`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              dry_run: dryRun,
-              rule_ids: selectedFamilyRuleId ? [selectedFamilyRuleId] : undefined,
-            }),
-          },
-        );
-        if (!response.ok) {
-          setFamilyRulesError(await parseErrorPayload(response));
-          return;
-        }
-        const payload = (await response.json()) as FamilyLinksApplyResult;
-        setFamilyApplyResult(payload);
-        await Promise.all([loadSelectedFamilyRules(selectedFamilyId), loadShows()]);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to apply family rules";
-        setFamilyRulesError(message);
-      } finally {
-        setFamilyRuleApplyBusy(null);
-      }
-    },
-    [fetchWithAuth, loadSelectedFamilyRules, loadShows, selectedFamilyId, selectedFamilyRuleId],
-  );
 
   const onSubmitShowSearch = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -607,66 +270,107 @@ export default function BrandsShowsAndFranchisesPage() {
     [showQueryDraft],
   );
 
-  const effectiveCounts = useMemo(() => {
-    let explicit = 0;
-    let fallback = 0;
-    let ruleDefault = 0;
+  const showCards = useMemo(() => {
+    const map = new Map<string, LogoCard>();
     for (const row of rows) {
-      if (row.effective_source === "explicit") explicit += 1;
-      if (row.effective_source === "fallback") fallback += 1;
-      if (row.effective_source === "rule_default") ruleDefault += 1;
-    }
-    return { explicit, fallback, ruleDefault };
-  }, [rows]);
-
-  const franchiseLogoSummary = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        franchise_key: string;
-        franchise_name: string;
-        count: number;
-        wordmark_url: string | null;
-        icon_url: string | null;
+      if (!row.show_id) continue;
+      if (!map.has(row.show_id)) {
+        map.set(row.show_id, {
+          targetType: "show",
+          targetKey: row.show_id,
+          targetLabel: row.show_name,
+          subtitle: row.franchise_name ? `Franchise: ${row.franchise_name}` : "No franchise",
+          wordmarkUrl: null,
+          iconUrl: null,
+          assetCount: 0,
+          sourceProvider: null,
+        });
       }
-    >();
-    const pickUrl = (row: FranchiseLogoRow): string | null =>
-      row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url || null;
+    }
+    for (const row of showLogoRows) {
+      const key = String(row.target_key || "").trim();
+      if (!key) continue;
+      const card =
+        map.get(key) ??
+        {
+          targetType: "show" as const,
+          targetKey: key,
+          targetLabel: row.target_label || key,
+          subtitle: null,
+          wordmarkUrl: null,
+          iconUrl: null,
+          assetCount: 0,
+          sourceProvider: null,
+        };
+      updateCardFromLogoRow(card, row);
+      map.set(key, card);
+    }
+    return [...map.values()].sort((a, b) => a.targetLabel.localeCompare(b.targetLabel));
+  }, [rows, showLogoRows]);
+
+  const franchiseCards = useMemo(() => {
+    const map = new Map<string, LogoCard>();
+    const franchiseShowCounts = new Map<string, number>();
+    for (const row of rows) {
+      const key = String(row.franchise_key || "").trim();
+      if (!key || key === "unassigned") continue;
+      franchiseShowCounts.set(key, (franchiseShowCounts.get(key) ?? 0) + 1);
+      if (!map.has(key)) {
+        map.set(key, {
+          targetType: "franchise",
+          targetKey: key,
+          targetLabel: row.franchise_name || key,
+          subtitle: null,
+          wordmarkUrl: null,
+          iconUrl: null,
+          assetCount: 0,
+          sourceProvider: null,
+        });
+      }
+    }
     for (const row of franchiseLogoRows) {
       const key = String(row.target_key || "").trim();
       if (!key) continue;
-      const existing = map.get(key) ?? {
-        franchise_key: key,
-        franchise_name: row.target_label || key,
-        count: 0,
-        wordmark_url: null,
-        icon_url: null,
-      };
-      existing.count += 1;
-      const role = String(row.logo_role || "").trim().toLowerCase();
-      const url = pickUrl(row);
-      if (role === "icon") {
-        if ((row.is_selected_for_role || !existing.icon_url) && url) existing.icon_url = url;
-      } else if (role === "wordmark") {
-        if ((row.is_selected_for_role || !existing.wordmark_url) && url) existing.wordmark_url = url;
-      } else if (row.is_primary) {
-        if (!existing.wordmark_url && url) existing.wordmark_url = url;
-      } else if (!existing.icon_url && url) {
-        existing.icon_url = url;
-      } else if (!existing.wordmark_url && url) {
-        existing.wordmark_url = url;
-      }
-      map.set(key, existing);
+      const card =
+        map.get(key) ??
+        {
+          targetType: "franchise" as const,
+          targetKey: key,
+          targetLabel: row.target_label || key,
+          subtitle: null,
+          wordmarkUrl: null,
+          iconUrl: null,
+          assetCount: 0,
+          sourceProvider: null,
+        };
+      updateCardFromLogoRow(card, row);
+      map.set(key, card);
     }
-    return [...map.values()].sort((a, b) => a.franchise_name.localeCompare(b.franchise_name));
-  }, [franchiseLogoRows]);
+    return [...map.values()]
+      .map((card) => ({
+        ...card,
+        subtitle: `${franchiseShowCounts.get(card.targetKey) ?? 0} show${
+          franchiseShowCounts.get(card.targetKey) === 1 ? "" : "s"
+        }`,
+      }))
+      .sort((a, b) => a.targetLabel.localeCompare(b.targetLabel));
+  }, [franchiseLogoRows, rows]);
+
+  const showCompleteCount = useMemo(
+    () => showCards.filter((card) => getCardStatus(card) === "complete").length,
+    [showCards],
+  );
+  const franchiseCompleteCount = useMemo(
+    () => franchiseCards.filter((card) => getCardStatus(card) === "complete").length,
+    [franchiseCards],
+  );
 
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
         <div className="text-center">
           <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent" />
-          <p className="text-sm text-zinc-600">Preparing shows & franchises workspace...</p>
+          <p className="text-sm text-zinc-600">Preparing show branding workspace...</p>
         </div>
       </div>
     );
@@ -683,10 +387,10 @@ export default function BrandsShowsAndFranchisesPage() {
           <AdminGlobalHeader bodyClassName="px-6 py-6">
             <div className="mx-auto max-w-6xl">
               <AdminBreadcrumbs
-                items={buildBrandsPageBreadcrumb("Shows & Franchises", "/brands/shows-and-franchises")}
+                items={buildBrandsPageBreadcrumb("Show Branding", "/brands/shows-and-franchises")}
                 className="mb-1"
               />
-              <h1 className="break-words text-3xl font-bold text-zinc-900">Shows & Franchises</h1>
+              <h1 className="break-words text-3xl font-bold text-zinc-900">Show Branding</h1>
               <p className="break-words text-sm text-zinc-500">
                 This page is currently disabled. Enable `BRANDS_SHOWS_FRANCHISES_ENABLED` to use it.
               </p>
@@ -705,12 +409,15 @@ export default function BrandsShowsAndFranchisesPage() {
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <AdminBreadcrumbs
-                items={buildBrandsPageBreadcrumb("Shows & Franchises", "/brands/shows-and-franchises")}
+                items={buildBrandsPageBreadcrumb("Show Branding", "/brands/shows-and-franchises")}
                 className="mb-1"
               />
-              <h1 className="break-words text-3xl font-bold text-zinc-900">Shows & Franchises</h1>
+              <h1 className="break-words text-3xl font-bold text-zinc-900">
+                Show & Franchise Branding
+              </h1>
               <p className="break-words text-sm text-zinc-500">
-                Franchise fallback rules for Fandom links and show-level effective source coverage.
+                Manage logo assets for shows and franchise brands. Shared link rules and franchise
+                automation now live in Shows Settings.
               </p>
               <BrandsTabs activeTab="shows" className="mt-4" />
             </div>
@@ -726,11 +433,17 @@ export default function BrandsShowsAndFranchisesPage() {
               <button
                 type="button"
                 onClick={() => void refreshAll()}
-                disabled={rowsLoading || rulesLoading || franchiseLogoLoading || familyRulesLoading || syncingPageLogos}
+                disabled={rowsLoading || showLogoLoading || franchiseLogoLoading || syncingPageLogos}
                 className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {rowsLoading || rulesLoading || franchiseLogoLoading || familyRulesLoading ? "Refreshing..." : "Refresh"}
+                {rowsLoading || showLogoLoading || franchiseLogoLoading ? "Refreshing..." : "Refresh"}
               </button>
+              <Link
+                href="/shows/settings"
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+              >
+                Open Shows Settings
+              </Link>
               <Link
                 href="/admin"
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
@@ -742,11 +455,15 @@ export default function BrandsShowsAndFranchisesPage() {
         </AdminGlobalHeader>
 
         <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
-          {rulesError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{rulesError}</div>
-          ) : null}
           {rowsError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{rowsError}</div>
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {rowsError}
+            </div>
+          ) : null}
+          {showLogoError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {showLogoError}
+            </div>
           ) : null}
           {franchiseLogoError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -754,620 +471,50 @@ export default function BrandsShowsAndFranchisesPage() {
             </div>
           ) : null}
           {syncPageError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncPageError}</div>
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {syncPageError}
+            </div>
           ) : null}
           {syncPageNotice ? (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
               {syncPageNotice}
             </div>
           ) : null}
-          {familyRulesError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{familyRulesError}</div>
-          ) : null}
 
-          {applyResult ? (
-            <section className="rounded-xl border border-green-200 bg-green-50 p-4">
-              <h2 className="text-sm font-semibold text-green-900">Latest Rule Apply Result</h2>
-              <p className="mt-1 text-sm text-green-800">
-                {applyResult.rule_name} ({applyResult.franchise_key}): matched {applyResult.matched_show_count}, targeted{" "}
-                {applyResult.applied_show_count}, links upserted {applyResult.links_upserted}, skipped explicit{" "}
-                {applyResult.skipped_explicit}, skipped existing fallback {applyResult.skipped_already_fallback}, skipped manual{" "}
-                {applyResult.skipped_existing_manual ?? 0}, updated derived {applyResult.updated_derived_count ?? 0}.
-              </p>
-            </section>
-          ) : null}
-
-          <section className="rounded-xl border border-zinc-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-zinc-900">Family Coverage Link Rules</h2>
-                <p className="text-sm text-zinc-600">
-                  Create and apply generic link rules (Fandom, Wikipedia, social, or other) by explicit coverage type.
-                </p>
-              </div>
-              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600">
-                families: {familyRows.length} / rules: {familyRules.length}
-              </span>
-            </div>
-
-            {familyApplyResult ? (
-              <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                {familyApplyResult.dry_run ? "Dry run" : "Apply"} matched {familyApplyResult.matched_show_count}, applied{" "}
-                {familyApplyResult.applied_show_count}, skipped manual {familyApplyResult.skipped_existing_manual}, updated derived{" "}
-                {familyApplyResult.updated_derived_count}, errors {familyApplyResult.errors?.length ?? 0}.
-              </div>
-            ) : null}
-
-            {familyRows.length === 0 ? (
-              <p className="mt-3 text-sm text-zinc-500">No active brand families found yet. Create a family from a network/streaming detail page first.</p>
-            ) : (
-              <>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Family
-                    <select
-                      value={selectedFamilyId}
-                      onChange={(event) => {
-                        setSelectedFamilyId(event.target.value);
-                        setFamilyApplyResult(null);
-                      }}
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    >
-                      {familyRows.map((family) => (
-                        <option key={family.id} value={family.id}>
-                          {family.display_name} ({family.family_key})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Scope For Apply
-                    <select
-                      value={selectedFamilyRuleId}
-                      onChange={(event) => setSelectedFamilyRuleId(event.target.value)}
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    >
-                      <option value="">All active rules in family</option>
-                      {familyRules.map((rule) => (
-                        <option key={rule.id} value={rule.id}>
-                          {rule.link_group}/{rule.link_kind} - {rule.coverage_type}
-                          {rule.coverage_value ? ` (${rule.coverage_value})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Link Group
-                    <select
-                      value={familyRuleDraft.link_group}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          link_group: event.target.value as FamilyLinkRuleDraft["link_group"],
-                        }))
-                      }
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    >
-                      <option value="official">official</option>
-                      <option value="social">social</option>
-                      <option value="knowledge">knowledge</option>
-                      <option value="cast_announcements">cast_announcements</option>
-                      <option value="other">other</option>
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Link Kind
-                    <input
-                      value={familyRuleDraft.link_kind}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          link_kind: event.target.value,
-                        }))
-                      }
-                      placeholder="wikipedia | fandom | instagram | tiktok"
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold text-zinc-700 md:col-span-2">
-                    URL
-                    <input
-                      value={familyRuleDraft.url}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          url: event.target.value,
-                        }))
-                      }
-                      placeholder="https://..."
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Coverage Type
-                    <select
-                      value={familyRuleDraft.coverage_type}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          coverage_type: event.target.value as FamilyLinkRuleDraft["coverage_type"],
-                        }))
-                      }
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    >
-                      <option value="family_all_shows">family_all_shows</option>
-                      <option value="family_network_shows">family_network_shows</option>
-                      <option value="family_streaming_shows">family_streaming_shows</option>
-                      <option value="franchise_rule">franchise_rule</option>
-                      <option value="show_wikidata_exact">show_wikidata_exact</option>
-                      <option value="show_name_contains">show_name_contains</option>
-                    </select>
-                  </label>
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Coverage Value
-                    <input
-                      value={familyRuleDraft.coverage_value}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          coverage_value: event.target.value,
-                        }))
-                      }
-                      placeholder="optional by coverage type"
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Label
-                    <input
-                      value={familyRuleDraft.label}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          label: event.target.value,
-                        }))
-                      }
-                      placeholder="Display label (optional)"
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold text-zinc-700">
-                    Priority
-                    <input
-                      value={familyRuleDraft.priority}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          priority: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-700">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={familyRuleDraft.auto_apply}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          auto_apply: event.target.checked,
-                        }))
-                      }
-                    />
-                    auto_apply
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={familyRuleDraft.is_active}
-                      onChange={(event) =>
-                        setFamilyRuleDraft((previous) => ({
-                          ...previous,
-                          is_active: event.target.checked,
-                        }))
-                      }
-                    />
-                    is_active
-                  </label>
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void onCreateFamilyRule()}
-                    disabled={familyRuleCreateBusy || !selectedFamilyId}
-                    className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-500"
-                  >
-                    {familyRuleCreateBusy ? "Creating..." : "Create Rule"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onApplyFamilyRules(true)}
-                    disabled={familyRuleApplyBusy !== null || !selectedFamilyId}
-                    className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {familyRuleApplyBusy === "dry_run" ? "Running..." : "Dry Run Apply"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onApplyFamilyRules(false)}
-                    disabled={familyRuleApplyBusy !== null || !selectedFamilyId}
-                    className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {familyRuleApplyBusy === "apply" ? "Applying..." : "Apply"}
-                  </button>
-                </div>
-
-                <div className="mt-3 overflow-x-auto">
-                  <table className="min-w-full divide-y divide-zinc-200 text-sm">
-                    <thead className="bg-zinc-50">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-semibold text-zinc-700">Kind</th>
-                        <th className="px-3 py-2 text-left font-semibold text-zinc-700">Coverage</th>
-                        <th className="px-3 py-2 text-left font-semibold text-zinc-700">Source</th>
-                        <th className="px-3 py-2 text-left font-semibold text-zinc-700">Status</th>
-                        <th className="px-3 py-2 text-left font-semibold text-zinc-700">URL</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100 bg-white">
-                      {familyRulesLoading ? (
-                        <tr>
-                          <td colSpan={5} className="px-3 py-6 text-center text-zinc-500">
-                            Loading family rules...
-                          </td>
-                        </tr>
-                      ) : null}
-                      {!familyRulesLoading && familyRules.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="px-3 py-6 text-center text-zinc-500">
-                            No rules for selected family.
-                          </td>
-                        </tr>
-                      ) : null}
-                      {!familyRulesLoading
-                        ? familyRules.map((rule) => (
-                            <tr key={rule.id}>
-                              <td className="px-3 py-2 text-zinc-700">
-                                {rule.link_group}/{rule.link_kind}
-                              </td>
-                              <td className="px-3 py-2 text-zinc-700">
-                                {rule.coverage_type}
-                                {rule.coverage_value ? ` (${rule.coverage_value})` : ""}
-                              </td>
-                              <td className="px-3 py-2 text-zinc-700">{rule.source}</td>
-                              <td className="px-3 py-2 text-zinc-700">
-                                {rule.is_active ? "active" : "inactive"} / {rule.auto_apply ? "auto" : "manual"}
-                              </td>
-                              <td className="max-w-[320px] px-3 py-2 [overflow-wrap:anywhere]">
-                                <a href={rule.url} target="_blank" rel="noreferrer" className="text-blue-700 underline">
-                                  {rule.url}
-                                </a>
-                              </td>
-                            </tr>
-                          ))
-                        : null}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-zinc-200 bg-white p-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-zinc-900">All Generic Link Rules Snapshot</h2>
-              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600">
-                {genericLinkRules.length} rules
-              </span>
-            </div>
-            <p className="mt-1 text-sm text-zinc-600">
-              Coverage-based shared rules across families (read-only snapshot from the consolidated backend payload).
+          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+              Branding Overview
             </p>
-            {genericLinkRules.length === 0 ? (
-              <p className="mt-3 text-sm text-zinc-500">No generic link rules found.</p>
-            ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="min-w-full divide-y divide-zinc-200 text-sm">
-                  <thead className="bg-zinc-50">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-semibold text-zinc-700">Family</th>
-                      <th className="px-3 py-2 text-left font-semibold text-zinc-700">Kind</th>
-                      <th className="px-3 py-2 text-left font-semibold text-zinc-700">Coverage</th>
-                      <th className="px-3 py-2 text-left font-semibold text-zinc-700">Source</th>
-                      <th className="px-3 py-2 text-left font-semibold text-zinc-700">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100 bg-white">
-                    {genericLinkRules.map((rule) => (
-                      <tr key={rule.id}>
-                        <td className="px-3 py-2 text-zinc-700">{rule.family_id ?? "n/a"}</td>
-                        <td className="px-3 py-2 text-zinc-700">
-                          {rule.link_group}/{rule.link_kind}
-                        </td>
-                        <td className="px-3 py-2 text-zinc-700">
-                          {rule.coverage_type}
-                          {rule.coverage_value ? ` (${rule.coverage_value})` : ""}
-                        </td>
-                        <td className="px-3 py-2 text-zinc-700">{rule.source}</td>
-                        <td className="px-3 py-2 text-zinc-700">
-                          {rule.is_active ? "active" : "inactive"} / {rule.auto_apply ? "auto" : "manual"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-zinc-200 bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-zinc-900">Franchise Logo Summary</h2>
-              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600">
-                {franchiseLogoLoading ? "Loading..." : `${franchiseLogoSummary.length} franchises`}
+            <h2 className="mt-2 text-2xl font-bold text-zinc-900">Coverage Snapshot</h2>
+            <div className="mt-4 flex flex-wrap gap-2 text-sm text-zinc-700">
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                shows: {showCards.length}
+              </span>
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                complete shows: {showCompleteCount}
+              </span>
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                franchises: {franchiseCards.length}
+              </span>
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                complete franchises: {franchiseCompleteCount}
+              </span>
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                shows in scope: {rowsCount}
               </span>
             </div>
-            {franchiseLogoSummary.length === 0 ? (
-              <p className="text-sm text-zinc-500">No franchise logos found yet.</p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {franchiseLogoSummary.map((item) => (
-                  <article
-                    key={item.franchise_key}
-                    role="button"
-                    tabIndex={0}
-                    className="cursor-pointer rounded-lg border border-zinc-200 p-3 transition hover:border-zinc-300 hover:bg-zinc-50"
-                    onClick={() =>
-                      setLogoPickerState({
-                        targetType: "franchise",
-                        targetKey: item.franchise_key,
-                        targetLabel: item.franchise_name,
-                      })
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      setLogoPickerState({
-                        targetType: "franchise",
-                        targetKey: item.franchise_key,
-                        targetLabel: item.franchise_name,
-                      });
-                    }}
-                  >
-                    <p className="truncate text-sm font-semibold text-zinc-900">{item.franchise_name}</p>
-                    <p className="truncate text-xs text-zinc-500">{item.franchise_key}</p>
-                    <p className="mt-1 text-xs text-zinc-600">{item.count} logo{item.count === 1 ? "" : "s"}</p>
-                    <div className="mt-2 flex gap-2">
-                      <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <Image
-                          src={item.wordmark_url || PLACEHOLDER_ICON_PATH}
-                          alt={`${item.franchise_name} wordmark`}
-                          fill
-                          className="object-contain p-1"
-                          unoptimized
-                        />
-                      </div>
-                      <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                        <Image
-                          src={item.icon_url || PLACEHOLDER_ICON_PATH}
-                          alt={`${item.franchise_name} icon`}
-                          fill
-                          className="object-contain p-1"
-                          unoptimized
-                        />
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
           </section>
 
-          <section className="rounded-xl border border-zinc-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-zinc-900">Franchise Rules</h2>
-                <p className="text-sm text-zinc-600">
-                  Configure fallback Fandom URLs. Apply writes only to shows missing explicit approved Fandom links.
-                </p>
-                {suggestedFranchises.length > 0 ? (
-                  <p className="mt-2 text-xs text-zinc-600">Suggested franchises: {suggestedFranchises.join(", ")}</p>
-                ) : null}
-              </div>
-              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600">
-                {rulesLoading ? "Loading..." : `${rules.length} rules`}
-              </span>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {rules.map((rule) => {
-                const draft = ruleDrafts[rule.key] ?? toDraft(rule);
-                const saveBusy = savingRuleKey === rule.key;
-                const previewBusy = applyRunningKey === `${rule.key}:dry`;
-                const applyBusy = applyRunningKey === `${rule.key}:apply`;
-                return (
-                  <article key={rule.key} className="rounded-lg border border-zinc-200 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-zinc-900">{rule.name}</h3>
-                      <div className="flex flex-wrap gap-1 text-xs">
-                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-zinc-700">
-                          key: {rule.key}
-                        </span>
-                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-zinc-700">
-                          matched: {rule.matched_show_count}
-                        </span>
-                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-zinc-700">
-                          fallback rows: {rule.applied_fallback_count}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      <label className="text-xs font-semibold text-zinc-700">
-                        Rule Name
-                        <input
-                          value={draft.name}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { name: event.target.value })}
-                          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-zinc-700">
-                        Source Rank
-                        <input
-                          value={draft.source_rank}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { source_rank: event.target.value })}
-                          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-zinc-700 md:col-span-2">
-                        Primary Fandom URL
-                        <input
-                          value={draft.primary_url}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { primary_url: event.target.value })}
-                          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-zinc-700 md:col-span-2">
-                        Review `Special:AllPages` URL
-                        <input
-                          value={draft.review_allpages_url}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { review_allpages_url: event.target.value })}
-                          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-zinc-700">
-                        Match Terms (comma separated)
-                        <input
-                          value={draft.match_terms_csv}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { match_terms_csv: event.target.value })}
-                          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-zinc-700">
-                        Aliases (comma separated)
-                        <input
-                          value={draft.aliases_csv}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { aliases_csv: event.target.value })}
-                          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                        />
-                      </label>
-                      <label className="text-xs font-semibold text-zinc-700 md:col-span-2">
-                        Network Terms (comma separated)
-                        <input
-                          value={draft.network_terms_csv}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { network_terms_csv: event.target.value })}
-                          className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm font-normal"
-                        />
-                      </label>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-700">
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={draft.include_allpages_scan}
-                          onChange={(event) =>
-                            onChangeRuleDraft(rule.key, { include_allpages_scan: event.target.checked })
-                          }
-                        />
-                        Include `Special:AllPages` candidate scan
-                      </label>
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={draft.is_active}
-                          onChange={(event) => onChangeRuleDraft(rule.key, { is_active: event.target.checked })}
-                        />
-                        Rule active
-                      </label>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void onSaveRule(rule.key)}
-                        disabled={saveBusy}
-                        className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-500"
-                      >
-                        {saveBusy ? "Saving..." : "Save Rule"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void onApplyRule(rule.key, true)}
-                        disabled={previewBusy || applyBusy}
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {previewBusy ? "Previewing..." : "Preview Apply (Dry Run)"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void onApplyRule(rule.key, false)}
-                        disabled={previewBusy || applyBusy}
-                        className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {applyBusy ? "Applying..." : "Apply Missing-Only"}
-                      </button>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap gap-3 text-xs">
-                      <a href={rule.primary_url} target="_blank" rel="noreferrer" className="text-blue-700 underline">
-                        Primary Fandom
-                      </a>
-                      {rule.review_allpages_url ? (
-                        <a
-                          href={rule.review_allpages_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-700 underline"
-                        >
-                          Review `Special:AllPages`
-                        </a>
-                      ) : null}
-                      {(rule.candidate_urls ?? []).map((candidate) => (
-                        <a key={candidate} href={candidate} target="_blank" rel="noreferrer" className="text-blue-700 underline">
-                          Candidate URL
-                        </a>
-                      ))}
-                    </div>
-                  </article>
-                );
-              })}
-              {!rulesLoading && rules.length === 0 ? (
-                <p className="text-sm text-zinc-500">No franchise rules were returned.</p>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-zinc-200 bg-white p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-zinc-900">Shows From Supabase</h2>
-                <p className="text-sm text-zinc-600">
-                  Effective Fandom URL precedence: explicit approved link, then fallback rule link, then rule candidate.
+                <h2 className="text-xl font-semibold text-zinc-900">Find Show Branding Targets</h2>
+                <p className="text-sm text-zinc-500">
+                  Filter show and franchise cards by show title.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-1 text-xs text-zinc-700">
-                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">rows: {rowsCount}</span>
-                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
-                  explicit: {effectiveCounts.explicit}
-                </span>
-                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
-                  fallback: {effectiveCounts.fallback}
-                </span>
-                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1">
-                  rule default: {effectiveCounts.ruleDefault}
-                </span>
-              </div>
             </div>
-
-            <form onSubmit={onSubmitShowSearch} className="mt-3 flex flex-wrap items-center gap-2">
+            <form onSubmit={onSubmitShowSearch} className="flex flex-wrap items-center gap-2">
               <input
                 value={showQueryDraft}
                 onChange={(event) => setShowQueryDraft(event.target.value)}
@@ -1391,80 +538,220 @@ export default function BrandsShowsAndFranchisesPage() {
                 Clear
               </button>
             </form>
+          </section>
 
-            <div className="mt-3 overflow-x-auto">
-              <table className="min-w-full divide-y divide-zinc-200 text-sm">
-                <thead className="bg-zinc-50">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Show</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Franchise</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Effective Source</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Effective URL</th>
-                    <th className="px-3 py-2 text-left font-semibold text-zinc-700">Rule Candidates</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100 bg-white">
-                  {rowsLoading ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-zinc-500">
-                        Loading shows...
-                      </td>
-                    </tr>
-                  ) : null}
-                  {!rowsLoading && rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-8 text-center text-zinc-500">
-                        No shows found.
-                      </td>
-                    </tr>
-                  ) : null}
-                  {!rowsLoading
-                    ? rows.map((row) => {
-                        const showSlug = row.canonical_slug || row.show_id;
-                        return (
-                          <tr key={row.show_id}>
-                            <td className="max-w-[300px] px-3 py-2 font-medium text-zinc-900 [overflow-wrap:anywhere]">
-                              <Link href={`/shows/${encodeURIComponent(showSlug)}`} className="underline-offset-2 hover:underline">
-                                {row.show_name}
-                              </Link>
-                            </td>
-                            <td className="px-3 py-2 text-zinc-700">{row.franchise_name ?? row.franchise_key ?? "Unassigned"}</td>
-                            <td className="px-3 py-2 text-zinc-700">{row.effective_source}</td>
-                            <td className="max-w-[320px] px-3 py-2 [overflow-wrap:anywhere]">
-                              {row.effective_fandom_url ? (
-                                <a href={row.effective_fandom_url} target="_blank" rel="noreferrer" className="text-blue-700 underline">
-                                  {row.effective_fandom_url}
-                                </a>
-                              ) : (
-                                <span className="text-zinc-500">Missing</span>
-                              )}
-                            </td>
-                            <td className="max-w-[320px] px-3 py-2 [overflow-wrap:anywhere]">
-                              {row.rule_candidates.length > 0 ? (
-                                <div className="flex flex-col gap-1">
-                                  {row.rule_candidates.map((candidate) => (
-                                    <a
-                                      key={candidate}
-                                      href={candidate}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="text-blue-700 underline"
-                                    >
-                                      {candidate}
-                                    </a>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-zinc-500">None</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    : null}
-                </tbody>
-              </table>
+          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-zinc-900">
+                Shows ({showCards.length})
+              </h2>
+              <p className="text-sm text-zinc-500">Complete: {showCompleteCount}</p>
             </div>
+            {showCards.length === 0 ? (
+              <p className="text-sm text-zinc-500">No show branding targets found for this filter.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {showCards.map((card) => (
+                  <article
+                    key={`${card.targetType}:${card.targetKey}`}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer rounded border border-zinc-200 p-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+                    onClick={() =>
+                      setLogoPickerState({
+                        targetType: card.targetType,
+                        targetKey: card.targetKey,
+                        targetLabel: card.targetLabel,
+                      })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setLogoPickerState({
+                        targetType: card.targetType,
+                        targetKey: card.targetKey,
+                        targetLabel: card.targetLabel,
+                      });
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-zinc-900">{card.targetLabel}</p>
+                        {card.subtitle ? (
+                          <p className="truncate text-xs text-zinc-500">{card.subtitle}</p>
+                        ) : null}
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                          getCardStatus(card) === "complete"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {getCardStatus(card) === "complete" ? "Complete" : "Needs attention"}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                        <Image
+                          src={card.wordmarkUrl || PLACEHOLDER_ICON_PATH}
+                          alt={
+                            card.wordmarkUrl
+                              ? `${card.targetLabel} wordmark`
+                              : `${card.targetLabel} placeholder`
+                          }
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
+                      </div>
+                      <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                        <Image
+                          src={card.iconUrl || PLACEHOLDER_ICON_PATH}
+                          alt={
+                            card.iconUrl
+                              ? `${card.targetLabel} icon`
+                              : `${card.targetLabel} placeholder icon`
+                          }
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {card.sourceProvider ? (
+                        <p className="truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          {normalizeProviderLabel(card.sourceProvider)}
+                        </p>
+                      ) : null}
+                      <p className="text-xs text-zinc-500">
+                        Wordmark: {card.wordmarkUrl ? "available" : "missing"} · Icon:{" "}
+                        {card.iconUrl ? "available" : "missing"} · Assets: {card.assetCount}
+                      </p>
+                    </div>
+                    {getCardStatus(card) !== "complete" ? (
+                      <p className="mt-1 text-xs text-amber-700">
+                        Missing{" "}
+                        {card.wordmarkUrl
+                          ? "icon"
+                          : card.iconUrl
+                            ? "wordmark"
+                            : "wordmark + icon"}
+                        .
+                      </p>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-zinc-900">
+                Franchises ({franchiseCards.length})
+              </h2>
+              <p className="text-sm text-zinc-500">Complete: {franchiseCompleteCount}</p>
+            </div>
+            {franchiseCards.length === 0 ? (
+              <p className="text-sm text-zinc-500">No franchise branding targets found for this filter.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {franchiseCards.map((card) => (
+                  <article
+                    key={`${card.targetType}:${card.targetKey}`}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer rounded border border-zinc-200 p-3 transition hover:border-zinc-300 hover:bg-zinc-50"
+                    onClick={() =>
+                      setLogoPickerState({
+                        targetType: card.targetType,
+                        targetKey: card.targetKey,
+                        targetLabel: card.targetLabel,
+                      })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      setLogoPickerState({
+                        targetType: card.targetType,
+                        targetKey: card.targetKey,
+                        targetLabel: card.targetLabel,
+                      });
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-zinc-900">{card.targetLabel}</p>
+                        {card.subtitle ? (
+                          <p className="truncate text-xs text-zinc-500">{card.subtitle}</p>
+                        ) : null}
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                          getCardStatus(card) === "complete"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {getCardStatus(card) === "complete" ? "Complete" : "Needs attention"}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <div className="relative h-12 w-28 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                        <Image
+                          src={card.wordmarkUrl || PLACEHOLDER_ICON_PATH}
+                          alt={
+                            card.wordmarkUrl
+                              ? `${card.targetLabel} wordmark`
+                              : `${card.targetLabel} placeholder`
+                          }
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
+                      </div>
+                      <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                        <Image
+                          src={card.iconUrl || PLACEHOLDER_ICON_PATH}
+                          alt={
+                            card.iconUrl
+                              ? `${card.targetLabel} icon`
+                              : `${card.targetLabel} placeholder icon`
+                          }
+                          fill
+                          className="object-contain p-1"
+                          unoptimized
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {card.sourceProvider ? (
+                        <p className="truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          {normalizeProviderLabel(card.sourceProvider)}
+                        </p>
+                      ) : null}
+                      <p className="text-xs text-zinc-500">
+                        Wordmark: {card.wordmarkUrl ? "available" : "missing"} · Icon:{" "}
+                        {card.iconUrl ? "available" : "missing"} · Assets: {card.assetCount}
+                      </p>
+                    </div>
+                    {getCardStatus(card) !== "complete" ? (
+                      <p className="mt-1 text-xs text-amber-700">
+                        Missing{" "}
+                        {card.wordmarkUrl
+                          ? "icon"
+                          : card.iconUrl
+                            ? "wordmark"
+                            : "wordmark + icon"}
+                        .
+                      </p>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         </main>
         {logoPickerState ? (
@@ -1475,7 +762,7 @@ export default function BrandsShowsAndFranchisesPage() {
             targetType={logoPickerState.targetType}
             targetKey={logoPickerState.targetKey}
             targetLabel={logoPickerState.targetLabel}
-            onSaved={loadFranchiseLogos}
+            onSaved={refreshAll}
           />
         ) : null}
       </div>

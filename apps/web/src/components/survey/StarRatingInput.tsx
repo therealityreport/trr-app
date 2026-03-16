@@ -11,6 +11,7 @@ export interface StarRatingInputProps {
   value: number | null;
   onChange: (value: number) => void;
   disabled?: boolean;
+  iconSrc?: string | null;
 }
 
 /**
@@ -26,6 +27,7 @@ export default function StarRatingInput({
   value,
   onChange,
   disabled = false,
+  iconSrc = null,
 }: StarRatingInputProps) {
   const config = question.config as unknown as NumericRankingConfig;
 
@@ -64,6 +66,7 @@ export default function StarRatingInput({
         surveyTheme={surveyTheme}
         episodeLabel={episodeLabel}
         hideHeader
+        iconSrc={iconSrc}
       />
     </div>
   );

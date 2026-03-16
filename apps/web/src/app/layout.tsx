@@ -6,6 +6,7 @@ import ToastHost from "@/components/ToastHost";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import DebugPanel from "@/components/DebugPanel";
 import SideMenuProvider from "@/components/SideMenuProvider";
+import TypographyRuntimeClient from "@/components/typography/TypographyRuntimeClient";
 import {
   HOSTED_FONT_PRELOADS,
   buildHostedFontAssetPath,
@@ -36,7 +37,7 @@ export const metadata: Metadata = {
   description: "News, surveys, polls, quizzes, and games for Reality TV fans.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
@@ -56,13 +57,15 @@ export default function RootLayout({
         ))}
       </head>
       <body className={`${geistSans.variable} ${inter.variable} ${playfair.variable} font-sans antialiased`}>
-        <SideMenuProvider>
-          <ErrorBoundary>
-            <ToastHost />
-            {children}
-            <DebugPanel />
-          </ErrorBoundary>
-        </SideMenuProvider>
+        <TypographyRuntimeClient>
+          <SideMenuProvider>
+            <ErrorBoundary>
+              <ToastHost />
+              {children}
+              <DebugPanel />
+            </ErrorBoundary>
+          </SideMenuProvider>
+        </TypographyRuntimeClient>
       </body>
     </html>
   );

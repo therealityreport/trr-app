@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type {
   CastDecisionCardConfig,
@@ -541,17 +542,6 @@ export default function CastDecisionCardInput({
     };
   }, [fontProbeTokens]);
 
-  if (!currentRow || choices.length === 0) {
-    return (
-      <div className="rounded-xl border border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
-        Add `config.rows` and at least two decision choices to render this template.
-      </div>
-    );
-  }
-
-  const currentImage = resolveRowImage(currentRow);
-  const isLastRow = currentRowIndex >= rows.length - 1;
-  const showInlineActionButton = hasSelection && !disabled;
   const responsiveScale = clampNumber((containerWidth - 320) / 920, 0, 1);
   const promptFontSize = Math.round(
     clampNumber(
@@ -574,6 +564,65 @@ export default function CastDecisionCardInput({
     clampNumber(interpolate(18, 40, responsiveScale) * buttonScaleFactor, 12, 52),
   );
   const nextButtonMarginTop = Math.round(clampNumber(interpolate(20, 34, responsiveScale), 16, 40));
+  const promptTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "cast-decision-card",
+      instanceKey: "question",
+      role: "prompt",
+    },
+    {
+      fontFamily: fontOverrides.promptFontFamily,
+      fontWeight: "700",
+      fontSize: `${promptFontSize}px`,
+      lineHeight: "1.15",
+      letterSpacing: `${promptLetterSpacing}em`,
+      textTransform: "uppercase",
+    },
+  );
+  const subjectTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "cast-decision-card",
+      instanceKey: "question",
+      role: "subject",
+    },
+    {
+      fontFamily: fontOverrides.castNameFontFamily,
+      fontWeight: "800",
+      fontSize: `${nameFontSize}px`,
+      lineHeight: "0.9",
+      letterSpacing: "0px",
+      textTransform: "uppercase",
+    },
+  );
+  const optionTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "cast-decision-card",
+      instanceKey: "question",
+      role: "option",
+    },
+    {
+      fontFamily: fontOverrides.choiceFontFamily,
+      fontWeight: "700",
+      fontSize: `${choiceFontSize}px`,
+      lineHeight: "0.9",
+      letterSpacing: "0.02em",
+      textTransform: "uppercase",
+    },
+  );
+  if (!currentRow || choices.length === 0) {
+    return (
+      <div className="rounded-xl border border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
+        Add `config.rows` and at least two decision choices to render this template.
+      </div>
+    );
+  }
+
+  const currentImage = resolveRowImage(currentRow);
+  const isLastRow = currentRowIndex >= rows.length - 1;
+  const showInlineActionButton = hasSelection && !disabled;
 
   return (
     <div
@@ -587,10 +636,7 @@ export default function CastDecisionCardInput({
           data-testid="three-choice-prompt"
           className="mx-auto max-w-[32ch] uppercase leading-[1.15] text-black"
           style={{
-            fontFamily: fontOverrides.promptFontFamily,
-            fontWeight: 700,
-            fontSize: `${promptFontSize}px`,
-            letterSpacing: `${promptLetterSpacing}em`,
+            ...promptTypographyStyle,
             color: promptTextColor,
           }}
         >
@@ -600,9 +646,7 @@ export default function CastDecisionCardInput({
           data-testid="three-choice-cast-name"
           className="mx-auto mt-1 max-w-[16ch] uppercase leading-[0.9] text-black sm:mt-2"
           style={{
-            fontFamily: fontOverrides.castNameFontFamily,
-            fontWeight: 800,
-            fontSize: `${nameFontSize}px`,
+            ...subjectTypographyStyle,
             color: questionTextColor,
           }}
         >
@@ -692,11 +736,8 @@ export default function CastDecisionCardInput({
                   }`}
                   style={{
                     color: choice.textColor,
-                    fontFamily: fontOverrides.choiceFontFamily,
-                    fontWeight: 700,
+                    ...optionTypographyStyle,
                     fontSize: `${resolvedChoiceFontSize}px`,
-                    lineHeight: "0.9",
-                    letterSpacing: "0.02em",
                     textShadow: showImageOverlay ? "0 2px 8px rgba(0, 0, 0, 0.35)" : "none",
                   }}
                 >

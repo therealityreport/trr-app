@@ -6,8 +6,11 @@ import ImageSourceModal, { type ImageSourceSelection } from "@/components/admin/
 import PaletteExportPanel from "@/components/admin/color-lab/PaletteExportPanel";
 import ShadeThemePanels from "@/components/admin/color-lab/ShadeThemePanels";
 import { buildThemes } from "@/lib/admin/color-lab/theme-contrast";
-import { buildPaletteFromImageData } from "@/lib/admin/color-lab/palette-extraction";
-import { normalizeHexColor } from "@/lib/admin/color-lab/color-math";
+import {
+  buildPaletteFromImageData,
+  extractPaletteFromImageData,
+} from "@/lib/admin/color-lab/palette-extraction";
+import { clamp, normalizeHexColor } from "@/lib/admin/color-lab/color-math";
 import type { PaletteLibraryEntry, PaletteLibrarySourceType, PaletteSamplePoint } from "@/lib/admin/color-lab/types";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 
@@ -26,6 +29,13 @@ interface ImagePaletteLabProps {
 const MIN_COLORS = 3;
 const MAX_COLORS = 10;
 
+interface ImageViewport {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 function normalizeColors(input: string[]): string[] {
   return input
     .map((color) => normalizeHexColor(color))
@@ -42,7 +52,9 @@ export default function ImagePaletteLab({
   defaultSeasonNumber = null,
   onApplyPalette,
 }: ImagePaletteLabProps) {
+  const imageStageRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const sampledImageDataRef = useRef<ImageData | null>(null);
   const uploadObjectUrlRef = useRef<string | null>(null);
 
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
@@ -60,6 +72,8 @@ export default function ImagePaletteLab({
   const [paletteCount, setPaletteCount] = useState(5);
   const [colors, setColors] = useState<string[]>([]);
   const [markerPoints, setMarkerPoints] = useState<PaletteSamplePoint[]>([]);
+  const [activeMarkerIndex, setActiveMarkerIndex] = useState<number | null>(null);
+  const [imageViewport, setImageViewport] = useState<ImageViewport | null>(null);
 
   const [imageReady, setImageReady] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -120,6 +134,43 @@ export default function ImagePaletteLab({
     };
   }, []);
 
+  const syncImageViewport = useCallback(() => {
+    const stage = imageStageRef.current;
+    const image = imageRef.current;
+    if (!stage || !image) {
+      setImageViewport(null);
+      return;
+    }
+
+    const stageRect = stage.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
+    if (stageRect.width <= 0 || stageRect.height <= 0 || imageRect.width <= 0 || imageRect.height <= 0) {
+      setImageViewport(null);
+      return;
+    }
+
+    setImageViewport({
+      left: imageRect.left - stageRect.left,
+      top: imageRect.top - stageRect.top,
+      width: imageRect.width,
+      height: imageRect.height,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!imageReady) {
+      setImageViewport(null);
+      return;
+    }
+
+    syncImageViewport();
+    const handleResize = () => syncImageViewport();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [imageReady, syncImageViewport]);
+
   const runPaletteExtraction = useCallback(() => {
     if (!imageReady || !imageIdentity || !imageRef.current) {
       return;
@@ -153,6 +204,7 @@ export default function ImagePaletteLab({
 
       ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      sampledImageDataRef.current = imageData;
 
       const extracted = buildPaletteFromImageData({
         imageData,
@@ -172,6 +224,7 @@ export default function ImagePaletteLab({
       setExtractError(error instanceof Error ? error.message : "Failed to extract colors from image.");
       setColors([]);
       setMarkerPoints([]);
+      sampledImageDataRef.current = null;
     } finally {
       setExtracting(false);
     }
@@ -242,6 +295,66 @@ export default function ImagePaletteLab({
     void loadSeasonOptions();
   }, [loadPaletteEntries, loadSeasonOptions]);
 
+  const updateMarkerFromPointer = useCallback(
+    (markerIndex: number, clientX: number, clientY: number) => {
+      const stage = imageStageRef.current;
+      const viewport = imageViewport;
+      const sampledImageData = sampledImageDataRef.current;
+      if (!stage || !viewport || !sampledImageData) return;
+
+      const stageRect = stage.getBoundingClientRect();
+      if (viewport.width <= 0 || viewport.height <= 0 || stageRect.width <= 0 || stageRect.height <= 0) {
+        return;
+      }
+
+      const relativeX = clamp(clientX - stageRect.left - viewport.left, 0, viewport.width);
+      const relativeY = clamp(clientY - stageRect.top - viewport.top, 0, viewport.height);
+      const priorPoint = markerPoints[markerIndex];
+      const nextPoint: PaletteSamplePoint = {
+        x: clamp(relativeX / viewport.width, 0, 1),
+        y: clamp(relativeY / viewport.height, 0, 1),
+        radius: priorPoint?.radius ?? 18,
+      };
+      const nextColor =
+        normalizeColors(extractPaletteFromImageData(sampledImageData, [nextPoint], 1))[0] ??
+        colors[markerIndex] ??
+        "#000000";
+
+      setMarkerPoints((prev) =>
+        prev.map((point, index) => (index === markerIndex ? nextPoint : point))
+      );
+      setColors((prev) => {
+        const next = [...prev];
+        next[markerIndex] = nextColor;
+        return next;
+      });
+      setSaveError(null);
+      setSaveSuccess(null);
+    },
+    [colors, imageViewport, markerPoints],
+  );
+
+  useEffect(() => {
+    if (activeMarkerIndex === null) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      updateMarkerFromPointer(activeMarkerIndex, event.clientX, event.clientY);
+    };
+    const stopDragging = () => {
+      setActiveMarkerIndex(null);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopDragging);
+    window.addEventListener("pointercancel", stopDragging);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopDragging);
+      window.removeEventListener("pointercancel", stopDragging);
+    };
+  }, [activeMarkerIndex, updateMarkerFromPointer]);
+
   const handleImageSelection = useCallback(
     (selection: ImageSourceSelection) => {
       revokePreviousUploadUrl(selection.imageUrl);
@@ -268,6 +381,8 @@ export default function ImagePaletteLab({
       setImageReady(false);
       setExtractError(null);
       setSaveSuccess(null);
+      setImageViewport(null);
+      sampledImageDataRef.current = null;
     },
     [defaultSeasonNumber, defaultShowId, revokePreviousUploadUrl],
   );
@@ -297,6 +412,8 @@ export default function ImagePaletteLab({
       setImageIdentity(`library-entry:${entry.id}:${entry.seed}`);
       setImageUrl(toImageProxyUrl(entry.source_image_url));
       setImageReady(false);
+      setImageViewport(null);
+      sampledImageDataRef.current = null;
     }
 
     setSaveSuccess(`Loaded palette '${entry.name}'.`);
@@ -572,34 +689,58 @@ export default function ImagePaletteLab({
               Select an image source to generate a palette.
             </div>
           ) : (
-            <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-black/70">
+            <div
+              ref={imageStageRef}
+              className="relative overflow-hidden rounded-lg border border-zinc-200 bg-black/70"
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 ref={imageRef}
                 src={imageUrl}
                 alt="Palette sampling source"
                 crossOrigin="anonymous"
-                onLoad={() => setImageReady(true)}
+                onLoad={() => {
+                  setImageReady(true);
+                  syncImageViewport();
+                }}
                 onError={() => {
                   setImageReady(false);
+                  setImageViewport(null);
+                  sampledImageDataRef.current = null;
                   setExtractError("Failed to load selected image.");
                 }}
                 className="max-h-[36rem] w-full object-contain"
               />
 
-              {markerPoints.map((point, index) => (
-                <span
-                  key={`${index}-${point.x}-${point.y}`}
-                  className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white"
-                  style={{
-                    left: `${Math.round(point.x * 10000) / 100}%`,
-                    top: `${Math.round(point.y * 10000) / 100}%`,
-                    width: index === 0 ? "3.2rem" : "1.6rem",
-                    height: index === 0 ? "3.2rem" : "1.6rem",
-                    backgroundColor: index === 0 ? `${colors[index] ?? "#000000"}88` : "transparent",
-                  }}
-                />
-              ))}
+              {imageViewport &&
+                markerPoints.map((point, index) => (
+                  <button
+                    key={`${index}-${point.x}-${point.y}`}
+                    type="button"
+                    aria-label={`Palette marker ${index + 1}`}
+                    data-testid={`palette-marker-${index + 1}`}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      setActiveMarkerIndex(index);
+                      updateMarkerFromPointer(index, event.clientX, event.clientY);
+                    }}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white transition ${
+                      activeMarkerIndex === index
+                        ? "cursor-grabbing ring-2 ring-blue-400 ring-offset-2 ring-offset-black/40"
+                        : "cursor-grab"
+                    }`}
+                    style={{
+                      left: `${imageViewport.left + point.x * imageViewport.width}px`,
+                      top: `${imageViewport.top + point.y * imageViewport.height}px`,
+                      width: index === 0 ? "3.2rem" : "1.6rem",
+                      height: index === 0 ? "3.2rem" : "1.6rem",
+                      backgroundColor: index === 0 ? `${colors[index] ?? "#000000"}88` : "transparent",
+                      touchAction: "none",
+                    }}
+                  >
+                    <span className="sr-only">{colors[index] ?? "sampled color"}</span>
+                  </button>
+                ))}
             </div>
           )}
 
@@ -608,6 +749,7 @@ export default function ImagePaletteLab({
             {!extracting && imageSourceType && <span>Source: {imageSourceType}</span>}
             {showId && <span>Show: {showId}</span>}
             {seasonNumber !== null && <span>Season: {seasonNumber}</span>}
+            {imageViewport && <span>Drag markers to retarget sampled colors.</span>}
           </div>
           {extractError && <p className="mt-2 text-xs font-semibold text-red-600">{extractError}</p>}
         </div>

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { getUserProfile, isFirestoreUnavailableError } from "@/lib/db/users";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import type { UserProfile } from "@/lib/validation/user";
 
 type ProfileState = {
@@ -224,7 +225,7 @@ export default function ProfilePage() {
             <div className="space-y-2">
               <p className="text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-zinc-600">Reality Profile</p>
               <div className="flex flex-wrap items-center justify-center gap-3 md:justify-start">
-                <h2 className="text-4xl font-bold text-black" style={{ fontFamily: "var(--font-rude-slab)" }}>
+                <h2 className="text-4xl font-bold text-black" style={{ fontFamily: "var(--font-rude-slab)" }} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "profile", instanceKey: "hero", role: "heading" })}>
                   {displayName}
                 </h2>
                 <span className="inline-flex items-center rounded-full border border-black px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em]">

@@ -64,18 +64,23 @@ function FeaturedMediaCard({
           )}
         </div>
 
-        <div className="mb-3 flex h-32 items-center justify-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100">
+        <div
+          data-testid={`${title.toLowerCase().replace(/\s+/g, "-")}-preview`}
+          className={`mb-3 relative overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 ${aspectClassName}`}
+        >
           {selectedAssetUrl ? (
             <Image
               src={selectedAssetUrl}
               alt={title}
-              width={460}
-              height={180}
+              fill
               unoptimized
-              className="h-full w-full object-contain"
+              className="object-contain"
+              sizes="420px"
             />
           ) : (
-            <span className="text-xs text-zinc-500">{emptyLabel}</span>
+            <div className="flex h-full items-center justify-center px-4 text-center">
+              <span className="text-xs text-zinc-500">{emptyLabel}</span>
+            </div>
           )}
         </div>
 

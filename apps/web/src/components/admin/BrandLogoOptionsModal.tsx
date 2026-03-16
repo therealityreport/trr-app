@@ -31,7 +31,15 @@ import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 type BrandLogoRole = "wordmark" | "icon";
 type SourceQueryKind = "search_term" | "slug" | "host_or_url" | "readonly";
 type SourceStatus = "idle" | "loading" | "saving" | "ready" | "error";
-type ModalTargetType = "network" | "streaming" | "production" | "franchise" | "publication" | "social" | "other";
+type ModalTargetType =
+  | "show"
+  | "network"
+  | "streaming"
+  | "production"
+  | "franchise"
+  | "publication"
+  | "social"
+  | "other";
 
 type LogoOptionBase = {
   id: string;
@@ -146,8 +154,19 @@ const QUERY_PLACEHOLDERS: Record<SourceQueryKind, string> = {
   readonly: "",
 };
 
-const pickDisplayUrl = (row: LogoOptionBase): string | null =>
-  row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url || row.source_url || null;
+const buildBrandLogoPreviewProxyUrl = (sourceUrl: string): string =>
+  `/api/admin/trr-api/brands/logos/options/preview?url=${encodeURIComponent(sourceUrl)}`;
+
+const pickDisplayUrl = (row: LogoOptionBase): string | null => {
+  const hostedUrl = row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url || null;
+  if (hostedUrl) return hostedUrl;
+
+  if (row.option_kind === "candidate" && row.source_provider === "logos_fandom" && row.source_url) {
+    return buildBrandLogoPreviewProxyUrl(row.source_url);
+  }
+
+  return row.source_url || null;
+};
 
 const joinClassNames = (...values: Array<string | false | null | undefined>): string => values.filter(Boolean).join(" ");
 
@@ -239,6 +258,96 @@ const getOptionPreferredRole = (option: SavedLogoAsset | DiscoverCandidate): Bra
   }
   return "wordmark";
 };
+
+const OTHER_BRAND_LOGO_ROLE: Record<BrandLogoRole, BrandLogoRole> = {
+  wordmark: "icon",
+  icon: "wordmark",
+};
+
+const dedupeBrandLogoRoles = (roles: Array<BrandLogoRole | null | undefined>): BrandLogoRole[] => {
+  const out: BrandLogoRole[] = [];
+  for (const role of roles) {
+    if (!role || out.includes(role)) continue;
+    out.push(role);
+  }
+  return out;
+};
+
+const toSavedLogoAsset = (value: unknown): SavedLogoAsset | null => {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = typeof row.id === "string" ? row.id : "";
+  if (!id) return null;
+  return {
+    id,
+    source_url: typeof row.source_url === "string" ? row.source_url : null,
+    source_provider: typeof row.source_provider === "string" ? row.source_provider : null,
+    discovered_from: typeof row.discovered_from === "string" ? row.discovered_from : null,
+    hosted_logo_url: typeof row.hosted_logo_url === "string" ? row.hosted_logo_url : null,
+    hosted_logo_black_url: typeof row.hosted_logo_black_url === "string" ? row.hosted_logo_black_url : null,
+    hosted_logo_white_url: typeof row.hosted_logo_white_url === "string" ? row.hosted_logo_white_url : null,
+    option_kind: typeof row.option_kind === "string" ? row.option_kind : "stored",
+    file_type: typeof row.file_type === "string" ? row.file_type : null,
+    content_type: typeof row.content_type === "string" ? row.content_type : null,
+    width: typeof row.width === "number" ? row.width : null,
+    height: typeof row.height === "number" ? row.height : null,
+    aspect_ratio: typeof row.aspect_ratio === "number" ? row.aspect_ratio : null,
+    logo_role: row.logo_role === "icon" ? "icon" : row.logo_role === "wordmark" ? "wordmark" : null,
+    detected_logo_role:
+      row.detected_logo_role === "icon" ? "icon" : row.detected_logo_role === "wordmark" ? "wordmark" : null,
+    selected_roles: Array.isArray(row.selected_roles)
+      ? dedupeBrandLogoRoles(
+          row.selected_roles.map((role) => (role === "icon" || role === "wordmark" ? role : null)),
+        )
+      : [],
+  };
+};
+
+function applyFeaturedSelectionState(
+  assets: SavedLogoAsset[],
+  featured: Record<BrandLogoRole, SavedLogoAsset | null>,
+  selectedAsset: SavedLogoAsset,
+  role: BrandLogoRole,
+): {
+  assets: SavedLogoAsset[];
+  featured: Record<BrandLogoRole, SavedLogoAsset | null>;
+} {
+  const nextFeatured = {
+    ...featured,
+    [role]: selectedAsset,
+  };
+  const otherRole = OTHER_BRAND_LOGO_ROLE[role];
+  const selectedRoles = dedupeBrandLogoRoles([
+    role,
+    nextFeatured[otherRole]?.id === selectedAsset.id ? otherRole : null,
+    ...(selectedAsset.selected_roles ?? []),
+  ]);
+
+  let foundSelectedAsset = false;
+  const nextAssets = assets.map((asset) => {
+    const retainedRoles = dedupeBrandLogoRoles((asset.selected_roles ?? []).filter((selectedRole) => selectedRole !== role));
+    if (asset.id !== selectedAsset.id) {
+      return retainedRoles.length === (asset.selected_roles ?? []).length
+        ? asset
+        : { ...asset, selected_roles: retainedRoles };
+    }
+    foundSelectedAsset = true;
+    return {
+      ...asset,
+      ...selectedAsset,
+      selected_roles: selectedRoles,
+    };
+  });
+
+  if (!foundSelectedAsset) {
+    nextAssets.push({
+      ...selectedAsset,
+      selected_roles: selectedRoles,
+    });
+  }
+
+  return { assets: nextAssets, featured: nextFeatured };
+}
 
 async function parseErrorPayload(response: Response): Promise<string> {
   const fallback = `Request failed (${response.status})`;
@@ -635,6 +744,7 @@ export default function BrandLogoOptionsModal({
   const includeRelated = targetType === "publication" || targetType === "social";
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [hasPersistedChanges, setHasPersistedChanges] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [relatedFallbackActive, setRelatedFallbackActive] = useState(false);
   const [sources, setSources] = useState<SourceSummary[]>([]);
@@ -668,6 +778,11 @@ export default function BrandLogoOptionsModal({
   const [deleteConfirmAssetId, setDeleteConfirmAssetId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const sourcesRef = useRef<SourceSummary[]>([]);
+  const savedAssetsRef = useRef<SavedLogoAsset[]>([]);
+  const featuredByRoleRef = useRef<Record<BrandLogoRole, SavedLogoAsset | null>>({
+    wordmark: null,
+    icon: null,
+  });
   const discoverOffsetBySourceRef = useRef<Record<string, number>>({});
   const discoveredOptionsBySourceRef = useRef<Record<string, DiscoverCandidate[]>>({});
   const resultsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -689,6 +804,14 @@ export default function BrandLogoOptionsModal({
   useEffect(() => {
     sourcesRef.current = sources;
   }, [sources]);
+
+  useEffect(() => {
+    savedAssetsRef.current = savedAssets;
+  }, [savedAssets]);
+
+  useEffect(() => {
+    featuredByRoleRef.current = featuredByRole;
+  }, [featuredByRole]);
 
   useEffect(() => {
     discoverOffsetBySourceRef.current = discoverOffsetBySource;
@@ -922,6 +1045,7 @@ export default function BrandLogoOptionsModal({
     setSourceSuggestionsLoadingBySource({});
     setSourceSuggestionsErrorBySource({});
     setDeleteConfirmAssetId(null);
+    setHasPersistedChanges(false);
     try {
       const {
         fallbackMessage,
@@ -1116,6 +1240,7 @@ export default function BrandLogoOptionsModal({
       setAddingQueryBySource((previous) => ({ ...previous, [sourceProvider]: false }));
       setNewQueryDraftBySource((previous) => ({ ...previous, [sourceProvider]: "" }));
       setSourceStatusBySource((previous) => ({ ...previous, [sourceProvider]: "ready" }));
+      setHasPersistedChanges(true);
       if (sourceProvider === "logos_fandom") {
         setSourceSuggestionsBySource((previous) => ({ ...previous, [sourceProvider]: [] }));
       }
@@ -1302,6 +1427,19 @@ export default function BrandLogoOptionsModal({
 
   const assignOptionToRole = useCallback(async (option: SavedLogoAsset | DiscoverCandidate, role: BrandLogoRole) => {
     if (saving) return;
+    const previousSavedAssets = savedAssetsRef.current;
+    const previousFeaturedByRole = featuredByRoleRef.current;
+    const existingSavedAsset = (option.option_kind || "stored") === "candidate" ? null : toSavedLogoAsset(option);
+    if (existingSavedAsset) {
+      const optimisticState = applyFeaturedSelectionState(
+        previousSavedAssets,
+        previousFeaturedByRole,
+        existingSavedAsset,
+        role,
+      );
+      setSavedAssets(optimisticState.assets);
+      setFeaturedByRole(optimisticState.featured);
+    }
     setSaving(true);
     setError(null);
     setDeleteConfirmAssetId(null);
@@ -1329,12 +1467,24 @@ export default function BrandLogoOptionsModal({
       if (!response.ok) {
         throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
       }
-      if ((option.option_kind || "stored") !== "candidate") {
-        setFeaturedByRole((previous) => ({ ...previous, [role]: option as SavedLogoAsset }));
+      const payload = (await response.json().catch(() => ({}))) as { selected?: unknown };
+      const selectedAsset = toSavedLogoAsset(payload.selected) ?? existingSavedAsset;
+      if (!selectedAsset) {
+        throw new Error("Assigned logo response did not include a selected asset");
       }
-      await refreshModalAfterMutation((option.option_kind || "stored") === "candidate" ? SAVED_SOURCE_PROVIDER : (activeSource ?? SAVED_SOURCE_PROVIDER));
+      const nextState = applyFeaturedSelectionState(
+        previousSavedAssets,
+        previousFeaturedByRole,
+        selectedAsset,
+        role,
+      );
+      setSavedAssets(nextState.assets);
+      setFeaturedByRole(nextState.featured);
+      setHasPersistedChanges(true);
       notifySaved();
     } catch (assignError) {
+      setSavedAssets(previousSavedAssets);
+      setFeaturedByRole(previousFeaturedByRole);
       setError(
         normalizeLogoOptionsErrorMessage(
           assignError instanceof Error ? assignError.message : "Failed to assign featured logo",
@@ -1343,7 +1493,7 @@ export default function BrandLogoOptionsModal({
     } finally {
       setSaving(false);
     }
-  }, [activeSource, fetchWithAuth, notifySaved, refreshModalAfterMutation, saving, targetKey, targetLabel, targetType]);
+  }, [fetchWithAuth, notifySaved, saving, targetKey, targetLabel, targetType]);
 
   const deleteSavedAsset = useCallback(async (assetId: string) => {
     if (saving) return;
@@ -1369,6 +1519,7 @@ export default function BrandLogoOptionsModal({
       hydrateFromModalPayload(payload, { preferredActiveSource: SAVED_SOURCE_PROVIDER });
       const sourceRows = Array.isArray(payload.sources) ? payload.sources : [];
       void prefetchSourceCandidates(sourceRows, modalSessionRef.current);
+      setHasPersistedChanges(true);
       notifySaved();
     } catch (deleteError) {
       setError(
@@ -1423,6 +1574,7 @@ export default function BrandLogoOptionsModal({
         }
       }
       await refreshModalAfterMutation(SAVED_SOURCE_PROVIDER);
+      setHasPersistedChanges(true);
       notifySaved();
     } catch (saveError) {
       setError(
@@ -1882,7 +2034,7 @@ export default function BrandLogoOptionsModal({
               {activeSource === SAVED_SOURCE_PROVIDER ? "Drag any saved asset into the top frames to make it featured." : "Batch save selected assets into the shared Saved library."}
             </p>
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={onClose} disabled={saving}>Close</Button>
+              <Button variant="outline" onClick={onClose} disabled={saving}>{hasPersistedChanges ? "Save" : "Close"}</Button>
               {activeSource !== SAVED_SOURCE_PROVIDER ? (
                 <Button onClick={() => void onSaveSelected()} disabled={saving || activeSelectionIds.length === 0}>
                   {saving ? "Saving..." : `Save Selected (${activeSelectionIds.length})`}

@@ -57,6 +57,9 @@ export function useShowGallery<TSeasonAsset, TJobLiveCounts, TEntityContext>() {
     seasons_episodes: false,
     photos: false,
     cast_credits: false,
+    videos: false,
+    news: false,
+    social_setup: false,
   });
   const [refreshTargetNotice, setRefreshTargetNotice] = useState<
     Partial<Record<ShowRefreshTarget, string>>

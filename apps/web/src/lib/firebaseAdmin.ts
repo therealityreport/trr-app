@@ -5,6 +5,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
 const USE_EMULATORS = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
+const IS_NEXT_BUILD_PROCESS = process.argv.includes("build") || process.argv.some((arg) => arg.includes("processChild.js"));
 
 if (USE_EMULATORS) {
   // Ensure Admin SDK targets emulators when flag is on
@@ -29,7 +30,9 @@ function initAdmin() {
   } else {
     // For development/CI without service account, initialize with minimal config
     // This prevents crashes during build but admin features won't work at runtime
-    console.warn("Firebase Admin SDK: No service account provided. Some features will be disabled.");
+    if (!IS_NEXT_BUILD_PROCESS) {
+      console.warn("Firebase Admin SDK: No service account provided. Some features will be disabled.");
+    }
     const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "demo-build";
     initializeApp({ projectId });
   }

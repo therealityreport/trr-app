@@ -9,6 +9,7 @@ import AdminGlobalSearch from "@/components/admin/AdminGlobalSearch";
 import { HealthIndicator } from "@/components/admin/SystemHealthModal";
 import SystemHealthModal from "@/components/admin/SystemHealthModal";
 import { ADMIN_NAV_ITEMS } from "@/lib/admin/admin-navigation";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import {
   readAdminRecentShows,
   subscribeAdminRecentShows,
@@ -79,7 +80,7 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
           </div>
         </div>
 
-        {children ? <div className={bodyClassName}>{children}</div> : null}
+        {children ? <div className={bodyClassName} {...buildTypographyDataAttributes({ area: "admin", role: "headerMeta" })}>{children}</div> : null}
       </header>
 
       <AdminSideMenu

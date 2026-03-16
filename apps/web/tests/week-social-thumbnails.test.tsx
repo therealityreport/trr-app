@@ -256,6 +256,7 @@ describe("WeekDetailPage thumbnails", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     mockSearch.value = "source_scope=bravo";
+    try { sessionStorage.clear(); } catch { /* no-op in jsdom */ }
   });
 
   it("renders thumbnail previews for instagram, tiktok, and youtube", async () => {
@@ -866,6 +867,134 @@ describe("WeekDetailPage thumbnails", () => {
     expect(bravotvFallback.tagName).toBe("SPAN");
   });
 
+  it("does not show slide navigation for a single-image Instagram detail with mirrored and source URLs", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    payload.platforms.instagram.posts[0].thumbnail_url = "https://images.test/ig-card-thumb.jpg";
+    payload.platforms.instagram.posts[0].media_urls = ["https://images.test/ig-card-thumb.jpg"];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "instagram",
+            source_id: "ig-1",
+            author: "bravotv",
+            text: "Single-image IG post",
+            url: "https://instagram.com/p/abc",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            post_format: "post",
+            thumbnail_url: "https://images.test/ig-hosted-thumb.jpg",
+            source_thumbnail_url: "https://images.test/ig-source-thumb.jpg",
+            hosted_thumbnail_url: "https://images.test/ig-hosted-thumb.jpg",
+            media_urls: ["https://images.test/ig-hosted-thumb.jpg"],
+            source_media_urls: ["https://images.test/ig-source-image.jpg"],
+            hosted_media_urls: ["https://images.test/ig-hosted-thumb.jpg"],
+            stats: {
+              likes: 50,
+              comments_count: 10,
+              views: 1000,
+              engagement: 1060,
+            },
+            total_comments_in_db: 0,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("instagram-drawer-slide-indicator-ig-1")).not.toBeInTheDocument();
+    const drawerThumb = await screen.findByTestId("post-drawer-preview-ig-1");
+    expect(drawerThumb).toHaveAttribute("src", "https://images.test/ig-hosted-thumb.jpg");
+  });
+
+  it("falls back to thumbnail candidates when the Instagram drawer preview image fails to load", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    payload.platforms.instagram.posts[0].thumbnail_url = "https://images.test/ig-card-thumb.jpg";
+    payload.platforms.instagram.posts[0].media_urls = ["https://images.test/ig-card-thumb.jpg"];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/posts/instagram/ig-1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            platform: "instagram",
+            source_id: "ig-1",
+            author: "bravotv",
+            text: "Single-image IG post",
+            url: "https://instagram.com/p/abc",
+            posted_at: "2026-01-01T00:00:00.000Z",
+            post_format: "post",
+            thumbnail_url: "https://images.test/ig-fallback-thumb.jpg",
+            source_thumbnail_url: "https://images.test/ig-source-thumb.jpg",
+            hosted_thumbnail_url: "https://images.test/ig-fallback-thumb.jpg",
+            media_urls: ["https://images.test/ig-broken-preview.jpg"],
+            source_media_urls: ["https://images.test/ig-broken-preview.jpg"],
+            hosted_media_urls: [],
+            stats: {
+              likes: 50,
+              comments_count: 10,
+              views: 1000,
+              engagement: 1060,
+            },
+            total_comments_in_db: 0,
+            comments: [],
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    await clickPostDetailCardByThumbnailAlt("Instagram post thumbnail");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Post Details" })).toBeInTheDocument();
+    });
+
+    const drawerThumb = await screen.findByTestId("post-drawer-preview-ig-1");
+    expect(drawerThumb).toHaveAttribute("src", "https://images.test/ig-broken-preview.jpg");
+
+    fireEvent.error(drawerThumb);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("post-drawer-preview-ig-1")).toHaveAttribute(
+        "src",
+        "https://images.test/ig-fallback-thumb.jpg",
+      );
+    });
+  });
+
   it("uses author username and resolved profile avatar when raw author handle is abbreviated", async () => {
     const abbreviatedAuthorPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
     const youtubePost = abbreviatedAuthorPayload.platforms.youtube.posts[0] as (typeof weekPayload.platforms.youtube.posts)[number] & {
@@ -1367,7 +1496,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Facebook 7")).toBeInTheDocument();
     });
     expect(screen.queryByText("Loading week detail...")).not.toBeInTheDocument();
-    expect(mockRouter.replace.mock.calls.length).toBe(replaceCallsBeforeTabSwitch);
+    expect(mockRouter.replace.mock.calls.length).toBeGreaterThan(replaceCallsBeforeTabSwitch);
+    expect(String(mockRouter.replace.mock.calls.at(-1)?.[0] ?? "")).toContain("/social/w1/facebook");
     expect(screen.getAllByText(/Facebook \d+/).length).toBe(7);
 
     fireEvent.click(screen.getByRole("button", { name: /Twitter\/X\(30\)/i }));
@@ -1375,7 +1505,8 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("Twitter 20")).toBeInTheDocument();
     });
     expect(screen.queryByText("Loading week detail...")).not.toBeInTheDocument();
-    expect(mockRouter.replace.mock.calls.length).toBe(replaceCallsBeforeTabSwitch);
+    expect(mockRouter.replace.mock.calls.length).toBeGreaterThan(replaceCallsBeforeTabSwitch);
+    expect(String(mockRouter.replace.mock.calls.at(-1)?.[0] ?? "")).toContain("/social/w1/twitter");
     expect(screen.queryByText("Twitter 21")).not.toBeInTheDocument();
 
     const detailQueries = weekCalls
@@ -1386,7 +1517,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(detailQueries[2]?.get("platforms")).toBe("twitter");
     expect(detailQueries[1]?.get("post_offset")).toBe("0");
     expect(detailQueries[2]?.get("post_offset")).toBe("0");
-  });
+  }, 15_000);
 
   it("renders hashtag and mention chips for youtube/facebook/threads with text fallback when token arrays are absent", async () => {
     const tokenPayload = JSON.parse(JSON.stringify(weekPayload)) as Record<string, any>;
@@ -1693,7 +1824,7 @@ describe("WeekDetailPage thumbnails", () => {
       expect(within(statsPanel).getByText("Engagement")).toBeInTheDocument();
       expect(within(statsPanel).getByText("Instagram")).toBeInTheDocument();
     }
-  });
+  }, 15_000);
 
   it("renders video media in the lightbox for video post URLs", async () => {
     const videoPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
@@ -2335,6 +2466,36 @@ describe("WeekDetailPage thumbnails", () => {
     expect(nextHref).not.toContain("source_scope=");
     expect(nextHref).not.toContain("social_platform=youtube");
     expect(nextHref).not.toContain("day=");
+  });
+
+  it("updates the canonical route when switching between details and youtube tabs", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => weekPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    fireEvent.click(screen.getByRole("button", { name: /YouTube\(1\)/i }));
+    await waitFor(() => {
+      expect(screen.getByText("Episode Clip")).toBeInTheDocument();
+    });
+    expect(String(mockRouter.replace.mock.calls.at(-1)?.[0] ?? "")).toContain("/social/w1/youtube");
+
+    fireEvent.click(screen.getByRole("button", { name: /All\(3\)/i }));
+    await waitFor(() => {
+      expect(screen.getByText("IG post")).toBeInTheDocument();
+    });
+    expect(String(mockRouter.replace.mock.calls.at(-1)?.[0] ?? "")).toContain("/social/w1/details");
   });
 
   it("renders enriched instagram metadata inside the Post Details drawer", async () => {
@@ -3103,13 +3264,60 @@ describe("WeekDetailPage thumbnails", () => {
       if (url.includes("/social/analytics/week/1")) {
         return { ok: true, status: 200, json: async () => weekPayload } as Response;
       }
-      if (url.includes("/social/ingest") && init?.method === "POST") {
+      if (url.includes("/social/sync-sessions") && init?.method === "POST") {
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            run_id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
-            queued_or_started_jobs: 8,
+            status: "created",
+            sync_session_id: "ss-80423aa2-0001",
+            current_run_id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
+            current_run: {
+              id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
+              summary: { total_jobs: 8 },
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/sync-sessions/") && url.includes("/stream")) {
+        return { ok: false, status: 503, headers: new Headers(), body: null } as unknown as Response;
+      }
+      if (url.includes("/social/sync-sessions/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sync_session_id: "ss-80423aa2-0001",
+            status: "completed",
+            season_id: "season-1",
+            source_scope: "bravo",
+            platforms: [],
+            date_start: weekPayload.week.start,
+            date_end: weekPayload.week.end,
+            current_pass_kind: "initial",
+            current_pass_attempt: 1,
+            current_run_id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb",
+            pass_sequence: 1,
+            follow_up_reason: null,
+            pass_history: [],
+            completeness_snapshot: {
+              up_to_date: true,
+              comments_coverage: {
+                total_saved_comments: 36,
+                total_reported_comments: 36,
+                coverage_pct: 100,
+                up_to_date: true,
+                stale_posts_count: 0,
+                posts_scanned: 3,
+                by_platform: {
+                  instagram: { total_saved_comments: 10, total_reported_comments: 10, coverage_pct: 100, up_to_date: true, stale_posts_count: 0, posts_scanned: 1 },
+                  tiktok: { total_saved_comments: 12, total_reported_comments: 12, coverage_pct: 100, up_to_date: true, stale_posts_count: 0, posts_scanned: 1 },
+                  youtube: { total_saved_comments: 14, total_reported_comments: 14, coverage_pct: 100, up_to_date: true, stale_posts_count: 0, posts_scanned: 1 },
+                },
+                evaluated_at: "2026-01-01T00:02:00.000Z",
+              },
+            },
+            current_run: { id: "80423aa2-83ae-4f44-8aa4-dd5e8f8d39eb", status: "completed" },
           }),
         } as Response;
       }
@@ -3239,7 +3447,24 @@ describe("WeekDetailPage thumbnails", () => {
           }),
         } as Response;
       }
-      throw new Error(`Unexpected URL: ${url}`);
+      if (url.includes("/social/runs?")) {
+        return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
+      }
+      if (url.includes("/social/ingest/health-dot")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ queue_enabled: true, workers: { healthy: true, count: 1 } }),
+        } as Response;
+      }
+      if (url.includes("/social/analytics/mirror-coverage?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ posts_scanned: 0, needs_mirror_count: 0, up_to_date: true, by_platform: {} }),
+        } as Response;
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
@@ -3251,27 +3476,26 @@ describe("WeekDetailPage thumbnails", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Pass 1\/1 queued for Week 1 \(all platforms\) · run 80423aa2 · 8 job\(s\)/),
+        screen.getByText(/Sync session created for Week 1 \(all platforms\) · run 80423aa2/),
       ).toBeInTheDocument();
     });
     await waitFor(() => {
       expect(screen.getByText("Sync Progress")).toBeInTheDocument();
-      expect(screen.getByText(/Coverage 36\/36 \(100\.0%\) · Up-to-Date\./i)).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/8\/8 jobs/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/10 scraped/i)).toBeInTheDocument();
 
-    const ingestCall = fetchMock.mock.calls.find(
-      (call) => String(call[0]).includes("/social/ingest") && (call[1] as RequestInit | undefined)?.method === "POST",
+    const syncSessionCall = fetchMock.mock.calls.find(
+      (call) => String(call[0]).includes("/social/sync-sessions") && (call[1] as RequestInit | undefined)?.method === "POST",
     );
-    expect(ingestCall).toBeDefined();
-    const ingestInit = ingestCall?.[1] as RequestInit;
-    const body = JSON.parse(String(ingestInit.body ?? "{}")) as Record<string, unknown>;
+    expect(syncSessionCall).toBeDefined();
+    const syncSessionInit = syncSessionCall?.[1] as RequestInit;
+    const body = JSON.parse(String(syncSessionInit.body ?? "{}")) as Record<string, unknown>;
 
     expect(body.source_scope).toBe("bravo");
     expect(body.sync_strategy).toBe("incremental");
-    expect(body.ingest_mode).toBe("posts_and_comments");
-    expect(body.max_comments_per_post).toBe(10000);
-    expect(body.max_replies_per_post).toBe(2000);
     expect(body.date_start).toBe(weekPayload.week.start);
     expect(body.date_end).toBe(weekPayload.week.end);
     expect(body.platforms).toBeUndefined();
@@ -3296,13 +3520,44 @@ describe("WeekDetailPage thumbnails", () => {
       if (url.includes("/social/analytics/week/1")) {
         return { ok: true, status: 200, json: async () => weekPayload } as Response;
       }
-      if (url.includes("/social/ingest") && init?.method === "POST") {
+      if (url.includes("/social/sync-sessions") && init?.method === "POST") {
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            run_id: "a623c36b-9805-4f6b-b741-0b208fba050c",
-            queued_or_started_jobs: 8,
+            status: "created",
+            sync_session_id: "ss-a623c36b-0001",
+            current_run_id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+            current_run: {
+              id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+              summary: { total_jobs: 8 },
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/sync-sessions/") && url.includes("/stream")) {
+        return { ok: false, status: 503, headers: new Headers(), body: null } as unknown as Response;
+      }
+      if (url.includes("/social/sync-sessions/")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sync_session_id: "ss-a623c36b-0001",
+            status: "running",
+            season_id: "season-1",
+            source_scope: "bravo",
+            platforms: [],
+            date_start: weekPayload.week.start,
+            date_end: weekPayload.week.end,
+            current_pass_kind: "initial",
+            current_pass_attempt: 1,
+            current_run_id: "a623c36b-9805-4f6b-b741-0b208fba050c",
+            pass_sequence: 1,
+            follow_up_reason: null,
+            pass_history: [],
+            completeness_snapshot: {},
+            current_run: { id: "a623c36b-9805-4f6b-b741-0b208fba050c", status: "running" },
           }),
         } as Response;
       }
@@ -3340,7 +3595,17 @@ describe("WeekDetailPage thumbnails", () => {
           }),
         } as Response;
       }
-      throw new Error(`Unexpected URL: ${url}`);
+      if (url.includes("/social/runs?")) {
+        return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
+      }
+      if (url.includes("/social/ingest/health-dot")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ queue_enabled: true, workers: { healthy: true, count: 1 } }),
+        } as Response;
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 

@@ -141,7 +141,7 @@ describe("show-admin-routes", () => {
         platform: "instagram",
         handle: "@BravoTV",
       }),
-    ).toBe("/social/instagram/bravotv");
+    ).toBe("/admin/social/instagram/bravotv");
 
     expect(
       buildSocialAccountProfileUrl({
@@ -149,20 +149,20 @@ describe("show-admin-routes", () => {
         handle: "@BravoTV",
         tab: "hashtags",
       }),
-    ).toBe("/social/instagram/bravotv/hashtags");
+    ).toBe("/admin/social/instagram/bravotv/hashtags");
 
     expect(parseSocialAccountProfilePath("/social/instagram/bravotv")).toMatchObject({
       platform: "instagram",
       handle: "bravotv",
       tab: "stats",
-      canonicalPath: "/social/instagram/bravotv",
+      canonicalPath: "/admin/social/instagram/bravotv",
     });
 
-    expect(parseSocialAccountProfilePath("/social/instagram/bravotv/collaborators-tags")).toMatchObject({
+    expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/collaborators-tags")).toMatchObject({
       platform: "instagram",
       handle: "bravotv",
       tab: "collaborators-tags",
-      canonicalPath: "/social/instagram/bravotv/collaborators-tags",
+      canonicalPath: "/admin/social/instagram/bravotv/collaborators-tags",
     });
   });
 
@@ -593,7 +593,7 @@ describe("show-admin-routes", () => {
     ).toBe("/people/meredith-marks--7f528757/gallery?page=2");
   });
 
-  it("slugifies people names and appends person id prefix", () => {
+  it("slugifies people names and keeps clean person slugs by default", () => {
     expect(toPersonSlug("Meredith Marks")).toBe("meredith-marks");
     expect(toPersonSlug("Jax & Brittany")).toBe("jax-and-brittany");
     expect(toPersonSlug("Sébastien Schmitt")).toBe("sebastien-schmitt");
@@ -602,13 +602,20 @@ describe("show-admin-routes", () => {
         personName: "Meredith Marks",
         personId: "7f528757-5017-4599-8252-c02f0d0736cf",
       })
-    ).toBe("meredith-marks--7f528757");
+    ).toBe("meredith-marks");
     expect(
       buildPersonRouteSlug({
         personName: "Sébastien Schmitt",
         personId: "12345678-1234-1234-1234-123456789abc",
       }),
-    ).toBe("sebastien-schmitt--12345678");
+    ).toBe("sebastien-schmitt");
+    expect(
+      buildPersonRouteSlug({
+        personName: "Meredith Marks",
+        personId: "7f528757-5017-4599-8252-c02f0d0736cf",
+        includeIdPrefix: true,
+      })
+    ).toBe("meredith-marks--7f528757");
   });
 
   it("cleans legacy person routing query params", () => {

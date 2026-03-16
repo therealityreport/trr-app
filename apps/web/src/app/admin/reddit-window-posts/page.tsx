@@ -1300,7 +1300,7 @@ function AdminRedditWindowPostsPageContent() {
         showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
       })
-    : "/admin/social-media";
+    : "/admin/social";
   const communityHref = context
     ? buildShowRedditCommunityUrl({
         showSlug: context.showSlug,

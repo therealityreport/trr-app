@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import {
   DndContext,
   DragOverlay,
@@ -811,6 +812,37 @@ export default function ReunionSeatingPredictionInput({
     left: "0px",
     top: "0px",
   };
+  const headingTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "reunion-seating",
+      instanceKey: "question",
+      role: "heading",
+    },
+    {
+      fontFamily: headingFont,
+      fontSize: `${headingSize}px`,
+      lineHeight: `${headingLineHeight}px`,
+      letterSpacing: `${headingLetterSpacing}em`,
+      fontWeight: "800",
+    },
+  );
+  const optionTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "reunion-seating",
+      instanceKey: "question",
+      role: "option",
+    },
+    {
+      fontFamily: "\"Plymouth Serial\", var(--font-sans), sans-serif",
+      fontSize: "12px",
+      lineHeight: `${optionLineHeight}`,
+      letterSpacing: `${optionLetterSpacing}em`,
+      fontWeight: "700",
+      textTransform: "uppercase",
+    },
+  );
 
   return (
     <section
@@ -826,12 +858,8 @@ export default function ReunionSeatingPredictionInput({
       <h3
         className="mx-auto max-w-[1000px] text-center"
         style={{
-          fontFamily: headingFont,
           color: headingColor,
-          fontSize: `${headingSize}px`,
-          lineHeight: `${headingLineHeight}px`,
-          letterSpacing: `${headingLetterSpacing}em`,
-          fontWeight: 800,
+          ...headingTypographyStyle,
         }}
       >
         {question.question_text}
@@ -839,10 +867,7 @@ export default function ReunionSeatingPredictionInput({
 
       <p
         className="mt-3 text-center text-sm font-semibold uppercase text-zinc-700"
-        style={{
-          lineHeight: optionLineHeight,
-          letterSpacing: `${optionLetterSpacing}em`,
-        }}
+        style={optionTypographyStyle}
       >
         {stage === "full_time" ? fullTimePrompt : friendPrompt}
       </p>
@@ -999,7 +1024,7 @@ export default function ReunionSeatingPredictionInput({
         <div className="mx-auto mt-3 w-full max-w-[760px]" data-testid="reunion-unassigned-bank">
           <p
             className="text-center text-xs font-semibold uppercase text-zinc-600"
-            style={{ letterSpacing: `${optionLetterSpacing}em` }}
+            style={optionTypographyStyle}
           >
             {stage === "friend_side" ? "Friend Of" : "Full-Time Cast"}
           </p>

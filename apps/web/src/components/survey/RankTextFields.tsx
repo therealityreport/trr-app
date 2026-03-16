@@ -15,6 +15,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import {
   isCloudfrontCdnFontCandidate,
@@ -174,10 +175,7 @@ function RankRow({
   optionHeight,
   optionRadius,
   optionPaddingX,
-  optionFontSize,
-  optionLineHeight,
-  optionLetterSpacing,
-  optionFontFamily,
+  optionTypographyStyle,
 }: {
   id: string;
   label: string;
@@ -187,10 +185,7 @@ function RankRow({
   optionHeight: number;
   optionRadius: number;
   optionPaddingX: number;
-  optionFontSize: number;
-  optionLineHeight: number;
-  optionLetterSpacing: number;
-  optionFontFamily: string;
+  optionTypographyStyle: React.CSSProperties | undefined;
 }) {
   const {
     attributes,
@@ -239,14 +234,7 @@ function RankRow({
     >
       <span
         style={{
-          fontFamily: optionFontFamily,
-          fontWeight: 800,
-          fontSize: `${optionFontSize}px`,
-          lineHeight: optionLineHeight <= 3
-            ? `${(optionFontSize * optionLineHeight).toFixed(2)}px`
-            : `${optionLineHeight}px`,
-          letterSpacing: `${optionLetterSpacing}em`,
-          textTransform: "uppercase",
+          ...optionTypographyStyle,
         }}
       >
         {label}
@@ -462,6 +450,24 @@ export default function RankTextFields({
       responsiveSizing.optionLetterSpacing,
     [configRecord, responsiveSizing.optionLetterSpacing],
   );
+  const optionTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "rank-text-fields",
+      instanceKey: "question",
+      role: "option",
+    },
+    {
+      fontFamily: optionFontFamily,
+      fontWeight: "800",
+      fontSize: `${responsiveSizing.optionFontSize}px`,
+      lineHeight: optionLineHeight <= 3
+        ? `${(responsiveSizing.optionFontSize * optionLineHeight).toFixed(2)}px`
+        : `${optionLineHeight}px`,
+      letterSpacing: `${optionLetterSpacing}em`,
+      textTransform: "uppercase",
+    },
+  );
 
   const handleDragStart = React.useCallback((event: DragStartEvent) => {
     setActiveId(event.active.id as string);
@@ -553,10 +559,7 @@ export default function RankTextFields({
                 optionHeight={responsiveSizing.optionHeight}
                 optionRadius={responsiveSizing.optionRadius}
                 optionPaddingX={responsiveSizing.optionPaddingX}
-                optionFontSize={responsiveSizing.optionFontSize}
-                optionLineHeight={optionLineHeight}
-                optionLetterSpacing={optionLetterSpacing}
-                optionFontFamily={optionFontFamily}
+                optionTypographyStyle={optionTypographyStyle}
               />
             );
           })}
@@ -581,14 +584,7 @@ export default function RankTextFields({
             >
               <span
                 style={{
-                  fontFamily: optionFontFamily,
-                  fontWeight: 800,
-                  fontSize: `${responsiveSizing.optionFontSize}px`,
-                  lineHeight: optionLineHeight <= 3
-                    ? `${(responsiveSizing.optionFontSize * optionLineHeight).toFixed(2)}px`
-                    : `${optionLineHeight}px`,
-                  letterSpacing: `${optionLetterSpacing}em`,
-                  textTransform: "uppercase",
+                  ...optionTypographyStyle,
                 }}
               >
                 {activeOption.option_text}

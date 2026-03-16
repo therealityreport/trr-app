@@ -24,7 +24,7 @@ describe("admin navigation config", () => {
       "/people",
       "/games",
       "/surveys",
-      "/social-media",
+      "/admin/social",
       "/brands",
       "/users",
       "/groups",

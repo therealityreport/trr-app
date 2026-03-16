@@ -8,6 +8,7 @@ export type DesignSystemTabId =
   | "icons-illustrations";
 
 export type DesignSystemSubtabId =
+  | "typography"
   | "survey"
   | "auth"
   | "admin"
@@ -34,7 +35,13 @@ type DesignSystemSubtabDefinition = {
 };
 
 export const DESIGN_SYSTEM_TAB_DEFINITIONS: readonly DesignSystemTabDefinition[] = [
-  { id: "fonts", label: "Fonts" },
+  {
+    id: "fonts",
+    label: "Fonts",
+    subtabs: [
+      { id: "typography", label: "Typography" },
+    ],
+  },
   { id: "colors", label: "Colors" },
   { id: "buttons", label: "Buttons" },
   {

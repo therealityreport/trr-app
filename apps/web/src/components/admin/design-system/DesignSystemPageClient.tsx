@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useRef, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -27,6 +27,7 @@ import {
   buildHostedFontUrl,
   extractHostedFontAssetLinks,
 } from "@/lib/fonts/hosted-fonts";
+import type { TypographyArea, TypographyState } from "@/lib/typography/types";
 
 const QuestionsTab = dynamic(() => import("@/app/admin/fonts/_components/QuestionsTab"), {
   loading: () => (
@@ -60,6 +61,13 @@ const IconsIllustrationsTab = dynamic(() => import("./IconsIllustrationsTab"), {
   loading: () => (
     <div className="py-12 text-center text-sm text-zinc-500">
       Loading icons and illustrations...
+    </div>
+  ),
+});
+const TypographyTab = dynamic(() => import("./TypographyTab"), {
+  loading: () => (
+    <div className="py-12 text-center text-sm text-zinc-500">
+      Loading typography editor...
     </div>
   ),
 });
@@ -159,6 +167,30 @@ interface FontFamily {
   fontFamilyValue: string;
 }
 
+type FontCatalogSort = "az" | "most-used" | "most-styles" | "recently-touched";
+type FontCatalogSourceFilter = "all" | "hosted" | "google" | "stacks" | "realitease";
+
+type TypographySetLink = {
+  id: string;
+  name: string;
+  area: TypographyArea;
+};
+
+type FontUsagePreview = {
+  page: string;
+  title: string;
+  eyebrow: string;
+  body: string;
+  snippets: string[];
+  route?: string;
+  emphasis: string;
+};
+
+type ActiveFontPreview = {
+  preview: FontUsagePreview;
+  fontFamily: string;
+};
+
 const INACTIVE_USED_ON_PATTERN = /(Not yet used|Not actively used|Available|Deprecated)/i;
 
 interface ColorFamily {
@@ -212,6 +244,83 @@ function getFontUsedOnEntries(font: { usedOn: UsedOnEntry[]; weights?: FontWeigh
   return dedupeUsedOnEntries([...familyEntries, ...weightEntries]);
 }
 
+function normalizeFontLabel(value: string): string {
+  const normalized = value
+    .replace(/^var\(--font-/, "")
+    .replace(/\)$/, "")
+    .replace(/^"+|"+$/g, "")
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\s*,.*$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  const aliases: Record<string, string> = {
+    hamburg: "hamburg serial",
+    gloucester: "gloucester",
+    "plymouth serial": "plymouth serial",
+    "plymouth serial variable": "plymouth serial",
+    "rude slab": "rude slab condensed",
+    "font games": "plymouth serial",
+    games: "plymouth serial",
+    serif: "gloucester",
+  };
+
+  return aliases[normalized] ?? normalized;
+}
+
+const FONT_PAGE_ROUTE_MAP: Record<string, string> = {
+  Home: "/",
+  Login: "/login",
+  Register: "/auth/register",
+  "Auth Finish": "/auth/register",
+  "Privacy Policy": "/privacy-policy",
+  "Terms of Service": "/terms-of-service",
+  "Terms of Sale": "/terms-of-sale",
+  Hub: "/hub",
+  Profile: "/profile",
+  "Hub Surveys": "/hub/surveys",
+  "Bravodle Cover": "/bravodle/cover",
+  "Bravodle Play": "/bravodle/play",
+  "Realitease Cover": "/realitease/cover",
+  "Realitease Play": "/realitease/play",
+  "RHOSLC Survey": "/surveys/rhoslc-s6",
+  "RHOSLC Survey Play": "/surveys/rhoslc-s6/play",
+  "RHOSLC Survey Results": "/surveys/rhoslc-s6/results",
+  "RHOP Survey": "/surveys/rhop-s10",
+};
+
+function buildFontUsagePreview(entry: UsedOnEntry): FontUsagePreview {
+  const parsed = parsePreviewFromPath(entry.path);
+  const snippets = parsed?.texts?.length ? parsed.texts : [entry.path];
+  const primarySnippet = snippets[0] ?? entry.page;
+  return {
+    page: entry.page,
+    title: entry.page,
+    eyebrow: "Page usage preview",
+    body: entry.path,
+    snippets,
+    route: FONT_PAGE_ROUTE_MAP[entry.page],
+    emphasis: primarySnippet,
+  };
+}
+
+function countFontStyles(weights: Array<FontWeight | number>): number {
+  return weights.reduce<number>((count, weight) => {
+    if (typeof weight === "number") return count + 1;
+    return count + 1 + (weight.hasItalic ? 1 : 0);
+  }, 0);
+}
+
+function deriveTouchedScore(entries: UsedOnEntry[]): number {
+  return entries.reduce((score, entry, index) => {
+    const pathScore = /app\/|src\/|page\.tsx|component/i.test(entry.path) ? 3 : 1;
+    const activeScore = isActiveUsedOnEntry(entry) ? 6 : 0;
+    return score + activeScore + pathScore + Math.max(0, 12 - index);
+  }, 0);
+}
+
 function StaticUsedOnPills({ entries }: { entries: UsedOnEntry[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -234,11 +343,11 @@ function StaticUsedOnPills({ entries }: { entries: UsedOnEntry[] }) {
 const CDN_FONTS: FontFamily[] = [
   {
     name: "Beton",
-    weights: [w(700)],
+    weights: [w(300), w(600), w(700), w(800)],
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Beton/`,
-    description: "Extended bold geometric slab serif by Heinrich Jost.",
+    description: "Geometric slab serif by Heinrich Jost. Light through ExtraBold plus condensed/compressed cuts.",
     fontFamilyValue: '"Beton"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
@@ -308,8 +417,38 @@ const CDN_FONTS: FontFamily[] = [
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
-    description: "Geometric sans-serif by Paul Renner. 6 weights with obliques.",
+    description: "Geometric sans-serif by Paul Renner (Futura PT variant). 6 weights with obliques. See also: Futura Now Display, Headline, Text.",
     fontFamilyValue: '"Futura Now"',
+    usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
+  },
+  {
+    name: "Futura Now Display",
+    weights: [w(100, true), w(300, true), w(400, true), w(700, true), w(800, true), w(900, true)],
+    type: "CDN Font",
+    source: "CloudFront CDN",
+    cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
+    description: "Futura Now Display sub-family. 6 weights with italics. Optimized for large sizes.",
+    fontFamilyValue: '"Futura Now Display"',
+    usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
+  },
+  {
+    name: "Futura Now Headline",
+    weights: [w(100, true), w(200, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
+    type: "CDN Font",
+    source: "CloudFront CDN",
+    cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
+    description: "Futura Now Headline sub-family. 8 weights with italics, plus full condensed range.",
+    fontFamilyValue: '"Futura Now Headline"',
+    usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
+  },
+  {
+    name: "Futura Now Text",
+    weights: [w(100, true), w(200, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
+    type: "CDN Font",
+    source: "CloudFront CDN",
+    cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
+    description: "Futura Now Text sub-family. 8 weights with italics, plus full condensed range. Optimized for body text.",
+    fontFamilyValue: '"Futura Now Text"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
   {
@@ -324,11 +463,11 @@ const CDN_FONTS: FontFamily[] = [
   },
   {
     name: "Geometric Slabserif 712",
-    weights: [w(400), w(700), w(800)],
+    weights: [w(300, true), w(400, true), w(700), w(800)],
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Geometric%20Slabserif%20712/`,
-    description: "Bitstream geometric slab serif. Medium, Bold, and Extra Bold.",
+    description: "Bitstream geometric slab serif. Light through Extra Bold.",
     fontFamilyValue: '"Geometric Slabserif 712"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
@@ -379,10 +518,10 @@ const CDN_FONTS: FontFamily[] = [
     name: "Hamburg Serial",
     cssVar: "--font-hamburg",
     weights: [
-      { weight: 200, label: "ExtraLight", hasItalic: false },
-      { weight: 300, label: "Light", hasItalic: false },
+      { weight: 200, label: "ExtraLight", hasItalic: true },
+      { weight: 300, label: "Light", hasItalic: true },
       {
-        weight: 400, label: "Regular", hasItalic: false,
+        weight: 400, label: "Regular", hasItalic: true,
         usedOn: [
           { page: "Home", path: 'w400 · "Log in or create an account to get started" (body text)' },
           { page: "Login", path: 'w400 · "Don\'t have an account? Sign up" (body text)' },
@@ -396,7 +535,7 @@ const CDN_FONTS: FontFamily[] = [
         ],
       },
       {
-        weight: 500, label: "Medium", hasItalic: false,
+        weight: 500, label: "Medium", hasItalic: true,
         usedOn: [
           { page: "Home", path: 'w500 · "Email" (form label)' },
           { page: "Login", path: 'w500 · "Email", "Password" (form labels), "or" separator' },
@@ -404,15 +543,15 @@ const CDN_FONTS: FontFamily[] = [
           { page: "Auth Finish", path: 'w500 · "Username", "Birthday", "Gender", "Country" (form labels)' },
         ],
       },
-      { weight: 700, label: "Bold", hasItalic: false,
+      { weight: 700, label: "Bold", hasItalic: true,
         usedOn: [
           { page: "Home", path: 'w700 · "Go to Hub" (button)' },
           { page: "Login", path: 'w700 · "Log in" (button)' },
           { page: "Register", path: 'w700 · "Continue" (button)' },
         ],
       },
-      { weight: 800, label: "ExtraBold", hasItalic: false },
-      { weight: 900, label: "Black", hasItalic: false },
+      { weight: 800, label: "ExtraBold", hasItalic: true },
+      { weight: 900, label: "Black", hasItalic: true },
     ],
     type: "CDN Font",
     source: "CloudFront CDN",
@@ -457,27 +596,37 @@ const CDN_FONTS: FontFamily[] = [
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Malden%20Sans/`,
-    description: "Contemporary grotesque sans-serif. 7 weights with italics.",
+    description: "Contemporary grotesque sans-serif. 7 weights with italics. See also: Malden Sans Condensed.",
     fontFamilyValue: '"Malden Sans"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
   {
+    name: "Malden Sans Condensed",
+    weights: [w(100, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true)],
+    type: "CDN Font",
+    source: "CloudFront CDN",
+    cdnPath: `${CDN_BASE}/monotype/Malden%20Sans/`,
+    description: "Condensed variant of Malden Sans. 6 weights with italics.",
+    fontFamilyValue: '"Malden Sans Condensed"',
+    usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
+  },
+  {
     name: "News Gothic",
-    weights: [w(400, true), w(500), w(600), w(700, true)],
+    weights: [w(300), w(400, true), w(500), w(600), w(700, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/News%20Gothic/`,
-    description: "Classic grotesque sans-serif by Morris Fuller Benton.",
+    description: "Classic grotesque sans-serif by Morris Fuller Benton. Light through Bold.",
     fontFamilyValue: '"News Gothic"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
   {
     name: "News Gothic No. 2",
-    weights: [w(300), w(400), w(500, true), w(700, true), w(900, true)],
+    weights: [w(100, true), w(300, true), w(400, true), w(500, true), w(700, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/News%20Gothic%20No.%202/`,
-    description: "Updated News Gothic with expanded weight range. Light through Black.",
+    description: "Updated News Gothic with expanded weight range. Thin through Black with italics.",
     fontFamilyValue: '"News Gothic No. 2"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
@@ -504,11 +653,11 @@ const CDN_FONTS: FontFamily[] = [
   {
     name: "Plymouth Serial",
     cssVar: "--font-plymouth-serial",
-    weights: [w(300), w(400), w(500), w(700), w(800), w(900)],
+    weights: [w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Plymouth%20Serial/`,
-    description: "Decorative serif used in game covers and surveys.",
+    description: "Decorative serif used in game covers and surveys. 6 weights with italics.",
     fontFamilyValue: '"Plymouth Serial"',
     usedOn: [
       { page: "Bravodle Cover", path: "app/bravodle/cover/page.tsx" },
@@ -519,11 +668,11 @@ const CDN_FONTS: FontFamily[] = [
   },
   {
     name: "Rockwell",
-    weights: [w(800)],
+    weights: [w(300, true), w(400, true), w(700, true), w(800)],
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Rockwell/`,
-    description: "Classic geometric slab serif. Single extra bold weight.",
+    description: "Classic geometric slab serif. Light through ExtraBold with italics and condensed cuts.",
     fontFamilyValue: '"Rockwell"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
@@ -533,8 +682,18 @@ const CDN_FONTS: FontFamily[] = [
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Rockwell%20Nova/`,
-    description: "Updated Rockwell with expanded weights. Geometric slab serif.",
+    description: "Updated Rockwell. 4 weights with italics. See also: Rockwell Nova Condensed.",
     fontFamilyValue: '"Rockwell Nova"',
+    usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
+  },
+  {
+    name: "Rockwell Nova Condensed",
+    weights: [w(300, true), w(400, true), w(700, true)],
+    type: "CDN Font",
+    source: "CloudFront CDN",
+    cdnPath: `${CDN_BASE}/monotype/Rockwell%20Nova/`,
+    description: "Condensed variant of Rockwell Nova. Light, Regular, Bold with italics.",
+    fontFamilyValue: '"Rockwell Nova Condensed"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
   {
@@ -583,11 +742,11 @@ const CDN_FONTS: FontFamily[] = [
   },
   {
     name: "Stymie",
-    weights: [w(500)],
+    weights: [w(300, true), w(500, true), w(700, true), w(900)],
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Stymie/`,
-    description: "Classic geometric slab serif. Single medium weight.",
+    description: "Classic geometric slab serif. Light through Black with condensed cuts.",
     fontFamilyValue: '"Stymie"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
@@ -597,7 +756,7 @@ const CDN_FONTS: FontFamily[] = [
     type: "CDN Font",
     source: "CloudFront CDN",
     cdnPath: `${CDN_BASE}/monotype/Stymie%20Extra%20Bold/`,
-    description: "Classic geometric slab serif. Single extra bold weight.",
+    description: "Classic geometric slab serif. ExtraBold plus condensed cut.",
     fontFamilyValue: '"Stymie Extra Bold"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
   },
@@ -809,114 +968,124 @@ function parsePreviewFromPath(path: string): { weight: number; texts: string[] }
   return texts.length > 0 ? { weight, texts } : null;
 }
 
-function PreviewPopover({
-  entry,
-  fontFamily,
-  anchorRef,
+function FontUsagePreviewModal({
+  activePreview,
   onClose,
 }: {
-  entry: UsedOnEntry;
-  fontFamily: string;
-  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  activePreview: ActiveFontPreview | null;
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  if (!activePreview) return null;
 
-  useEffect(() => {
-    if (anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 8, left: rect.left });
-    }
-  }, [anchorRef]);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (
-        ref.current && !ref.current.contains(e.target as Node) &&
-        anchorRef.current && !anchorRef.current.contains(e.target as Node)
-      ) onClose();
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [onClose, anchorRef]);
-
-  const parsed = parsePreviewFromPath(entry.path);
-  if (!pos) return null;
+  const { preview, fontFamily } = activePreview;
 
   return createPortal(
     <div
-      ref={ref}
-      style={{ position: "fixed", top: pos.top, left: pos.left }}
-      className="z-[9999] w-80 rounded-xl border border-zinc-200 bg-white shadow-xl"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-zinc-950/55 px-4 py-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="font-usage-preview-title"
+      data-testid="font-usage-preview-modal"
+      onClick={onClose}
     >
-      <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5">
-        <span className="text-xs font-semibold text-zinc-700">{entry.page}</span>
-        <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 text-sm leading-none">
-          &times;
-        </button>
-      </div>
-      <div className="px-4 py-3 space-y-3 max-h-[60vh] overflow-y-auto">
-        {parsed ? (
-          parsed.texts.map((text, i) => (
-            <div key={i}>
-              <span className="text-[10px] font-medium text-zinc-400 tabular-nums">
-                {parsed.weight} {WEIGHT_LABELS[parsed.weight] ?? ""}
-              </span>
-              <p
-                className="mt-0.5 text-lg text-zinc-900 leading-snug"
-                style={{ fontFamily, fontWeight: parsed.weight }}
-              >
-                {text}
-              </p>
+      <div
+        className="w-full max-w-3xl rounded-[28px] border border-zinc-200 bg-white p-5 shadow-2xl sm:p-6"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              {preview.eyebrow}
             </div>
-          ))
-        ) : (
-          <p className="text-xs text-zinc-500">{entry.path}</p>
-        )}
+            <h3 id="font-usage-preview-title" className="mt-2 text-xl font-bold tracking-[-0.03em] text-zinc-950">
+              {preview.title}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-zinc-600 [overflow-wrap:anywhere]">
+              {preview.body}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-zinc-200 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-600"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-5 rounded-[24px] border border-zinc-200 bg-[#F8F5EE] p-5">
+          <div className="rounded-[22px] border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-400">
+              {preview.page}
+            </div>
+            <div
+              className="mt-4 max-w-[18ch] text-[2rem] font-semibold leading-none tracking-[-0.04em] text-zinc-950"
+              style={{ fontFamily }}
+            >
+              {preview.emphasis}
+            </div>
+            <div className="mt-4 space-y-2">
+              {preview.snippets.map((snippet) => (
+                <div
+                  key={snippet}
+                  className="rounded-[16px] border border-zinc-200 bg-zinc-50 px-4 py-3 text-zinc-900"
+                  style={{ fontFamily }}
+                >
+                  {snippet}
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600">
+              This specimen keeps the original page’s typography feel while focusing on the text that actually uses this font.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          {preview.route ? (
+            <a
+              href={preview.route}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+            >
+              Open actual page
+            </a>
+          ) : (
+            <span className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-400">
+              No live page route
+            </span>
+          )}
+        </div>
       </div>
     </div>,
     document.body,
   );
 }
 
-function UsedOnChips({ entries, fontFamily }: { entries: UsedOnEntry[]; fontFamily: string }) {
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
-  const chipRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
-
-  const setChipRef = useCallback((idx: number, el: HTMLButtonElement | null) => {
-    if (el) chipRefs.current.set(idx, el);
-    else chipRefs.current.delete(idx);
-  }, []);
-
+function UsedOnChips({
+  entries,
+  fontFamily,
+  onOpenPreview,
+}: {
+  entries: UsedOnEntry[];
+  fontFamily: string;
+  onOpenPreview: (preview: ActiveFontPreview) => void;
+}) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {entries.map((entry, idx) => {
-        const hasPreviews = parsePreviewFromPath(entry.path) !== null;
+        const preview = buildFontUsagePreview(entry);
         return (
-          <span key={idx}>
-            <button
-              ref={(el) => setChipRef(idx, el)}
-              type="button"
-              onClick={() => setActiveIdx(activeIdx === idx ? null : idx)}
-              title={entry.path}
-              className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs ring-1 ring-inset transition-colors ${
-                activeIdx === idx
-                  ? "bg-violet-200 text-violet-900 ring-violet-400"
-                  : "bg-violet-50 text-violet-700 ring-violet-200 hover:bg-violet-100"
-              } ${hasPreviews ? "cursor-pointer" : "cursor-default"}`}
-            >
-              {entry.page}
-            </button>
-            {activeIdx === idx && hasPreviews && (
-              <PreviewPopover
-                entry={entry}
-                fontFamily={fontFamily}
-                anchorRef={{ current: chipRefs.current.get(idx) ?? null }}
-                onClose={() => setActiveIdx(null)}
-              />
-            )}
-          </span>
+          <button
+            key={`${entry.page}-${idx}`}
+            type="button"
+            onClick={() => onOpenPreview({ preview, fontFamily })}
+            title={entry.path}
+            className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200 transition hover:bg-violet-100"
+          >
+            {entry.page}
+          </button>
         );
       })}
     </div>
@@ -964,10 +1133,20 @@ function FontCard({
   family,
   fontAssetHref,
   previewText,
+  linkedSets,
+  isPinned,
+  onTogglePin,
+  onOpenPreview,
+  onOpenTypographySet,
 }: {
   family: FontFamily;
   fontAssetHref?: string;
   previewText: string;
+  linkedSets: TypographySetLink[];
+  isPinned: boolean;
+  onTogglePin: () => void;
+  onOpenPreview: (preview: ActiveFontPreview) => void;
+  onOpenTypographySet: (setId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const totalWeights = family.weights.length;
@@ -983,45 +1162,59 @@ function FontCard({
   const resolvedAssetHref = fontAssetHref ?? fallbackCdnHref;
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden transition-shadow hover:shadow-md">
-      {/* Collapsed header — always visible */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-zinc-50/60"
-      >
-        {/* Font name rendered in its own font */}
-        <div className="min-w-0 flex-1">
-          <h3
-            className="text-lg font-semibold text-zinc-900 truncate"
-            style={{ fontFamily: family.fontFamilyValue }}
-          >
-            {family.name}
-          </h3>
-          <div className="mt-1 flex items-center gap-2">
-            <TypeBadge type={family.type} source={family.source} />
-            <span className="text-[10px] text-zinc-400">
-              {totalStyles} style{totalStyles > 1 ? "s" : ""}
-            </span>
-          </div>
-          {activeUsedOn.length > 0 ? <StaticUsedOnPills entries={activeUsedOn} /> : null}
-        </div>
-
-        {/* Preview text in the font (collapsed state) */}
-        <p
-          className="hidden sm:block max-w-xs text-sm text-zinc-500 truncate"
-          style={{ fontFamily: family.fontFamilyValue, fontWeight: 400 }}
+    <div
+      className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden transition-shadow hover:shadow-md"
+      data-testid={`font-card-${family.name}`}
+    >
+      <div className="flex items-stretch gap-3 px-5 py-4">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-4 text-left transition-colors hover:bg-zinc-50/60"
         >
-          {previewText}
-        </p>
+          <div className="min-w-0 flex-1">
+            <div className="min-w-0">
+              <h3
+                className="truncate text-lg font-semibold text-zinc-900"
+                style={{ fontFamily: family.fontFamilyValue }}
+              >
+                {family.name}
+              </h3>
+              <p
+                className="mt-2 truncate text-sm text-zinc-500"
+                style={{ fontFamily: family.fontFamilyValue, fontWeight: 400 }}
+              >
+                {previewText}
+              </p>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <TypeBadge type={family.type} source={family.source} />
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                {displayUsedOn.length} used
+              </span>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                {totalStyles} style{totalStyles > 1 ? "s" : ""}
+              </span>
+            </div>
+            {activeUsedOn.length > 0 ? <StaticUsedOnPills entries={activeUsedOn} /> : null}
+          </div>
+          <ChevronIcon open={open} />
+        </button>
+        <button
+          type="button"
+          onClick={onTogglePin}
+          className={`self-start rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+            isPinned
+              ? "bg-zinc-950 text-white"
+              : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+          }`}
+        >
+          {isPinned ? "Pinned" : "Compare"}
+        </button>
+      </div>
 
-        <ChevronIcon open={open} />
-      </button>
-
-      {/* Expanded panel */}
       {open && (
         <div className="border-t border-zinc-100">
-          {/* Meta row */}
           <div className="px-5 py-3 bg-zinc-50/40 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-500">
             {family.cssVar && (
               <span>
@@ -1041,22 +1234,43 @@ function FontCard({
             )}
           </div>
 
-          {/* Description */}
           <div className="px-5 py-2">
             <p className="text-xs text-zinc-500">{family.description}</p>
           </div>
 
-          {/* Used On (font-level, only if entries exist) */}
+          {linkedSets.length > 0 ? (
+            <div className="px-5 py-2 border-b border-zinc-100">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                In Typography Sets
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {linkedSets.map((set) => (
+                  <button
+                    key={set.id}
+                    type="button"
+                    onClick={() => onOpenTypographySet(set.id)}
+                    className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
+                  >
+                    {set.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {displayUsedOn.length > 0 && (
             <div className="px-5 py-2 border-b border-zinc-100">
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                 Used On
               </p>
-              <UsedOnChips entries={displayUsedOn} fontFamily={family.fontFamilyValue} />
+              <UsedOnChips
+                entries={displayUsedOn}
+                fontFamily={family.fontFamilyValue}
+                onOpenPreview={onOpenPreview}
+              />
             </div>
           )}
 
-          {/* Weight Previews */}
           <div className="px-5 py-4">
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Weights
@@ -1090,7 +1304,11 @@ function FontCard({
                           </p>
                           <div className="min-h-7 md:pt-1">
                             {displayWeightUsedOn.length > 0 ? (
-                              <UsedOnChips entries={displayWeightUsedOn} fontFamily={family.fontFamilyValue} />
+                              <UsedOnChips
+                                entries={displayWeightUsedOn}
+                                fontFamily={family.fontFamilyValue}
+                                onOpenPreview={onOpenPreview}
+                              />
                             ) : (
                               <span className="text-xs text-zinc-300">—</span>
                             )}
@@ -1114,7 +1332,11 @@ function FontCard({
                             </p>
                             <div className="min-h-7 md:pt-1">
                               {displayWeightUsedOn.length > 0 ? (
-                                <UsedOnChips entries={displayWeightUsedOn} fontFamily={family.fontFamilyValue} />
+                                <UsedOnChips
+                                  entries={displayWeightUsedOn}
+                                  fontFamily={family.fontFamilyValue}
+                                  onOpenPreview={onOpenPreview}
+                                />
                               ) : (
                                 <span className="text-xs text-zinc-300">—</span>
                               )}
@@ -1141,38 +1363,75 @@ function FontCard({
 function RealiteaseFontCard({
   font,
   previewText,
+  linkedSets,
+  isPinned,
+  onTogglePin,
+  onOpenPreview,
+  onOpenTypographySet,
 }: {
   font: RealiteaseFontEntry;
   previewText: string;
+  linkedSets: TypographySetLink[];
+  isPinned: boolean;
+  onTogglePin: () => void;
+  onOpenPreview: (preview: ActiveFontPreview) => void;
+  onOpenTypographySet: (setId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden transition-shadow hover:shadow-md">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-zinc-50/60"
-      >
-        <div className="min-w-0 flex-1">
-          <h3
-            className="text-lg font-semibold text-zinc-900 truncate"
-            style={{ fontFamily: font.fontFamily }}
-          >
-            {font.name}
-          </h3>
-          <div className="mt-1 flex items-center gap-2">
-            <span className="inline-flex items-center rounded-full bg-purple-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-purple-700 ring-1 ring-inset ring-purple-200">
-              CDN Font
-            </span>
-            <span className="text-[10px] text-zinc-400">Realitease</span>
-            <span className="text-[10px] text-zinc-400">
-              {font.weights.length} style{font.weights.length > 1 ? "s" : ""}
-            </span>
+    <div
+      className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden transition-shadow hover:shadow-md"
+      data-testid={`font-card-${font.name}`}
+    >
+      <div className="flex items-stretch gap-3 px-5 py-4">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-4 text-left transition-colors hover:bg-zinc-50/60"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="min-w-0">
+              <h3
+                className="truncate text-lg font-semibold text-zinc-900"
+                style={{ fontFamily: font.fontFamily }}
+              >
+                {font.name}
+              </h3>
+              <p
+                className="mt-2 truncate text-sm text-zinc-500"
+                style={{ fontFamily: font.fontFamily, fontWeight: 400 }}
+              >
+                {previewText}
+              </p>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-purple-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-purple-700 ring-1 ring-inset ring-purple-200">
+                CDN Font
+              </span>
+              <span className="text-[10px] text-zinc-400">Realitease</span>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                {font.usedOn.length} used
+              </span>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                {font.weights.length} style{font.weights.length > 1 ? "s" : ""}
+              </span>
+            </div>
           </div>
-        </div>
-        <ChevronIcon open={open} />
-      </button>
+          <ChevronIcon open={open} />
+        </button>
+        <button
+          type="button"
+          onClick={onTogglePin}
+          className={`self-start rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+            isPinned
+              ? "bg-zinc-950 text-white"
+              : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+          }`}
+        >
+          {isPinned ? "Pinned" : "Compare"}
+        </button>
+      </div>
 
       {open && (
         <div className="border-t border-zinc-100">
@@ -1185,12 +1444,32 @@ function RealiteaseFontCard({
             <p className="text-xs text-zinc-500">{font.description}</p>
           </div>
 
+          {linkedSets.length > 0 ? (
+            <div className="px-5 py-2 border-b border-zinc-100">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                In Typography Sets
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {linkedSets.map((set) => (
+                  <button
+                    key={set.id}
+                    type="button"
+                    onClick={() => onOpenTypographySet(set.id)}
+                    className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
+                  >
+                    {set.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {/* Used On */}
           <div className="px-5 py-2 border-b border-zinc-100">
             <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Used On
             </p>
-            <UsedOnChips entries={font.usedOn} fontFamily={font.fontFamily} />
+            <UsedOnChips entries={font.usedOn} fontFamily={font.fontFamily} onOpenPreview={onOpenPreview} />
           </div>
 
           {/* Weights */}
@@ -1212,6 +1491,90 @@ function RealiteaseFontCard({
         </div>
       )}
     </div>
+  );
+}
+
+function FontComparisonTray({
+  entries,
+  previewText,
+  onRemove,
+}: {
+  entries: Array<{
+    id: string;
+    name: string;
+    fontFamily: string;
+    styles: number;
+    usageCount: number;
+    sets: TypographySetLink[];
+  }>;
+  previewText: string;
+  onRemove: (id: string) => void;
+}) {
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="sticky top-0 z-20 mb-6 rounded-[24px] border border-zinc-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            Comparison Tray
+          </div>
+          <h2 className="mt-1 text-lg font-bold tracking-[-0.02em] text-zinc-950">
+            Compare pinned fonts
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">
+            The same preview text is rendered across your pinned families so you can compare fit quickly.
+          </p>
+        </div>
+        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-700">
+          {entries.length} of 3 pinned
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {entries.map((entry) => (
+          <article key={entry.id} className="rounded-[20px] border border-zinc-200 bg-zinc-50 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-zinc-950">{entry.name}</div>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                    {entry.usageCount} used
+                  </span>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+                    {entry.styles} styles
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(entry.id)}
+                className="rounded-full border border-zinc-200 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600"
+              >
+                Remove
+              </button>
+            </div>
+            <div
+              className="mt-4 rounded-[18px] border border-zinc-200 bg-white px-4 py-4 text-[1.45rem] leading-tight tracking-[-0.03em] text-zinc-950"
+              style={{ fontFamily: entry.fontFamily }}
+            >
+              {previewText}
+            </div>
+            {entry.sets.length > 0 ? (
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                {entry.sets.map((set) => (
+                  <span
+                    key={`${entry.id}-${set.id}`}
+                    className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600"
+                  >
+                    {set.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1335,6 +1698,12 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
     "The quick brown fox jumps over the lazy dog"
   );
   const [showUsedOnly, setShowUsedOnly] = useState(false);
+  const [fontSearch, setFontSearch] = useState("");
+  const [fontSort, setFontSort] = useState<FontCatalogSort>("az");
+  const [fontSourceFilter, setFontSourceFilter] = useState<FontCatalogSourceFilter>("all");
+  const [comparisonIds, setComparisonIds] = useState<string[]>([]);
+  const [typographyState, setTypographyState] = useState<TypographyState | null>(null);
+  const [activeFontPreview, setActiveFontPreview] = useState<ActiveFontPreview | null>(null);
   const [hostedFontAssetLinks, setHostedFontAssetLinks] = useState<Record<string, string>>({});
   const [designSystemColors, setDesignSystemColors] = useState<string[]>(() => [...DESIGN_SYSTEM_BASE_COLORS]);
   const [newBaseColor, setNewBaseColor] = useState("#5C0F4F");
@@ -1355,6 +1724,28 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
       .catch(() => {
         if (cancelled) return;
         setHostedFontAssetLinks({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch("/api/admin/design-system/typography")
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json() as Promise<TypographyState>;
+      })
+      .then((payload) => {
+        if (!payload || cancelled) return;
+        setTypographyState(payload);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTypographyState(null);
       });
 
     return () => {
@@ -1423,6 +1814,168 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
 
   const normalizedNewBaseColor = normalizeHexColor(newBaseColor) ?? "#000000";
 
+  const isUsed = (font: { usedOn: UsedOnEntry[]; weights?: FontWeight[] }) =>
+    getFontUsedOnEntries(font, true).length > 0;
+
+  const typographySetLinksByFont = useMemo(() => {
+    const map = new Map<string, TypographySetLink[]>();
+    typographyState?.sets.forEach((set) => {
+      const seenInSet = new Set<string>();
+      Object.values(set.roles).forEach((role) => {
+        [role.mobile.fontFamily, role.desktop.fontFamily].forEach((fontFamily) => {
+          const key = normalizeFontLabel(fontFamily);
+          if (!key || seenInSet.has(key)) return;
+          seenInSet.add(key);
+          const bucket = map.get(key) ?? [];
+          bucket.push({ id: set.id, name: set.name, area: set.area });
+          map.set(key, bucket);
+        });
+      });
+    });
+    return map;
+  }, [typographyState]);
+
+  const matchesSearch = useCallback(
+    (values: string[]) => {
+      const query = fontSearch.trim().toLowerCase();
+      if (!query) return true;
+      return values.some((value) => value.toLowerCase().includes(query));
+    },
+    [fontSearch],
+  );
+
+  const sortFamilies = useCallback(
+    <T extends FontFamily | RealiteaseFontEntry>(items: T[], getEntries: (item: T) => UsedOnEntry[], getStyles: (item: T) => number, getName: (item: T) => string) => {
+      const next = [...items];
+      next.sort((left, right) => {
+        const leftEntries = getEntries(left);
+        const rightEntries = getEntries(right);
+        if (fontSort === "most-used") {
+          return rightEntries.length - leftEntries.length || getName(left).localeCompare(getName(right));
+        }
+        if (fontSort === "most-styles") {
+          return getStyles(right) - getStyles(left) || getName(left).localeCompare(getName(right));
+        }
+        if (fontSort === "recently-touched") {
+          return deriveTouchedScore(rightEntries) - deriveTouchedScore(leftEntries) || getName(left).localeCompare(getName(right));
+        }
+        return getName(left).localeCompare(getName(right));
+      });
+      return next;
+    },
+    [fontSort],
+  );
+
+  const filteredCDN = useMemo(() => {
+    const filtered = COMPLETE_CDN_FONTS.filter((family) => {
+      if (fontSourceFilter !== "all" && fontSourceFilter !== "hosted") return false;
+      const entries = getFontUsedOnEntries(family);
+      if (showUsedOnly && !isUsed(family)) return false;
+      return matchesSearch([family.name, family.cssVar ?? "", family.description, ...entries.map((entry) => `${entry.page} ${entry.path}`)]);
+    });
+    return sortFamilies(filtered, (item) => getFontUsedOnEntries(item, true), (item) => countFontStyles(item.weights), (item) => item.name);
+  }, [fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
+
+  const filteredGoogle = useMemo(() => {
+    const filtered = GOOGLE_FONTS.filter((family) => {
+      if (fontSourceFilter !== "all" && fontSourceFilter !== "google") return false;
+      const entries = getFontUsedOnEntries(family);
+      if (showUsedOnly && !isUsed(family)) return false;
+      return matchesSearch([family.name, family.cssVar ?? "", family.description, ...entries.map((entry) => `${entry.page} ${entry.path}`)]);
+    });
+    return sortFamilies(filtered, (item) => getFontUsedOnEntries(item, true), (item) => countFontStyles(item.weights), (item) => item.name);
+  }, [fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
+
+  const filteredStacks = useMemo(() => {
+    const filtered = FONT_STACKS.filter((family) => {
+      if (fontSourceFilter !== "all" && fontSourceFilter !== "stacks") return false;
+      const entries = getFontUsedOnEntries(family);
+      if (showUsedOnly && !isUsed(family)) return false;
+      return matchesSearch([family.name, family.cssVar ?? "", family.description, ...entries.map((entry) => `${entry.page} ${entry.path}`)]);
+    });
+    return sortFamilies(filtered, (item) => getFontUsedOnEntries(item, true), (item) => countFontStyles(item.weights), (item) => item.name);
+  }, [fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
+
+  const filteredRealitease = useMemo(() => {
+    const filtered = REALITEASE_FONTS.filter((font) => {
+      if (fontSourceFilter !== "all" && fontSourceFilter !== "realitease") return false;
+      if (showUsedOnly && !isUsed({ usedOn: font.usedOn })) return false;
+      return matchesSearch([font.name, font.description, ...font.usedOn.map((entry) => `${entry.page} ${entry.path}`)]);
+    });
+    return sortFamilies(filtered, (item) => item.usedOn.filter(isActiveUsedOnEntry), (item) => item.weights.length, (item) => item.name);
+  }, [fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
+
+  const catalogTotalFamilies =
+    COMPLETE_CDN_FONTS.length + GOOGLE_FONTS.length + FONT_STACKS.length + REALITEASE_FONTS.length;
+  const activeInAppFamilies = [
+    ...COMPLETE_CDN_FONTS.filter((family) => isUsed(family)),
+    ...GOOGLE_FONTS.filter((family) => isUsed(family)),
+    ...FONT_STACKS.filter((family) => isUsed(family)),
+    ...REALITEASE_FONTS.filter((font) => isUsed({ usedOn: font.usedOn })),
+  ].length;
+
+  const comparisonEntries = useMemo(() => {
+    const allEntries = [
+      ...COMPLETE_CDN_FONTS.map((family) => ({
+        id: family.name,
+        name: family.name,
+        fontFamily: family.fontFamilyValue,
+        styles: countFontStyles(family.weights),
+        usageCount: getFontUsedOnEntries(family, true).length,
+        sets: typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? [],
+      })),
+      ...GOOGLE_FONTS.map((family) => ({
+        id: family.name,
+        name: family.name,
+        fontFamily: family.fontFamilyValue,
+        styles: countFontStyles(family.weights),
+        usageCount: getFontUsedOnEntries(family, true).length,
+        sets: typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? [],
+      })),
+      ...FONT_STACKS.map((family) => ({
+        id: family.name,
+        name: family.name,
+        fontFamily: family.fontFamilyValue,
+        styles: countFontStyles(family.weights),
+        usageCount: getFontUsedOnEntries(family, true).length,
+        sets: typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? [],
+      })),
+      ...REALITEASE_FONTS.map((font) => ({
+        id: font.name,
+        name: font.name,
+        fontFamily: font.fontFamily,
+        styles: font.weights.length,
+        usageCount: font.usedOn.filter(isActiveUsedOnEntry).length,
+        sets: typographySetLinksByFont.get(normalizeFontLabel(font.fontFamily)) ?? [],
+      })),
+    ];
+    return comparisonIds.map((id) => allEntries.find((entry) => entry.id === id)).filter(Boolean) as NonNullable<typeof allEntries[number]>[];
+  }, [comparisonIds, typographySetLinksByFont]);
+
+  const cdnFontCount = filteredCDN.length;
+  const googleFontCount = filteredGoogle.length;
+  const stackCount = filteredStacks.length;
+  const realiteaseCount = filteredRealitease.length;
+  const totalStyles = filteredCDN.reduce((sum, f) => sum + f.weights.length + f.weights.filter((w) => w.hasItalic).length, 0);
+  const activeTabSubtabs = getDesignSystemSubtabs(activeTab);
+  const additionalHostedFontPreviewCss = ADDITIONAL_MONOTYPE_FONTS.map((font) => (
+    `@font-face { font-family: "${font.name}"; src: url("${buildHostedFontAssetPath(font.previewAssetPath)}") format("${inferFontFormat(font.previewAssetPath)}"); font-weight: 400; font-style: normal; font-display: swap; }`
+  )).join("\n");
+  const toggleComparison = (fontId: string) => {
+    setComparisonIds((current) => {
+      if (current.includes(fontId)) {
+        return current.filter((entry) => entry !== fontId);
+      }
+      if (current.length >= 3) {
+        return [...current.slice(1), fontId];
+      }
+      return [...current, fontId];
+    });
+  };
+  const openTypographySet = (setId: string) => {
+    router.push(`/design-system/fonts/typography?set=${encodeURIComponent(setId)}`);
+  };
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -1438,24 +1991,6 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
     return null;
   }
 
-  const isUsed = (font: { usedOn: UsedOnEntry[]; weights?: FontWeight[] }) =>
-    getFontUsedOnEntries(font, true).length > 0;
-
-  const filteredCDN = showUsedOnly ? COMPLETE_CDN_FONTS.filter((f) => isUsed(f)) : COMPLETE_CDN_FONTS;
-  const filteredGoogle = showUsedOnly ? GOOGLE_FONTS.filter((f) => isUsed(f)) : GOOGLE_FONTS;
-  const filteredStacks = showUsedOnly ? FONT_STACKS.filter((f) => isUsed(f)) : FONT_STACKS;
-  const filteredRealitease = showUsedOnly ? REALITEASE_FONTS.filter((f) => isUsed({ usedOn: f.usedOn })) : REALITEASE_FONTS;
-
-  const cdnFontCount = filteredCDN.length;
-  const googleFontCount = filteredGoogle.length;
-  const stackCount = filteredStacks.length;
-  const realiteaseCount = filteredRealitease.length;
-  const totalStyles = filteredCDN.reduce((sum, f) => sum + f.weights.length + f.weights.filter((w) => w.hasItalic).length, 0);
-  const activeTabSubtabs = getDesignSystemSubtabs(activeTab);
-  const additionalHostedFontPreviewCss = ADDITIONAL_MONOTYPE_FONTS.map((font) => (
-    `@font-face { font-family: "${font.name}"; src: url("${buildHostedFontAssetPath(font.previewAssetPath)}") format("${inferFontFormat(font.previewAssetPath)}"); font-weight: 400; font-style: normal; font-display: swap; }`
-  )).join("\n");
-
   return (
     <ClientOnly>
       <div className="min-h-screen bg-zinc-50">
@@ -1464,10 +1999,22 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
           <div className="mx-auto max-w-5xl">
             <div className="flex items-center justify-between">
               <div>
-                <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("UI Design System", "/design-system/fonts")} className="mb-1" />
-                <h1 className="text-2xl font-bold text-zinc-900">UI Design System</h1>
+                <AdminBreadcrumbs
+                  items={buildAdminSectionBreadcrumb(
+                    activeTab === "fonts" ? "Fonts" : "UI Design System",
+                    "/design-system/fonts",
+                  )}
+                  className="mb-1"
+                />
+                <h1 className="text-2xl font-bold text-zinc-900">
+                  {activeTab === "fonts" ? (activeSubtab === "typography" ? "Typography Sets" : "Fonts Library") : "UI Design System"}
+                </h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Fonts, colors, buttons, question components, and form patterns used across the app.
+                  {activeTab === "fonts"
+                    ? activeSubtab === "typography"
+                      ? "Reusable typography defaults, page assignments, and live preview specimens."
+                      : "Browse hosted, Google, stack, and Realitease families used across the app."
+                    : "Fonts, colors, buttons, question components, and form patterns used across the app."}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1511,6 +2058,19 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
             </nav>
             {activeTabSubtabs.length > 0 ? (
               <nav className="flex flex-wrap gap-2 border-t border-zinc-100 py-3" aria-label={`${activeTab} sections`}>
+                {activeTab === "fonts" ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push(buildDesignSystemHref("fonts"))}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition ${
+                      activeSubtab === null
+                        ? "bg-zinc-900 text-white"
+                        : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                    }`}
+                  >
+                    Catalog
+                  </button>
+                ) : null}
                 {activeTabSubtabs.map((subtab) => {
                   const isActiveSubtab = activeSubtab === subtab.id;
                   return (
@@ -1696,136 +2256,254 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
 
         {/* Fonts Tab */}
         {activeTab === "fonts" && (<>
-          <style>{additionalHostedFontPreviewCss}</style>
-          <p className="mb-4 text-sm text-zinc-500">
-            {cdnFontCount} CDN fonts ({totalStyles} styles) &middot; {googleFontCount} Google &middot; {stackCount} stacks &middot; {realiteaseCount} Realitease
-          </p>
-          {/* Toolbar — sticky */}
-          <div className="sticky top-0 z-10 -mx-6 px-6 pb-4 pt-0 bg-zinc-50">
-            <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm space-y-3">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowUsedOnly((v) => !v)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
-                    showUsedOnly
-                      ? "bg-violet-600 text-white hover:bg-violet-700"
-                      : "border border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-                  }`}
-                >
-                  Currently Used
-                </button>
-                {showUsedOnly && (
-                  <span className="text-xs text-zinc-400">
-                    Showing only fonts actively used in the app
+          {activeSubtab === "typography" ? (
+            <TypographyTab />
+          ) : (
+            <>
+              <style>{additionalHostedFontPreviewCss}</style>
+
+              <section className="mb-6 rounded-[24px] border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="max-w-3xl">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                      Fonts
+                    </div>
+                    <h2 className="mt-1 text-[1.9rem] font-bold tracking-[-0.03em] text-zinc-950">
+                      Browse every family used by the app
+                    </h2>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600">
+                      Compare families, jump into live page previews, and cross-link directly into typography sets when a font powers shared defaults.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
+                        {catalogTotalFamilies} total families
+                      </span>
+                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
+                        {activeInAppFamilies} active in app
+                      </span>
+                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
+                        {totalStyles} hosted styles
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => router.push("/design-system/fonts")}
+                      className="rounded-full bg-zinc-950 px-4 py-2 text-sm font-semibold text-white"
+                    >
+                      Catalog
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push("/design-system/fonts/typography")}
+                      className="rounded-full border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Typography Sets
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <FontComparisonTray
+                entries={comparisonEntries}
+                previewText={previewText}
+                onRemove={(id) => setComparisonIds((current) => current.filter((entry) => entry !== id))}
+              />
+
+              <div className="sticky top-0 z-10 -mx-6 bg-zinc-50 px-6 pb-4">
+                <div className="rounded-[24px] border border-zinc-200 bg-white p-4 shadow-sm">
+                  <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
+                    <div className="space-y-3">
+                      <div>
+                        <label
+                          htmlFor="font-search"
+                          className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400"
+                        >
+                          Search fonts
+                        </label>
+                        <input
+                          id="font-search"
+                          type="text"
+                          value={fontSearch}
+                          onChange={(event) => setFontSearch(event.target.value)}
+                          placeholder="Search family, CSS var, page, or usage..."
+                          className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition"
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { value: "all", label: "All" },
+                          { value: "hosted", label: "Hosted" },
+                          { value: "google", label: "Google" },
+                          { value: "stacks", label: "Stacks" },
+                          { value: "realitease", label: "Realitease" },
+                        ].map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setFontSourceFilter(option.value as FontCatalogSourceFilter)}
+                            className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] ${
+                              fontSourceFilter === option.value
+                                ? "bg-zinc-950 text-white"
+                                : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setShowUsedOnly((value) => !value)}
+                          className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] ${
+                            showUsedOnly
+                              ? "bg-violet-600 text-white"
+                              : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                          }`}
+                        >
+                          Currently Used
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label
+                          htmlFor="preview-text"
+                          className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400"
+                        >
+                          Preview Text
+                        </label>
+                        <input
+                          id="preview-text"
+                          type="text"
+                          value={previewText}
+                          onChange={(e) => setPreviewText(e.target.value)}
+                          placeholder="Type preview text..."
+                          className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition"
+                        />
+                      </div>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                        Sort
+                        <select
+                          aria-label="Font sort"
+                          value={fontSort}
+                          onChange={(event) => setFontSort(event.target.value as FontCatalogSort)}
+                          className="mt-1 w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-sm font-medium normal-case tracking-normal text-zinc-900"
+                        >
+                          <option value="az">A-Z</option>
+                          <option value="most-used">Most Used</option>
+                          <option value="most-styles">Most Styles</option>
+                          <option value="recently-touched">Recently Touched in App</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p className="mb-4 text-sm text-zinc-500">
+                {cdnFontCount} hosted fonts ({totalStyles} styles) · {googleFontCount} Google · {stackCount} stacks · {realiteaseCount} Realitease
+              </p>
+
+              <section className="mb-10">
+                <div className="mb-4 flex items-center gap-3">
+                  <h2 className="text-lg font-bold text-zinc-900">Hosted Fonts</h2>
+                  <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
+                    {cdnFontCount}
                   </span>
-                )}
-              </div>
-              <div>
-                <label
-                  htmlFor="preview-text"
-                  className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400"
-                >
-                  Preview Text
-                </label>
-                <input
-                  id="preview-text"
-                  type="text"
-                  value={previewText}
-                  onChange={(e) => setPreviewText(e.target.value)}
-                  placeholder="Type preview text..."
-                  className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition"
-                />
-              </div>
-            </div>
-          </div>
+                  <span className="text-xs text-zinc-400">Cloudflare R2</span>
+                </div>
+                <div className="space-y-3">
+                  {filteredCDN.map((family) => (
+                    <FontCard
+                      key={family.name}
+                      family={family}
+                      fontAssetHref={hostedFontAssetLinks[family.name]}
+                      previewText={previewText}
+                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
+                      isPinned={comparisonIds.includes(family.name)}
+                      onTogglePin={() => toggleComparison(family.name)}
+                      onOpenPreview={setActiveFontPreview}
+                      onOpenTypographySet={openTypographySet}
+                    />
+                  ))}
+                </div>
+              </section>
 
-          {/* Hosted Fonts */}
-          <section className="mb-10">
-            <div className="mb-4 flex items-center gap-3">
-              <h2 className="text-lg font-bold text-zinc-900">
-                Hosted Fonts
-              </h2>
-              <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
-                {cdnFontCount}
-              </span>
-              <span className="text-xs text-zinc-400">Cloudflare R2</span>
-            </div>
-            <div className="space-y-2">
-              {filteredCDN.map((family) => (
-                <FontCard
-                  key={family.name}
-                  family={family}
-                  fontAssetHref={hostedFontAssetLinks[family.name]}
-                  previewText={previewText}
-                />
-              ))}
-            </div>
-          </section>
+              <section className="mb-10">
+                <div className="mb-3 flex items-center gap-3">
+                  <h2 className="text-lg font-bold text-zinc-900">Realitease Fonts</h2>
+                  <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800">
+                    {realiteaseCount}
+                  </span>
+                  <span className="text-xs text-zinc-400">Game-specific</span>
+                </div>
+                <div className="space-y-3">
+                  {filteredRealitease.map((font) => (
+                    <RealiteaseFontCard
+                      key={font.name}
+                      font={font}
+                      previewText={previewText}
+                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(font.fontFamily)) ?? []}
+                      isPinned={comparisonIds.includes(font.name)}
+                      onTogglePin={() => toggleComparison(font.name)}
+                      onOpenPreview={setActiveFontPreview}
+                      onOpenTypographySet={openTypographySet}
+                    />
+                  ))}
+                </div>
+              </section>
 
-          {/* Realitease Fonts */}
-          <section className="mb-10">
-            <div className="mb-3 flex items-center gap-3">
-              <h2 className="text-lg font-bold text-zinc-900">
-                Realitease Fonts
-              </h2>
-              <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800">
-                {realiteaseCount}
-              </span>
-              <span className="text-xs text-zinc-400">Game-specific</span>
-            </div>
-            <div className="space-y-2">
-              {filteredRealitease.map((font) => (
-                <RealiteaseFontCard
-                  key={font.name}
-                  font={font}
-                  previewText={previewText}
-                />
-              ))}
-            </div>
-          </section>
+              <section className="mb-10">
+                <div className="mb-4 flex items-center gap-3">
+                  <h2 className="text-lg font-bold text-zinc-900">Google Fonts</h2>
+                  <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800">
+                    {googleFontCount}
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {filteredGoogle.map((family) => (
+                    <FontCard
+                      key={family.name}
+                      family={family}
+                      previewText={previewText}
+                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
+                      isPinned={comparisonIds.includes(family.name)}
+                      onTogglePin={() => toggleComparison(family.name)}
+                      onOpenPreview={setActiveFontPreview}
+                      onOpenTypographySet={openTypographySet}
+                    />
+                  ))}
+                </div>
+              </section>
 
-          {/* Google Fonts */}
-          <section className="mb-10">
-            <div className="mb-4 flex items-center gap-3">
-              <h2 className="text-lg font-bold text-zinc-900">
-                Google Fonts
-              </h2>
-              <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800">
-                {googleFontCount}
-              </span>
-            </div>
-            <div className="space-y-2">
-              {filteredGoogle.map((family) => (
-                <FontCard
-                  key={family.name}
-                  family={family}
-                  previewText={previewText}
-                />
-              ))}
-            </div>
-          </section>
+              <section className="mb-10">
+                <div className="mb-4 flex items-center gap-3">
+                  <h2 className="text-lg font-bold text-zinc-900">Font Stacks</h2>
+                  <span className="rounded-full bg-zinc-200 px-2.5 py-0.5 text-xs font-semibold text-zinc-700">
+                    {stackCount}
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {filteredStacks.map((family) => (
+                    <FontCard
+                      key={family.name}
+                      family={family}
+                      previewText={previewText}
+                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
+                      isPinned={comparisonIds.includes(family.name)}
+                      onTogglePin={() => toggleComparison(family.name)}
+                      onOpenPreview={setActiveFontPreview}
+                      onOpenTypographySet={openTypographySet}
+                    />
+                  ))}
+                </div>
+              </section>
 
-          {/* Font Stacks */}
-          <section className="mb-10">
-            <div className="mb-4 flex items-center gap-3">
-              <h2 className="text-lg font-bold text-zinc-900">
-                Font Stacks
-              </h2>
-              <span className="rounded-full bg-zinc-200 px-2.5 py-0.5 text-xs font-semibold text-zinc-700">
-                {stackCount}
-              </span>
-            </div>
-            <div className="space-y-2">
-              {filteredStacks.map((family) => (
-                <FontCard
-                  key={family.name}
-                  family={family}
-                  previewText={previewText}
-                />
-              ))}
-            </div>
-          </section>
+              <FontUsagePreviewModal activePreview={activeFontPreview} onClose={() => setActiveFontPreview(null)} />
+            </>
+          )}
         </>)}
         </main>
       </div>

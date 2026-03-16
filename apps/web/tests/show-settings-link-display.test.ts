@@ -74,4 +74,22 @@ describe("show link display helpers", () => {
       })
     ).toBeNull();
   });
+
+  it("keeps fandom subpages attributable to the same cast member", () => {
+    expect(
+      parsePersonNameFromLink({
+        url: "https://real-housewives.fandom.com/wiki/Angie_Katsanevas/Storylines",
+        link_kind: "fandom",
+        label: "Angie Katsanevas/Storylines",
+      })
+    ).toBe("Angie Katsanevas");
+
+    expect(
+      parsePersonNameFromLink({
+        url: "https://real-housewives.fandom.com/wiki/Angie_Katsanevas/Connections",
+        link_kind: "fandom",
+        label: "Angie Katsanevas/Connections",
+      })
+    ).toBe("Angie Katsanevas");
+  });
 });

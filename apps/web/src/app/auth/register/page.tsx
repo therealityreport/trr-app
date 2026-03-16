@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { auth, signInWithGoogle } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, OAuthProvider, signInWithPopup, updateProfile } from "firebase/auth";
 import { upsertUserProfile, getUserProfile, checkUserExists, isFirestoreUnavailableError } from "@/lib/db/users";
+import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 import { validateEmail, validatePassword } from "@/lib/validation/user";
 
 const ENABLE_APPLE = (process.env.NEXT_PUBLIC_ENABLE_APPLE ?? "false").toLowerCase() === "true";
@@ -271,7 +272,7 @@ function RegisterContent() {
       <div className={`w-full max-w-md mx-auto mt-16 px-4 transition-all duration-300 ease-in-out ${isTransitioning ? 'opacity-50 transform translate-y-2' : 'opacity-100 transform translate-y-0'}`}>
         {/* Title */}
         <div className="w-full text-center mb-6">
-          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center">
+          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "register", instanceKey: "auth-form", role: "heroTitle" })}>
             {stage === "email" ? "Create an Account" : 
              stage === "details" ? "Create an Account" : 
              "Welcome back! Please enter your password to continue."}
@@ -298,7 +299,7 @@ function RegisterContent() {
             <>
               <div className="w-full">
                 <div className="h-[21px] mb-2">
-                  <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "register", instanceKey: "auth-form", role: "label" })}>
                     Email address
                   </label>
                 </div>
@@ -340,7 +341,7 @@ function RegisterContent() {
             <>
               <div className="w-[450px] left-[-27px] absolute" style={{ top: "60px" }}>
                 <div className="h-[21px] mb-2">
-                  <label htmlFor="email-display" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  <label htmlFor="email-display" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "register", instanceKey: "auth-form", role: "label" })}>
                     Email address
                   </label>
                 </div>
@@ -368,10 +369,10 @@ function RegisterContent() {
             <>
               <div className="w-[450px] left-[-27px] absolute" style={{ top: "145px" }}>
                 <div className="h-[21px] mb-2">
-                  <label htmlFor="firstName" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  <label htmlFor="firstName" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "register", instanceKey: "auth-form", role: "label" })}>
                     First Name
                   </label>
-                  <label htmlFor="lastName" className="text-black text-sm font-hamburg font-medium leading-[21px] absolute left-[225px]" style={{letterSpacing: '0.1px'}}>
+                  <label htmlFor="lastName" className="text-black text-sm font-hamburg font-medium leading-[21px] absolute left-[225px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "register", instanceKey: "auth-form", role: "label" })}>
                     Last Name
                   </label>
                 </div>
@@ -428,7 +429,7 @@ function RegisterContent() {
             <>
               <div className={`w-[450px] left-[-27px] absolute`} style={{ top: stage === "details" ? "230px" : (formError ? "225px" : "145px") }}>
                 <div className="h-[21px] mb-2">
-                  <label htmlFor="password" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  <label htmlFor="password" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "register", instanceKey: "auth-form", role: "label" })}>
                     Password
                   </label>
                 </div>
@@ -457,7 +458,7 @@ function RegisterContent() {
             <>
               <div className="w-[450px] left-[-27px] absolute" style={{ top: "315px" }}>
                 <div className="h-[21px] mb-2">
-                  <label htmlFor="confirm" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}}>
+                  <label htmlFor="confirm" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "register", instanceKey: "auth-form", role: "label" })}>
                     Re-enter password
                   </label>
                 </div>

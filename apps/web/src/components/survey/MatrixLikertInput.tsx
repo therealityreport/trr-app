@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTypographyRoleStyle } from "@/components/typography/TypographyClientProvider";
 import type { SurveyQuestion, QuestionOption } from "@/lib/surveys/normalized-types";
 import type { AgreeLikertScaleConfig, MatrixRow } from "@/lib/surveys/question-config-types";
 import SurveyContinueButton from "./SurveyContinueButton";
@@ -342,6 +343,7 @@ export default function MatrixLikertInput({
 }: MatrixLikertInputProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = React.useState(390);
+  const [isDesktop, setIsDesktop] = React.useState(false);
   const config = question.config as unknown as AgreeLikertScaleConfig;
   const configRecord = config as unknown as UnknownRecord;
   const rows = React.useMemo(() => config.rows ?? [], [config.rows]);
@@ -377,6 +379,18 @@ export default function MatrixLikertInput({
     () => normalizeScalePercent(config.buttonScale, 100) / 100,
     [config.buttonScale],
   );
+
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+
+    const media = window.matchMedia("(min-width: 768px)");
+    const sync = () => setIsDesktop(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -423,28 +437,8 @@ export default function MatrixLikertInput({
     () => Math.round(clampNumber(interpolate(14, 36, responsiveScale), 10, 48)),
     [responsiveScale],
   );
-  const promptFontSize = React.useMemo(
-    () => Math.round(clampNumber(interpolate(15, 30, responsiveScale), 14, 38)),
-    [responsiveScale],
-  );
-  const promptLetterSpacing = React.useMemo(
-    () => interpolate(0.03, 0.05, responsiveScale),
-    [responsiveScale],
-  );
-  const promptLineHeight = React.useMemo(
-    () => interpolate(1.38, 1.72, responsiveScale),
-    [responsiveScale],
-  );
   const promptToStatementGap = React.useMemo(
     () => Math.round(clampNumber(interpolate(14, 30, responsiveScale), 10, 38)),
-    [responsiveScale],
-  );
-  const statementFontSize = React.useMemo(
-    () => Math.round(clampNumber(interpolate(30, 60, responsiveScale), 22, 68)),
-    [responsiveScale],
-  );
-  const statementLineHeight = React.useMemo(
-    () => interpolate(1.02, 0.87, responsiveScale),
     [responsiveScale],
   );
   const optionStackMarginTop = React.useMemo(
@@ -453,14 +447,6 @@ export default function MatrixLikertInput({
   );
   const optionStackGap = React.useMemo(
     () => Math.round(clampNumber(interpolate(10, 18, responsiveScale), 8, 24)),
-    [responsiveScale],
-  );
-  const optionLabelFontSize = React.useMemo(
-    () => Math.round(clampNumber(interpolate(19, 33, responsiveScale) * buttonScaleFactor, 12, 52)),
-    [buttonScaleFactor, responsiveScale],
-  );
-  const optionLabelLineHeight = React.useMemo(
-    () => interpolate(1.28, 1.58, responsiveScale),
     [responsiveScale],
   );
   const optionMinHeight = React.useMemo(
@@ -524,6 +510,51 @@ export default function MatrixLikertInput({
     }
   }, [disabled, question.id]);
 
+  const promptTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "matrix-likert",
+      instanceKey: "question",
+      role: "heading",
+    },
+    {
+      fontFamily: fontOverrides.headingFontFamily,
+      fontWeight: "700",
+      fontSize: isDesktop ? "36px" : "28px",
+      lineHeight: "1.05",
+      letterSpacing: "0em",
+    },
+  );
+  const statementTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "matrix-likert",
+      instanceKey: "question",
+      role: "statement",
+    },
+    {
+      fontFamily: fontOverrides.statementFontFamily,
+      fontWeight: "800",
+      fontSize: "24px",
+      lineHeight: "1.05",
+      letterSpacing: "0em",
+    },
+  );
+  const optionTypographyStyle = useTypographyRoleStyle(
+    {
+      area: "surveys",
+      pageKey: "matrix-likert",
+      instanceKey: "question",
+      role: "option",
+    },
+    {
+      fontFamily: fontOverrides.optionFontFamily,
+      fontWeight: "500",
+      fontSize: "13px",
+      lineHeight: "1.2",
+      letterSpacing: "0.015em",
+    },
+  );
   if (!rows.length || !columns.length) {
     return (
       <div className="rounded-xl border border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600">
@@ -551,11 +582,7 @@ export default function MatrixLikertInput({
         data-testid="agree-likert-prompt"
         className="mx-auto max-w-5xl px-1 text-center uppercase text-black"
         style={{
-          fontFamily: fontOverrides.headingFontFamily,
-          fontWeight: 700,
-          fontSize: `${promptFontSize}px`,
-          lineHeight: promptLineHeight.toFixed(2),
-          letterSpacing: `${promptLetterSpacing}em`,
+          ...promptTypographyStyle,
           color: promptTextColor,
         }}
       >
@@ -577,10 +604,7 @@ export default function MatrixLikertInput({
             <h3
               className="mx-auto max-w-[34ch] text-center leading-[0.95] text-black"
               style={{
-                fontFamily: fontOverrides.statementFontFamily,
-                fontWeight: 800,
-                fontSize: `${statementFontSize}px`,
-                lineHeight: statementLineHeight.toFixed(2),
+                ...statementTypographyStyle,
                 color: statementTextColor,
               }}
             >
@@ -610,7 +634,7 @@ export default function MatrixLikertInput({
                     style={{
                       backgroundColor: theme.bgColor,
                       color: theme.textColor,
-                      fontFamily: fontOverrides.optionFontFamily,
+                      fontFamily: optionTypographyStyle?.fontFamily ?? fontOverrides.optionFontFamily,
                       width: "100%",
                       minHeight: `${optionMinHeight}px`,
                       borderRadius: `${optionBorderRadius}px`,
@@ -625,9 +649,7 @@ export default function MatrixLikertInput({
                     <span
                       className="block leading-[1.2] tracking-[0.015em]"
                       style={{
-                        fontSize: `${optionLabelFontSize}px`,
-                        fontWeight: 500,
-                        lineHeight: optionLabelLineHeight.toFixed(2),
+                        ...optionTypographyStyle,
                       }}
                     >
                       {col.option_text}

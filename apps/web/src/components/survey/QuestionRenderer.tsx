@@ -69,6 +69,7 @@ export default function QuestionRenderer({
         ? numericConfig.iconOverrideUrl.trim()
         : "";
       const resolvedIconUrl = override || (showIconUrl ?? "").trim();
+      const usesTenPointScale = numericConfig.min === 0 && numericConfig.max === 10;
       if (resolvedIconUrl) {
         return (
           <IconRatingInput
@@ -84,11 +85,22 @@ export default function QuestionRenderer({
           />
         );
       }
+      if (usesTenPointScale) {
+        return (
+          <StarRatingInput
+            {...commonProps}
+            value={value as number | null}
+            onChange={onChange}
+            iconSrc={null}
+          />
+        );
+      }
       return (
         <StarRatingInput
           {...commonProps}
           value={value as number | null}
           onChange={onChange}
+          iconSrc={null}
         />
       );
     }

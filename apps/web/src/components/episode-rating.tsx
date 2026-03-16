@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { SurveyTheme } from "@/lib/surveys/types";
 import { DEFAULT_SURVEY_THEME } from "@/lib/surveys/types";
+import PartialFillIcon from "@/components/survey/PartialFillIcon";
 
 export interface EpisodeRatingProps {
   value: number | null;
@@ -11,6 +12,7 @@ export interface EpisodeRatingProps {
   episodeLabel?: string;
   /** Hide the title and description (useful when embedded in a form with its own labels) */
   hideHeader?: boolean;
+  iconSrc?: string | null;
 }
 
 export default function EpisodeRating({
@@ -19,6 +21,7 @@ export default function EpisodeRating({
   surveyTheme = DEFAULT_SURVEY_THEME,
   episodeLabel = "this episode",
   hideHeader = false,
+  iconSrc = null,
 }: EpisodeRatingProps) {
   const [localValue, setLocalValue] = React.useState<number>(value ?? 5.0);
   const [isDragging, setIsDragging] = React.useState(false);
@@ -100,6 +103,31 @@ export default function EpisodeRating({
     return (localValue - (starNumber - 1)) * 100;
   };
 
+  const renderRatingIcon = (index: number) => {
+    if (!iconSrc) {
+      return (
+        <svg viewBox="0 0 24 24" className="h-full w-full">
+          <polygon
+            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+            fill={`url(#ep-star-fill-${uniqueId}-${index})`}
+            stroke={surveyTheme.progressFill}
+            strokeWidth="1.5"
+          />
+        </svg>
+      );
+    }
+
+    return (
+      <PartialFillIcon
+        src={iconSrc}
+        sizePx={28}
+        fillPercent={getStarFillPercent(index)}
+        fillColor={surveyTheme.progressFill}
+        emptyColor={surveyTheme.progressBg}
+      />
+    );
+  };
+
   return (
     <div className="w-full max-w-lg mx-auto px-4 py-8">
       <div
@@ -153,17 +181,10 @@ export default function EpisodeRating({
                 key={star}
                 type="button"
                 onClick={() => handleChange(star)}
-                className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center transition-transform hover:scale-110"
+                className="flex h-6 w-6 items-center justify-center transition-transform hover:scale-110 sm:h-7 sm:w-7"
                 aria-label={`Rate ${star}`}
               >
-                <svg viewBox="0 0 24 24" className="w-full h-full">
-                  <polygon
-                    points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
-                    fill={`url(#ep-star-fill-${uniqueId}-${index})`}
-                    stroke={surveyTheme.progressFill}
-                    strokeWidth="1.5"
-                  />
-                </svg>
+                {renderRatingIcon(index)}
               </button>
             ))}
           </div>

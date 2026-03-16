@@ -35,14 +35,14 @@ export const resolveFeaturedShowLogoAssetId = (
     if (asset.logo_link_is_primary) return asset.id;
   }
 
-  if (!primaryLogoImageId) return null;
-  const normalizedPrimaryLogoImageId = primaryLogoImageId.trim();
-  if (!normalizedPrimaryLogoImageId) return null;
-
-  for (const asset of logoAssets) {
-    if (asset.origin_table !== "show_images") continue;
-    if ((asset.kind ?? "").trim().toLowerCase() !== "logo") continue;
-    if (asset.id === normalizedPrimaryLogoImageId) return asset.id;
+  const normalizedPrimaryLogoImageId = primaryLogoImageId?.trim() ?? null;
+  if (normalizedPrimaryLogoImageId) {
+    for (const asset of logoAssets) {
+      if (asset.origin_table !== "show_images") continue;
+      if ((asset.kind ?? "").trim().toLowerCase() !== "logo") continue;
+      if (asset.id === normalizedPrimaryLogoImageId) return asset.id;
+    }
   }
+
   return null;
 };

@@ -9,7 +9,7 @@ import FlashbackRanker from "@/components/flashback-ranker";
 import IconRatingInput from "@/components/survey/IconRatingInput";
 import { useSurveyManager } from "@/lib/surveys/manager";
 import { RHOSLC_EPISODE_ID, RHOSLC_SEASON_ID, RHOSLC_SHOW_ID, RHOSLC_SURVEY_ID } from "@/lib/surveys/config";
-import { RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL } from "@/lib/surveys/rhoslc-assets";
+import { RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH } from "@/lib/surveys/rhoslc-assets";
 import type { SurveyEpisodeMeta, SurveyRankingItem, SurveyResponse } from "@/lib/surveys/types";
 
 const IDENTIFIERS = {
@@ -29,7 +29,7 @@ const CAST_MEMBERS: SurveyRankingItem[] = [
   { id: "danna", label: "Danna Bui-Negrete", img: "" },
 ];
 
-const SNOWFLAKE_ICON_SRC = RHOSLC_S6_SNOWFLAKE_ICON_CDN_URL;
+const SNOWFLAKE_ICON_SRC = RHOSLC_S6_SNOWFLAKE_ICON_PUBLIC_PATH;
 
 export default function RhoslcSurveyPlayPage() {
   const router = useRouter();

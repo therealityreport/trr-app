@@ -42,7 +42,7 @@ vi.mock("@/components/admin/reddit-sources-manager", () => ({
   },
 }));
 
-import RedditCommunityViewPage from "@/app/admin/social-media/reddit/[communitySlug]/page";
+import RedditCommunityViewPage from "@/app/admin/social/reddit/[communitySlug]/page";
 
 describe("reddit community view page", () => {
   beforeEach(() => {
@@ -121,7 +121,7 @@ describe("reddit community view page", () => {
     useRouterMock.mockReturnValue({ replace: replaceMock });
     useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
     useParamsMock.mockReturnValue({ communitySlug: "BravoRealHousewives" });
-    usePathnameMock.mockReturnValue("/admin/social-media/reddit/BravoRealHousewives");
+    usePathnameMock.mockReturnValue("/admin/social/reddit/BravoRealHousewives");
     useSearchParamsMock.mockReturnValue(
       new URLSearchParams({
         return_to: "/shows/the-real-housewives-of-salt-lake-city/social/reddit/BravoRealHousewives/s6",
@@ -219,7 +219,7 @@ describe("reddit community view page", () => {
     useRouterMock.mockReturnValue({ replace: replaceMock });
     useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
     useParamsMock.mockReturnValue({ communitySlug: "BravoRealHousewives" });
-    usePathnameMock.mockReturnValue("/admin/social-media/reddit/BravoRealHousewives");
+    usePathnameMock.mockReturnValue("/admin/social/reddit/BravoRealHousewives");
     useSearchParamsMock.mockReturnValue(new URLSearchParams({ showSlug: "rhoslc" }));
 
     const { rerender } = render(<RedditCommunityViewPage />);
@@ -523,7 +523,7 @@ describe("reddit community view page", () => {
   it("falls back to default back href without query params", () => {
     useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
     useParamsMock.mockReturnValue({ communitySlug: "RHOP" });
-    usePathnameMock.mockReturnValue("/admin/social-media/reddit/RHOP");
+    usePathnameMock.mockReturnValue("/admin/social/reddit/RHOP");
     useSearchParamsMock.mockReturnValue(new URLSearchParams());
 
     render(<RedditCommunityViewPage />);
@@ -533,7 +533,7 @@ describe("reddit community view page", () => {
         mode: "global",
         initialCommunityId: "RHOP",
         hideCommunityList: true,
-        backHref: "/admin/social-media",
+        backHref: "/admin/social",
         episodeDiscussionsPlacement: "inline",
         enableEpisodeSync: true,
       }),
@@ -543,7 +543,7 @@ describe("reddit community view page", () => {
   it("rejects non-local return_to values and keeps default back href", () => {
     useAdminGuardMock.mockReturnValue({ user: { uid: "admin-uid" }, checking: false, hasAccess: true });
     useParamsMock.mockReturnValue({ communitySlug: "rhoslc" });
-    usePathnameMock.mockReturnValue("/admin/social-media/reddit/rhoslc");
+    usePathnameMock.mockReturnValue("/admin/social/reddit/rhoslc");
     useSearchParamsMock.mockReturnValue(
       new URLSearchParams({
         return_to: "https://example.com/not-allowed",
@@ -552,10 +552,10 @@ describe("reddit community view page", () => {
 
     render(<RedditCommunityViewPage />);
 
-    expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute("href", "/admin/social-media");
+    expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute("href", "/admin/social");
     expect(redditSourcesManagerMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        backHref: "/admin/social-media",
+        backHref: "/admin/social",
       }),
     );
   });
