@@ -35,7 +35,11 @@ class SurveyManager {
 
   private getFirestore(): Firestore {
     if (!this.firestore) {
-      this.firestore = getDb();
+      const db = getDb();
+      if (!db) {
+        throw new Error("Firestore is not available — Surveys require Firebase Firestore.");
+      }
+      this.firestore = db;
     }
     return this.firestore;
   }

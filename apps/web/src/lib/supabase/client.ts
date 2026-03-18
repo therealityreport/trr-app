@@ -5,23 +5,28 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.e
 
 let client: ReturnType<typeof createSupabaseClient> | null = null;
 
+let warnedMissing = false;
+
 /**
  * Shared browser-safe Supabase client (singleton).
  *
  * Uses NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY when available,
  * falling back to SUPABASE_URL / SUPABASE_ANON_KEY for local dev.
+ *
+ * Returns `null` when env vars are missing so callers can degrade gracefully
+ * instead of crashing the component tree.
  */
-export function createClient() {
+export function createClient(): ReturnType<typeof createSupabaseClient> | null {
   if (!client) {
-    if (!SUPABASE_URL) {
-      throw new Error(
-        "Supabase URL is not configured. Set NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL.",
-      );
-    }
-    if (!SUPABASE_ANON_KEY) {
-      throw new Error(
-        "Supabase anon key is not configured. Set NEXT_PUBLIC_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY.",
-      );
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      if (!warnedMissing) {
+        console.warn(
+          "[supabase] Client not configured — set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY. " +
+            "Supabase-backed features will be unavailable.",
+        );
+        warnedMissing = true;
+      }
+      return null;
     }
     client = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {

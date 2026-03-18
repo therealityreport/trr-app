@@ -13,7 +13,9 @@ import type { FlashbackQuiz, FlashbackEvent } from "@/lib/flashback/types";
 // Flashback tables are not yet in the generated Supabase types.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(): any {
-  return createClient();
+  const client = createClient();
+  if (!client) throw new Error("Supabase is not configured.");
+  return client;
 }
 
 const GAME = ADMIN_GAME_MAP.flashback;

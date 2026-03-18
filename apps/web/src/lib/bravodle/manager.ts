@@ -88,7 +88,11 @@ export class BravodleManager {
 
   static getInstance(): BravodleManager {
     if (!BravodleManager.instance) {
-      BravodleManager.instance = new BravodleManager(getDb());
+      const db = getDb();
+      if (!db) {
+        throw new Error("Firestore is not available — Bravodle requires Firebase Firestore.");
+      }
+      BravodleManager.instance = new BravodleManager(db);
     }
     return BravodleManager.instance;
   }

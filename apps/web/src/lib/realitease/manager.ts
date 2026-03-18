@@ -97,7 +97,11 @@ export class RealiteaseManager {
 
   static getInstance(): RealiteaseManager {
     if (!RealiteaseManager.instance) {
-      RealiteaseManager.instance = new RealiteaseManager(getDb());
+      const db = getDb();
+      if (!db) {
+        throw new Error("Firestore is not available — Realitease requires Firebase Firestore.");
+      }
+      RealiteaseManager.instance = new RealiteaseManager(db);
     }
     return RealiteaseManager.instance;
   }
