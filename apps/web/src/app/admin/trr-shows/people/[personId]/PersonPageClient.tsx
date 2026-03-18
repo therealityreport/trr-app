@@ -5441,6 +5441,29 @@ export default function PersonProfilePage() {
     []
   );
 
+  const handleExpandEvent = useCallback(async (eventUrl: string, eventTitle: string) => {
+    if (!personId) return;
+    const confirmed = window.confirm(
+      `Scrape all images of ${person?.full_name ?? "this person"} from "${eventTitle}"?\n\nThis may take a moment.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/admin/trr-api/people/${personId}/images/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          expand_event_url: eventUrl,
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      // Refresh gallery photos after expansion
+      await fetchPhotos();
+    } catch (err) {
+      console.error("Event expansion failed:", err);
+    }
+  }, [personId, person?.full_name, fetchPhotos]);
+
   const handleRefreshImages = useCallback(async (mode: "full" | "sync" = "full") => {
     if (!personId) return;
     if (refreshingImages || reprocessingImages) return;
@@ -8560,7 +8583,10 @@ export default function PersonProfilePage() {
                           key={photo.id}
                           type="button"
                           onClick={() => {
-                            // Placeholder — Task 9 will wire up the expand handler
+                            const eventUrl = typeof metadata.getty_event_url === "string" ? metadata.getty_event_url : null;
+                            if (eventUrl) {
+                              handleExpandEvent(eventUrl, eventTitle);
+                            }
                           }}
                           className="group relative overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm transition hover:shadow-md"
                         >
