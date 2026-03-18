@@ -72,6 +72,7 @@ import {
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
   computePersonPhotoShowBuckets,
+  getPersonEventImageCount,
   isWwhlShowName,
   resolveGalleryShowFilterFallback,
   resolvePersonGalleryImportContext,
@@ -3632,6 +3633,35 @@ export default function PersonProfilePage() {
     getPhotoSortDate,
   ]);
 
+  const { mainGalleryPhotos, otherEventCovers } = useMemo(() => {
+    const main: TrrPersonPhoto[] = [];
+    const otherCovers: TrrPersonPhoto[] = [];
+    const seenOtherEventKeys = new Set<string>();
+
+    for (const photo of filteredPhotos) {
+      const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+      const scope = typeof metadata.source_query_scope === "string"
+        ? metadata.source_query_scope
+        : null;
+
+      if (scope === "broad") {
+        const eventKey =
+          (typeof metadata.getty_event_id === "string" ? metadata.getty_event_id : null) ??
+          (typeof metadata.getty_event_title === "string" ? metadata.getty_event_title : null) ??
+          photo.source_image_id ??
+          photo.id;
+        if (!seenOtherEventKeys.has(String(eventKey))) {
+          seenOtherEventKeys.add(String(eventKey));
+          otherCovers.push(photo);
+        }
+      } else {
+        main.push(photo);
+      }
+    }
+
+    return { mainGalleryPhotos: main, otherEventCovers: otherCovers };
+  }, [filteredPhotos]);
+
   const scopedStageTargets = useMemo(() => buildStageTargetsFromPhotos(filteredPhotos), [filteredPhotos]);
   const fullStageTargets = useMemo(() => buildStageTargetsFromPhotos(photos), [photos]);
 
@@ -3639,7 +3669,7 @@ export default function PersonProfilePage() {
     const profilePictures: TrrPersonPhoto[] = [];
     const otherPhotos: TrrPersonPhoto[] = [];
 
-    for (const photo of filteredPhotos.slice(0, photosVisibleCount)) {
+    for (const photo of mainGalleryPhotos.slice(0, photosVisibleCount)) {
       const normalizedContextType = (photo.context_type ?? "").toLowerCase().trim();
       const normalizedContextSection = (photo.context_section ?? "").toLowerCase().trim();
       const isProfilePicture =
@@ -3654,7 +3684,7 @@ export default function PersonProfilePage() {
     }
 
     return { profilePictures, otherPhotos };
-  }, [filteredPhotos, photosVisibleCount]);
+  }, [mainGalleryPhotos, photosVisibleCount]);
 
   const filteredPhotoIndexById = useMemo(() => {
     const indexMap = new Map<string, number>();
@@ -8500,7 +8530,7 @@ export default function PersonProfilePage() {
                   </section>
                 )}
               </div>
-              {filteredPhotos.length > photosVisibleCount && (
+              {mainGalleryPhotos.length > photosVisibleCount && (
                 <div className="mt-4 flex justify-center">
                   <button
                     type="button"
@@ -8511,7 +8541,51 @@ export default function PersonProfilePage() {
                   </button>
                 </div>
               )}
-              {filteredPhotos.length === 0 && photos.length > 0 && (
+              {otherEventCovers.length > 0 && (
+                <div className="mt-8">
+                  <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                    Other Events ({otherEventCovers.length})
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                    {otherEventCovers.map((photo) => {
+                      const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+                      const eventTitle =
+                        (typeof metadata.getty_event_title === "string" ? metadata.getty_event_title : null) ??
+                        photo.caption ??
+                        "Unknown Event";
+                      const personCount = getPersonEventImageCount(photo, metadata);
+
+                      return (
+                        <button
+                          key={photo.id}
+                          type="button"
+                          onClick={() => {
+                            // Placeholder — Task 9 will wire up the expand handler
+                          }}
+                          className="group relative overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm transition hover:shadow-md"
+                        >
+                          <div className="aspect-[3/4] w-full overflow-hidden bg-zinc-100">
+                            <img
+                              src={photo.thumb_url || photo.hosted_url || photo.url || undefined}
+                              alt={eventTitle}
+                              className="h-full w-full object-cover transition group-hover:scale-105"
+                              loading="lazy"
+                            />
+                          </div>
+                          <div className="p-2">
+                            <p className="truncate text-xs font-medium text-zinc-800">{eventTitle}</p>
+                            {personCount !== null && (
+                              <p className="text-xs text-zinc-500">{personCount} images</p>
+                            )}
+                            <p className="mt-1 text-xs font-medium text-blue-600">Click to scrape</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {mainGalleryPhotos.length === 0 && photos.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm text-zinc-500">
                     {referencesFilterActive && wantsReferences && activeReferenceCount === 0
