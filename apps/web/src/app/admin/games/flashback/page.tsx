@@ -10,6 +10,12 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { createClient } from "@/lib/supabase/client";
 import type { FlashbackQuiz, FlashbackEvent } from "@/lib/flashback/types";
 
+// Flashback tables are not yet in the generated Supabase types.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function db(): any {
+  return createClient();
+}
+
 const GAME = ADMIN_GAME_MAP.flashback;
 
 export default function AdminFlashbackPage() {
@@ -24,7 +30,7 @@ export default function AdminFlashbackPage() {
   /* ─── Fetch quizzes ─── */
   const fetchQuizzes = useCallback(async () => {
     setLoadingQuizzes(true);
-    const supabase = createClient();
+    const supabase = db();
     const { data, error } = await supabase
       .from("flashback_quizzes")
       .select("*")
@@ -45,7 +51,7 @@ export default function AdminFlashbackPage() {
   /* ─── Fetch events for selected quiz ─── */
   const fetchEvents = useCallback(async (quizId: string) => {
     setLoadingEvents(true);
-    const supabase = createClient();
+    const supabase = db();
     const { data, error } = await supabase
       .from("flashback_events")
       .select("*")
@@ -72,7 +78,7 @@ export default function AdminFlashbackPage() {
     const publishDate = window.prompt("Publish date (YYYY-MM-DD):");
     if (!publishDate) return;
 
-    const supabase = createClient();
+    const supabase = db();
     const { error } = await supabase.from("flashback_quizzes").insert({
       title,
       publish_date: publishDate,
@@ -88,7 +94,7 @@ export default function AdminFlashbackPage() {
 
   /* ─── Toggle publish ─── */
   const handleTogglePublish = async (quiz: FlashbackQuiz) => {
-    const supabase = createClient();
+    const supabase = db();
     const { error } = await supabase
       .from("flashback_quizzes")
       .update({ is_published: !quiz.is_published })
@@ -125,7 +131,7 @@ export default function AdminFlashbackPage() {
 
     const nextSortOrder = events.length + 1;
 
-    const supabase = createClient();
+    const supabase = db();
     const { error } = await supabase.from("flashback_events").insert({
       quiz_id: selectedQuizId,
       description,
@@ -145,7 +151,7 @@ export default function AdminFlashbackPage() {
   /* ─── Delete event ─── */
   const handleDeleteEvent = async (eventId: string) => {
     if (!window.confirm("Delete this event?")) return;
-    const supabase = createClient();
+    const supabase = db();
     const { error } = await supabase
       .from("flashback_events")
       .delete()
