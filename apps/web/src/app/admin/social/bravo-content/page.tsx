@@ -10,6 +10,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 const BRAVO_ACCOUNT_MAP = [
   { platform: "Instagram", accounts: ["bravotv", "bravodailydish", "bravowwhl"] },
   { platform: "TikTok", accounts: ["bravotv", "bravowwhl"] },
+  { platform: "Threads", accounts: ["bravotv", "bravowwhl"] },
   { platform: "Twitter/X", accounts: ["bravotv", "bravowwhl"] },
   { platform: "YouTube", accounts: ["bravo", "wwhl"] },
 ];

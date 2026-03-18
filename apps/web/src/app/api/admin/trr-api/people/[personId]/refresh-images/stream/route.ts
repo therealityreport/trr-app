@@ -26,6 +26,7 @@ const RETRYABLE_FETCH_ERROR_CODES = new Set([
   "ENOTFOUND",
   "UND_ERR_CONNECT_TIMEOUT",
 ]);
+const LOCAL_ADMIN_EXECUTION_HOSTS = new Set(["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"]);
 
 interface RouteParams {
   params: Promise<{ personId: string }>;
@@ -57,6 +58,12 @@ const getProxyConfig = (): {
     DEFAULT_CONNECT_PREFLIGHT_TIMEOUT_MS
   ),
 });
+
+const shouldPreferLocalExecution = (request: NextRequest): boolean => {
+  if (process.env.NODE_ENV !== "development") return false;
+  const hostname = request.nextUrl.hostname.trim().toLowerCase();
+  return LOCAL_ADMIN_EXECUTION_HOSTS.has(hostname);
+};
 
 const buildErrorResponse = (
   payload: Record<string, unknown>,
@@ -250,6 +257,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
     const proxyConfig = getProxyConfig();
     const backendHost = getBackendHost(backendUrl);
+    const preferLocalExecution = shouldPreferLocalExecution(request);
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -347,6 +355,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               ...(requestId ? { "x-trr-request-id": requestId } : {}),
               ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
               ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
+              ...(preferLocalExecution ? { "x-trr-prefer-local-execution": "1" } : {}),
             },
             body: JSON.stringify(body ?? {}),
             signal: requestController.signal,

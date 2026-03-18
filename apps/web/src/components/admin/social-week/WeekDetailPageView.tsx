@@ -9,7 +9,7 @@ import { SeasonTabsNav } from "@/components/admin/season-tabs/SeasonTabsNav";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
-  buildSeasonSocialBreadcrumb,
+  buildSeasonWeekBreadcrumb,
   humanizeSlug,
 } from "@/lib/admin/admin-breadcrumbs";
 import {
@@ -39,6 +39,7 @@ import {
   buildSocialSyncSessionRequest,
   consumeSocialSyncSessionStream,
   type SocialSyncSessionProgressSnapshot,
+  type SocialSyncRetryKind,
   type SocialSyncSessionStreamPayload,
 } from "@/lib/admin/social-sync-session";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
@@ -666,7 +667,7 @@ type SummaryTokenKey = "collaborators" | "tags" | "mentions" | "hashtags";
 type SourceScope = "bravo" | "creator" | "community";
 type SocialMediaType = "image" | "video" | "embed";
 type SeasonTabId = "overview" | "episodes" | "assets" | "news" | "fandom" | "cast" | "surveys" | "social";
-type SocialAnalyticsViewId = "bravo" | "sentiment" | "hashtags" | "advanced" | "reddit";
+type SocialAnalyticsViewId = "bravo" | "sentiment" | "hashtags" | "advanced" | "reddit" | "cast-content";
 
 interface SocialMediaCandidate {
   src: string;
@@ -766,11 +767,12 @@ const SEASON_PAGE_TABS: ReadonlyArray<{ id: SeasonTabId; label: string }> = [
   { id: "social", label: "Social Media" },
 ];
 const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsViewId; label: string }> = [
-  { id: "bravo", label: "OFFICIAL ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYSIS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
   { id: "reddit", label: "REDDIT ANALYTICS" },
+  { id: "cast-content", label: "CAST COMPARISON" },
 ];
 const EMPTY_PLATFORM_TOTALS: Record<SocialPlatform, number> = {
   instagram: 0,
@@ -965,7 +967,8 @@ const SOCIAL_TIME_ZONE = "America/New_York";
 const DATE_TOKEN_RE = /^\d{4}-\d{2}-\d{2}$/;
 const COMMENT_SYNC_MAX_PASSES = 1;
 const COMMENT_SYNC_MAX_DURATION_MS = 90 * 60 * 1000;
-const SYNC_GALLERY_REFRESH_MS = 4_000;
+const DEV_LOW_HEAT_MODE = process.env.NODE_ENV !== "production";
+const SYNC_GALLERY_REFRESH_MS = DEV_LOW_HEAT_MODE ? 10_000 : 4_000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
@@ -989,7 +992,7 @@ const REQUEST_TIMEOUT_MS = {
 } as const;
 const SYNC_KICKOFF_TIMEOUT_MESSAGE = "Sync kickoff request timed out";
 const SYNC_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
-const SYNC_ACTIVE_POLL_INTERVAL_MS = 4_000;
+const SYNC_ACTIVE_POLL_INTERVAL_MS = DEV_LOW_HEAT_MODE ? 10_000 : 4_000;
 const RHOSLC_REQUIRED_HASHTAG = "RHOSLC";
 const TOKEN_HANDLE_DETAIL_KEYS = [
   "tagged_users_detail",
@@ -1403,10 +1406,10 @@ function formatTranscriptErrorLabel(error: string | null | undefined): string {
 
 function getActualCommentsForPost(platform: string, post: AnyPost): number {
   if (platform === "twitter") {
-    return Math.max(0, getNum(post, "replies_count") + getNum(post, "quotes"));
+    return Math.max(0, getNum(post, "replies_count"));
   }
   if (platform === "threads") {
-    return Math.max(0, getNum(post, "replies_count") + getNum(post, "quotes"));
+    return Math.max(0, getNum(post, "replies_count") || getNum(post, "comments_count"));
   }
   return Math.max(0, getNum(post, "comments_count"));
 }
@@ -1489,10 +1492,10 @@ function formatMirrorCoverageLabel(readyCount: number, total: number): string {
 function getReportedCommentCountFromStats(platform: string, stats: Record<string, number>): number {
   const raw = (() => {
     if (platform === "twitter") {
-      return Number(stats.replies_count ?? 0) + Number(stats.quotes ?? 0);
+      return Number(stats.replies_count ?? 0);
     }
     if (platform === "threads") {
-      return Number(stats.replies_count ?? stats.comments_count ?? 0) + Number(stats.quotes ?? 0);
+      return Number(stats.replies_count ?? stats.comments_count ?? 0);
     }
     return Number(stats.comments_count ?? 0);
   })();
@@ -1502,7 +1505,7 @@ function getReportedCommentCountFromStats(platform: string, stats: Record<string
 
 function getTwitterRepostCount(post: AnyPost): number {
   if (hasNum(post, "reposts")) return Math.max(0, getNum(post, "reposts"));
-  return Math.max(0, getNum(post, "retweets") + getNum(post, "quotes"));
+  return Math.max(0, getNum(post, "retweets"));
 }
 
 function getPostThumbnailUrl(platform: string, post: AnyPost): string | null {
@@ -1857,6 +1860,46 @@ function getPreferredPostDetailMediaSrc(data: PostDetailMediaFields): string | n
     preferredThumbnailUrl,
     sourceThumbnailUrl,
   ]);
+}
+
+function getPreferredCastScreentimeImportSource(
+  platform: string,
+  post: AnyPost,
+  externalPostUrl: string | null | undefined,
+): { mode: "youtube_url" | "external_url"; url: string | null } | null {
+  if (platform !== "youtube") return null;
+
+  const mediaAssetUrls = extractMediaAssetUrls(post.media_asset_meta);
+  const sourceMediaUrls = buildNormalizedMediaUrlList([
+    ...(getStrArr(post, "source_media_urls").length ? getStrArr(post, "source_media_urls") : getStrArr(post, "media_urls")),
+    ...mediaAssetUrls.sourceMediaUrls,
+  ]);
+  const hostedMediaUrls = buildNormalizedMediaUrlList([
+    ...getStrArr(post, "hosted_media_urls"),
+    ...mediaAssetUrls.hostedMediaUrls,
+  ]);
+
+  const pairedAssetCount = Math.max(sourceMediaUrls.length, hostedMediaUrls.length);
+  for (let index = 0; index < pairedAssetCount; index += 1) {
+    const sourceMediaUrl = normalizeSocialMediaCandidateUrl(sourceMediaUrls[index]);
+    const hostedMediaUrl = normalizeSocialMediaCandidateUrl(hostedMediaUrls[index]);
+    if (!sourceMediaUrl || !hostedMediaUrl || isLikelyHtmlDocumentUrl(hostedMediaUrl)) continue;
+    if (detectSocialMediaType(sourceMediaUrl) !== "video") continue;
+    if (SOCIAL_MEDIA_IMAGE_EXT_RE.test(hostedMediaUrl.toLowerCase())) continue;
+    return { mode: "external_url", url: hostedMediaUrl };
+  }
+
+  const hostedVideoCandidate = pickFirstVideoUrl(hostedMediaUrls);
+  if (hostedVideoCandidate) {
+    return { mode: "external_url", url: hostedVideoCandidate };
+  }
+
+  const normalizedExternalPostUrl = normalizeSocialMediaCandidateUrl(externalPostUrl);
+  if (normalizedExternalPostUrl) {
+    return { mode: "youtube_url", url: normalizedExternalPostUrl };
+  }
+
+  return null;
 }
 
 function getPostDetailThumbnailUrl(data: PostDetailMediaFields): string | null {
@@ -2528,7 +2571,11 @@ function resolvePostExternalUrl(
 
 type ProxyErrorPayload = {
   error?: string;
+  code?: string;
+  detail?: string;
   trace_id?: string;
+  upstream_detail?: Record<string, unknown> | null;
+  upstream_detail_code?: string | null;
 };
 
 function formatErrorWithTraceId(message: string, traceId: unknown): string {
@@ -2539,8 +2586,88 @@ function formatErrorWithTraceId(message: string, traceId: unknown): string {
 
 async function readApiErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
   const body = (await response.json().catch(() => ({}))) as ProxyErrorPayload;
-  const message = String(body.error || "").trim() || fallbackMessage;
+  const message = String(body.error || body.detail || "").trim() || fallbackMessage;
   return formatErrorWithTraceId(message, body.trace_id);
+}
+
+function formatSyncKickoffErrorMessage(payload: ProxyErrorPayload, fallbackMessage: string): string {
+  const upstreamDetail =
+    payload.upstream_detail && typeof payload.upstream_detail === "object" ? payload.upstream_detail : null;
+  const upstreamCode =
+    (typeof payload.upstream_detail_code === "string" && payload.upstream_detail_code.trim()) ||
+    (typeof payload.code === "string" && payload.code.trim()) ||
+    "";
+  const upstreamMessage =
+    (typeof upstreamDetail?.message === "string" && upstreamDetail.message.trim()) ||
+    (typeof payload.error === "string" && payload.error.trim()) ||
+    (typeof payload.detail === "string" && payload.detail.trim()) ||
+    fallbackMessage;
+  if (upstreamCode === "SOCIAL_WORKER_UNAVAILABLE") {
+    const workerHealth =
+      upstreamDetail?.worker_health && typeof upstreamDetail.worker_health === "object"
+        ? (upstreamDetail.worker_health as Record<string, unknown>)
+        : null;
+    const healthReason =
+      typeof workerHealth?.reason === "string" && workerHealth.reason.trim()
+        ? ` (${workerHealth.reason})`
+        : "";
+    return `${upstreamMessage}${healthReason}. Start the remote social executor and retry.`;
+  }
+  if (upstreamCode === "SOCIAL_REMOTE_WORKER_REQUIRED") {
+    return `${upstreamMessage}. This sync is remote-only for Instagram/TikTok. Start the configured remote executor and retry.`;
+  }
+  if (upstreamCode === "SOCIAL_REMOTE_JOB_PLANE_ENFORCED") {
+    return `${upstreamMessage}. Remote-worker ownership is enforced right now, so this page cannot fall back to inline execution.`;
+  }
+  return upstreamMessage;
+}
+
+function readNumberLike(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function humanizeSyncDimensionLabel(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function formatCoverageDimensionSummary(dimension: string, coverage: Record<string, unknown>): string | null {
+  if (dimension === "comments") {
+    const saved = readNumberLike(coverage.total_saved_comments ?? coverage.saved_comments);
+    const reported = readNumberLike(coverage.total_reported_comments ?? coverage.reported_comments);
+    const savedReplies = readNumberLike(coverage.saved_replies);
+    const reportedReplies = readNumberLike(coverage.reported_replies);
+    const savedQuotes = readNumberLike(coverage.saved_quotes);
+    const reportedQuotes = readNumberLike(coverage.reported_quotes);
+    const parts: string[] = [];
+    if (saved !== null || reported !== null) {
+      parts.push(`${saved ?? 0}/${reported ?? 0}`);
+    }
+    if (savedReplies !== null || reportedReplies !== null) {
+      parts.push(`replies ${savedReplies ?? 0}/${reportedReplies ?? 0}`);
+    }
+    if (savedQuotes !== null || reportedQuotes !== null) {
+      parts.push(`quotes ${savedQuotes ?? 0}/${reportedQuotes ?? 0}`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }
+  if (dimension === "media" || dimension === "comment_media") {
+    const scanned = readNumberLike(coverage.posts_scanned ?? coverage.items_scanned);
+    const needsMirror = readNumberLike(coverage.needs_mirror_count);
+    if (scanned !== null || needsMirror !== null) {
+      const satisfied = Math.max(0, (scanned ?? 0) - (needsMirror ?? 0));
+      return `${satisfied}/${scanned ?? 0} ready`;
+    }
+  }
+  if (dimension === "avatars") {
+    const scanned = readNumberLike(coverage.posts_scanned);
+    const missing = readNumberLike(coverage.missing_avatar_count);
+    if (scanned !== null || missing !== null) {
+      const satisfied = Math.max(0, (scanned ?? 0) - (missing ?? 0));
+      return `${satisfied}/${scanned ?? 0} ready`;
+    }
+  }
+  return typeof coverage.up_to_date === "boolean" ? (coverage.up_to_date ? "up to date" : "follow-up needed") : null;
 }
 
 function getFallbackHandle(platform: string): string {
@@ -4174,6 +4301,24 @@ function PostCard({
   const headerHandleText = formatHeaderHandleLine(headerAccounts);
   const verifiedHeaderHandles = resolveVerifiedHeaderHandles(platform, post, headerAccounts);
   const externalPostUrl = resolvePostExternalUrl(platform, post);
+  const castScreentimeImportSource = useMemo(
+    () => getPreferredCastScreentimeImportSource(platform, post, externalPostUrl),
+    [externalPostUrl, platform, post],
+  );
+  const castScreentimeImportHref = useMemo(() => {
+    if (!seasonId || !castScreentimeImportSource?.url) return null;
+    const params = new URLSearchParams({
+      prefill_context: "social_week_youtube",
+      owner_scope: "season",
+      owner_id: seasonId,
+      video_class: "promo",
+      promo_subtype: "trailer",
+      video_class_filter: "promo",
+      source_mode: castScreentimeImportSource.mode,
+      source_url: castScreentimeImportSource.url,
+    });
+    return `/admin/cast-screentime?${params.toString()}` as Route;
+  }, [castScreentimeImportSource, seasonId]);
   const captionAuthorLabel = formatHandleLabel(post.author) || "@unknown";
   const normalizedCaptionText = normalizeCaptionPreviewText(platform, post.text);
   const topic = platform === "threads" ? getStr(post, "topic") : "";
@@ -4379,6 +4524,14 @@ function PostCard({
         {/* Actions row */}
         <div className="flex items-center justify-end mt-3 pt-2 border-t border-gray-100">
           <div className="flex items-center gap-3">
+            {castScreentimeImportHref ? (
+              <Link
+                href={castScreentimeImportHref}
+                className="text-xs font-medium px-2.5 py-1 rounded-md border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 transition-colors"
+              >
+                Send To Cast Screentime
+              </Link>
+            ) : null}
             <button
               type="button"
               onClick={() => setStatsOpen(true)}
@@ -4537,6 +4690,10 @@ export default function WeekDetailPage() {
   const [syncMirrorCoveragePreview, setSyncMirrorCoveragePreview] = useState<MirrorCoverageResponse | null>(null);
   const [syncWorkerHealth, setSyncWorkerHealth] = useState<WorkerHealthPayload | null>(null);
   const [syncElapsedDisplay, setSyncElapsedDisplay] = useState("");
+  const [isDocumentVisible, setIsDocumentVisible] = useState<boolean>(() => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState === "visible";
+  });
   const [tokenSummaryModal, setTokenSummaryModal] = useState<{
     key: SummaryTokenKey;
     label: string;
@@ -4599,6 +4756,17 @@ export default function WeekDetailPage() {
     lastRouteReplaceAttemptRef.current = canonicalCurrentRoute;
   }, [canonicalCurrentRoute]);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleVisibilityChange = () => setIsDocumentVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  const syncPollingEnabled = !DEV_LOW_HEAT_MODE || isDocumentVisible;
+
   const resolvedSeasonId = useMemo(() => {
     if (data?.season?.season_id && looksLikeUuid(data.season.season_id)) {
       return data.season.season_id;
@@ -4613,13 +4781,30 @@ export default function WeekDetailPage() {
     if (syncingComments) return "Syncing...";
     if (SOCIAL_FULL_SYNC_MIRROR_ENABLED) {
       return platformFilter === "all"
-        ? "Full Sync + Mirror"
-        : `Full Sync ${getSyncActionPlatformLabel(platformFilter)} + Mirror`;
+        ? "Start Full Sync + Mirror"
+        : `Start Full Sync ${getSyncActionPlatformLabel(platformFilter)} + Mirror`;
     }
     return platformFilter === "all"
-      ? "Sync All"
-      : `Sync ${getSyncActionPlatformLabel(platformFilter)}`;
+      ? "Start Sync Session"
+      : `Start ${getSyncActionPlatformLabel(platformFilter)} Sync Session`;
   }, [platformFilter, syncingComments]);
+  const syncWorkerHealthWarning = useMemo(() => {
+    if (!syncWorkerHealth || syncWorkerHealth.queue_enabled !== true) {
+      return null;
+    }
+    const healthyWorkers = Number(syncWorkerHealth.healthy_workers ?? 0);
+    if (syncWorkerHealth.healthy === true || healthyWorkers > 0) {
+      return null;
+    }
+    const reason =
+      typeof syncWorkerHealth.reason === "string" && syncWorkerHealth.reason.trim().length > 0
+        ? ` (${syncWorkerHealth.reason})`
+        : "";
+    return `Queue mode is enabled but no healthy remote executors are reporting${reason}.`;
+  }, [syncWorkerHealth]);
+  const syncActionsBlockedReason = syncWorkerHealthWarning
+    ? `${syncWorkerHealthWarning} Sync kickoff is disabled until executor health recovers.`
+    : null;
   useAdminOperationUnloadGuard();
 
   const getSyncRunRequestHeaders = useCallback(async (): Promise<Record<string, string>> => {
@@ -5562,16 +5747,17 @@ export default function WeekDetailPage() {
         SYNC_KICKOFF_TIMEOUT_MESSAGE,
       );
       if (!response.ok) {
-        const kickoffError = await readApiErrorMessage(response, "Failed to start sync session");
+        const errorBody = (await response.json().catch(() => ({}))) as ProxyErrorPayload;
+        const kickoffError = formatErrorWithTraceId(
+          formatSyncKickoffErrorMessage(errorBody, "Failed to start sync session"),
+          errorBody.trace_id,
+        );
         throw new Error(kickoffError);
       }
 
-      const result = (await response.json().catch(() => ({}))) as {
+      const result = (await response.json().catch(() => ({}))) as SocialSyncSessionProgressSnapshot & {
         status?: string;
         sync_session_id?: string;
-        current_run_id?: string;
-        current_run?: { id?: string | null; summary?: Record<string, unknown> } | null;
-        completeness_snapshot?: { up_to_date?: boolean };
       };
       if (result.status === "already_up_to_date") {
         setSyncSessionId(null);
@@ -5597,6 +5783,8 @@ export default function WeekDetailPage() {
         throw new Error("Sync session started without a session id");
       }
       adoptRun(runId, syncSessionIdValue, null);
+      setSyncSessionProgress(result);
+      setSyncPass(Math.max(1, Number(result.pass_sequence ?? 1) || 1));
       return {
         syncSessionId: syncSessionIdValue,
         runId,
@@ -5737,7 +5925,7 @@ export default function WeekDetailPage() {
   );
 
   const retrySyncSession = useCallback(
-    async (retryKind: "retry_missing_comments" | "retry_failed_media" | "retry_missing_avatars" | "retry_missing_comment_media") => {
+    async (retryKind: SocialSyncRetryKind) => {
       if (!syncSessionId || !hasValidNumericPathParams) return;
       setSyncSessionRetryKind(retryKind);
       try {
@@ -6029,6 +6217,31 @@ export default function WeekDetailPage() {
     } satisfies WorkerHealthPayload;
   }, [getSyncRunRequestHeaders]);
 
+  useEffect(() => {
+    if (!hasValidNumericPathParams || !isAdmin) return;
+    let cancelled = false;
+    const refreshWorkerHealth = async () => {
+      try {
+        const health = await fetchSyncWorkerHealth();
+        if (!cancelled) {
+          setSyncWorkerHealth(health);
+        }
+      } catch {
+        if (!cancelled) {
+          setSyncWorkerHealth(null);
+        }
+      }
+    };
+    void refreshWorkerHealth();
+    const intervalId = window.setInterval(() => {
+      void refreshWorkerHealth();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [fetchSyncWorkerHealth, hasValidNumericPathParams, isAdmin]);
+
   const fetchSyncWeekLiveHealth = useCallback(async () => {
     if (!hasValidNumericPathParams) return null;
     const headers = await getSyncRunRequestHeaders();
@@ -6094,13 +6307,21 @@ export default function WeekDetailPage() {
       if (!hasValidNumericPathParams) {
         throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
       }
+      if (syncActionsBlockedReason) {
+        throw new Error(syncActionsBlockedReason);
+      }
 
       const selectedPlatforms: Array<Exclude<PlatformFilter, "all">> | null =
         platformFilter === "all" ? null : [platformFilter];
-
-      syncSessionStateRef.current = {
+      const scopedDayRange = activeDayFilter ? buildIsoDayRange(activeDayFilter) : null;
+      const syncWindow = scopedDayRange ?? {
         dateStart: data.week.start,
         dateEnd: data.week.end,
+      };
+
+      syncSessionStateRef.current = {
+        dateStart: syncWindow.dateStart,
+        dateEnd: syncWindow.dateEnd,
         platforms: selectedPlatforms,
         maxPasses: 3,
         maxDurationMs: COMMENT_SYNC_MAX_DURATION_MS,
@@ -6109,7 +6330,9 @@ export default function WeekDetailPage() {
       };
 
       const platformLabel = platformFilter === "all" ? "all platforms" : PLATFORM_LABELS[platformFilter];
-      const weekLabel = data.week.label || (data.week.week_index === 0 ? "Pre-Season" : `Week ${data.week.week_index}`);
+      const weekLabel = activeDayFilter
+        ? `Day ${activeDayFilter}`
+        : data.week.label || (data.week.week_index === 0 ? "Pre-Season" : `Week ${data.week.week_index}`);
       setSyncStartedAt(new Date(syncSessionStateRef.current.startedAtMs));
       setSyncPass(1);
       try {
@@ -6123,8 +6346,8 @@ export default function WeekDetailPage() {
         }
       }
       const kickoff = await queueSyncPass({
-        dateStart: data.week.start,
-        dateEnd: data.week.end,
+        dateStart: syncWindow.dateStart,
+        dateEnd: syncWindow.dateEnd,
         platforms: selectedPlatforms,
       });
       if (generation !== syncSessionGenerationRef.current) return;
@@ -6170,6 +6393,7 @@ export default function WeekDetailPage() {
       syncSessionStateRef.current = null;
     }
   }, [
+    activeDayFilter,
     data,
     fetchSyncWorkerHealth,
     hasValidNumericPathParams,
@@ -6177,6 +6401,7 @@ export default function WeekDetailPage() {
     isRhoslcSeason,
     platformFilter,
     queueSyncPass,
+    syncActionsBlockedReason,
     syncOperationFlowScope,
     syncRunFlowScope,
     sourceScope,
@@ -6346,8 +6571,11 @@ export default function WeekDetailPage() {
               setSyncSessionStreamConnected(false);
               return;
             }
+            const waitingForFollowUp = sessionStatus === "pass_evaluating" && !nextRunId;
             setSyncMessage(
-              `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel} · ${dateLabel}.`,
+              waitingForFollowUp
+                ? `Waiting for sync session follow-up · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`
+                : `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`,
             );
           },
         });
@@ -6382,6 +6610,7 @@ export default function WeekDetailPage() {
   useEffect(() => {
     if (!syncSessionId || !syncingComments) return;
     if (syncSessionStreamConnected) return;
+    if (!syncPollingEnabled) return;
     let cancelled = false;
     let timeoutId: number | null = null;
 
@@ -6429,8 +6658,13 @@ export default function WeekDetailPage() {
           setSyncingComments(false);
           return;
         }
+        const waitingForFollowUp =
+          sessionStatus === "pass_evaluating" &&
+          !(typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0);
         setSyncMessage(
-          `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel} · ${dateLabel}.`,
+          waitingForFollowUp
+            ? `Waiting for sync session follow-up · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`
+            : `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`,
         );
       } catch (err) {
         if (cancelled) return;
@@ -6447,10 +6681,12 @@ export default function WeekDetailPage() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [fetchSyncSessionProgress, syncSessionId, syncSessionStreamConnected, syncingComments]);
+  }, [fetchSyncSessionProgress, syncPollingEnabled, syncSessionId, syncSessionStreamConnected, syncingComments]);
 
   useEffect(() => {
     if (!syncRunId || !syncingComments) return;
+    if (syncSessionStreamConnected) return;
+    if (!syncPollingEnabled) return;
 
     syncPollAbortRef.current?.abort();
     const abortController = new AbortController();
@@ -6481,10 +6717,6 @@ export default function WeekDetailPage() {
         const currentRun = snapshot.run;
         if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
           if (syncSessionId) {
-            const elapsed = syncStartedAt ? ` in ${Math.round((Date.now() - syncStartedAt.getTime()) / 1000)}s` : "";
-            setSyncMessage(
-              `Pass ${syncPass || 1}/3 complete${elapsed}. Waiting for sync session follow-up...`,
-            );
             return;
           }
           const terminalSessionStatus =
@@ -6707,17 +6939,20 @@ export default function WeekDetailPage() {
     requeueMirrorJobs,
     sortDir,
     sortField,
+    syncPollingEnabled,
     syncPass,
     syncRunId,
     syncOperationFlowScope,
     syncRunFlowScope,
     syncSessionId,
+    syncSessionStreamConnected,
     syncStartedAt,
     syncingComments,
   ]);
 
   useEffect(() => {
     if (!syncingComments || !hasValidNumericPathParams) return;
+    if (!syncPollingEnabled) return;
     let cancelled = false;
     let timeoutId: number | null = null;
 
@@ -6739,7 +6974,7 @@ export default function WeekDetailPage() {
       cancelled = true;
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [fetchSyncWeekLiveHealth, hasValidNumericPathParams, syncingComments]);
+  }, [fetchSyncWeekLiveHealth, hasValidNumericPathParams, syncPollingEnabled, syncingComments]);
 
   useEffect(() => {
     if (!syncingComments && syncPass !== 0) {
@@ -6777,6 +7012,7 @@ export default function WeekDetailPage() {
   useEffect(() => {
     if (!syncingComments || !hasValidNumericPathParams) return;
     if (syncSessionStreamConnected) return;
+    if (!syncPollingEnabled) return;
     const intervalId = setInterval(() => {
       void fetchData({
         refreshGalleryOnly: true,
@@ -6788,7 +7024,7 @@ export default function WeekDetailPage() {
     return () => {
       clearInterval(intervalId);
     };
-  }, [fetchData, hasValidNumericPathParams, platformFilter, sortDir, sortField, syncSessionStreamConnected, syncingComments]);
+  }, [fetchData, hasValidNumericPathParams, platformFilter, sortDir, sortField, syncPollingEnabled, syncSessionStreamConnected, syncingComments]);
 
   const openPostMediaLightbox = useCallback(
     (platform: string, post: AnyPost, initialIndex = 0) => {
@@ -7855,29 +8091,34 @@ export default function WeekDetailPage() {
     tab: "social",
     socialView: "official",
   });
+  const breadcrumbWeekHref = buildSeasonSocialWeekUrl({
+    showSlug: showSlugForRouting,
+    seasonNumber,
+    weekIndex: weekIndexInt,
+  });
   const socialHeaderTitle = `${recentShowLabel} · Season ${
     Number.isFinite(seasonNumberInt) ? seasonNumberInt : seasonNumber
   }`;
   const weekLabel = data?.week.label?.trim() || `Week ${weekIndexInt}`;
   const weekDateRangeLabel =
     data?.week?.start && data?.week?.end
-      ? `${recentShowLabel} — Season ${Number.isFinite(seasonNumberInt) ? seasonNumberInt : seasonNumber} · ${fmtDate(
-          data.week.start,
-        )} – ${fmtDate(data.week.end)}`
+      ? `${fmtDate(data.week.start)} – ${fmtDate(data.week.end)}`
       : null;
 
   return (
     <div className="min-h-screen bg-zinc-50">
       <SocialAdminPageHeader
-        breadcrumbs={buildSeasonSocialBreadcrumb(recentShowLabel, seasonNumber, {
+        breadcrumbs={buildSeasonWeekBreadcrumb(recentShowLabel, seasonNumber, weekLabel, {
           showHref: breadcrumbShowHref,
           seasonHref: breadcrumbSeasonHref,
+          weekHref: breadcrumbWeekHref,
           socialHref: breadcrumbSocialHref,
-          subTabLabel: "Official Analytics",
+          socialLabel: "Social Media",
+          subTabLabel: "Official Analysis",
           subTabHref: breadcrumbSocialHref,
         })}
-        title={socialHeaderTitle}
-        backHref={breadcrumbShowHref}
+        title={`${socialHeaderTitle} · ${weekLabel}`}
+        backHref={breadcrumbSocialHref}
         backLabel="Back"
         bodyClassName="px-6 py-6"
       />
@@ -7885,7 +8126,7 @@ export default function WeekDetailPage() {
       <div className="border-b border-zinc-200 bg-white">
         <div className="mx-auto max-w-6xl px-6">
           <SeasonTabsNav tabs={SEASON_PAGE_TABS} activeTab="social" onSelect={handleSeasonTabSelect} />
-          <nav className="pb-4 flex flex-wrap gap-2" aria-label="Social analytics views">
+          <nav className="pb-2 flex flex-wrap gap-2" aria-label="Social analytics views">
             {SEASON_SOCIAL_ANALYTICS_VIEWS.map((view) => {
               const isActive = view.id === "bravo";
               const viewHref = buildSeasonAdminUrl({
@@ -7915,15 +8156,40 @@ export default function WeekDetailPage() {
               );
             })}
           </nav>
+          <nav aria-label="Social platform tabs" className="pb-4 flex flex-wrap gap-2">
+            {PLATFORM_FILTERS.map((tab) => {
+              const isActive = platformFilter === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => handlePlatformFilterSelect(tab.key)}
+                  aria-pressed={isActive}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                    isActive
+                      ? "border-zinc-800 bg-zinc-800 text-white"
+                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    {tab.key !== "all" && <SocialPlatformTabIcon tab={tab.key} />}
+                    <span>{tab.label}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
         </div>
       </div>
 
-      <section className="border-b border-zinc-200 bg-zinc-50">
-        <div className="mx-auto max-w-6xl px-6 py-4">
-          <h1 className="text-2xl font-bold text-zinc-900">{weekLabel}</h1>
-          {weekDateRangeLabel && <p className="mt-1 text-sm text-zinc-600">{weekDateRangeLabel}</p>}
-        </div>
-      </section>
+      {weekDateRangeLabel && (
+        <section className="border-b border-zinc-200 bg-zinc-50">
+          <div className="mx-auto max-w-6xl px-6 py-3">
+            <p className="text-sm text-zinc-600">{weekDateRangeLabel}</p>
+          </div>
+        </section>
+      )}
 
       <main className="mx-auto max-w-6xl px-6 py-6">
 
@@ -8049,8 +8315,9 @@ export default function WeekDetailPage() {
               onClick={() => {
                 void syncAllCommentsForWeek();
               }}
-              disabled={syncingComments}
+              disabled={syncingComments || Boolean(syncActionsBlockedReason)}
               className="text-sm rounded-md px-3 py-1.5 bg-gray-900 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              title={syncActionsBlockedReason ?? undefined}
             >
               {syncButtonLabel}
             </button>
@@ -8060,6 +8327,12 @@ export default function WeekDetailPage() {
             {allPosts.length} {allPosts.length === 1 ? "post" : "posts"}
           </span>
         </div>
+
+          {syncActionsBlockedReason ? (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {syncActionsBlockedReason}
+            </div>
+          ) : null}
 
           {(syncMessage || syncError) && (
             <div
@@ -8087,26 +8360,60 @@ export default function WeekDetailPage() {
             const followUpDimensions = (syncSessionProgress.follow_up_dimensions ?? snapshot.follow_up_dimensions ?? [])
               .map((dimension) => String(dimension || "").trim())
               .filter((dimension) => dimension.length > 0);
+            const followUpBreakdown: Record<string, number> =
+              syncSessionProgress.follow_up_breakdown && typeof syncSessionProgress.follow_up_breakdown === "object"
+                ? syncSessionProgress.follow_up_breakdown
+                : {};
+            const coverageEntries = Object.entries(syncSessionProgress.coverage_by_dimension ?? {}).filter(
+              (entry): entry is [string, Record<string, unknown>] =>
+                typeof entry[0] === "string" && typeof entry[1] === "object" && entry[1] !== null,
+            );
             const retryActions = [
-              Number(snapshot.comment_target_count ?? snapshot.targeted_anchor_count ?? 0) > 0
+              Number(followUpBreakdown.comments ?? snapshot.comment_target_count ?? snapshot.targeted_anchor_count ?? 0) > 0
                 ? ["retry_missing_comments", "Retry Comments"]
                 : null,
-              Number(snapshot.detail_target_count ?? 0) > 0 || Number(snapshot.missing_asset_count ?? 0) > 0
+              Number(followUpBreakdown.media ?? snapshot.detail_target_count ?? 0) > 0 || Number(snapshot.missing_asset_count ?? 0) > 0
                 ? ["retry_failed_media", "Retry Media"]
                 : null,
-              Number(snapshot.avatar_target_count ?? 0) > 0 || Number(snapshot.missing_avatar_count ?? 0) > 0
+              Number(followUpBreakdown.avatars ?? snapshot.avatar_target_count ?? 0) > 0 || Number(snapshot.missing_avatar_count ?? 0) > 0
                 ? ["retry_missing_avatars", "Retry Avatars"]
                 : null,
-              Number(snapshot.comment_media_target_count ?? 0) > 0 || Number(snapshot.missing_comment_media_count ?? 0) > 0
+              Number(followUpBreakdown.comment_media ?? snapshot.comment_media_target_count ?? 0) > 0 || Number(snapshot.missing_comment_media_count ?? 0) > 0
                 ? ["retry_missing_comment_media", "Retry Comment Media"]
                 : null,
-            ].filter((value): value is [string, string] => Array.isArray(value));
+            ].filter((value): value is [SocialSyncRetryKind, string] => Array.isArray(value));
+            const platformDiagnostics = Object.values(syncSessionProgress.platform_diagnostics ?? {}).filter(
+              (value): value is NonNullable<SocialSyncSessionProgressSnapshot["platform_diagnostics"]>[string] =>
+                typeof value === "object" && value !== null,
+            );
+            const topLevelDiagnostics = [
+              syncSessionProgress.auth_mode ? `Auth ${syncSessionProgress.auth_mode}` : null,
+              syncSessionProgress.execution_path ? `Path ${syncSessionProgress.execution_path}` : null,
+              syncSessionProgress.source_mode ? `Source ${syncSessionProgress.source_mode}` : null,
+              syncSessionProgress.queue_wait_state ? `Queue ${syncSessionProgress.queue_wait_state}` : null,
+              syncSessionProgress.queue_cap !== null && syncSessionProgress.queue_cap !== undefined
+                ? `Queue cap ${syncSessionProgress.queue_cap}`
+                : null,
+              syncSessionProgress.worker_version ? `Worker ${syncSessionProgress.worker_version}` : null,
+            ].filter((value): value is string => Boolean(value));
+            const publicFallbackPlatforms = platformDiagnostics
+              .filter(
+                (diagnostic) =>
+                  ["facebook", "threads"].includes(String(diagnostic.platform || "")) &&
+                  diagnostic.auth_mode === "public",
+              )
+              .map((diagnostic) => PLATFORM_LABELS[String(diagnostic.platform || "") as SocialPlatform] ?? String(diagnostic.platform || ""))
+              .filter((value) => value.length > 0);
+            const twitterAuthMissing = platformDiagnostics.some(
+              (diagnostic) =>
+                String(diagnostic.platform || "") === "twitter" && String(diagnostic.auth_status_reason || "") === "twitter_auth_missing",
+            );
             return (
               <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">Sync Session</span>
                   <span className={statChipClass}>{displayStatus}</span>
-                  <span className={statChipClass}>Pass {Math.max(1, Number(syncSessionProgress.pass_sequence ?? 1) || 1)}/3</span>
+                  <span className={statChipClass}>Pass {Math.max(1, Number(syncSessionProgress.pass_sequence ?? 1) || 1)}</span>
                   <span className={statChipClass}>{passLabel}</span>
                   <span className={statChipClass}>Attempt {Math.max(1, Number(syncSessionProgress.current_pass_attempt ?? 1) || 1)}</span>
                 </div>
@@ -8114,11 +8421,30 @@ export default function WeekDetailPage() {
                 {syncSessionProgress.status_reason ? (
                   <p className="mt-1 text-xs text-zinc-700">{syncSessionProgress.status_reason}</p>
                 ) : null}
+                {publicFallbackPlatforms.length > 0 ? (
+                  <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    Degraded mode: {publicFallbackPlatforms.join(", ")} using public fallback.
+                  </div>
+                ) : null}
+                {twitterAuthMissing ? (
+                  <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    Twitter/X auth warning: cookies, bearer, and twikit auth are all missing for this session.
+                  </div>
+                ) : null}
                 {followUpDimensions.length > 0 ? (
                   <p className="mt-1 text-xs text-zinc-600">Follow-up dimensions: {followUpDimensions.join(", ")}</p>
                 ) : null}
                 {syncSessionProgress.expected_after_current_pass ? (
                   <p className="mt-1 text-xs text-zinc-500">{syncSessionProgress.expected_after_current_pass}</p>
+                ) : null}
+                {topLevelDiagnostics.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {topLevelDiagnostics.map((label) => (
+                      <span key={label} className={statChipClass}>
+                        {label}
+                      </span>
+                    ))}
+                  </div>
                 ) : null}
                 <div className="mt-2 flex flex-wrap gap-2">
                   <span className={statChipClass}>Incomplete posts {Number(snapshot.incomplete_post_count ?? 0)}</span>
@@ -8132,15 +8458,86 @@ export default function WeekDetailPage() {
                   <span className={statChipClass}>Avatar targets {Number(snapshot.avatar_target_count ?? 0)}</span>
                   <span className={statChipClass}>Comment media targets {Number(snapshot.comment_media_target_count ?? 0)}</span>
                 </div>
+                {Object.keys(followUpBreakdown).length > 0 ? (
+                  <div className="mt-2 rounded border border-zinc-200 bg-white px-2 py-2 text-xs text-zinc-700">
+                    <div className="font-semibold text-zinc-900">Follow-up breakdown</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {Object.entries(followUpBreakdown).map(([dimension, count]) => (
+                        <span key={dimension} className={statChipClass}>
+                          {humanizeSyncDimensionLabel(dimension)} {Number(count ?? 0)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {coverageEntries.length > 0 ? (
+                  <div className="mt-2 rounded border border-zinc-200 bg-white px-2 py-2 text-xs text-zinc-700">
+                    <div className="font-semibold text-zinc-900">Per-dimension coverage</div>
+                    <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                      {coverageEntries.map(([dimension, coverage]) => (
+                        <div key={dimension}>
+                          <span className="font-medium text-zinc-900">{humanizeSyncDimensionLabel(dimension)}</span>
+                          {": "}
+                          {formatCoverageDimensionSummary(dimension, coverage) ?? "n/a"}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {platformDiagnostics.length > 0 ? (
+                  <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                    {platformDiagnostics.map((diagnostic, index) => {
+                      const platform = String(diagnostic.platform || syncSessionProgress.platforms[index] || "platform");
+                      const warnings = Array.isArray(diagnostic.warnings)
+                        ? diagnostic.warnings.map((warning) => String(warning || "").replaceAll("_", " "))
+                        : [];
+                      const platformCoverageEntries = Object.entries(diagnostic.coverage_by_dimension ?? {}).filter(
+                        (entry): entry is [string, Record<string, unknown>] =>
+                          typeof entry[0] === "string" && typeof entry[1] === "object" && entry[1] !== null,
+                      );
+                      return (
+                        <div key={`${platform}-${index}`} className="rounded border border-zinc-200 bg-white px-2 py-2 text-xs text-zinc-700">
+                          <div className="flex flex-wrap gap-2">
+                            <span className="font-semibold text-zinc-900">{PLATFORM_LABELS[platform as SocialPlatform] ?? platform}</span>
+                            {diagnostic.auth_mode ? <span className={statChipClass}>Auth {diagnostic.auth_mode}</span> : null}
+                            {diagnostic.execution_path ? <span className={statChipClass}>{diagnostic.execution_path}</span> : null}
+                            {diagnostic.source_mode ? <span className={statChipClass}>Source {diagnostic.source_mode}</span> : null}
+                            {diagnostic.queue_wait_state ? <span className={statChipClass}>Queue {diagnostic.queue_wait_state}</span> : null}
+                          </div>
+                          <div className="mt-1 text-zinc-600">
+                            Queue cap {Number(diagnostic.queue_cap ?? 0) || "n/a"}
+                            {typeof diagnostic.queue_age_seconds === "number" ? ` · oldest queued ${diagnostic.queue_age_seconds}s` : ""}
+                            {diagnostic.worker_version ? ` · worker ${diagnostic.worker_version}` : ""}
+                          </div>
+                          {diagnostic.auth_status_reason ? (
+                            <div className="mt-1 text-zinc-600">Auth detail: {diagnostic.auth_status_reason.replaceAll("_", " ")}</div>
+                          ) : null}
+                          {warnings.length > 0 ? (
+                            <div className="mt-1 text-amber-700">Warnings: {warnings.join(", ")}</div>
+                          ) : null}
+                          {platformCoverageEntries.length > 0 ? (
+                            <div className="mt-2 space-y-1 text-zinc-600">
+                              {platformCoverageEntries.map(([dimension, coverage]) => (
+                                <div key={dimension}>
+                                  <span className="font-medium text-zinc-900">{humanizeSyncDimensionLabel(dimension)}</span>
+                                  {": "}
+                                  {formatCoverageDimensionSummary(dimension, coverage) ?? "n/a"}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 <div className="mt-2 flex flex-wrap gap-2">
                   {retryActions.map(([retryKind, label]) => (
                     <button
                       key={retryKind}
                       type="button"
                       onClick={() => {
-                        void retrySyncSession(
-                          retryKind as "retry_missing_comments" | "retry_failed_media" | "retry_missing_avatars" | "retry_missing_comment_media",
-                        );
+                        void retrySyncSession(retryKind);
                       }}
                       disabled={retryDisabled || syncSessionRetryKind !== null}
                       className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"

@@ -14,12 +14,11 @@ import type {
 } from "@/lib/admin/show-page/types";
 
 export const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
-  { key: "shows", label: "SHOWS", description: "Show info, entities, providers" },
-  { key: "seasons", label: "SEASONS", description: "Season-level sync progress" },
-  { key: "episodes", label: "EPISODES", description: "Episode-level sync and credits" },
-  { key: "people", label: "PEOPLE", description: "Cast/member profile and person jobs" },
-  { key: "media", label: "MEDIA", description: "Images, mirroring, auto-count, cleanup" },
-  { key: "bravotv", label: "BRAVOTV", description: "Bravo preview/commit actions" },
+  { key: "show_core", label: "SHOW CORE", description: "Details, seasons, episodes, cast, and setup" },
+  { key: "links", label: "LINKS", description: "Show, season, and cast link discovery" },
+  { key: "bravo", label: "BRAVO", description: "Bravo auto-sync when eligible" },
+  { key: "cast_profiles", label: "CAST PROFILES", description: "Relationship roles, bios, and profile data" },
+  { key: "cast_media", label: "CAST MEDIA", description: "Images, mirroring, and media persistence" },
 ];
 
 export const SHOW_PAGE_TABS: ShowTab[] = [
@@ -34,11 +33,12 @@ export const SHOW_PAGE_TABS: ShowTab[] = [
 ];
 
 export const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "OFFICIAL ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYSIS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
   { id: "reddit", label: "REDDIT ANALYTICS" },
+  { id: "cast-content", label: "CAST COMPARISON" },
 ];
 
 export const SHOW_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string }> = [
@@ -123,10 +123,20 @@ export const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   videos: "Bravo Videos",
   news: "Google News",
   social_setup: "Social Setup",
+  show_core: "Show Core",
+  links: "Links",
+  bravo: "Bravo",
+  cast_profiles: "Cast Profiles",
+  cast_media: "Cast Media",
 };
 
 export const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   starting: "Initializing",
+  show_core: "Show Core",
+  links: "Links",
+  bravo: "Bravo",
+  cast_profiles: "Cast Profiles",
+  cast_media: "Cast Media",
   details_sync_shows: "Show Info",
   details_tmdb_show_entities: "Show Entities",
   details_tmdb_watch_providers: "Watch Providers",
@@ -156,6 +166,10 @@ export const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   prune: "Cleanup",
   mirroring: "S3 Mirroring",
   mirror: "S3 Mirroring",
+  links_discover: "Links Discovery",
+  bravo_sync: "Bravo Sync",
+  cast_profiles_sync: "Cast Profiles",
+  cast_media_sync: "Cast Media",
 };
 
 export const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {

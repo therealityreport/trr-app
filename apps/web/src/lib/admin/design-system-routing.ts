@@ -15,6 +15,7 @@ export type DesignSystemSubtabId =
   | "ui"
   | "layout"
   | "overlays"
+  | "frames"
   | "icons"
   | "logos"
   | "illustrations";
@@ -63,6 +64,7 @@ export const DESIGN_SYSTEM_TAB_DEFINITIONS: readonly DesignSystemTabDefinition[]
       { id: "survey", label: "Survey" },
       { id: "layout", label: "Layout" },
       { id: "overlays", label: "Overlays" },
+      { id: "frames", label: "Frames" },
     ],
   },
   {

@@ -41,7 +41,12 @@ export type ShowRefreshTarget =
   | "cast_credits"
   | "videos"
   | "news"
-  | "social_setup";
+  | "social_setup"
+  | "show_core"
+  | "links"
+  | "bravo"
+  | "cast_profiles"
+  | "cast_media";
 
 export type ShowTab = { id: TabId; label: string; icon?: "home" };
 

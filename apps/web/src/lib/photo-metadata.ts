@@ -76,15 +76,31 @@ export interface PhotoMetadata {
   imdbTitleUrl?: string | null;
   mediaTypeLabel?: string | null;
   eventName?: string | null;
+  gettyEventUrl?: string | null;
+  gettyEventId?: string | null;
+  gettyEventSlug?: string | null;
+  gettyEventDate?: string | null;
+  groupedEventCount?: number | null;
   episodeTitle?: string | null;
   episodeNumber?: number | null;
   episodeLabel?: string | null;
   sourceVariant?: string | null;
+  sourceResolution?: string | null;
   sourcePageTitle?: string | null;
   sourceUrl?: string | null;
   showName?: string | null;
   showId?: string | null;
   showContextSource?: string | null;
+  gettyDetails?: Record<string, string> | null;
+  gettyTags?: string[];
+  photographer?: string | null;
+  company?: string | null;
+  airdate?: Date | null;
+  uploadedAt?: Date | null;
+  peopleTags?: string[];
+  filteredTags?: string[];
+  nbcumvShowId?: string | null;
+  nbcumvContentType?: string | null;
   faceBoxes?: PhotoFaceBox[];
   faceCrops?: PhotoFaceCrop[];
   peopleCount?: number | null;
@@ -916,6 +932,101 @@ const toImdbTitleUrl = (titleId: string | null): string | null => {
   return `https://www.imdb.com/title/${titleId}/`;
 };
 
+// ---------- Getty tag filtering ----------
+
+/** Getty tags that convey no useful information about the image content.
+ *  Built from actual tag frequency analysis across cast_photos. */
+const GENERIC_TAG_FILTER = new Set([
+  // Ubiquitous metadata tags (appear on nearly every image)
+  "arts culture and entertainment",
+  "photography",
+  "color image",
+  "usa",
+  "choice",
+  "indoors",
+  "outdoors",
+  "people",
+  "celebrities",
+  "attending",
+  // Orientation / framing (describes photo composition, not content)
+  "horizontal",
+  "vertical",
+  "portrait",
+  "full length",
+  "three quarter length",
+  "looking at camera",
+  "one person",
+  "two people",
+  "three people",
+  "four people",
+  "five people",
+  "large group of people",
+  "medium group of people",
+  "headshot",
+  // Year/decade buckets (redundant with date fields)
+  "2020 - 2029",
+  "2023",
+  "2025",
+  // Generic descriptors
+  "smiling",
+  "laughing",
+  "day",
+  "event",
+  "topics",
+  "topix",
+  "bestpix",
+  "arrival",
+  "downloading",
+  "celebrity sightings",
+  // Day markers (meaningless without event context)
+  "day 1",
+  "day 2",
+  "day 3",
+  "day 4",
+]);
+
+function splitGettyTags(
+  tags: string[],
+  knownPeople: string[]
+): { peopleTags: string[]; filteredTags: string[] } {
+  const knownPeopleLower = new Set(knownPeople.map((n) => n.toLowerCase()));
+  const peopleTags: string[] = [];
+  const filteredTags: string[] = [];
+  for (const tag of tags) {
+    const lower = tag.toLowerCase();
+    if (GENERIC_TAG_FILTER.has(lower)) continue;
+    // Fix truncated tags like "The Real Housewives Of..."
+    const cleaned = tag.replace(/\.{3}$/, "");
+    if (knownPeopleLower.has(lower)) {
+      peopleTags.push(cleaned);
+    } else {
+      filteredTags.push(cleaned);
+    }
+  }
+  return { peopleTags, filteredTags };
+}
+
+// ---------- NBCUMV field extraction ----------
+
+function extractNbcumvFields(meta: Record<string, unknown> | null): {
+  photographer: string | null;
+  company: string | null;
+  showId: string | null;
+  contentType: string | null;
+  airdate: Date | null;
+  uploadedAt: Date | null;
+} {
+  if (!meta) return { photographer: null, company: null, showId: null, contentType: null, airdate: null, uploadedAt: null };
+  return {
+    photographer: getMetadataString(meta, "lbx_photographer", "photographer", "credit"),
+    company: getMetadataString(meta, "company", "network", "brand"),
+    showId: getMetadataString(meta, "show_id", "showId"),
+    contentType: getMetadataString(meta, "content_type", "contentType", "type"),
+    airdate: parseDateValue(meta.air_date ?? meta.airdate ?? meta.liveDate ?? null),
+    uploadedAt: parseDateValue(meta.upload_date ?? meta.uploaded_at ?? null),
+  };
+}
+
 export function mapPhotoToMetadata(
   photo: TrrPersonPhoto,
   options?: { fallbackPeople?: string[] }
@@ -1037,7 +1148,20 @@ export function mapPhotoToMetadata(
     sourcePageUrlFromPhoto ??
     getMetadataString(gettyMetadata, "detail_url", "source_page_url", "source_url") ??
     getMetadataString(nbcumvMetadata, "source_page_url", "source_url") ??
+    getMetadataString(metadata, "getty_event_url", "gettyEventUrl") ??
     imdbSourceUrlFallback;
+  const gettyEventUrl =
+    getMetadataString(metadata, "getty_event_url", "gettyEventUrl") ??
+    getMetadataString(gettyMetadata, "event_url", "eventUrl");
+  const gettyEventId =
+    getMetadataString(metadata, "getty_event_id", "gettyEventId", "getty_event_group_id") ??
+    getMetadataString(gettyMetadata, "event_id", "eventId");
+  const gettyEventSlug =
+    getMetadataString(metadata, "getty_event_slug", "gettyEventSlug", "getty_event_group_slug") ??
+    getMetadataString(gettyMetadata, "event_url_slug", "eventUrlSlug");
+  const gettyEventDate =
+    getMetadataString(metadata, "getty_event_date", "gettyEventDate") ??
+    getMetadataString(gettyMetadata, "event_date", "eventDate");
 
   const sourceVariant = getMetadataString(
     metadata,
@@ -1253,11 +1377,61 @@ export function mapPhotoToMetadata(
     metadata,
     "event_name",
     "eventName",
+    "getty_event_title",
+    "gettyEventTitle",
+    "bucket_label",
+    "bucketLabel",
+    "getty_event_group_title",
     "source_page_title",
     "sourcePageTitle",
     "asset_name",
     "assetName",
   );
+  const galleryBucketType = getMetadataString(
+    metadata,
+    "bucket_type",
+    "bucketType",
+    "gallery_bucket_type",
+    "galleryBucketType",
+  );
+  const groupedEventCount = parseIntegerValue(
+    metadata.grouped_image_count ??
+      (metadata.gallery_bucket &&
+      typeof metadata.gallery_bucket === "object"
+        ? (metadata.gallery_bucket as Record<string, unknown>).grouped_image_count
+        : null)
+  );
+  const sourceResolution = getMetadataString(metadata, "source_resolution", "sourceResolution");
+  const gettyDetailsRaw =
+    getNestedMetadataObject(metadata, "getty_details") ??
+    getNestedMetadataObject(gettyMetadata, "details");
+  const gettyDetails =
+    gettyDetailsRaw && Object.keys(gettyDetailsRaw).length > 0
+      ? Object.fromEntries(
+          Object.entries(gettyDetailsRaw)
+            .map(([key, value]) => [key, decodeAndNormalizeText(value) ?? String(value ?? "").trim()])
+            .filter(([, value]) => Boolean(value))
+        )
+      : null;
+  const gettyTags = [
+    ...new Set(
+      (
+        Array.isArray(metadata.getty_tags)
+          ? metadata.getty_tags
+          : Array.isArray(gettyMetadata?.keyword_texts)
+            ? gettyMetadata.keyword_texts
+            : []
+      )
+        .map((value) => decodeAndNormalizeText(value))
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    ),
+  ];
+  const { peopleTags, filteredTags } = splitGettyTags(gettyTags, people);
+  const nbcumvFields = extractNbcumvFields(nbcumvMetadata);
+  const photographer =
+    nbcumvFields.photographer ??
+    (gettyDetails?.credit_display || gettyDetails?.credit) ??
+    null;
   const mediaTypeLabel = (() => {
     if (contentType) {
       return formatContentTypeLabel(contentType);
@@ -1265,7 +1439,7 @@ export function mapPhotoToMetadata(
     return formatImdbImageType(imdbType);
   })();
   const eventName =
-    mediaTypeLabel?.toLowerCase() === "event"
+    mediaTypeLabel?.toLowerCase() === "event" || galleryBucketType?.toLowerCase() === "event"
       ? decodeAndNormalizeText(eventNameRaw) ?? titles[0] ?? null
       : null;
   const faceDiagnosticsRaw =
@@ -1319,15 +1493,31 @@ export function mapPhotoToMetadata(
     imdbTitleUrl,
     mediaTypeLabel,
     eventName,
+    gettyEventUrl,
+    gettyEventId,
+    gettyEventSlug,
+    gettyEventDate,
+    groupedEventCount,
     episodeTitle,
     episodeNumber,
     episodeLabel,
     sourceVariant,
+    sourceResolution,
     sourcePageTitle: normalizedSourcePageTitle,
     sourceUrl,
     showName,
     showId,
     showContextSource,
+    gettyDetails,
+    gettyTags,
+    photographer,
+    company: nbcumvFields.company,
+    airdate: nbcumvFields.airdate,
+    uploadedAt: nbcumvFields.uploadedAt,
+    peopleTags,
+    filteredTags,
+    nbcumvShowId: nbcumvFields.showId,
+    nbcumvContentType: nbcumvFields.contentType,
     faceBoxes,
     faceCrops,
     peopleCount,
@@ -1620,6 +1810,38 @@ export function mapSeasonAssetToMetadata(
     metadata.gallery_status_checked_at ?? metadata.gallery_status_checkedAt ?? null
   );
 
+  // Getty tags & NBCUMV fields (same logic as mapPhotoToMetadata)
+  const gettyDetailsRaw =
+    getNestedMetadataObject(metadata, "getty_details") ??
+    getNestedMetadataObject(gettyMetadata, "details");
+  const gettyDetails =
+    gettyDetailsRaw && Object.keys(gettyDetailsRaw).length > 0
+      ? Object.fromEntries(
+          Object.entries(gettyDetailsRaw)
+            .map(([key, value]) => [key, decodeAndNormalizeText(value) ?? String(value ?? "").trim()])
+            .filter(([, value]) => Boolean(value))
+        )
+      : null;
+  const gettyTags = [
+    ...new Set(
+      (
+        Array.isArray(metadata.getty_tags)
+          ? metadata.getty_tags
+          : Array.isArray(gettyMetadata?.keyword_texts)
+            ? gettyMetadata.keyword_texts
+            : []
+      )
+        .map((value) => decodeAndNormalizeText(value))
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    ),
+  ];
+  const { peopleTags, filteredTags } = splitGettyTags(gettyTags, people);
+  const nbcumvFields = extractNbcumvFields(nbcumvMetadata);
+  const photographer =
+    nbcumvFields.photographer ??
+    (gettyDetails?.credit_display || gettyDetails?.credit) ??
+    null;
+
   return {
     source: asset.source,
     sourceBadgeColor: SOURCE_COLORS[asset.source.toLowerCase()] ?? "#6b7280",
@@ -1645,6 +1867,16 @@ export function mapSeasonAssetToMetadata(
     sourceVariant,
     sourcePageTitle,
     sourceUrl,
+    gettyDetails,
+    gettyTags,
+    photographer,
+    company: nbcumvFields.company,
+    airdate: nbcumvFields.airdate,
+    uploadedAt: nbcumvFields.uploadedAt,
+    peopleTags,
+    filteredTags,
+    nbcumvShowId: nbcumvFields.showId,
+    nbcumvContentType: nbcumvFields.contentType,
     faceBoxes,
     faceCrops,
     peopleCount,

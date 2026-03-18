@@ -22,11 +22,11 @@ import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
 import {
+  buildAdminRedditCommunityUrl,
+  buildAdminRedditCommunityWindowPostUrl,
+  buildAdminRedditCommunityWindowUrl,
   buildSeasonAdminUrl,
   buildShowAdminUrl,
-  buildShowRedditCommunityUrl,
-  buildShowRedditCommunityWindowPostUrl,
-  buildShowRedditCommunityWindowUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
 
@@ -82,6 +82,36 @@ interface ShowSeasonOption {
   season_number: number;
 }
 
+interface SeasonEpisodeRow {
+  id: string;
+  episode_number: number;
+  air_date: string | null;
+}
+
+interface SocialAnalyticsPeriodRow {
+  week_index?: number;
+  label?: string;
+  start?: string;
+  end?: string;
+}
+
+interface EpisodePeriodOption {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+}
+
+interface EpisodeWindowBounds {
+  key: string;
+  label: string;
+  start: string | null;
+  end: string | null;
+  type: "episode" | "period";
+  source?: "period" | "fallback";
+  episodeNumber?: number;
+}
+
 interface WindowContext {
   communityId: string;
   seasonId: string;
@@ -131,11 +161,12 @@ const SEASON_TABS: Array<{ tab: SeasonAdminTab; label: string }> = [
 ];
 
 const SOCIAL_TABS: Array<{ view: SocialAnalyticsViewSlug; label: string }> = [
-  { view: "official", label: "OFFICIAL ANALYTICS" },
+  { view: "official", label: "OFFICIAL ANALYSIS" },
   { view: "sentiment", label: "SENTIMENT ANALYSIS" },
   { view: "hashtags", label: "HASHTAGS ANALYSIS" },
   { view: "advanced", label: "ADVANCED ANALYTICS" },
   { view: "reddit", label: "REDDIT ANALYTICS" },
+  { view: "cast-content", label: "CAST COMPARISON" },
 ];
 
 const fmtNum = (value: number | null | undefined): string => {
@@ -174,6 +205,299 @@ const normalizeCommunitySlug = (value: string | null | undefined): string | null
   return cleaned || null;
 };
 
+const parseDateMs = (value: string | null | undefined): number | null => {
+  if (!value || typeof value !== "string") return null;
+  const parsed = new Date(value);
+  const ms = parsed.getTime();
+  return Number.isFinite(ms) ? ms : null;
+};
+
+const toIsoDate = (value: string | null | undefined): string | null => {
+  const ms = parseDateMs(value);
+  return ms === null ? null : new Date(ms).toISOString();
+};
+
+const EASTERN_TIMEZONE = "America/New_York";
+
+const getEasternDateParts = (
+  value: Date,
+): { year: number; month: number; day: number; hour: number; minute: number; second: number } | null => {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(value);
+  const getPart = (type: Intl.DateTimeFormatPartTypes): number | null => {
+    const raw = parts.find((part) => part.type === type)?.value;
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const year = getPart("year");
+  const month = getPart("month");
+  const day = getPart("day");
+  const hour = getPart("hour");
+  const minute = getPart("minute");
+  const second = getPart("second");
+  if (year === null || month === null || day === null || hour === null || minute === null || second === null) {
+    return null;
+  }
+  return { year, month, day, hour, minute, second };
+};
+
+const toEasternDateKey = (value: string | null | undefined): string | null => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const explicitDateMatch = trimmed.match(
+      /^(\d{4})-(\d{2})-(\d{2})(?:$|T00:00:00(?:\.000)?Z$)/,
+    );
+    if (explicitDateMatch) {
+      const year = explicitDateMatch[1];
+      const month = explicitDateMatch[2];
+      const day = explicitDateMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+  }
+  const ms = parseDateMs(value);
+  if (ms === null) return null;
+  const parts = getEasternDateParts(new Date(ms));
+  if (!parts) return null;
+  return `${String(parts.year).padStart(4, "0")}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+};
+
+const toEasternMidnightIso = (value: string | null | undefined): string | null => {
+  const dateKey = toEasternDateKey(value);
+  if (!dateKey) return null;
+  const [yearRaw, monthRaw, dayRaw] = dateKey.split("-");
+  const year = Number.parseInt(yearRaw ?? "", 10);
+  const month = Number.parseInt(monthRaw ?? "", 10);
+  const day = Number.parseInt(dayRaw ?? "", 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  for (let utcHour = 0; utcHour <= 12; utcHour += 1) {
+    const candidate = new Date(Date.UTC(year, month - 1, day, utcHour, 0, 0));
+    const parts = getEasternDateParts(candidate);
+    if (!parts) continue;
+    if (parts.year === year && parts.month === month && parts.day === day && parts.hour === 0 && parts.minute === 0) {
+      return candidate.toISOString();
+    }
+  }
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0)).toISOString();
+};
+
+const toEasternClockIso = (
+  value: string | null | undefined,
+  hour: number,
+  minute: number,
+  second: number,
+): string | null => {
+  const dateKey = toEasternDateKey(value);
+  if (!dateKey) return null;
+  const [yearRaw, monthRaw, dayRaw] = dateKey.split("-");
+  const year = Number.parseInt(yearRaw ?? "", 10);
+  const month = Number.parseInt(monthRaw ?? "", 10);
+  const day = Number.parseInt(dayRaw ?? "", 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+
+  for (let utcDayOffset = -1; utcDayOffset <= 1; utcDayOffset += 1) {
+    for (let utcHour = 0; utcHour < 24; utcHour += 1) {
+      const candidate = new Date(
+        Date.UTC(year, month - 1, day + utcDayOffset, utcHour, minute, second),
+      );
+      const parts = getEasternDateParts(candidate);
+      if (!parts) continue;
+      if (
+        parts.year === year &&
+        parts.month === month &&
+        parts.day === day &&
+        parts.hour === hour &&
+        parts.minute === minute &&
+        parts.second === second
+      ) {
+        return candidate.toISOString();
+      }
+    }
+  }
+  return null;
+};
+
+const addDaysUtc = (value: string | null | undefined, days: number): string | null => {
+  const ms = parseDateMs(value);
+  return ms === null ? null : new Date(ms + days * 24 * 60 * 60 * 1000).toISOString();
+};
+
+const parseEpisodeNumberFromPeriodLabel = (label: string): number | null => {
+  const episodeMatch = label.match(/\bepisode\s*(\d{1,3})\b/i);
+  if (!episodeMatch?.[1]) return null;
+  const parsed = Number.parseInt(episodeMatch[1], 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const isPreSeasonPeriodLabel = (label: string): boolean =>
+  /\b(pre[\s-]?season|trailer)\b/i.test(label);
+
+const isPostSeasonPeriodLabel = (label: string): boolean =>
+  /\b(post[\s-]?season|reunion|finale)\b/i.test(label);
+
+const buildPeriodOptions = (weeklyRows: SocialAnalyticsPeriodRow[]): EpisodePeriodOption[] => {
+  const weekly = weeklyRows
+    .map((row) => {
+      const start = toIsoDate(row.start);
+      const end = toIsoDate(row.end);
+      if (!start || !end) return null;
+      return {
+        key: `weekly-${row.week_index ?? `${start}-${end}`}`,
+        label: row.label?.trim() || `Week ${row.week_index ?? "?"}`,
+        start,
+        end,
+      } satisfies EpisodePeriodOption;
+    })
+    .filter((row): row is EpisodePeriodOption => Boolean(row))
+    .sort((a, b) => {
+      const aPreSeason = isPreSeasonPeriodLabel(a.label);
+      const bPreSeason = isPreSeasonPeriodLabel(b.label);
+      if (aPreSeason && !bPreSeason) return -1;
+      if (!aPreSeason && bPreSeason) return 1;
+      return (parseDateMs(a.start) ?? 0) - (parseDateMs(b.start) ?? 0);
+    });
+
+  if (weekly.length === 0) return [];
+  const allStart = weekly[0]?.start;
+  const allEnd = weekly[weekly.length - 1]?.end;
+  if (!allStart || !allEnd) return weekly;
+  return [{ key: "all-periods", label: "All Periods", start: allStart, end: allEnd }, ...weekly];
+};
+
+const buildEpisodeWindowBounds = (
+  seasonEpisodes: SeasonEpisodeRow[],
+  periodOptions: EpisodePeriodOption[],
+): Map<string, EpisodeWindowBounds> => {
+  const bounds = new Map<string, EpisodeWindowBounds>();
+  const rows = [...seasonEpisodes]
+    .filter((episode) => Number.isFinite(episode.episode_number) && episode.episode_number > 0)
+    .sort((a, b) => a.episode_number - b.episode_number);
+
+  if (rows.length > 0) {
+    const firstEpisodeAirDate = rows[0]?.air_date ?? null;
+    const lastEpisodeAirDate = rows[rows.length - 1]?.air_date ?? null;
+    const firstEpisodeAirMidnight = toEasternMidnightIso(firstEpisodeAirDate);
+    const lastEpisodeAirMidnight = toEasternMidnightIso(lastEpisodeAirDate);
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (!row) continue;
+      const nextRow = rows[index + 1];
+      const rowAirMidnight = toEasternMidnightIso(row.air_date);
+      const nextAirMidnight = nextRow ? toEasternMidnightIso(nextRow.air_date) : null;
+      bounds.set(`episode-${row.episode_number}`, {
+        key: `episode-${row.episode_number}`,
+        label: `Episode ${row.episode_number}`,
+        start: rowAirMidnight,
+        end: nextAirMidnight ?? addDaysUtc(lastEpisodeAirMidnight ?? rowAirMidnight, 7),
+        type: "episode",
+        source: "fallback",
+        episodeNumber: row.episode_number,
+      });
+    }
+
+    const preseasonEnd = rows[0] ? toEasternMidnightIso(rows[0].air_date) : null;
+    if (firstEpisodeAirMidnight || preseasonEnd) {
+      bounds.set("period-preseason", {
+        key: "period-preseason",
+        label: "Pre-Season",
+        start: firstEpisodeAirMidnight,
+        end: preseasonEnd,
+        type: "period",
+        source: "fallback",
+      });
+    }
+
+    const postseasonStart = lastEpisodeAirMidnight;
+    const postseasonEnd = addDaysUtc(postseasonStart, 7);
+    if (postseasonStart || postseasonEnd) {
+      bounds.set("period-postseason", {
+        key: "period-postseason",
+        label: "Post-Season",
+        start: postseasonStart,
+        end: postseasonEnd,
+        type: "period",
+        source: "fallback",
+      });
+    }
+  }
+
+  for (const period of periodOptions) {
+    if (period.key === "all-periods") continue;
+    const label = period.label.trim();
+    const episodeNumber = parseEpisodeNumberFromPeriodLabel(label);
+    if (episodeNumber !== null) {
+      bounds.set(`episode-${episodeNumber}`, {
+        key: `episode-${episodeNumber}`,
+        label: `Episode ${episodeNumber}`,
+        start: period.start,
+        end: period.end,
+        type: "episode",
+        source: "period",
+        episodeNumber,
+      });
+      continue;
+    }
+    if (isPreSeasonPeriodLabel(label)) {
+      bounds.set("period-preseason", {
+        key: "period-preseason",
+        label: "Pre-Season",
+        start: period.start,
+        end: period.end,
+        type: "period",
+        source: "period",
+      });
+      continue;
+    }
+    if (isPostSeasonPeriodLabel(label)) {
+      bounds.set("period-postseason", {
+        key: "period-postseason",
+        label: "Post-Season",
+        start: period.start,
+        end: period.end,
+        type: "period",
+        source: "period",
+      });
+    }
+  }
+
+  const firstEpisodeAirDate = rows.find((row) => row.episode_number === 1)?.air_date ?? null;
+  const secondEpisodeAirDate = rows.find((row) => row.episode_number === 2)?.air_date ?? null;
+  if (firstEpisodeAirDate) {
+    const preSeasonEndCutover = toEasternClockIso(firstEpisodeAirDate, 19, 0, 0);
+    const episodeOneStartCutover = toEasternClockIso(firstEpisodeAirDate, 19, 1, 1);
+    const episodeOneWindow = bounds.get("episode-1");
+    const episodeOneEndAnchor =
+      secondEpisodeAirDate ??
+      episodeOneWindow?.end ??
+      addDaysUtc(toEasternMidnightIso(firstEpisodeAirDate), 7);
+    const episodeOneEndCutover = toEasternClockIso(episodeOneEndAnchor, 19, 1, 10);
+
+    const preSeasonWindow = bounds.get("period-preseason");
+    if (preSeasonWindow && preSeasonEndCutover) {
+      bounds.set("period-preseason", { ...preSeasonWindow, end: preSeasonEndCutover });
+    }
+    if (episodeOneWindow) {
+      bounds.set("episode-1", {
+        ...episodeOneWindow,
+        start: episodeOneStartCutover ?? episodeOneWindow.start,
+        end: episodeOneEndCutover ?? episodeOneWindow.end,
+      });
+    }
+  }
+
+  return bounds;
+};
+
 /**
  * Parse reddit window context from a show-scoped pathname.  Used as a fallback
  * when the page is rendered from the s[seasonNumber] catch-all route where
@@ -188,6 +512,35 @@ const parseRedditWindowFromPathname = (
   seasonNumber: number | null;
   windowKey: string;
 } | null => {
+  const adminWithSeason = pathname.match(
+    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)\/s(\d{1,3})\/([^/]+)$/,
+  );
+  if (adminWithSeason) {
+    const communitySlug = decodeURIComponent(adminWithSeason[1] ?? "");
+    if (communitySlug.toLowerCase() !== "communities") {
+      const season = Number.parseInt(adminWithSeason[3] ?? "", 10);
+      return {
+        showId: decodeURIComponent(adminWithSeason[2] ?? ""),
+        communitySlug,
+        seasonNumber: Number.isFinite(season) && season > 0 ? season : null,
+        windowKey: decodeURIComponent(adminWithSeason[4] ?? ""),
+      };
+    }
+  }
+  const adminWithoutSeason = pathname.match(
+    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)\/([^/]+)$/,
+  );
+  if (adminWithoutSeason) {
+    const communitySlug = decodeURIComponent(adminWithoutSeason[1] ?? "");
+    if (communitySlug.toLowerCase() !== "communities") {
+      return {
+        showId: decodeURIComponent(adminWithoutSeason[2] ?? ""),
+        communitySlug,
+        seasonNumber: null,
+        windowKey: decodeURIComponent(adminWithoutSeason[3] ?? ""),
+      };
+    }
+  }
   // /{showId}/social/reddit/{communitySlug}/s{season}/{windowKey}
   const withSeason = pathname.match(
     /^\/([^/]+)\/social\/reddit\/([^/]+)\/s(\d{1,3})\/([^/]+)$/,
@@ -292,7 +645,6 @@ const resolverStageMessage = (stage: ResolverStage): string => {
   }
 };
 
-const ACTIVE_REFRESH_RUN_STATUSES = new Set<RefreshRunStatus>(["queued", "running", "cancelling"]);
 const TERMINAL_REFRESH_RUN_STATUSES = new Set<RefreshRunStatus>([
   "completed",
   "partial",
@@ -468,6 +820,7 @@ function AdminRedditWindowPostsPageContent() {
   const { user, checking, hasAccess } = useAdminGuard();
   const params = useParams<{
     showId?: string;
+    showSlug?: string;
     seasonNumber?: string;
     communitySlug?: string;
     communityId?: string;
@@ -600,7 +953,8 @@ function AdminRedditWindowPostsPageContent() {
       const communitySlugCandidates = [pathCommunitySlug, queryCommunitySlugNormalized]
         .filter((value): value is string => Boolean(value))
         .map((value) => value.toLowerCase());
-      const pathShowSlug = (params.showId ?? "").trim() || parsedFromPathname?.showId || null;
+      const pathShowSlug =
+        (params.showSlug ?? "").trim() || (params.showId ?? "").trim() || parsedFromPathname?.showId || null;
       let showSlug = pathShowSlug ?? (queryShowSlug?.trim() || null);
       let seasonNumber = toInt(params.seasonNumber ?? querySeason) ?? parsedFromPathname?.seasonNumber ?? null;
 
@@ -671,14 +1025,86 @@ function AdminRedditWindowPostsPageContent() {
       seasonNumber = resolvedSeason.season_number;
 
       let resolvedLabel = legacyPeriodLabel?.trim() || "";
-      const resolvedStart = legacyPeriodStart?.trim() || "";
-      const resolvedEnd = legacyPeriodEnd?.trim() || "";
+      let resolvedStart = legacyPeriodStart?.trim() || "";
+      let resolvedEnd = legacyPeriodEnd?.trim() || "";
 
-      // Analytics is deferred to avoid blocking the backend during discover.
-      // The analytics endpoint can take 15-20s on cold cache which blocks the
-      // single-worker backend, causing the discover call to 504.  Period dates
-      // are backfilled lazily from the discovery payload's window_start/window_end
-      // after posts load (see loadWindowPosts backfill logic).
+      if (!resolvedLabel || !resolvedStart || !resolvedEnd) {
+        setResolverStage("loading_windows");
+        const [seasonEpisodesResult, analyticsResult] = await Promise.allSettled([
+          fetchAdminJsonWithTimeout<{
+            episodes?: Array<{
+              id?: string | null;
+              episode_number?: number | string | null;
+              air_date?: string | null;
+            }>;
+            error?: string;
+          }>({
+            url: `/api/admin/trr-api/seasons/${resolvedSeason.id}/episodes?limit=250&offset=0`,
+            timeoutMs: 8_000,
+            preferredUser: user,
+            signal: resolveController.signal,
+          }),
+          fetchAdminJsonWithTimeout<{
+            weekly?: SocialAnalyticsPeriodRow[];
+            summary?: { window?: { start?: string | null; end?: string | null } };
+            window?: { start?: string | null; end?: string | null };
+            error?: string;
+          }>({
+            url: `/api/admin/trr-api/shows/${selectedCommunity.trr_show_id}/seasons/${resolvedSeason.season_number}/social/analytics?season_id=${encodeURIComponent(resolvedSeason.id)}`,
+            timeoutMs: 8_000,
+            preferredUser: user,
+            signal: resolveController.signal,
+          }),
+        ]);
+
+        const seasonEpisodes =
+          seasonEpisodesResult.status === "fulfilled" && seasonEpisodesResult.value.ok
+            ? (Array.isArray(seasonEpisodesResult.value.payload.episodes)
+                ? seasonEpisodesResult.value.payload.episodes
+                : []
+              )
+                .map((episode) => {
+                  const parsedEpisodeNumber =
+                    typeof episode.episode_number === "number"
+                      ? Math.trunc(episode.episode_number)
+                      : typeof episode.episode_number === "string"
+                        ? Number.parseInt(episode.episode_number, 10)
+                        : Number.NaN;
+                  if (!Number.isFinite(parsedEpisodeNumber) || parsedEpisodeNumber <= 0) {
+                    return null;
+                  }
+                  return {
+                    id:
+                      typeof episode.id === "string" && episode.id.trim().length > 0
+                        ? episode.id
+                        : `episode-${parsedEpisodeNumber}`,
+                    episode_number: parsedEpisodeNumber,
+                    air_date:
+                      typeof episode.air_date === "string" && episode.air_date.trim().length > 0
+                        ? episode.air_date
+                        : null,
+                  } satisfies SeasonEpisodeRow;
+                })
+                .filter((episode): episode is SeasonEpisodeRow => episode !== null)
+            : [];
+
+        const periodOptions =
+          analyticsResult.status === "fulfilled" && analyticsResult.value.ok
+            ? buildPeriodOptions(
+                Array.isArray(analyticsResult.value.payload.weekly)
+                  ? analyticsResult.value.payload.weekly
+                  : [],
+              )
+            : [];
+
+        const derivedBounds = buildEpisodeWindowBounds(seasonEpisodes, periodOptions).get(containerKey) ?? null;
+        if (derivedBounds) {
+          resolvedLabel = resolvedLabel || derivedBounds.label;
+          resolvedStart = resolvedStart || derivedBounds.start || "";
+          resolvedEnd = resolvedEnd || derivedBounds.end || "";
+        }
+      }
+
       setResolverStage("finalizing");
       if (!resolvedLabel) {
         resolvedLabel = containerKey === "period-preseason"
@@ -727,6 +1153,7 @@ function AdminRedditWindowPostsPageContent() {
     params.communitySlug,
     params.seasonNumber,
     params.showId,
+    params.showSlug,
     params.windowKey,
     pathname,
     queryCommunityId,
@@ -781,7 +1208,7 @@ function AdminRedditWindowPostsPageContent() {
           }
           paramsObj.set("refresh", "true");
           paramsObj.set("wait", "true");
-          paramsObj.set("mode", "sync_posts");
+          paramsObj.set("mode", "sync_full");
         }
 
         const response = await fetchAdminJsonWithTimeout<{
@@ -837,7 +1264,7 @@ function AdminRedditWindowPostsPageContent() {
     [context, hasAccess, user],
   );
 
-  const [detailsSyncing, setDetailsSyncing] = useState(false);
+  const detailsSyncing = false;
   const detailRunHeaders = useMemo(
     () => ({ "x-trr-flow-key": detailRunFlowKey }),
     [detailRunFlowKey],
@@ -1051,123 +1478,6 @@ function AdminRedditWindowPostsPageContent() {
     ],
   );
 
-  const syncDetails = useCallback(
-    async () => {
-      if (!user || !hasAccess || !context) return;
-      const isPreOrPostSeason =
-        context.containerKey === "period-preseason" || context.containerKey === "period-postseason";
-      if (!isPreOrPostSeason && !context.periodStart && !context.periodEnd) {
-        setError("Window boundaries are unavailable. Open the community season view and sync from the period card.");
-        return;
-      }
-      setDetailsSyncing(true);
-      setError(null);
-      setDetailResumeBanner(null);
-      try {
-        const paramsObj = new URLSearchParams({
-          season_id: context.seasonId,
-          container_key: context.containerKey,
-          period_label: context.periodLabel,
-          refresh: "true",
-          wait: "false",
-          mode: "sync_details",
-        });
-        if (context.periodStart) {
-          paramsObj.set("period_start", context.periodStart);
-        }
-        if (context.periodEnd) {
-          paramsObj.set("period_end", context.periodEnd);
-        }
-        const response = await fetchAdminJsonWithTimeout<{
-          discovery?: DiscoveryPayload | null;
-          warning?: string;
-          error?: string;
-          run?: Record<string, unknown>;
-        }>({
-          url: `/api/admin/reddit/communities/${context.communityId}/discover?${paramsObj.toString()}`,
-          timeoutMs: 12_000,
-          preferredUser: user,
-          headers: detailRunHeaders,
-        });
-        if (!response.ok) {
-          throw new Error(response.payload.error ?? "Failed to sync details");
-        }
-        const run = parseRefreshRunPayload(response.payload.run);
-        if (response.payload.discovery) {
-          setDiscovery(response.payload.discovery);
-        }
-        if (response.payload.warning) {
-          setWarning(response.payload.warning);
-        }
-        if (run) {
-          setWarning(buildDetailRunMessage(context.periodLabel, run));
-          if (ACTIVE_REFRESH_RUN_STATUSES.has(run.status)) {
-            upsertAdminRunSession(detailRunFlowScope, {
-              runId: run.run_id,
-              flowKey: detailRunFlowKey,
-              status: "active",
-            });
-            if (run.operation_id) {
-              upsertAdminOperationSession(detailOperationFlowScope, {
-                flowKey: detailRunFlowKey,
-                input: "/api/admin/reddit/communities/[communityId]/discover",
-                method: "GET",
-                operationId: run.operation_id,
-                runId: run.run_id,
-                status: "active",
-              });
-            }
-            setDetailRunId(run.run_id);
-            await fetchManualAttachRuns();
-            void pollDetailSyncRun(run.run_id, context.periodLabel, run.operation_id);
-            return;
-          }
-          if (run.status === "failed" || run.status === "cancelled") {
-            if (run.operation_id) {
-              markAdminOperationSessionStatus(
-                detailOperationFlowScope,
-                run.status === "cancelled" ? "cancelled" : "failed",
-              );
-            }
-            markAdminRunSessionStatus(
-              detailRunFlowScope,
-              run.status === "cancelled" ? "cancelled" : "failed",
-            );
-            setDetailRunId(null);
-            throw new Error(run.error || `Detail sync ${run.status}.`);
-          }
-          if (run.operation_id) {
-            markAdminOperationSessionStatus(detailOperationFlowScope, "completed");
-          }
-          markAdminRunSessionStatus(detailRunFlowScope, "completed");
-          setDetailRunId(null);
-          await loadWindowPosts(false);
-          await fetchManualAttachRuns();
-          return;
-        }
-      } catch (syncError) {
-        if (isRequestCancelledError(syncError)) return;
-        markAdminOperationSessionStatus(detailOperationFlowScope, "failed");
-        markAdminRunSessionStatus(detailRunFlowScope, "failed");
-        setError(syncError instanceof Error ? syncError.message : "Failed to sync details");
-      } finally {
-        setDetailsSyncing(false);
-      }
-    },
-    [
-      context,
-      detailOperationFlowScope,
-      detailRunFlowKey,
-      detailRunFlowScope,
-      detailRunHeaders,
-      fetchManualAttachRuns,
-      hasAccess,
-      loadWindowPosts,
-      pollDetailSyncRun,
-      user,
-    ],
-  );
-
   const handleManualAttachRun = useCallback(async () => {
     const runId = selectedManualAttachRunId.trim();
     if (!runId || !context) return;
@@ -1274,9 +1584,9 @@ function AdminRedditWindowPostsPageContent() {
   useEffect(() => {
     if (!context || !hasAccess || !user) return;
 
-    const canonicalPath = buildShowRedditCommunityWindowUrl({
-      showSlug: context.showSlug,
+    const canonicalPath = buildAdminRedditCommunityWindowUrl({
       communitySlug: context.communitySlug,
+      showSlug: context.showSlug,
       seasonNumber: context.seasonNumber,
       windowKey: toCanonicalWindowToken(context.containerKey),
     });
@@ -1302,9 +1612,9 @@ function AdminRedditWindowPostsPageContent() {
       })
     : "/admin/social";
   const communityHref = context
-    ? buildShowRedditCommunityUrl({
-        showSlug: context.showSlug,
+    ? buildAdminRedditCommunityUrl({
         communitySlug: context.communitySlug,
+        showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
       })
     : redditHref;
@@ -1313,9 +1623,9 @@ function AdminRedditWindowPostsPageContent() {
       if (!context) return null;
       const normalizedPostId = thread.reddit_post_id.trim();
       if (!normalizedPostId) return null;
-      return buildShowRedditCommunityWindowPostUrl({
-        showSlug: context.showSlug,
+      return buildAdminRedditCommunityWindowPostUrl({
         communitySlug: context.communitySlug,
+        showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
         windowKey: toCanonicalWindowToken(context.containerKey),
         postId: normalizedPostId,
@@ -1403,7 +1713,7 @@ function AdminRedditWindowPostsPageContent() {
                 <h2 className="text-2xl font-semibold text-zinc-950">Discussion window dashboard</h2>
                 <p className="text-sm font-medium text-zinc-900">Window period: {context.periodLabel}</p>
                 <p className="max-w-3xl text-sm text-zinc-600">
-                  Track the posts captured for this discussion window, then jump into per-post detail sync when you need comments, media, and match context.
+                  Track the posts captured for this discussion window and use Sync Posts to refresh posts, comments, details, and media together.
                 </p>
               </div>
               <div className="grid min-w-[280px] gap-3 sm:grid-cols-3">
@@ -1473,19 +1783,10 @@ function AdminRedditWindowPostsPageContent() {
                   type="button"
                   onClick={() => void loadWindowPosts(true)}
                   disabled={loading || detailsSyncing}
+                  title="Sync posts, comments, details, and media for this window"
                   className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
                 >
                   {loading ? "Syncing…" : "Sync Posts"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void syncDetails()}
-                  disabled={loading || detailsSyncing}
-                  aria-label="Sync Details"
-                  title="Deep-scrape comment trees, media, and post details for this window"
-                  className="rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
-                >
-                  {detailsSyncing ? "Starting…" : "Sync Details 🕷️"}
                 </button>
                 <a
                   href={communityHref}

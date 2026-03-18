@@ -97,6 +97,7 @@ const PERSON_ROUTE_ADMIN_TAB_SEGMENTS = new Set([
   "news",
   "credits",
   "fandom",
+  "social",
 ]);
 const SOCIAL_WEEK_PLATFORM_SEGMENTS = new Set([
   "instagram",
@@ -360,19 +361,38 @@ function parseShortSeasonSocialWeekPath(segments: string[]): {
   weekNumber: string;
   subTab: string | null;
 } | null {
-  if (segments.length < 4 || segments.length > 5) return null;
-  const [showSegment, seasonToken, socialSegment, weekToken, subTabSegment] = segments;
-  if (!showSegment || !isSeasonToken(seasonToken ?? "")) return null;
-  if ((socialSegment ?? "").trim().toLowerCase() !== "social") return null;
-  if (!isWeekToken(weekToken ?? "")) return null;
-  const subTab = resolveSocialWeekSubTab(subTabSegment);
-  if (segments.length === 5 && !subTab) return null;
-  return {
-    showSegment,
-    seasonNumber: (seasonToken ?? "").slice(1),
-    weekNumber: (weekToken ?? "").slice(1),
-    subTab,
-  };
+  // Old form: /:showId/s:season/social/w:week[/:platform]
+  if (segments.length >= 4 && segments.length <= 5) {
+    const [showSegment, seasonToken, socialSegment, weekToken, subTabSegment] = segments;
+    if (showSegment && isSeasonToken(seasonToken ?? "") &&
+        (socialSegment ?? "").trim().toLowerCase() === "social" &&
+        isWeekToken(weekToken ?? "")) {
+      const subTab = resolveSocialWeekSubTab(subTabSegment);
+      if (segments.length === 5 && !subTab) return null;
+      return {
+        showSegment,
+        seasonNumber: (seasonToken ?? "").slice(1),
+        weekNumber: (weekToken ?? "").slice(1),
+        subTab,
+      };
+    }
+  }
+  // New canonical form: /:showId/social/s:season/w:week[/:platform]
+  if (segments.length >= 4 && segments.length <= 5) {
+    const [showSegment, socialSegment, seasonToken, weekToken, subTabSegment] = segments;
+    if (showSegment && (socialSegment ?? "").trim().toLowerCase() === "social" &&
+        isSeasonToken(seasonToken ?? "") && isWeekToken(weekToken ?? "")) {
+      const subTab = resolveSocialWeekSubTab(subTabSegment);
+      if (segments.length === 5 && !subTab) return null;
+      return {
+        showSegment,
+        seasonNumber: (seasonToken ?? "").slice(1),
+        weekNumber: (weekToken ?? "").slice(1),
+        subTab,
+      };
+    }
+  }
+  return null;
 }
 
 function parseLongSeasonSocialWeekPath(segments: string[]): {
@@ -447,9 +467,10 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
 
   const longSeasonSocialWeekPath = parseLongSeasonSocialWeekPath(segments);
   if (longSeasonSocialWeekPath) {
-    const canonicalSubTab = longSeasonSocialWeekPath.subTab ?? "details";
+    const canonicalSubTab = longSeasonSocialWeekPath.subTab;
+    const weekBase = `/${encodeURIComponent(longSeasonSocialWeekPath.showSegment)}/social/s${longSeasonSocialWeekPath.seasonNumber}/w${longSeasonSocialWeekPath.weekNumber}`;
     return appendSearch(
-      `/${encodeURIComponent(longSeasonSocialWeekPath.showSegment)}/s${longSeasonSocialWeekPath.seasonNumber}/social/w${longSeasonSocialWeekPath.weekNumber}/${canonicalSubTab}`,
+      canonicalSubTab && canonicalSubTab !== "details" ? `${weekBase}/${canonicalSubTab}` : weekBase,
       searchParams,
     );
   }
@@ -511,9 +532,10 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
     showTail[3]?.toLowerCase() === "week" &&
     /^[0-9]{1,3}$/.test(showTail[4] ?? "")
   ) {
-    const canonicalSubTab = resolveSocialWeekSubTab(showTail[5]) ?? "details";
+    const canonicalSubTab = resolveSocialWeekSubTab(showTail[5]);
+    const weekBase = `/${encodedShowSegment}/social/s${showTail[1]}/w${showTail[4]}`;
     return appendSearch(
-      `/${encodedShowSegment}/s${showTail[1]}/social/w${showTail[4]}/${canonicalSubTab}`,
+      canonicalSubTab && canonicalSubTab !== "details" ? `${weekBase}/${canonicalSubTab}` : weekBase,
       searchParams,
     );
   }
@@ -613,7 +635,7 @@ function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchPa
     if (segments.length === 2) {
       return base;
     }
-    if (showContext && segments.length === 3 && PERSON_ROUTE_ADMIN_TAB_SEGMENTS.has(normalizedThird)) {
+    if (segments.length === 3 && PERSON_ROUTE_ADMIN_TAB_SEGMENTS.has(normalizedThird)) {
       return `${base}/${normalizedThird === "details" ? "overview" : normalizedThird}`;
     }
     return null;

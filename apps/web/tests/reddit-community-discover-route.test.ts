@@ -264,6 +264,38 @@ describe("/api/admin/reddit/communities/[communityId]/discover route", () => {
     expect(payload.discovery?.threads?.[0]?.reddit_post_id).toBe("post-1");
   });
 
+  it("forwards sync_full mode and disables inline comment fetching for full-sync runs", async () => {
+    fetchSocialBackendJsonMock
+      .mockResolvedValueOnce({
+        run: {
+          run_id: "run-sync-full",
+          status: "queued",
+        },
+        execution_owner: "remote_worker",
+        execution_mode_canonical: "remote",
+      })
+      .mockResolvedValueOnce({
+        discovery: DISCOVERY_RESULT,
+        matched_period_key: "period-preseason",
+        misses: [],
+      });
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/discover?season_id=${SEASON_ID}&container_key=period-preseason&period_start=2025-08-14T00:00:00.000Z&period_end=2025-09-16T23:00:00.000Z&refresh=true&mode=sync_full`,
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ communityId: COMMUNITY_ID }) });
+    expect(response.status).toBe(200);
+
+    const runBody = JSON.parse(
+      (fetchSocialBackendJsonMock.mock.calls[0]?.[1] as { body?: string }).body ?? "{}",
+    ) as Record<string, unknown>;
+    expect(runBody.mode).toBe("sync_full");
+    expect(runBody.fetch_comments).toBe(false);
+    expect(runBody.comment_delta_only).toBe(true);
+  });
+
   it("wait=true polls status for completion when explicitly requested", async () => {
     fetchSocialBackendJsonMock
       .mockResolvedValueOnce({

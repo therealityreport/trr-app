@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SystemHealthModal, { HealthIndicator } from "@/components/admin/SystemHealthModal";
 
@@ -22,6 +22,11 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+const healthDotCallCount = () =>
+  fetchAdminWithAuthMock.mock.calls.filter(([input]) =>
+    String(input).includes("/api/admin/trr-api/social/ingest/health-dot"),
+  ).length;
 
 describe("SystemHealthModal polling", () => {
   let queueStatusPayload: {
@@ -264,6 +269,65 @@ describe("SystemHealthModal polling", () => {
         String(input).includes("/api/admin/trr-api/social/ingest/queue-status"),
       ),
     ).toBe(false);
+  });
+
+  it("backs off repeated health-dot polling after a stable status in dev", async () => {
+    vi.useFakeTimers();
+
+    render(<HealthIndicator onClick={() => undefined} />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(healthDotCallCount()).toBe(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(healthDotCallCount()).toBe(7);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_000);
+    });
+    expect(healthDotCallCount()).toBe(7);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(healthDotCallCount()).toBe(8);
+  });
+
+  it("pauses health-dot polling while hidden and refetches immediately when visible again", async () => {
+    vi.useFakeTimers();
+
+    render(<HealthIndicator onClick={() => undefined} />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(healthDotCallCount()).toBe(1);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    fireEvent(document, new Event("visibilitychange"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(healthDotCallCount()).toBe(1);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    fireEvent(document, new Event("visibilitychange"));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(healthDotCallCount()).toBe(2);
   });
 
   it("loads full queue diagnostics when modal is open", async () => {

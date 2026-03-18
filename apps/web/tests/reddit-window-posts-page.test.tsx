@@ -46,6 +46,15 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     json: async () => body,
   }) as Response;
 
+const seasonEpisodesPayload = {
+  episodes: [
+    { id: "ep-1", episode_number: 1, air_date: "2025-09-16T00:00:00.000Z" },
+    { id: "ep-2", episode_number: 2, air_date: "2025-09-23T00:00:00.000Z" },
+    { id: "ep-18", episode_number: 18, air_date: "2026-01-20T00:00:00.000Z" },
+    { id: "ep-19", episode_number: 19, air_date: "2026-01-27T00:00:00.000Z" },
+  ],
+};
+
 describe("admin reddit window posts page", () => {
   beforeEach(() => {
     useParamsMock.mockReset();
@@ -118,6 +127,9 @@ describe("admin reddit window posts page", () => {
           ],
         });
       }
+      if (url.includes("/api/admin/trr-api/seasons/season-6/episodes")) {
+        return jsonResponse(seasonEpisodesPayload);
+      }
       if (url.includes("/social/analytics")) {
         return jsonResponse({
           weekly: [
@@ -144,7 +156,7 @@ describe("admin reddit window posts page", () => {
     render(<AdminRedditWindowPostsPage />);
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+      expect(replaceMock).toHaveBeenCalledWith("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/w0");
     });
     expect(screen.getByText("No posts found for this window yet.")).toBeInTheDocument();
   });
@@ -185,6 +197,9 @@ describe("admin reddit window posts page", () => {
       if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
         return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
       }
+      if (url.includes("/api/admin/trr-api/seasons/season-6/episodes")) {
+        return jsonResponse(seasonEpisodesPayload);
+      }
       if (url.includes("/social/analytics")) {
         throw new DOMException("Request timed out", "AbortError");
       }
@@ -203,7 +218,7 @@ describe("admin reddit window posts page", () => {
     render(<AdminRedditWindowPostsPage />);
 
     await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+      expect(replaceMock).toHaveBeenCalledWith("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/w0");
     });
     // Period dates are now backfilled lazily from discovery window_start/window_end;
     // no user-facing warning is shown during context resolution.
@@ -241,6 +256,9 @@ describe("admin reddit window posts page", () => {
       }
       if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
         return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
+      }
+      if (url.includes("/api/admin/trr-api/seasons/season-6/episodes")) {
+        return jsonResponse(seasonEpisodesPayload);
       }
       if (url.includes("/social/analytics")) {
         return jsonResponse({
@@ -281,7 +299,6 @@ describe("admin reddit window posts page", () => {
   it("renders per-post View Details links to canonical reddit post detail routes", async () => {
     const replaceMock = vi.fn();
     useRouterMock.mockReturnValue({ replace: replaceMock });
-    usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -327,6 +344,9 @@ describe("admin reddit window posts page", () => {
       if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
         return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
       }
+      if (url.includes("/api/admin/trr-api/seasons/season-6/episodes")) {
+        return jsonResponse(seasonEpisodesPayload);
+      }
       return jsonResponse({ error: "unexpected" }, 500);
     });
 
@@ -334,32 +354,15 @@ describe("admin reddit window posts page", () => {
 
     const detailsLink = await screen.findByRole("link", { name: "View Details" });
     expect(detailsLink.getAttribute("href")).toBe(
-      "/rhoslc/social/reddit/BravoRealHousewives/s6/w0/sample-thread--u-test-user",
+      "/admin/social/reddit/BravoRealHousewives/rhoslc/s6/w0/abc123/sample-thread--u-test-user",
     );
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it("kicks off Sync Details in background with wait=false and polls run status", async () => {
+  it("does not render a separate Sync Details button", async () => {
     usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/api/admin/reddit/runs?")) {
-        return jsonResponse({ runs: [] });
-      }
-      if (url.includes("/api/admin/reddit/runs/11111111-1111-1111-1111-111111111111")) {
-        return jsonResponse({
-          run_id: "11111111-1111-1111-1111-111111111111",
-          status: "completed",
-        });
-      }
-      if (url.includes("/discover?") && url.includes("mode=sync_details")) {
-        return jsonResponse({
-          run: {
-            run_id: "11111111-1111-1111-1111-111111111111",
-            status: "running",
-          },
-        });
-      }
       if (url.includes("/discover?")) {
         return jsonResponse({
           discovery: {
@@ -384,40 +387,77 @@ describe("admin reddit window posts page", () => {
       if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
         return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
       }
+      if (url.includes("/api/admin/trr-api/seasons/season-6/episodes")) {
+        return jsonResponse(seasonEpisodesPayload);
+      }
+      return jsonResponse({ error: "unexpected" }, 500);
+    });
+
+    render(<AdminRedditWindowPostsPage />);
+    await screen.findByText("No posts found for this window yet.");
+    expect(screen.queryByRole("button", { name: "Sync Details" })).not.toBeInTheDocument();
+  });
+
+  it("derives episode boundaries for admin e18 sync-post requests", async () => {
+    useParamsMock.mockReturnValue({
+      showSlug: "rhoslc",
+      seasonNumber: "6",
+      communitySlug: "BravoRealHousewives",
+      windowKey: "e18",
+    });
+    usePathnameMock.mockReturnValue("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e18");
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
+
+    fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({
+          communities: [
+            {
+              id: "community-1",
+              trr_show_id: "show-1",
+              trr_show_name: "The Real Housewives of Salt Lake City",
+              subreddit: "BravoRealHousewives",
+            },
+          ],
+        });
+      }
+      if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
+        return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
+      }
+      if (url.includes("/api/admin/trr-api/seasons/season-6/episodes")) {
+        return jsonResponse(seasonEpisodesPayload);
+      }
+      if (url.includes("/social/analytics")) {
+        return jsonResponse({ weekly: [] });
+      }
+      if (url.includes("/discover?")) {
+        return jsonResponse({
+          discovery: {
+            fetched_at: "2026-03-01T00:00:00.000Z",
+            totals: { fetched_rows: 0, matched_rows: 0, tracked_flair_rows: 0 },
+            threads: [],
+          },
+        });
+      }
       return jsonResponse({ error: "unexpected" }, 500);
     });
 
     render(<AdminRedditWindowPostsPage />);
     await screen.findByText("No posts found for this window yet.");
 
-    fireEvent.click(screen.getByRole("button", { name: "Sync Details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync Posts" }));
 
     await waitFor(() => {
-      const syncDetailsCall = fetchAdminWithAuthMock.mock.calls.find((call) => {
+      const syncPostsCall = fetchAdminWithAuthMock.mock.calls.find((call) => {
         const url = String(call[0]);
-        return url.includes("/discover?") && url.includes("mode=sync_details");
+        return url.includes("/discover?") && url.includes("mode=sync_full") && url.includes("refresh=true");
       });
-      expect(syncDetailsCall).toBeTruthy();
-      const syncUrl = String(syncDetailsCall?.[0] ?? "");
-      expect(syncUrl).toContain("refresh=true");
-      expect(syncUrl).toContain("wait=false");
-      expect(syncUrl).toContain("mode=sync_details");
-    });
-
-    await waitFor(() => {
-      expect(fetchAdminWithAuthMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/admin/reddit/runs/11111111-1111-1111-1111-111111111111"),
-        expect.any(Object),
-        expect.any(Object),
-      );
-    });
-
-    await waitFor(() => {
-      expect(fetchAdminWithAuthMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/admin/reddit/runs?"),
-        expect.any(Object),
-        expect.any(Object),
-      );
+      expect(syncPostsCall).toBeTruthy();
+      const syncUrl = String(syncPostsCall?.[0] ?? "");
+      expect(syncUrl).toContain("mode=sync_full");
+      expect(syncUrl).toContain("period_start=2026-01-20T05%3A00%3A00.000Z");
+      expect(syncUrl).toContain("period_end=2026-01-27T05%3A00%3A00.000Z");
     });
   });
 });

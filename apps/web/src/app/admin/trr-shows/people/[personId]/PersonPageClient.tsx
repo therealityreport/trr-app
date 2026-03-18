@@ -34,6 +34,7 @@ import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/Ex
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
 import ShowNewsTab from "@/components/admin/show-tabs/ShowNewsTab";
 import FandomSyncModal from "@/components/admin/FandomSyncModal";
+import NbcumvSeasonBios from "@/components/admin/NbcumvSeasonBios";
 import ReassignImageModal from "@/components/admin/ReassignImageModal";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import SocialGrowthSection from "@/components/admin/social-growth-section";
@@ -69,9 +70,11 @@ import {
 import {
   BRAVOCON_LABEL,
   CANONICAL_SCOPED_SOURCE_ORDER,
+  buildPersonGalleryShowOptions,
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
   computePersonPhotoShowBuckets,
+  getShowDisplayLabel,
   isWwhlShowName,
   resolveGalleryShowFilterFallback,
   resolvePersonGalleryImportContext,
@@ -79,7 +82,6 @@ import {
   WWHL_LABEL,
   type CanonicalScopedSource,
   type GalleryShowFilter,
-  type PersonGalleryEventOption,
 } from "@/lib/admin/person-gallery-media-view";
 import { formatPersonRefreshSummary } from "@/lib/admin/person-refresh-summary";
 import {
@@ -495,7 +497,7 @@ interface UnifiedNewsFacets {
   seasons: UnifiedNewsFacetSeason[];
 }
 
-type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom" | "social-growth";
+type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom" | "social";
 type ReprocessStageKey = "all" | "tagging" | "crop" | "id_text" | "resize";
 type StageTargetScope = "filtered" | "full";
 type StageTargets = {
@@ -3066,8 +3068,6 @@ export default function PersonProfilePage() {
   const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>("all");
   const [selectedOtherShowKey, setSelectedOtherShowKey] = useState<string>("all");
   const [selectedEventBucketKey, setSelectedEventBucketKey] = useState<string>("all");
-  const [showEventsMenu, setShowEventsMenu] = useState(false);
-  const eventsMenuRef = useRef<HTMLDivElement | null>(null);
   const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
   const canonicalSourceOrderDirty = useMemo(
     () => canonicalSourceOrder.join("|") !== initialCanonicalSourceOrder.join("|"),
@@ -3105,43 +3105,16 @@ export default function PersonProfilePage() {
     () => buildShowAcronym(activeShowName),
     [activeShowName]
   );
+  const activeShowChipLabel =
+    getShowDisplayLabel(activeShowName) ??
+    (showSlugForRouting ? humanizeSlug(showSlugForRouting) : "This Show");
   const activeShowFilterLabel =
     activeShowName ??
     activeShowAcronym ??
     (showSlugForRouting ? humanizeSlug(showSlugForRouting) : "This Show");
   const knownShowOptions = useMemo(() => {
-    const byKey = new Map<
-      string,
-      { key: string; showId: string | null; showName: string; acronym: string | null }
-    >();
-    for (const credit of galleryFilterCreditsSource) {
-      if (!credit.show_id) continue;
-      const showName = credit.show_name?.trim() ?? "";
-      if (!showName || isWwhlShowName(showName)) continue;
-      const key = `id:${credit.show_id}`;
-      if (byKey.has(key)) continue;
-      byKey.set(key, {
-        key,
-        showId: credit.show_id,
-        showName,
-        acronym: buildShowAcronym(showName),
-      });
-    }
-    for (const photo of photos) {
-      if (photo.bucket_type !== "show") continue;
-      const showName = photo.resolved_show_name?.trim() ?? "";
-      if (!showName || isWwhlShowName(showName)) continue;
-      const key = photo.resolved_show_id ? `id:${photo.resolved_show_id}` : `name:${showName.toLowerCase()}`;
-      if (byKey.has(key)) continue;
-      byKey.set(key, {
-        key,
-        showId: photo.resolved_show_id ?? null,
-        showName,
-        acronym: buildShowAcronym(showName),
-      });
-    }
-    return Array.from(byKey.values()).sort((a, b) => a.showName.localeCompare(b.showName));
-  }, [galleryFilterCreditsSource, photos]);
+    return buildPersonGalleryShowOptions(photos);
+  }, [photos]);
   const activeShowOption = useMemo(() => {
     if (!activeShowName && !showIdForApi) return null;
     const targetShowId = showIdForApi?.trim();
@@ -3241,20 +3214,6 @@ export default function PersonProfilePage() {
     setSelectedOtherShowKey("all");
   }, [knownShowOptions, selectedOtherShowKey]);
 
-  useEffect(() => {
-    if (!showEventsMenu) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (eventsMenuRef.current?.contains(target)) return;
-      setShowEventsMenu(false);
-    };
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-    };
-  }, [showEventsMenu]);
-
   const mediaViewAvailability = useMemo(() =>
     computePersonGalleryMediaViewAvailability({
       photos,
@@ -3288,15 +3247,9 @@ export default function PersonProfilePage() {
     hasNonThisShowMatches,
   } = mediaViewAvailability;
 
-  const selectedEventOption = useMemo<PersonGalleryEventOption | null>(
-    () => eventOptions.find((option) => option.key === selectedEventBucketKey) ?? null,
-    [eventOptions, selectedEventBucketKey]
-  );
-
   useEffect(() => {
     if (eventOptions.length === 0) {
       setSelectedEventBucketKey("all");
-      setShowEventsMenu(false);
       return;
     }
     if (selectedEventBucketKey === "all") return;
@@ -3403,13 +3356,17 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     if (galleryShowFilter !== "events") return;
+    if (hasEventMatches && eventOptions.length === 0) {
+      setSelectedEventBucketKey("all");
+      return;
+    }
     if (hasSelectedEventMatches) return;
     if (eventOptions[0]?.key) {
       setSelectedEventBucketKey(eventOptions[0].key);
       return;
     }
     setGalleryShowFilter(Boolean(showIdParam) ? "this-show" : "all");
-  }, [eventOptions, galleryShowFilter, hasSelectedEventMatches, showIdParam]);
+  }, [eventOptions, galleryShowFilter, hasEventMatches, hasSelectedEventMatches, showIdParam]);
 
   // Compute unique sources from photos
   const uniqueSources = useMemo(() => {
@@ -7708,7 +7665,7 @@ export default function PersonProfilePage() {
                   { id: "news", label: `News (${unifiedNews.length})` },
                   { id: "credits", label: `Credits (${credits.length})` },
                   { id: "fandom", label: fandomData.length > 0 ? `Fandom (${fandomData.length})` : "Fandom" },
-                  { id: "social-growth", label: "Social Growth" },
+                  { id: "social", label: "Social" },
                 ] as const
               ).map((tab) => (
                 <button
@@ -7732,6 +7689,11 @@ export default function PersonProfilePage() {
           {/* Overview Tab */}
           {activeTab === "overview" && (
             <div className="grid gap-6 lg:grid-cols-2">
+              {/* Season Bios (NBCUMV) */}
+              {person?.full_name && (
+                <NbcumvSeasonBios personName={person.full_name} />
+              )}
+
               {/* External IDs */}
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <h3 className="mb-4 text-lg font-bold text-zinc-900">
@@ -8267,7 +8229,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        {activeShowFilterLabel}
+                        {activeShowChipLabel}
                       </button>
                     )}
                     {(showIdParam ? otherKnownShowOptions : knownShowOptions).map((option) => (
@@ -8284,7 +8246,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        {option.acronym ? `${option.showName} (${option.acronym})` : option.showName}
+                        {getShowDisplayLabel(option.showName) ?? option.showName}
                       </button>
                     ))}
                     {(hasWwhlMatches || hasWwhlCredit) && (
@@ -8314,49 +8276,20 @@ export default function PersonProfilePage() {
                       </button>
                     )}
                     {hasEventMatches && (
-                      <div className="relative" ref={eventsMenuRef}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (eventOptions.length === 0) {
-                              setGalleryShowFilter("events");
-                              return;
-                            }
-                            setShowEventsMenu((current) => !current);
-                          }}
-                          className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                            galleryShowFilter === "events"
-                              ? "border-zinc-900 bg-zinc-900 text-white"
-                              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                          }`}
-                        >
-                          {galleryShowFilter === "events" && selectedEventOption
-                            ? `Events: ${selectedEventOption.label}`
-                            : "Events"}
-                        </button>
-                        {showEventsMenu && eventOptions.length > 0 && (
-                          <div className="absolute left-0 top-full z-20 mt-2 min-w-64 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg">
-                            {eventOptions.map((option) => (
-                              <button
-                                type="button"
-                                key={option.key}
-                                onClick={() => {
-                                  setSelectedEventBucketKey(option.key);
-                                  setGalleryShowFilter("events");
-                                  setShowEventsMenu(false);
-                                }}
-                                className={`block w-full rounded-lg px-3 py-2 text-left text-xs font-medium transition ${
-                                  galleryShowFilter === "events" && selectedEventBucketKey === option.key
-                                    ? "bg-zinc-900 text-white"
-                                    : "text-zinc-700 hover:bg-zinc-50"
-                                }`}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedEventBucketKey("all");
+                          setGalleryShowFilter("events");
+                        }}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "events"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        Events
+                      </button>
                     )}
                     {hasUnknownShowMatches && (
                       <button
@@ -8385,6 +8318,39 @@ export default function PersonProfilePage() {
                       </button>
                     )}
                   </div>
+                  {galleryShowFilter === "events" && eventOptions.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedEventBucketKey("all")}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                          selectedEventBucketKey === "all"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        All Events
+                      </button>
+                      {eventOptions.map((option) => (
+                        <button
+                          type="button"
+                          key={option.key}
+                          onClick={() => {
+                            setSelectedEventBucketKey(option.key);
+                            setGalleryShowFilter("events");
+                          }}
+                          className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                            selectedEventBucketKey === option.key
+                              ? "border-zinc-900 bg-zinc-900 text-white"
+                              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                          }`}
+                        >
+                          {option.label}
+                          {typeof option.count === "number" ? ` (${option.count})` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -9165,8 +9131,8 @@ export default function PersonProfilePage() {
             </div>
           )}
 
-          {/* Social Growth Tab */}
-          {activeTab === "social-growth" && (
+          {/* Social Tab */}
+          {activeTab === "social" && (
             <SocialGrowthSection
               personId={personId}
               instagramHandle={instagramHandle}

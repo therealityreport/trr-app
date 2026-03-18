@@ -233,6 +233,7 @@ const parseContainerKey = (value: string | null): string | null => {
 };
 
 const buildRunConfigHash = (input: {
+  mode: "sync_posts" | "sync_details" | "sync_full";
   coverageMode: CoverageMode;
   maxPages: number | null;
   exhaustiveWindow: boolean;
@@ -247,6 +248,7 @@ const buildRunConfigHash = (input: {
   commentDeltaOnly: boolean;
 }): string => {
   const canonical = {
+    mode: input.mode,
     coverage_mode: input.coverageMode,
     max_pages: input.maxPages ?? null,
     exhaustive_window: input.exhaustiveWindow,
@@ -876,8 +878,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ...request.nextUrl.searchParams.getAll("seed_post_urls"),
     ]);
     const rawMode = request.nextUrl.searchParams.get("mode");
-    const refreshMode: "sync_posts" | "sync_details" | undefined =
-      rawMode === "sync_posts" || rawMode === "sync_details" ? rawMode : undefined;
+    const refreshMode: "sync_posts" | "sync_details" | "sync_full" | undefined =
+      rawMode === "sync_posts" || rawMode === "sync_details" || rawMode === "sync_full"
+        ? rawMode
+        : undefined;
     const forceFlairOnlyMode = forceIncludeFlairs.length > 0;
     const analysisFlairs = forceFlairOnlyMode ? [] : community.analysis_flairs ?? [];
     const analysisAllFlairs = forceFlairOnlyMode
@@ -991,11 +995,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // The backend loop uses `range(max_pages)` so 0 would mean zero iterations.
     // Translate 0 → 10 000 (effectively unlimited) before sending to backend.
     const effectiveMaxPages = (maxPages ?? 0) === 0 ? 10_000 : maxPages!;
-    const fetchComments = true;
+    const effectiveMode = refreshMode ?? "sync_posts";
+    const fetchComments = effectiveMode !== "sync_full";
     const commentDeltaOnly = true;
     const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || undefined;
     const flowKey = request.headers.get("x-trr-flow-key")?.trim() || undefined;
     const runConfigHash = buildRunConfigHash({
+      mode: effectiveMode,
       coverageMode,
       maxPages: effectiveMaxPages,
       exhaustiveWindow,
@@ -1039,7 +1045,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       max_pages: effectiveMaxPages,
       ...(tabSessionId ? { client_session_id: tabSessionId } : {}),
       ...(flowKey ? { client_workflow_id: flowKey } : {}),
-      ...(refreshMode ? { mode: refreshMode } : {}),
+      mode: effectiveMode,
     };
 
     const started = await fetchSocialBackendJson("/reddit/runs", {

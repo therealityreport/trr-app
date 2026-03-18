@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -128,12 +129,17 @@ type SocialRunSummary = {
   success_rate_pct?: number | null;
 };
 
-type SocialTarget = {
+export type SocialTarget = {
   platform: string;
   accounts?: string[];
   hashtags?: string[];
   keywords?: string[];
   is_active?: boolean;
+};
+
+type LinkedAccountProfileSummary = {
+  avatar_url?: string | null;
+  profile_url?: string | null;
 };
 
 type WorkerHealthPayload = {
@@ -620,6 +626,7 @@ interface SeasonSocialAnalyticsSectionProps {
   hidePlatformTabs?: boolean;
   externalControlsTarget?: HTMLElement | null;
   analyticsView?: SocialAnalyticsView;
+  onTargetsChange?: (targets: SocialTarget[]) => void;
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -1179,6 +1186,8 @@ const REQUEST_TIMEOUT_MS = {
   weekDetail: 35_000,
   workerHealth: 12_000,
 } as const;
+const DEV_LOW_HEAT_MODE = process.env.NODE_ENV !== "production";
+const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;
 const ANALYTICS_POLL_REFRESH_MS = 60_000;
 const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 4_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
@@ -2088,6 +2097,7 @@ export default function SeasonSocialAnalyticsSection({
   hidePlatformTabs = false,
   externalControlsTarget = null,
   analyticsView = "bravo",
+  onTargetsChange,
 }: SeasonSocialAnalyticsSectionProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -2137,6 +2147,7 @@ export default function SeasonSocialAnalyticsSection({
   const [dailyRunPlatform, setDailyRunPlatform] = useState<"all" | Platform>("all");
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [targets, setTargets] = useState<SocialTarget[]>([]);
+  const [linkedAccountSummaries, setLinkedAccountSummaries] = useState<Record<string, LinkedAccountProfileSummary>>({});
   const [runs, setRuns] = useState<SocialRun[]>([]);
   const [runSummaries, setRunSummaries] = useState<SocialRunSummary[]>([]);
   const [sharedStatus, setSharedStatus] = useState<SharedSeasonStatus | null>(null);
@@ -2203,6 +2214,10 @@ export default function SeasonSocialAnalyticsSection({
   const [expandedJobErrors, setExpandedJobErrors] = useState<Set<string>>(new Set());
   const [elapsedTick, setElapsedTick] = useState(0);
   const [pollingStatus, setPollingStatus] = useState<"idle" | "retrying" | "recovered">("idle");
+  const [isDocumentVisible, setIsDocumentVisible] = useState<boolean>(() => {
+    if (typeof document === "undefined") return true;
+    return document.visibilityState === "visible";
+  });
   const [sectionLastSuccessAt, setSectionLastSuccessAt] = useState<{
     analytics: Date | null;
     targets: Date | null;
@@ -2258,6 +2273,15 @@ export default function SeasonSocialAnalyticsSection({
   });
   const activeSyncSessionLastRefreshAtRef = useRef(0);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleVisibilityChange = () => setIsDocumentVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   const showRouteSlug = (showSlug || showId).trim();
   const seasonEpisodeNumberFromPath = useMemo(
     () => parseSeasonEpisodeNumberFromPath(pathname),
@@ -2276,6 +2300,9 @@ export default function SeasonSocialAnalyticsSection({
     async () => getClientAuthHeaders({ allowDevAdminBypass: true }),
     [],
   );
+  const normalizeLinkedAccountHandle = useCallback((value: string | null | undefined): string => {
+    return String(value || "").trim().replace(/^@+/, "").toLowerCase();
+  }, []);
 
   const queryString = useMemo(() => {
     const search = new URLSearchParams();
@@ -2655,6 +2682,10 @@ export default function SeasonSocialAnalyticsSection({
     sectionLastSuccessAt.targets,
     targets,
   ]);
+
+  useEffect(() => {
+    onTargetsChange?.(targets);
+  }, [onTargetsChange, targets]);
 
   const fetchAnalytics = useCallback(async () => {
     const existingRequest = inFlightRef.current.analyticsByKey.get(analyticsRequestKey);
@@ -3932,8 +3963,16 @@ export default function SeasonSocialAnalyticsSection({
 
         const headers = await getAuthHeaders();
         if (cancelled) return;
+        // Only switch to comments_only if every post-stage job found items.
+        // If any account had 0 results, keep doing full ingest so it gets scraped.
+        const postJobs = jobs.filter(
+          (j) => j.run_id === completedRunId && (j.job_type === "posts" || j.job_type === "shared_account_posts"),
+        );
+        const allAccountsCovered = postJobs.length > 0 && postJobs.every((j) => (j.items_found ?? 0) > 0);
         const nextIngestMode: IngestMode =
-          session.ingestMode === "posts_and_comments" ? "details_refresh" : session.ingestMode;
+          session.ingestMode === "posts_and_comments" && allAccountsCovered
+            ? "comments_only"
+            : session.ingestMode;
         const payload: {
           source_scope: Scope;
           platforms?: Platform[];
@@ -3974,11 +4013,6 @@ export default function SeasonSocialAnalyticsSection({
             : null;
         if (nextPlatforms && nextPlatforms.length > 0) {
           payload.platforms = nextPlatforms;
-        }
-        const isInstagramOnly = Array.isArray(nextPlatforms) && nextPlatforms.length === 1 && nextPlatforms[0] === "instagram";
-        if (isInstagramOnly) {
-          payload.max_comments_per_post = 0;
-          payload.max_replies_per_post = 0;
         }
         const targetOverrides = buildTargetOverrides(nextPlatforms);
         payload.accounts_override = targetOverrides.accounts_override;
@@ -4359,11 +4393,12 @@ export default function SeasonSocialAnalyticsSection({
   useEffect(() => {
     if (!activeRunId) return;
     if (!hasRunningJobs && !runningIngest) return;
+    if (DEV_LOW_HEAT_MODE && !isDocumentVisible) return;
 
     pollGenerationRef.current += 1;
     const generation = pollGenerationRef.current;
     pollFailureCountRef.current = 0;
-    const baseInterval = runningIngest ? 3_000 : 5_000;
+    const baseInterval = DEV_LOW_HEAT_MODE ? DEV_VISIBLE_POLL_INTERVAL_MS : runningIngest ? 3_000 : 5_000;
     let timer: number | null = null;
     let cancelled = false;
     let inFlight = false;
@@ -4427,7 +4462,11 @@ export default function SeasonSocialAnalyticsSection({
 
         if (runAndJobsSucceeded) {
           const now = Date.now();
-          const refreshInterval = runningIngest ? ANALYTICS_POLL_REFRESH_ACTIVE_MS : ANALYTICS_POLL_REFRESH_MS;
+          const refreshInterval = DEV_LOW_HEAT_MODE
+            ? DEV_VISIBLE_POLL_INTERVAL_MS
+            : runningIngest
+              ? ANALYTICS_POLL_REFRESH_ACTIVE_MS
+              : ANALYTICS_POLL_REFRESH_MS;
           if (now - lastAnalyticsPollAtRef.current >= refreshInterval) {
             lastAnalyticsPollAtRef.current = now;
             void fetchAnalytics()
@@ -4470,7 +4509,7 @@ export default function SeasonSocialAnalyticsSection({
         window.clearTimeout(timer);
       }
     };
-  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, fetchWorkerHealth, hasRunningJobs, runningIngest]);
+  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, fetchWorkerHealth, hasRunningJobs, isDocumentVisible, runningIngest]);
 
   useEffect(() => {
     if (pollingStatus !== "recovered") return;
@@ -4726,12 +4765,7 @@ export default function SeasonSocialAnalyticsSection({
           : (["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"] as Platform[]);
       const singlePlatform = requestedPlatforms.length === 1;
       const singlePlatformTarget = singlePlatform ? requestedPlatforms[0] : null;
-      const isInstagramOnly = singlePlatformTarget === "instagram";
       const igTikTokOnly = requestedPlatforms.every((platform) => platform === "instagram" || platform === "tiktok");
-      if (isInstagramOnly) {
-        payload.max_comments_per_post = 0;
-        payload.max_replies_per_post = 0;
-      }
       if (effectiveIngestMode === "comments_only") {
         payload.runner_strategy = "single_runner";
         payload.runner_count = 1;
@@ -5706,10 +5740,107 @@ export default function SeasonSocialAnalyticsSection({
   const isRedditView = analyticsView === "reddit";
   const isCastContentView = analyticsView === "cast-content";
   const selectedRunLabel = selectedRunId ? (runOptionLabelById.get(selectedRunId) ?? null) : null;
+  const platformHandleCounts = useMemo(() => {
+    const counts: Record<Platform, number> = {
+      instagram: 0,
+      tiktok: 0,
+      twitter: 0,
+      youtube: 0,
+      facebook: 0,
+      threads: 0,
+    };
+
+    for (const platform of Object.keys(counts) as Platform[]) {
+      const handles = new Set<string>();
+      for (const target of targets) {
+        if (target.is_active === false) continue;
+        if (String(target.platform || "").trim().toLowerCase() !== platform) continue;
+        for (const account of target.accounts ?? []) {
+          const normalized = normalizeLinkedAccountHandle(account);
+          if (normalized) {
+            handles.add(normalized);
+          }
+        }
+      }
+      counts[platform] = handles.size;
+    }
+
+    return counts;
+  }, [normalizeLinkedAccountHandle, targets]);
   const displayedTargets = useMemo(() => {
     if (platformTab === "overview") return targets;
     return targets.filter((target) => target.platform === platformTab);
   }, [platformTab, targets]);
+  const selectedPlatformHandles = useMemo(() => {
+    if (platformTab === "overview") return [] as string[];
+
+    const handles = new Set<string>();
+    for (const target of displayedTargets) {
+      if (target.is_active === false) continue;
+      for (const account of target.accounts ?? []) {
+        const normalized = normalizeLinkedAccountHandle(account);
+        if (normalized) {
+          handles.add(normalized);
+        }
+      }
+    }
+    return [...handles].sort((left, right) => left.localeCompare(right));
+  }, [displayedTargets, normalizeLinkedAccountHandle, platformTab]);
+  const selectedPlatformHandleTabs = useMemo(
+    () =>
+      selectedPlatformHandles.map((handle) => {
+        const cacheKey = `${platformTab}:${handle}`;
+        const summary = linkedAccountSummaries[cacheKey] ?? {};
+        return {
+          handle,
+          avatarUrl: summary.avatar_url ?? null,
+          href: buildSocialAccountProfileUrl({ platform: platformTab, handle }),
+        };
+      }),
+    [linkedAccountSummaries, platformTab, selectedPlatformHandles],
+  );
+
+  useEffect(() => {
+    if (!isActiveView(analyticsView) || platformTab === "overview" || selectedPlatformHandles.length === 0) {
+      return;
+    }
+
+    const missingHandles = selectedPlatformHandles.filter((handle) => !linkedAccountSummaries[`${platformTab}:${handle}`]);
+    if (missingHandles.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const headers = await getAuthHeaders();
+      const nextEntries: Record<string, LinkedAccountProfileSummary> = {};
+      await Promise.allSettled(
+        missingHandles.map(async (handle) => {
+          const response = await fetchAdminWithAuth(
+            `/api/admin/trr-api/social/profiles/${encodeURIComponent(platformTab)}/${encodeURIComponent(handle)}/summary`,
+            { headers, cache: "no-store" },
+            { allowDevAdminBypass: true },
+          );
+          if (!response.ok) {
+            throw new Error(`Failed to load linked handle summary for ${handle}`);
+          }
+          const data = (await response.json().catch(() => ({}))) as LinkedAccountProfileSummary;
+          nextEntries[`${platformTab}:${handle}`] = {
+            avatar_url: typeof data.avatar_url === "string" ? data.avatar_url : null,
+            profile_url: typeof data.profile_url === "string" ? data.profile_url : null,
+          };
+        }),
+      );
+      if (cancelled || Object.keys(nextEntries).length === 0) {
+        return;
+      }
+      setLinkedAccountSummaries((current) => ({ ...current, ...nextEntries }));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [analyticsView, getAuthHeaders, isActiveView, linkedAccountSummaries, platformTab, selectedPlatformHandles]);
   const openLeaderboardLightbox = useCallback(
     (
       item: {
@@ -6150,15 +6281,55 @@ export default function SeasonSocialAnalyticsSection({
       </label>
     </div>
   );
+  const linkedHandleTabs =
+    platformTab !== "overview" && selectedPlatformHandleTabs.length > 0 ? (
+      <nav
+        className="flex flex-wrap items-center gap-2"
+        aria-label={`${PLATFORM_LABELS[platformTab] ?? platformTab} linked handles`}
+      >
+        <span className="inline-flex items-center rounded-full border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">
+          ALL
+        </span>
+        {selectedPlatformHandleTabs.map((tab) => (
+          <Link
+            key={`${platformTab}-${tab.handle}`}
+            href={tab.href as Route}
+            className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50"
+          >
+            {tab.avatarUrl ? (
+              <Image
+                src={tab.avatarUrl}
+                alt=""
+                width={24}
+                height={24}
+                className="h-6 w-6 rounded-full border border-zinc-200 object-cover"
+                unoptimized
+              />
+            ) : (
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 text-[10px] font-bold uppercase text-zinc-500">
+                {tab.handle.slice(0, 2)}
+              </span>
+            )}
+            <span>@{tab.handle}</span>
+          </Link>
+        ))}
+      </nav>
+    ) : null;
   const shouldRenderInlineControls = !hidePlatformTabs && !externalControlsTarget;
   const shouldRenderPortaledControls = Boolean(hidePlatformTabs && externalControlsTarget);
+  const portaledHeaderRail = (
+    <div className="space-y-3">
+      {linkedHandleTabs}
+      {socialControlsRail}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
       {!isRedditView && !isCastContentView && (
         <>
           {shouldRenderPortaledControls && externalControlsTarget
-            ? createPortal(socialControlsRail, externalControlsTarget)
+            ? createPortal(portaledHeaderRail, externalControlsTarget)
             : null}
           <section
             aria-label="Season social analytics controls"
@@ -6192,6 +6363,7 @@ export default function SeasonSocialAnalyticsSection({
                 <nav className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-100/70 p-1" aria-label="Social platform tabs">
                   {PLATFORM_TABS.map((tab) => {
                     const isActive = platformTab === tab.key;
+                    const tabCount = tab.key === "overview" ? null : platformHandleCounts[tab.key];
                     return (
                       <button
                         key={tab.key}
@@ -6207,13 +6379,14 @@ export default function SeasonSocialAnalyticsSection({
                       >
                         <span className="inline-flex items-center gap-1.5">
                           <SocialPlatformTabIcon tab={tab.key} />
-                          <span>{tab.label}</span>
+                          <span>{tabCount === null ? tab.label : `${tab.label} (${tabCount})`}</span>
                         </span>
                       </button>
                     );
                   })}
                 </nav>
               )}
+              {!hidePlatformTabs ? linkedHandleTabs : null}
               {shouldRenderInlineControls ? socialControlsRail : null}
             </div>
 

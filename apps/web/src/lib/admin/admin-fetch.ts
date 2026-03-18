@@ -172,6 +172,10 @@ export const adminStream = async (
   try {
     pruneStaleAdminOperationSessions();
     const method = (requestInit.method || "GET").toUpperCase();
+    const headers =
+      requestInit.headers instanceof Headers
+        ? new Headers(requestInit.headers)
+        : new Headers(requestInit.headers ?? {});
     const bodyValue =
       typeof requestInit.body === "string"
         ? requestInit.body
@@ -181,15 +185,16 @@ export const adminStream = async (
             ? String(requestInit.body)
             : "";
     const bodySignature = bodyValue.length > 0 ? String(bodyValue.length) : "0";
+    const requestIdHeader = headers.get("x-trr-request-id")?.trim() ?? "";
+    const resumableKey = requestIdHeader || bodySignature;
     const targetPath =
       input instanceof URL
         ? `${input.pathname}${input.search}`
         : typeof input === "string"
           ? input
           : String(input);
-    const flowScope = `${method}:${targetPath}:${bodySignature}`;
+    const flowScope = `${method}:${targetPath}:${resumableKey}`;
     const flowKey = getOrCreateAdminFlowKey(flowScope);
-    const headers = requestInit.headers instanceof Headers ? new Headers(requestInit.headers) : new Headers(requestInit.headers ?? {});
     headers.set("x-trr-flow-key", flowKey);
     const requestWithFlow: AdminFetchWithTimeoutInit = {
       ...requestInit,

@@ -10,12 +10,12 @@ describe("refresh log pipeline helpers", () => {
   it("prefers structured topic over stage/category/message heuristics", () => {
     expect(
       resolveRefreshLogTopicKey({
-        topic: "media",
+        topic: "cast_media",
         stageKey: "details_sync_shows",
         category: "Show Info",
         message: "details sync shows: success",
       })
-    ).toBe("media");
+    ).toBe("cast_media");
   });
 
   it("falls back to stage mapping and then text heuristics", () => {
@@ -25,15 +25,15 @@ describe("refresh log pipeline helpers", () => {
         category: "Cast & Credits",
         message: "episode appearances synced",
       })
-    ).toBe("episodes");
+    ).toBe("show_core");
 
     expect(
       resolveRefreshLogTopicKey({
         category: "Refresh",
         message: "episode sync complete",
       })
-    ).toBe("episodes");
-  });
+    ).toBeNull();
+    });
 
   it("does not map generic full-refresh wrapper messages to pipeline topics", () => {
     expect(
@@ -46,37 +46,34 @@ describe("refresh log pipeline helpers", () => {
 
   it("builds fixed-order rows from topic definitions", () => {
     const definitions: RefreshLogTopicDefinition[] = [
-      { key: "shows", label: "SHOWS", description: "Show info" },
-      { key: "seasons", label: "SEASONS", description: "Season sync" },
-      { key: "episodes", label: "EPISODES", description: "Episode sync" },
-      { key: "people", label: "PEOPLE", description: "Cast sync" },
-      { key: "media", label: "MEDIA", description: "Media sync" },
-      { key: "bravotv", label: "BRAVOTV", description: "Bravo actions" },
+      { key: "show_core", label: "SHOW CORE", description: "Show info" },
+      { key: "links", label: "LINKS", description: "Link sync" },
+      { key: "bravo", label: "BRAVO", description: "Bravo sync" },
+      { key: "cast_profiles", label: "CAST PROFILES", description: "Profile sync" },
+      { key: "cast_media", label: "CAST MEDIA", description: "Media sync" },
     ];
 
     const rows = buildPipelineRows(definitions, [
-      { topic: { key: "media" }, status: "active", latest: { id: "m1" } },
-      { topic: { key: "shows" }, status: "done", latest: { id: "s1" } },
+      { topic: { key: "cast_media" }, status: "active", latest: { id: "m1" } },
+      { topic: { key: "show_core" }, status: "done", latest: { id: "s1" } },
     ]);
 
     expect(rows.map((row) => row.topic.key)).toEqual([
-      "shows",
-      "seasons",
-      "episodes",
-      "people",
-      "media",
-      "bravotv",
+      "show_core",
+      "links",
+      "bravo",
+      "cast_profiles",
+      "cast_media",
     ]);
     expect(rows[0].status).toBe("done");
     expect(rows[4].status).toBe("active");
-    expect(rows[5].status).toBe("pending");
   });
 
   it("dedupes equivalent wrapper/stream updates by topic-stage-message-progress", () => {
     const shouldDedupe = shouldDedupeRefreshLogEntry(
       {
         category: "Show Info",
-        topic: "shows",
+        topic: "show_core",
         stageKey: "details_sync_shows",
         message: "Show Info: details sync shows: success",
         current: 1,
@@ -84,7 +81,7 @@ describe("refresh log pipeline helpers", () => {
       },
       {
         category: "Refresh",
-        topic: "shows",
+        topic: "show_core",
         stageKey: "details_sync_shows",
         message: "Show Info: details sync shows: success",
         current: 1,
@@ -97,7 +94,7 @@ describe("refresh log pipeline helpers", () => {
       shouldDedupeRefreshLogEntry(
         {
           category: "Show Info",
-          topic: "shows",
+          topic: "show_core",
           stageKey: "details_sync_shows",
           message: "Show Info: details sync shows: success",
           current: 1,
@@ -105,7 +102,7 @@ describe("refresh log pipeline helpers", () => {
         },
         {
           category: "Show Info",
-          topic: "shows",
+          topic: "show_core",
           stageKey: "details_tmdb_show_entities",
           message: "Show Entities: done",
           current: 2,

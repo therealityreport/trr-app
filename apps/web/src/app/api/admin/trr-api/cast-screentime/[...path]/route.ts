@@ -26,14 +26,20 @@ async function forward(request: NextRequest, method: string, { params }: RoutePa
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
+      return NextResponse.json(
+        { error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_ROLE_KEY) is not configured" },
+        { status: 500 },
+      );
     }
 
     const internalSecret = process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
     if (!internalSecret) {
-      return NextResponse.json({ error: "Internal backend auth secret not configured" }, { status: 500 });
+      return NextResponse.json(
+        { error: "TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured in the TRR-APP server environment" },
+        { status: 500 },
+      );
     }
 
     const headers = new Headers({

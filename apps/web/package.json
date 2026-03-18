@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev --turbopack",
     "dev:turbo": "next dev --turbopack",
+    "dev:webpack": "next dev --webpack",
     "dev:stable": "next dev --webpack",
-    "dev:emu": "NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true next dev --webpack -p ${PORT:-3000}",
+    "dev:emu": "NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true next dev --turbopack -p ${PORT:-3000}",
+    "dev:emu:stable": "NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true next dev --webpack -p ${PORT:-3000}",
     "build": "next build --webpack",
     "build:turbo": "next build --turbopack",
     "start": "next start",
@@ -27,6 +29,8 @@
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@supabase/supabase-js": "^2.98.0",
     "firebase": "^12.10.0",
     "firebase-admin": "^12.7.0",

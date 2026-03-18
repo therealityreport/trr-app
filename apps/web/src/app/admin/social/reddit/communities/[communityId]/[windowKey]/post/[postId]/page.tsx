@@ -1,1 +1,24 @@
-export { default } from "@/app/admin/reddit-post-details/page";
+import type { Route } from "next";
+import { redirect } from "next/navigation";
+import {
+  resolveLegacyAdminRedditCanonicalHref,
+  type LegacyRouteSearchParams,
+} from "@/lib/server/admin/reddit-admin-legacy-routes";
+
+type PageProps = {
+  params: Promise<{ communityId: string; windowKey: string; postId: string }>;
+  searchParams?: Promise<LegacyRouteSearchParams>;
+};
+
+export default async function LegacyAdminSocialRedditPostDetailsPage({ params, searchParams }: PageProps) {
+  const resolvedParams = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  redirect(
+    (await resolveLegacyAdminRedditCanonicalHref({
+      communityId: resolvedParams.communityId,
+      searchParams: resolvedSearchParams,
+      windowKey: resolvedParams.windowKey,
+      postId: resolvedParams.postId,
+    })) as Route,
+  );
+}

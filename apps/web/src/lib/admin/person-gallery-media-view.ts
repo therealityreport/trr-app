@@ -19,6 +19,14 @@ export type PersonGalleryOtherShowOption = {
 export type PersonGalleryEventOption = {
   key: string;
   label: string;
+  count: number | null;
+};
+
+type PersonGalleryShowOptionAccumulator = {
+  canonicalKey: string;
+  showId: string | null;
+  showName: string;
+  acronym: string | null;
 };
 
 export type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery" | "getty" | "nbcumv";
@@ -64,6 +72,23 @@ export function toCanonicalScopedSource(value: string | null | undefined): Canon
 
 export function buildShowAcronym(name: string | null | undefined): string | null {
   if (!name) return null;
+  if (isWwhlShowName(name)) return WWHL_LABEL;
+  const normalized = normalizeShowNameToken(name);
+  const housewivesPrefix = "the real housewives of ";
+  const altHousewivesPrefix = "real housewives of ";
+  const cityToken = normalized.startsWith(housewivesPrefix)
+    ? normalized.slice(housewivesPrefix.length)
+    : normalized.startsWith(altHousewivesPrefix)
+      ? normalized.slice(altHousewivesPrefix.length)
+      : null;
+  if (cityToken) {
+    const cityAcronym = cityToken
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word[0]?.toUpperCase?.() ?? "")
+      .join("");
+    return cityAcronym ? `RHO${cityAcronym}` : "RHO";
+  }
   const words = name
     .replace(/[^a-z0-9 ]/gi, " ")
     .split(/\s+/)
@@ -76,6 +101,12 @@ export function buildShowAcronym(name: string | null | undefined): string | null
     .map((word) => word[0]?.toUpperCase?.() ?? "")
     .join("");
   return acronym || null;
+}
+
+export function getShowDisplayLabel(name: string | null | undefined): string | null {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  if (!trimmed) return null;
+  return buildShowAcronym(trimmed) ?? trimmed;
 }
 
 export function extractShowAcronyms(text: string): Set<string> {
@@ -117,6 +148,69 @@ function normalizeShowNameToken(value: string | null | undefined): string {
     .replace(/\s+/g, " ");
 }
 
+function pickPreferredShowName(
+  firstValue: string | null | undefined,
+  secondValue: string | null | undefined
+): string {
+  const first = typeof firstValue === "string" ? firstValue.trim() : "";
+  const second = typeof secondValue === "string" ? secondValue.trim() : "";
+  if (!first) return second;
+  if (!second) return first;
+  return second.length > first.length ? second : first;
+}
+
+export function buildPersonGalleryShowOptions(
+  photos: readonly TrrPersonPhoto[]
+): PersonGalleryOtherShowOption[] {
+  const byIdentity = new Map<string, PersonGalleryShowOptionAccumulator>();
+  for (const photo of photos) {
+    if (photo.bucket_type !== "show") continue;
+    const showId = typeof photo.resolved_show_id === "string" ? photo.resolved_show_id.trim() || null : null;
+    const showName =
+      photo.resolved_show_name?.trim() ||
+      (typeof photo.bucket_label === "string" ? photo.bucket_label.trim() : "") ||
+      "";
+    if (!showName || isWwhlShowName(showName)) continue;
+    const normalizedShowName = normalizeShowNameToken(showName);
+    const acronym = buildShowAcronym(showName);
+    const identityKey =
+      normalizedShowName ||
+      (showId ? `id:${showId}` : "") ||
+      (acronym ? `acronym:${acronym}` : "");
+    if (!identityKey) continue;
+    const existing = byIdentity.get(identityKey);
+    if (!existing) {
+      byIdentity.set(identityKey, {
+        canonicalKey: showId ? `id:${showId}` : `name:${identityKey}`,
+        showId,
+        showName,
+        acronym,
+      });
+      continue;
+    }
+    const preferredShowName = pickPreferredShowName(existing.showName, showName);
+    const preferredShowId = existing.showId ?? showId;
+    byIdentity.set(identityKey, {
+      canonicalKey: preferredShowId ? `id:${preferredShowId}` : existing.canonicalKey,
+      showId: preferredShowId,
+      showName: preferredShowName,
+      acronym: buildShowAcronym(preferredShowName) ?? existing.acronym ?? acronym,
+    });
+  }
+  return Array.from(byIdentity.values())
+    .map((entry) => ({
+      key: entry.canonicalKey,
+      showId: entry.showId,
+      showName: entry.showName,
+      acronym: entry.acronym,
+    }))
+    .sort((first, second) => {
+      const firstLabel = getShowDisplayLabel(first.showName) ?? first.showName;
+      const secondLabel = getShowDisplayLabel(second.showName) ?? second.showName;
+      return firstLabel.localeCompare(secondLabel);
+    });
+}
+
 function normalizedShowNamesMatch(
   firstValue: string | null | undefined,
   secondValue: string | null | undefined
@@ -152,6 +246,33 @@ function readGalleryBucketString(
   if (!nested || typeof nested !== "object") return null;
   const nestedValue = (nested as Record<string, unknown>)[key];
   return typeof nestedValue === "string" && nestedValue.trim() ? nestedValue.trim() : null;
+}
+
+function readGroupedImageCount(
+  photo: TrrPersonPhoto,
+  metadata: Record<string, unknown>
+): number | null {
+  const directValue = (photo as unknown as Record<string, unknown>).grouped_image_count;
+  if (typeof directValue === "number" && Number.isFinite(directValue)) return directValue;
+  if (typeof directValue === "string" && directValue.trim().length > 0) {
+    const parsedDirectValue = Number.parseInt(directValue, 10);
+    if (Number.isFinite(parsedDirectValue)) return parsedDirectValue;
+  }
+  const metadataValue = metadata.grouped_image_count;
+  if (typeof metadataValue === "number" && Number.isFinite(metadataValue)) return metadataValue;
+  if (typeof metadataValue === "string" && metadataValue.trim().length > 0) {
+    const parsedMetadataValue = Number.parseInt(metadataValue, 10);
+    if (Number.isFinite(parsedMetadataValue)) return parsedMetadataValue;
+  }
+  const nested = metadata.gallery_bucket;
+  if (!nested || typeof nested !== "object") return null;
+  const nestedValue = (nested as Record<string, unknown>).grouped_image_count;
+  if (typeof nestedValue === "number" && Number.isFinite(nestedValue)) return nestedValue;
+  if (typeof nestedValue === "string" && nestedValue.trim().length > 0) {
+    const parsedNestedValue = Number.parseInt(nestedValue, 10);
+    if (Number.isFinite(parsedNestedValue)) return parsedNestedValue;
+  }
+  return null;
 }
 
 function hasImdbEpisodeEvidence(
@@ -261,6 +382,8 @@ export function computePersonPhotoShowBuckets(input: {
   const bucketLabel = readGalleryBucketString(photo, metadata, "bucket_label");
   const resolvedBucketShowId = readGalleryBucketString(photo, metadata, "resolved_show_id");
   const resolvedBucketShowName = readGalleryBucketString(photo, metadata, "resolved_show_name");
+  const groupedImageCount = readGroupedImageCount(photo, metadata);
+  const qualifiesAsEvent = groupedImageCount !== null && groupedImageCount > 1;
   const rawMetaShowId = typeof metadata.show_id === "string" ? metadata.show_id : null;
   const rawMetaShowName = typeof metadata.show_name === "string" ? metadata.show_name.trim() : null;
   const rawMetaFallbackShowName =
@@ -349,12 +472,14 @@ export function computePersonPhotoShowBuckets(input: {
   const rawSectionTag =
     typeof metadata.fandom_section_tag === "string" ? metadata.fandom_section_tag.trim().toLowerCase() : null;
   const rawContextType = typeof photo.context_type === "string" ? photo.context_type.trim().toLowerCase() : null;
-  const matchesEvents = Boolean(
-    bucketType === "event" ||
-      (rawImdbImageType && EVENT_IMAGE_TYPES.has(rawImdbImageType)) ||
+  const inferredEventSignal = Boolean(
+    (rawImdbImageType && EVENT_IMAGE_TYPES.has(rawImdbImageType)) ||
       rawContentType === "event" ||
       rawSectionTag === "event" ||
       rawContextType === "event"
+  );
+  const matchesEvents = Boolean(
+    (bucketType === "event" && qualifiesAsEvent) || inferredEventSignal
   );
   const ignoreMetaShowIdForImdb = sourceNormalized === "imdb" && !trustImdbMetadata;
   const metaShowId = ignoreMetaShowIdForImdb || !trustImdbMetadata ? null : rawMetaShowId;
@@ -461,12 +586,12 @@ export function computePersonPhotoShowBuckets(input: {
       matchesThisShow: false,
       matchesWwhl: false,
       matchesBravocon: false,
-      matchesEvents: true,
+      matchesEvents: qualifiesAsEvent,
       matchesOtherShows: false,
       matchesSelectedOtherShow: false,
       matchesUnknownShows: false,
-      eventBucketKey: bucketKey,
-      eventBucketLabel: bucketLabel,
+      eventBucketKey: qualifiesAsEvent ? bucketKey : null,
+      eventBucketLabel: qualifiesAsEvent ? bucketLabel : null,
     };
   }
   if (bucketType === "show") {
@@ -539,9 +664,17 @@ export function computePersonGalleryMediaViewAvailability(input: {
     if (buckets.matchesBravocon) hasBravoconMatches = true;
     if (buckets.matchesEvents) hasEventMatches = true;
     if (buckets.matchesEvents && buckets.eventBucketKey && buckets.eventBucketLabel) {
+      const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
+      const rawCount = readGroupedImageCount(photo, metadata);
+      const nextCount = Number.isFinite(rawCount) ? Math.max(0, Number(rawCount)) : null;
+      const existing = eventOptionsByKey.get(buckets.eventBucketKey);
       eventOptionsByKey.set(buckets.eventBucketKey, {
         key: buckets.eventBucketKey,
         label: buckets.eventBucketLabel,
+        count:
+          nextCount !== null
+            ? Math.max(existing?.count ?? 0, nextCount)
+            : existing?.count ?? null,
       });
     }
     if (buckets.matchesOtherShows) hasOtherShowMatches = true;

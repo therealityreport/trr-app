@@ -196,4 +196,49 @@ describe("admin-fetch", () => {
     const requestInit = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined) ?? {};
     expect(requestInit.method).toBe("GET");
   });
+
+  it("uses x-trr-request-id to isolate new POST streams from stale resumable sessions", async () => {
+    upsertAdminOperationSession("POST:/api/test/stream:stale-request", {
+      flowKey: "flow-stale",
+      input: "/api/test/stream",
+      method: "POST",
+      status: "active",
+      operationId: "op-stale",
+      lastEventSeq: 8,
+    });
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('event: complete\ndata: {"operation_id":"op-new","event_seq":1}\n\n')
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await adminStream("/api/test/stream", {
+      method: "POST",
+      headers: {
+        "x-trr-request-id": "req-fresh-123",
+      },
+      body: JSON.stringify({ retry: true }),
+      timeoutMs: 1000,
+      onEvent: vi.fn(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/test/stream");
+    const requestInit = (fetchMock.mock.calls[0]?.[1] as RequestInit | undefined) ?? {};
+    expect(requestInit.method).toBe("POST");
+    const requestHeaders = new Headers(requestInit.headers);
+    expect(requestHeaders.get("x-trr-request-id")).toBe("req-fresh-123");
+    expect(getAdminOperationSession("POST:/api/test/stream:req-fresh-123")?.status).toBe("completed");
+  });
 });

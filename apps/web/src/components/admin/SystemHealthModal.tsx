@@ -198,7 +198,13 @@ type SharedHealthSubscriber = {
   onUpdate: (snapshot: SharedHealthSnapshot) => void;
 };
 
-const POLL_INTERVAL_MS = 5_000;
+const IS_DEV_ENV = process.env.NODE_ENV !== "production";
+const HEALTH_DOT_POLL_BASE_INTERVAL_MS = 5_000;
+const HEALTH_DOT_POLL_IDLE_INTERVAL_MS = 15_000;
+const HEALTH_DOT_POLL_DEEP_IDLE_INTERVAL_MS = 30_000;
+const HEALTH_DOT_POLL_IDLE_AFTER_MS = 30_000;
+const HEALTH_DOT_POLL_DEEP_IDLE_AFTER_MS = 120_000;
+const QUEUE_STATUS_POLL_INTERVAL_MS = 5_000;
 const FOLLOWER_CHECK_INTERVAL_MS = 5_000;
 const HEALTH_DOT_FETCH_TIMEOUT_MS = 12_000;
 const QUEUE_STATUS_FETCH_TIMEOUT_MS = 30_000;
@@ -804,6 +810,8 @@ class SharedHealthDotPoller {
   private leader = false;
   private tabId = createTabId();
   private channel: BroadcastChannel | null = null;
+  private lastObservedState: HealthState | null = null;
+  private unchangedStateSinceMs: number | null = null;
 
   constructor() {
     if (typeof window === "undefined") return;
@@ -821,7 +829,7 @@ class SharedHealthDotPoller {
     }
 
     window.addEventListener("storage", this.handleStorageEvent);
-    document.addEventListener("visibilitychange", this.reconcile);
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
   }
 
   subscribe(id: string, onUpdate: (snapshot: SharedHealthSnapshot) => void): void {
@@ -844,7 +852,8 @@ class SharedHealthDotPoller {
   }
 
   requestImmediatePoll(): void {
-    if (!this.hasActiveInterest()) return;
+    if (!this.shouldPollInThisTab()) return;
+    this.markStatusObservedNow();
     this.clearTimer();
     this.scheduleTick(0);
   }
@@ -880,6 +889,35 @@ class SharedHealthDotPoller {
     return STARTUP_JITTER_MIN_MS + Math.floor(Math.random() * STARTUP_JITTER_MAX_MS);
   }
 
+  private markStatusObservedNow(): void {
+    if (!IS_DEV_ENV || this.lastObservedState === null) return;
+    this.unchangedStateSinceMs = Date.now();
+  }
+
+  private nextLeaderDelayMs(): number {
+    if (!IS_DEV_ENV) return HEALTH_DOT_POLL_BASE_INTERVAL_MS;
+    if (this.unchangedStateSinceMs === null) return HEALTH_DOT_POLL_BASE_INTERVAL_MS;
+    const unchangedForMs = Date.now() - this.unchangedStateSinceMs;
+    if (unchangedForMs >= HEALTH_DOT_POLL_DEEP_IDLE_AFTER_MS) {
+      return HEALTH_DOT_POLL_DEEP_IDLE_INTERVAL_MS;
+    }
+    if (unchangedForMs >= HEALTH_DOT_POLL_IDLE_AFTER_MS) {
+      return HEALTH_DOT_POLL_IDLE_INTERVAL_MS;
+    }
+    return HEALTH_DOT_POLL_BASE_INTERVAL_MS;
+  }
+
+  private updateCadence(snapshot: SharedHealthSnapshot): void {
+    const nextState = healthState(snapshot.data, snapshot.error);
+    const fetchedAt = snapshot.lastFetchedMs ?? Date.now();
+    if (this.lastObservedState !== nextState || this.unchangedStateSinceMs === null) {
+      this.lastObservedState = nextState;
+      this.unchangedStateSinceMs = fetchedAt;
+      return;
+    }
+    this.lastObservedState = nextState;
+  }
+
   private reconcile = (): void => {
     if (!this.shouldPollInThisTab()) {
       this.clearTimer();
@@ -889,6 +927,15 @@ class SharedHealthDotPoller {
     if (this.timer) return;
     const hasPolledBefore = this.snapshot.lastFetchedMs !== null;
     this.scheduleTick(hasPolledBefore ? FOLLOWER_CHECK_INTERVAL_MS : this.randomStartupDelay());
+  };
+
+  private handleVisibilityChange = (): void => {
+    if (typeof document === "undefined") return;
+    if (document.visibilityState === "visible" && this.hasActiveInterest()) {
+      this.requestImmediatePoll();
+      return;
+    }
+    this.reconcile();
   };
 
   private async tick(): Promise<void> {
@@ -905,7 +952,7 @@ class SharedHealthDotPoller {
         this.releaseLeaderLease();
         return;
       }
-      this.scheduleTick(POLL_INTERVAL_MS);
+      this.scheduleTick(this.nextLeaderDelayMs());
       return;
     }
 
@@ -997,6 +1044,7 @@ class SharedHealthDotPoller {
   }
 
   private publish(snapshot: SharedHealthSnapshot, options?: { broadcast?: boolean }): void {
+    this.updateCadence(snapshot);
     this.snapshot = snapshot;
     for (const subscriber of this.subscribers.values()) {
       subscriber.onUpdate(snapshot);
@@ -1219,7 +1267,7 @@ function useQueueStatusModal(options: { isOpen: boolean }) {
       if (cancelled) return;
       timeoutRef.current = setTimeout(() => {
         void poll();
-      }, POLL_INTERVAL_MS);
+      }, QUEUE_STATUS_POLL_INTERVAL_MS);
     };
 
     void poll();

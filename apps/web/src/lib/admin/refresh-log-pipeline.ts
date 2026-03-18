@@ -1,4 +1,4 @@
-export type RefreshLogTopicKey = "shows" | "seasons" | "episodes" | "people" | "media" | "bravotv";
+export type RefreshLogTopicKey = "show_core" | "links" | "bravo" | "cast_profiles" | "cast_media";
 
 export type RefreshLogStatus = "pending" | "active" | "done" | "failed";
 
@@ -27,50 +27,66 @@ export type RefreshLogTerminalStateInput = {
 };
 
 const TOPIC_VALUES = new Set<RefreshLogTopicKey>([
-  "shows",
-  "seasons",
-  "episodes",
-  "people",
-  "media",
-  "bravotv",
+  "show_core",
+  "links",
+  "bravo",
+  "cast_profiles",
+  "cast_media",
 ]);
 
 const STAGE_TOPIC_MAP: Record<string, RefreshLogTopicKey> = {
-  details_sync_shows: "shows",
-  details_tmdb_show_entities: "shows",
-  details_tmdb_watch_providers: "shows",
-  seasons_episodes_seasons: "seasons",
-  seasons_episodes_episodes: "episodes",
-  cast_credits_show_cast: "people",
-  cast_credits_episode_appearances: "episodes",
-  photos_show_images: "media",
-  photos_season_episode_images: "media",
-  sync_show_images: "media",
-  sync_imdb_mediaindex: "media",
-  sync_tmdb_seasons: "media",
-  sync_tmdb_episodes: "media",
-  mirror_show_images: "media",
-  mirror_season_images: "media",
-  mirror_episode_images: "media",
-  sync_cast_photos: "media",
-  sync_imdb: "media",
-  sync_tmdb: "media",
-  sync_fandom: "media",
-  mirror_cast_photos: "media",
-  auto_count: "media",
-  word_id: "media",
-  prune: "media",
-  mirroring: "media",
-  mirror: "media",
+  show_core: "show_core",
+  details_sync_shows: "show_core",
+  details_tmdb_show_entities: "show_core",
+  details_tmdb_watch_providers: "show_core",
+  seasons_episodes_seasons: "show_core",
+  seasons_episodes_episodes: "show_core",
+  cast_credits_show_cast: "show_core",
+  cast_credits_episode_appearances: "show_core",
+  social_setup_seed: "show_core",
+  links: "links",
+  links_discover: "links",
+  bravo: "bravo",
+  bravo_sync: "bravo",
+  videos_bravo_import: "bravo",
+  cast_profiles: "cast_profiles",
+  cast_profiles_sync: "cast_profiles",
+  cast_media: "cast_media",
+  cast_media_sync: "cast_media",
+  photos_show_images: "cast_media",
+  photos_season_episode_images: "cast_media",
+  sync_show_images: "cast_media",
+  sync_imdb_mediaindex: "cast_media",
+  sync_tmdb_seasons: "cast_media",
+  sync_tmdb_episodes: "cast_media",
+  mirror_show_images: "cast_media",
+  mirror_season_images: "cast_media",
+  mirror_episode_images: "cast_media",
+  sync_cast_photos: "cast_media",
+  sync_imdb: "cast_media",
+  sync_tmdb: "cast_media",
+  sync_fandom: "cast_media",
+  mirror_cast_photos: "cast_media",
+  auto_count: "cast_media",
+  word_id: "cast_media",
+  prune: "cast_media",
+  mirroring: "cast_media",
+  mirror: "cast_media",
 };
 
 const CATEGORY_TOPIC_MAP: Record<string, RefreshLogTopicKey> = {
-  "show info": "shows",
-  "seasons & episodes": "seasons",
-  "show/season/episode media": "media",
-  "cast & credits": "people",
-  "cast profiles": "people",
-  bravotv: "bravotv",
+  "show info": "show_core",
+  "seasons & episodes": "show_core",
+  "cast & credits": "show_core",
+  "social setup": "show_core",
+  "refresh links": "links",
+  links: "links",
+  bravotv: "bravo",
+  "bravo videos": "bravo",
+  "cast bios": "cast_profiles",
+  "cast profiles": "cast_profiles",
+  "show/season/episode media": "cast_media",
+  "cast media": "cast_media",
 };
 
 const normalizeToken = (value: unknown): string => String(value ?? "").trim().toLowerCase();
@@ -91,10 +107,18 @@ export const normalizeRefreshLogTopic = (value: unknown): RefreshLogTopicKey | n
 const resolveTopicFromHeuristics = (category: string, message: string): RefreshLogTopicKey => {
   const haystack = `${category} ${message}`.toLowerCase();
 
-  if (haystack.includes("bravo")) return "bravotv";
-  if (haystack.includes("seasons_episodes_episodes")) return "episodes";
-  if (haystack.includes("seasons_episodes_seasons")) return "seasons";
-  if (haystack.includes("episode")) return "episodes";
+  if (haystack.includes("links")) return "links";
+  if (haystack.includes("bravo")) return "bravo";
+  if (
+    haystack.includes("details") ||
+    haystack.includes("season") ||
+    haystack.includes("episode") ||
+    haystack.includes("cast credits") ||
+    haystack.includes("show core") ||
+    haystack.includes("social setup")
+  ) {
+    return "show_core";
+  }
   if (
     haystack.includes("media") ||
     haystack.includes("image") ||
@@ -106,20 +130,18 @@ const resolveTopicFromHeuristics = (category: string, message: string): RefreshL
     haystack.includes("cleanup") ||
     haystack.includes("prune")
   ) {
-    return "media";
+    return "cast_media";
   }
   if (
     haystack.includes("person") ||
     haystack.includes("cast profile") ||
     haystack.includes("cast member") ||
-    haystack.includes("cast credits") ||
     haystack.includes("fandom profile") ||
     haystack.includes("tmdb profile")
   ) {
-    return "people";
+    return "cast_profiles";
   }
-  if (haystack.includes("season")) return "seasons";
-  return "shows";
+  return "show_core";
 };
 
 export const resolveRefreshLogTopicKey = (entry: RefreshLogTopicInput): RefreshLogTopicKey | null => {
@@ -138,7 +160,7 @@ export const resolveRefreshLogTopicKey = (entry: RefreshLogTopicInput): RefreshL
 
   const inferred = resolveTopicFromHeuristics(category, normalizeToken(entry.message));
   // Wrapper-level "Refresh" summaries should not overwrite a concrete pipeline topic.
-  if (category === "refresh" && inferred === "shows") {
+  if (category === "refresh" && inferred === "show_core") {
     return null;
   }
   return inferred;
