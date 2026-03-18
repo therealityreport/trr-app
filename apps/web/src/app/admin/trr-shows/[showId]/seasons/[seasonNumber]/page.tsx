@@ -21,7 +21,9 @@ import FandomSyncModal from "@/components/admin/FandomSyncModal";
 import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import SeasonSocialAnalyticsSection, {
   type SocialAnalyticsView,
+  type PlatformTab,
 } from "@/components/admin/season-social-analytics-section";
+import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import SeasonSurveysTab from "@/components/admin/season-tabs/SeasonSurveysTab";
 import SeasonOverviewTab from "@/components/admin/season-tabs/SeasonOverviewTab";
 import SeasonEpisodesTab from "@/components/admin/season-tabs/SeasonEpisodesTab";
@@ -397,9 +399,24 @@ const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: str
   { id: "cast-content", label: "CAST COMPARISON" },
 ];
 
+const SEASON_SOCIAL_PLATFORM_TABS: Array<{ key: PlatformTab; label: string }> = [
+  { key: "overview", label: "Overview" },
+  { key: "instagram", label: "Instagram" },
+  { key: "tiktok", label: "TikTok" },
+  { key: "twitter", label: "Twitter/X" },
+  { key: "youtube", label: "YouTube" },
+  { key: "facebook", label: "Facebook" },
+  { key: "threads", label: "Threads" },
+];
+
 const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {
   if (!value) return false;
   return SEASON_SOCIAL_ANALYTICS_VIEWS.some((item) => item.id === value);
+};
+
+const isSocialPlatformTab = (value: string | null | undefined): value is PlatformTab => {
+  if (!value) return false;
+  return SEASON_SOCIAL_PLATFORM_TABS.some((item) => item.key === value);
 };
 
 const normalizeSocialAnalyticsViewInput = (value: string | null | undefined): string | null => {
@@ -1020,7 +1037,7 @@ export default function SeasonDetailPage() {
   const [refreshingAssets, setRefreshingAssets] = useState(false);
   const [assetsRefreshNotice, setAssetsRefreshNotice] = useState<string | null>(null);
   const [assetsRefreshError, setAssetsRefreshError] = useState<string | null>(null);
-  const [assetsRefreshProgress, setAssetsRefreshProgress] = useState<RefreshProgressState | null>(
+  const [, setAssetsRefreshProgress] = useState<RefreshProgressState | null>(
     null
   );
   const [assetsRefreshLiveCounts, setAssetsRefreshLiveCounts] = useState<JobLiveCounts | null>(null);
@@ -1028,7 +1045,7 @@ export default function SeasonDetailPage() {
   const [batchJobsRunning, setBatchJobsRunning] = useState(false);
   const [batchJobsError, setBatchJobsError] = useState<string | null>(null);
   const [batchJobsNotice, setBatchJobsNotice] = useState<string | null>(null);
-  const [batchJobsProgress, setBatchJobsProgress] = useState<RefreshProgressState | null>(null);
+  const [, setBatchJobsProgress] = useState<RefreshProgressState | null>(null);
   const [batchJobsLiveCounts, setBatchJobsLiveCounts] = useState<JobLiveCounts | null>(null);
   const [batchJobOperations, setBatchJobOperations] = useState<BatchJobOperation[]>(
     DEFAULT_BATCH_JOB_OPERATIONS
@@ -1414,6 +1431,35 @@ export default function SeasonDetailPage() {
       );
     },
     [router, searchParams, seasonNumber, showSlugForRouting, seasonSocialPathFilters]
+  );
+
+  const socialPlatformTab = useMemo<PlatformTab>(() => {
+    const value = searchParams.get("social_platform");
+    if (isSocialPlatformTab(value)) return value;
+    const fromPath = seasonSocialPathFilters?.platform;
+    return fromPath ?? "overview";
+  }, [searchParams, seasonSocialPathFilters?.platform]);
+
+  const setSocialPlatformTab = useCallback(
+    (tab: PlatformTab) => {
+      const nextQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
+      nextQuery.delete("social_platform");
+      router.replace(
+        buildSeasonAdminUrl({
+          showSlug: showSlugForRouting,
+          seasonNumber,
+          tab: "social",
+          query: nextQuery,
+          socialRoute: {
+            weekIndex: seasonSocialPathFilters?.weekIndex,
+            platform: tab !== "overview" ? tab : undefined,
+            handle: seasonSocialPathFilters?.handle,
+          },
+        }) as Route,
+        { scroll: false },
+      );
+    },
+    [router, searchParams, seasonNumber, showSlugForRouting, seasonSocialPathFilters],
   );
 
   const [addBackdropsOpen, setAddBackdropsOpen] = useState(false);
@@ -4754,21 +4800,49 @@ export default function SeasonDetailPage() {
           <div className="mx-auto max-w-6xl px-6">
             <SeasonTabsNav tabs={SEASON_PAGE_TABS} activeTab={activeTab} onSelect={setTab} />
             {activeTab === "social" && (
-              <nav className="pb-4 flex flex-wrap gap-2">
-                {SEASON_SOCIAL_ANALYTICS_VIEWS.map((view) => (
-                  <button
-                    key={view.id}
-                    onClick={() => setSocialAnalyticsView(view.id)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
-                      socialAnalyticsView === view.id
-                        ? "border-zinc-800 bg-zinc-800 text-white"
-                        : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                    }`}
+              <>
+                <nav className="pb-2 flex flex-wrap gap-2">
+                  {SEASON_SOCIAL_ANALYTICS_VIEWS.map((view) => (
+                    <button
+                      key={view.id}
+                      onClick={() => setSocialAnalyticsView(view.id)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                        socialAnalyticsView === view.id
+                          ? "border-zinc-800 bg-zinc-800 text-white"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </nav>
+                {socialAnalyticsView !== "reddit" && socialAnalyticsView !== "cast-content" && (
+                  <nav
+                    aria-label="Social platform tabs"
+                    className="pb-4 flex flex-wrap gap-2"
                   >
-                    {view.label}
-                  </button>
-                ))}
-              </nav>
+                    {SEASON_SOCIAL_PLATFORM_TABS.map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setSocialPlatformTab(tab.key)}
+                        aria-pressed={socialPlatformTab === tab.key}
+                        aria-current={socialPlatformTab === tab.key ? "page" : undefined}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                          socialPlatformTab === tab.key
+                            ? "border-zinc-800 bg-zinc-800 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <SocialPlatformTabIcon tab={tab.key} />
+                          <span>{tab.label}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </nav>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -4960,18 +5034,7 @@ export default function SeasonDetailPage() {
             <SeasonAssetsTab>
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    {assetsView === "images"
-                      ? "Season Images"
-                      : assetsView === "videos"
-                        ? "Season Videos"
-                        : "Branding"}
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">
-                    {show.name} · Season {season.season_number}
-                  </h3>
-                </div>
+                <div />
                 <div className="flex flex-col gap-3 sm:items-end">
                   <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
                     <button
@@ -5075,25 +5138,11 @@ export default function SeasonDetailPage() {
                   {assetsRefreshError || assetsRefreshNotice}
                 </p>
               )}
-              <RefreshProgressBar
-                show={refreshingAssets}
-                stage={assetsRefreshProgress?.stage}
-                message={assetsRefreshProgress?.message}
-                current={assetsRefreshProgress?.current}
-                total={assetsRefreshProgress?.total}
-              />
               {(batchJobsNotice || batchJobsError) && (
                 <p className={`mb-4 text-sm ${batchJobsError ? "text-red-600" : "text-zinc-500"}`}>
                   {batchJobsError || batchJobsNotice}
                 </p>
               )}
-              <RefreshProgressBar
-                show={batchJobsRunning}
-                stage={batchJobsProgress?.stage}
-                message={batchJobsProgress?.message}
-                current={batchJobsProgress?.current}
-                total={batchJobsProgress?.total}
-              />
               {assetsTruncatedWarning && (
                 <p className="mb-4 text-xs font-medium text-amber-700">{assetsTruncatedWarning}</p>
               )}
@@ -6353,6 +6402,9 @@ export default function SeasonDetailPage() {
                   seasonId={season.id}
                   showName={show.name}
                   analyticsView={socialAnalyticsView}
+                  platformTab={socialPlatformTab}
+                  onPlatformTabChange={setSocialPlatformTab}
+                  hidePlatformTabs={true}
                 />
               }
             />

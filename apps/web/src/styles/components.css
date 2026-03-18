@@ -121,3 +121,61 @@
     }
   }
 }
+
+/* ─── Flashback Game Animations ─── */
+
+:root {
+  --fb-bg: #E8E0D0;
+  --fb-card: #FFFFFF;
+  --fb-card-shadow: rgba(0, 0, 0, 0.08);
+  --fb-card-drag-shadow: rgba(0, 0, 0, 0.18);
+  --fb-accent: #6B6BA0;
+  --fb-correct: #4A9E6F;
+  --fb-incorrect: #D4564A;
+  --fb-confirm-border: #D4A843;
+  --fb-timeline: #C4BCB0;
+  --fb-text: #3D3D3D;
+  --fb-text-muted: #8A8478;
+}
+
+@keyframes fb-slide-in {
+  from { opacity: 0; transform: translateY(-24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fb-slide-in {
+  animation: fb-slide-in 300ms ease-out forwards;
+}
+
+@keyframes fb-badge-appear {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-badge-appear {
+  animation: fb-badge-appear 400ms ease-out forwards;
+}
+
+@keyframes fb-incorrect-flash {
+  0% { background-color: var(--fb-card); }
+  30% { background-color: rgba(212, 86, 74, 0.15); }
+  100% { background-color: var(--fb-card); }
+}
+.animate-fb-incorrect-flash {
+  animation: fb-incorrect-flash 200ms linear;
+}
+
+@keyframes fb-slide-correct {
+  from { opacity: 0.7; transform: translateY(var(--fb-slide-offset, 0px)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fb-slide-correct {
+  animation: fb-slide-correct 500ms ease-in-out forwards;
+}
+
+@keyframes fb-score-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.animate-fb-score-pop {
+  animation: fb-score-pop 300ms ease-out;
+}

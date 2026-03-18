@@ -24,11 +24,11 @@ import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { parseRedditDetailSlug } from "@/lib/admin/reddit-detail-slug";
 import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-admin-routes";
 import {
+  buildAdminRedditCommunityUrl,
+  buildAdminRedditCommunityWindowPostUrl,
+  buildAdminRedditCommunityWindowUrl,
   buildSeasonAdminUrl,
   buildShowAdminUrl,
-  buildShowRedditCommunityUrl,
-  buildShowRedditCommunityWindowPostUrl,
-  buildShowRedditCommunityWindowUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
 import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
@@ -189,11 +189,12 @@ const SEASON_TABS: Array<{ tab: SeasonAdminTab; label: string }> = [
 ];
 
 const SOCIAL_TABS: Array<{ view: SocialAnalyticsViewSlug; label: string }> = [
-  { view: "official", label: "OFFICIAL ANALYTICS" },
+  { view: "official", label: "OFFICIAL ANALYSIS" },
   { view: "sentiment", label: "SENTIMENT ANALYSIS" },
   { view: "hashtags", label: "HASHTAGS ANALYSIS" },
   { view: "advanced", label: "ADVANCED ANALYTICS" },
   { view: "reddit", label: "REDDIT ANALYTICS" },
+  { view: "cast-content", label: "CAST COMPARISON" },
 ];
 
 const fmtNum = (value: number | null | undefined): string => {
@@ -294,6 +295,74 @@ const parsePostRouteFromPathname = (
   postId: string | null;
   detailSlug: string | null;
 } | null => {
+  const adminSeasonWindow = pathname.match(
+    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)\/s(\d{1,3})\/([^/]+)\/post\/([^/]+)$/,
+  );
+  if (adminSeasonWindow) {
+    const communitySlug = decodeURIComponent(adminSeasonWindow[1] ?? "");
+    if (communitySlug.toLowerCase() !== "communities") {
+      return {
+        showId: decodeURIComponent(adminSeasonWindow[2] ?? ""),
+        communitySlug,
+        seasonNumber: Number.parseInt(adminSeasonWindow[3] ?? "", 10),
+        windowKey: decodeURIComponent(adminSeasonWindow[4] ?? ""),
+        postId: decodeURIComponent(adminSeasonWindow[5] ?? ""),
+        detailSlug: null,
+      };
+    }
+  }
+
+  const adminSeasonWindowCanonical = pathname.match(
+    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)\/s(\d{1,3})\/([^/]+)\/([^/]+)$/,
+  );
+  if (adminSeasonWindowCanonical) {
+    const communitySlug = decodeURIComponent(adminSeasonWindowCanonical[1] ?? "");
+    if (communitySlug.toLowerCase() !== "communities") {
+      return {
+        showId: decodeURIComponent(adminSeasonWindowCanonical[2] ?? ""),
+        communitySlug,
+        seasonNumber: Number.parseInt(adminSeasonWindowCanonical[3] ?? "", 10),
+        windowKey: decodeURIComponent(adminSeasonWindowCanonical[4] ?? ""),
+        postId: null,
+        detailSlug: decodeURIComponent(adminSeasonWindowCanonical[5] ?? ""),
+      };
+    }
+  }
+
+  const adminWindow = pathname.match(
+    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)\/([^/]+)\/post\/([^/]+)$/,
+  );
+  if (adminWindow) {
+    const communitySlug = decodeURIComponent(adminWindow[1] ?? "");
+    if (communitySlug.toLowerCase() !== "communities") {
+      return {
+        showId: decodeURIComponent(adminWindow[2] ?? ""),
+        communitySlug,
+        seasonNumber: null,
+        windowKey: decodeURIComponent(adminWindow[3] ?? ""),
+        postId: decodeURIComponent(adminWindow[4] ?? ""),
+        detailSlug: null,
+      };
+    }
+  }
+
+  const adminWindowCanonical = pathname.match(
+    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/,
+  );
+  if (adminWindowCanonical) {
+    const communitySlug = decodeURIComponent(adminWindowCanonical[1] ?? "");
+    if (communitySlug.toLowerCase() !== "communities") {
+      return {
+        showId: decodeURIComponent(adminWindowCanonical[2] ?? ""),
+        communitySlug,
+        seasonNumber: null,
+        windowKey: decodeURIComponent(adminWindowCanonical[3] ?? ""),
+        postId: null,
+        detailSlug: decodeURIComponent(adminWindowCanonical[4] ?? ""),
+      };
+    }
+  }
+
   const showSeasonWindow = pathname.match(
     /^\/([^/]+)\/social\/reddit\/([^/]+)\/s(\d{1,3})\/([^/]+)\/post\/([^/]+)$/,
   );
@@ -362,14 +431,14 @@ const parsePostRouteFromPathname = (
     };
   }
 
-  const adminWindow = pathname.match(
+  const adminCommunityWindow = pathname.match(
     /^\/admin\/social(?:-media)?\/reddit\/communities\/([^/]+)\/([^/]+)\/post\/([^/]+)$/,
   );
-  if (adminWindow) {
+  if (adminCommunityWindow) {
     return {
-      communityId: decodeURIComponent(adminWindow[1] ?? ""),
-      windowKey: decodeURIComponent(adminWindow[2] ?? ""),
-      postId: decodeURIComponent(adminWindow[3] ?? ""),
+      communityId: decodeURIComponent(adminCommunityWindow[1] ?? ""),
+      windowKey: decodeURIComponent(adminCommunityWindow[2] ?? ""),
+      postId: decodeURIComponent(adminCommunityWindow[3] ?? ""),
       seasonNumber: null,
       detailSlug: null,
     };
@@ -593,6 +662,7 @@ function AdminRedditPostDetailsPageContent() {
   const { user, checking, hasAccess } = useAdminGuard();
   const params = useParams<{
     showId?: string;
+    showSlug?: string;
     seasonNumber?: string;
     communitySlug?: string;
     communityId?: string;
@@ -682,7 +752,8 @@ function AdminRedditPostDetailsPageContent() {
         .filter((value): value is string => Boolean(value))
         .map((value) => value.toLowerCase());
 
-      const pathShowSlug = (params.showId ?? "").trim() || parsedFromPathname?.showId || null;
+      const pathShowSlug =
+        (params.showSlug ?? "").trim() || (params.showId ?? "").trim() || parsedFromPathname?.showId || null;
       let showSlug = pathShowSlug ?? (queryShowSlug?.trim() || null);
       let seasonNumber = toInt(params.seasonNumber ?? querySeason) ?? parsedFromPathname?.seasonNumber ?? null;
 
@@ -822,6 +893,7 @@ function AdminRedditPostDetailsPageContent() {
     params.postId,
     params.seasonNumber,
     params.showId,
+    params.showSlug,
     params.windowKey,
     pathname,
     queryCommunityId,
@@ -1243,9 +1315,9 @@ function AdminRedditPostDetailsPageContent() {
 
   useEffect(() => {
     if (!context || !hasAccess || !user) return;
-    const canonicalPath = buildShowRedditCommunityWindowPostUrl({
-      showSlug: context.showSlug,
+    const canonicalPath = buildAdminRedditCommunityWindowPostUrl({
       communitySlug: context.communitySlug,
+      showSlug: context.showSlug,
       seasonNumber: context.seasonNumber,
       windowKey: toCanonicalWindowToken(context.containerKey),
       postId: context.postId,
@@ -1272,16 +1344,16 @@ function AdminRedditPostDetailsPageContent() {
       })
     : "/admin/social";
   const communityHref = context
-    ? buildShowRedditCommunityUrl({
-        showSlug: context.showSlug,
+    ? buildAdminRedditCommunityUrl({
         communitySlug: context.communitySlug,
+        showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
       })
     : redditHref;
   const windowHref = context
-    ? buildShowRedditCommunityWindowUrl({
-        showSlug: context.showSlug,
+    ? buildAdminRedditCommunityWindowUrl({
         communitySlug: context.communitySlug,
+        showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
         windowKey: toCanonicalWindowToken(context.containerKey),
       })

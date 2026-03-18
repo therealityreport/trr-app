@@ -33,6 +33,14 @@ const CARDS: GameCard[] = [
     blurb: "Guess the Bravo-lebrity in six tries.",
     icon: "/icons/Bravodle-Icon.svg",
   },
+  {
+    title: "Flashback",
+    href: "/flashback/cover",
+    tone: "bg-amber-100",
+    cta: "Play",
+    blurb: "Place reality TV moments on a timeline.",
+    icon: "/icons/Flashback-Icon.svg",
+  },
 ];
 
 function GameTile({ card }: { card: GameCard }) {
@@ -68,7 +76,7 @@ function GameTile({ card }: { card: GameCard }) {
       <div className="space-y-4 p-5">
         {card.blurb && <p className="text-center text-sm text-neutral-500 leading-tight">{card.blurb}</p>}
         <div className="flex justify-center gap-3">
-          {["Realitease", "Bravodle"].includes(card.title) ? (
+          {["Realitease", "Bravodle", "Flashback"].includes(card.title) ? (
             <>
               <Link href={{ pathname: card.href }} className={baseButtonClasses + " hover:bg-zinc-50"}>
                 {card.cta ?? "Play"}

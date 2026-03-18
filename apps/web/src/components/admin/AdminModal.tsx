@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import type { ReactNode, RefObject } from "react";
 
 type AdminModalProps = {
@@ -17,6 +17,7 @@ type AdminModalProps = {
   backdropClassName?: string;
   panelClassName?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  preserveScrollPosition?: boolean;
 };
 
 const FOCUSABLE_SELECTOR =
@@ -41,10 +42,24 @@ export default function AdminModal({
   backdropClassName,
   panelClassName,
   initialFocusRef,
+  preserveScrollPosition = false,
 }: AdminModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const panelScrollTopRef = useRef(0);
+  const onCloseRef = useRef(onClose);
   const titleId = useId();
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useLayoutEffect(() => {
+    if (!isOpen || !preserveScrollPosition) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    panel.scrollTop = panelScrollTopRef.current;
+  });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -58,11 +73,16 @@ export default function AdminModal({
     const target = initialFocusRef?.current ?? focusables[0] ?? panel;
     target.focus();
 
+    const handleScroll = () => {
+      panelScrollTopRef.current = panel.scrollTop;
+    };
+    panel.addEventListener("scroll", handleScroll, { passive: true });
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (!disableClose && closeOnEscape) {
           event.preventDefault();
-          onClose();
+          onCloseRef.current();
         }
         return;
       }
@@ -96,12 +116,13 @@ export default function AdminModal({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
+      panel.removeEventListener("scroll", handleScroll);
       document.removeEventListener("keydown", handleKeyDown);
       if (previouslyFocusedRef.current && previouslyFocusedRef.current.isConnected) {
         previouslyFocusedRef.current.focus();
       }
     };
-  }, [closeOnEscape, disableClose, initialFocusRef, isOpen, onClose]);
+  }, [closeOnEscape, disableClose, initialFocusRef, isOpen]);
 
   if (!isOpen) return null;
 

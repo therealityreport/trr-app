@@ -11,15 +11,32 @@ export const SOCIAL_ACCOUNT_PROFILE_PLATFORMS: ReadonlyArray<SocialPlatformSlug>
   "threads",
 ];
 
+export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
+  "instagram",
+  "tiktok",
+  "twitter",
+  "threads",
+];
+
 export type SocialAccountProfileSummary = {
   platform: SocialPlatformSlug;
   account_handle: string;
   profile_url?: string | null;
+  avatar_url?: string | null;
   total_posts: number;
   total_engagement: number;
   total_views: number;
   first_post_at?: string | null;
   last_post_at?: string | null;
+  catalog_total_posts?: number;
+  catalog_assigned_posts?: number;
+  catalog_unassigned_posts?: number;
+  catalog_pending_review_posts?: number;
+  catalog_first_post_at?: string | null;
+  catalog_last_post_at?: string | null;
+  last_catalog_run_at?: string | null;
+  last_catalog_run_status?: string | null;
+  catalog_recent_runs?: SocialAccountCatalogRun[];
   per_show_counts: SocialAccountProfileShowBucket[];
   per_season_counts: SocialAccountProfileSeasonBucket[];
   top_hashtags: SocialAccountProfileHashtag[];
@@ -78,6 +95,53 @@ export type SocialAccountProfilePost = {
   };
 };
 
+export type SocialAccountCatalogPost = SocialAccountProfilePost & {
+  assignment_status?: "assigned" | "unassigned" | "ambiguous" | "needs_review";
+  assignment_source?: string | null;
+  candidate_matches?: Array<Record<string, unknown>>;
+};
+
+export type SocialAccountCatalogRun = {
+  job_id: string;
+  run_id: string;
+  status?: string | null;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error_message?: string | null;
+};
+
+export type SocialAccountCatalogReviewItem = {
+  id: string;
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  hashtag: string;
+  display_hashtag?: string | null;
+  review_status: string;
+  usage_count: number;
+  sample_post_ids: string[];
+  sample_source_ids: string[];
+  suggested_shows: SocialAccountProfileShowBucket[];
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+};
+
+export type CatalogBackfillRequest = {
+  date_start?: string | null;
+  date_end?: string | null;
+  backfill_scope: "full_history" | "bounded_window";
+};
+
+export type CatalogSyncRecentRequest = {
+  lookback_days: number;
+};
+
+export type CatalogReviewResolveRequest = {
+  resolution_action: "assign_show" | "assign_season" | "mark_non_show";
+  show_id?: string | null;
+  season_id?: string | null;
+};
+
 export type SocialAccountProfileHashtagAssignment = {
   id?: string | null;
   show_id?: string | null;
@@ -115,6 +179,7 @@ export type SocialAccountProfileCollaboratorTagAggregate = {
 
 export const SOCIAL_ACCOUNT_PROFILE_TAB_LABELS: Record<SocialAccountProfileTab, string> = {
   stats: "Stats",
+  catalog: "Catalog",
   posts: "Posts",
   hashtags: "Hashtags",
   "collaborators-tags": "Collaborators / Tags",

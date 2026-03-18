@@ -1,0 +1,29 @@
+<svg width="454" height="454" viewBox="0 0 454 454" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rounded background -->
+  <rect x="0" y="0" width="454" height="454" rx="49" fill="white"/>
+  <!-- Outer border -->
+  <rect x="10" y="10" width="434" height="434" rx="44" stroke="black" stroke-width="12" fill="none"/>
+  <!-- Film clapperboard top section -->
+  <rect x="50" y="60" width="354" height="80" rx="8" fill="#1a1a1a"/>
+  <!-- Clapperboard stripes -->
+  <rect x="50" y="60" width="50" height="80" rx="8" fill="white"/>
+  <rect x="130" y="60" width="50" height="80" fill="white"/>
+  <rect x="210" y="60" width="50" height="80" fill="white"/>
+  <rect x="290" y="60" width="50" height="80" fill="white"/>
+  <rect x="370" y="60" width="34" height="80" rx="0" fill="white"/>
+  <!-- Film frame body -->
+  <rect x="50" y="150" width="354" height="240" rx="8" fill="#E8D5B7"/>
+  <!-- Timeline arrow -->
+  <line x1="90" y1="270" x2="340" y2="270" stroke="#1a1a1a" stroke-width="6" stroke-linecap="round"/>
+  <polygon points="350,270 330,258 330,282" fill="#1a1a1a"/>
+  <!-- Timeline dots -->
+  <circle cx="120" cy="270" r="12" fill="#B8860B"/>
+  <circle cx="190" cy="270" r="12" fill="#B8860B"/>
+  <circle cx="260" cy="270" r="12" fill="#B8860B"/>
+  <!-- Year labels -->
+  <text x="120" y="240" text-anchor="middle" font-family="Georgia, serif" font-size="22" font-weight="bold" fill="#1a1a1a">?</text>
+  <text x="190" y="240" text-anchor="middle" font-family="Georgia, serif" font-size="22" font-weight="bold" fill="#1a1a1a">?</text>
+  <text x="260" y="240" text-anchor="middle" font-family="Georgia, serif" font-size="22" font-weight="bold" fill="#1a1a1a">?</text>
+  <!-- Flashback text -->
+  <text x="227" y="340" text-anchor="middle" font-family="Georgia, serif" font-size="38" font-weight="bold" fill="#1a1a1a">FLASHBACK</text>
+</svg>

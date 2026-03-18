@@ -64,6 +64,19 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/progressParams = new URLSearchParams\(\{\s*recent_log_limit:\s*"40"/s);
   });
 
+  it("uses the active day filter when kicking off a sync session", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const scopedDayRange = activeDayFilter \? buildIsoDayRange\(activeDayFilter\) : null;/);
+    expect(contents).toMatch(/const syncWindow = scopedDayRange \?\? \{/);
+    expect(contents).toMatch(/dateStart: syncWindow\.dateStart,/);
+    expect(contents).toMatch(/dateEnd: syncWindow\.dateEnd,/);
+  });
+
   it("uses timeout-bounded fetches for week detail and sync polling", () => {
     const filePath = path.resolve(
       __dirname,
@@ -118,6 +131,8 @@ describe("social week detail wiring", () => {
     expect(weekContents).toMatch(/consumeSocialSyncSessionStream/);
     expect(weekContents).toMatch(/social\/sync-sessions\/\$\{syncSessionId\}.*\/stream/s);
     expect(weekContents).toMatch(/if \(syncSessionStreamConnected\) return;/);
+    expect(weekContents).toMatch(/if \(!syncPollingEnabled\) return;/);
+    expect(weekContents).toMatch(/syncPollAbortRef\.current\?\.abort\(\);/);
 
     const seasonFilePath = path.resolve(
       __dirname,
@@ -165,6 +180,51 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/const TRANSIENT_DEV_RESTART_PATTERNS = \[/);
     expect(contents).toMatch(/isTransientDevRestartMessage/);
     expect(contents).toMatch(/syncPollFailureCountRef\.current = Math\.max\(1, syncPollFailureCountRef\.current\)/);
+  });
+
+  it("throttles week and season social polling in dev when tabs are hidden", () => {
+    const weekFilePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const weekContents = fs.readFileSync(weekFilePath, "utf8");
+
+    expect(weekContents).toMatch(/const DEV_LOW_HEAT_MODE = process\.env\.NODE_ENV !== "production";/);
+    expect(weekContents).toMatch(/const SYNC_GALLERY_REFRESH_MS = DEV_LOW_HEAT_MODE \? 10_000 : 4_000;/);
+    expect(weekContents).toMatch(/const SYNC_ACTIVE_POLL_INTERVAL_MS = DEV_LOW_HEAT_MODE \? 10_000 : 4_000;/);
+    expect(weekContents).toMatch(/const \[isDocumentVisible, setIsDocumentVisible\] = useState<boolean>\(\(\) => \{/);
+    expect(weekContents).toMatch(/const syncPollingEnabled = !DEV_LOW_HEAT_MODE \|\| isDocumentVisible;/);
+    expect(weekContents).toMatch(/if \(!syncPollingEnabled\) return;/);
+
+    const seasonFilePath = path.resolve(
+      __dirname,
+      "../src/components/admin/season-social-analytics-section.tsx",
+    );
+    const seasonContents = fs.readFileSync(seasonFilePath, "utf8");
+
+    expect(seasonContents).toMatch(/const DEV_LOW_HEAT_MODE = process\.env\.NODE_ENV !== "production";/);
+    expect(seasonContents).toMatch(/const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;/);
+    expect(seasonContents).toMatch(/const \[isDocumentVisible, setIsDocumentVisible\] = useState<boolean>\(\(\) => \{/);
+    expect(seasonContents).toMatch(/if \(DEV_LOW_HEAT_MODE && !isDocumentVisible\) return;/);
+    expect(seasonContents).toMatch(/const baseInterval = DEV_LOW_HEAT_MODE \? DEV_VISIBLE_POLL_INTERVAL_MS : runningIngest \? 3_000 : 5_000;/);
+    expect(seasonContents).toMatch(/const refreshInterval = DEV_LOW_HEAT_MODE\s*\? DEV_VISIBLE_POLL_INTERVAL_MS/s);
+  });
+
+  it("surfaces worker-health blocking and sync-session diagnostics in the week sync UI", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/syncActionsBlockedReason/);
+    expect(contents).toMatch(/Queue mode is enabled but no healthy remote executors are reporting/);
+    expect(contents).toMatch(/platformDiagnostics/);
+    expect(contents).toMatch(/Auth detail:/);
+    expect(contents).toMatch(/Follow-up breakdown/);
+    expect(contents).toMatch(/Per-dimension coverage/);
+    expect(contents).toMatch(/Twitter\/X auth warning/);
+    expect(contents).toMatch(/Degraded mode:/);
   });
 
   it("uses season social header chrome wiring with official analytics context", () => {
@@ -409,5 +469,19 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/Comment sync \{formatPlatformSyncStatus\(postStatus\.comment_sync_status\.status\)\}/);
     expect(contents).toMatch(/Mirror/);
     expect(contents).toMatch(/Mirror \{formatPlatformSyncStatus\(postStatus\.media_mirror_status\.status\)\}/);
+  });
+
+  it("prefers mirrored hosted YouTube assets when pre-filling cast screentime imports", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/function getPreferredCastScreentimeImportSource/);
+    expect(contents).toMatch(/mode: "external_url"/);
+    expect(contents).toMatch(/source_mode: castScreentimeImportSource\.mode/);
+    expect(contents).toMatch(/source_url: castScreentimeImportSource\.url/);
+    expect(contents).toMatch(/normalizeSocialMediaCandidateUrl\(externalPostUrl\)/);
   });
 });

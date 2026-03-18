@@ -979,6 +979,82 @@ describe("reddit-discovery-service", () => {
     expect(result.candidates[0]?.reddit_post_id).toBe("show-focused-candidate");
   });
 
+  it("allows show-focused episode discovery without configured title patterns", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify(
+          makeListing([
+            {
+              id: "show-focused-no-patterns",
+              title: "RHOSLC Season 6 Episode 10 Live Episode Discussion",
+              selftext: "Thread text",
+              url: "https://www.reddit.com/r/realhousewivesofSLC/comments/show-focused-no-patterns/test/",
+              permalink:
+                "/r/realhousewivesofSLC/comments/show-focused-no-patterns/test/",
+              author: "user1",
+              score: 61,
+              num_comments: 13,
+              created_utc: 1_706_001_575,
+              link_flair_text: null,
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const result = await discoverEpisodeDiscussionThreads({
+      subreddit: "realhousewivesofSLC",
+      showName: "The Real Housewives of Salt Lake City",
+      showAliases: ["RHOSLC"],
+      seasonNumber: 6,
+      seasonEpisodes: [{ episode_number: 10, air_date: "2026-03-01" }],
+      episodeTitlePatterns: [],
+      episodeRequiredFlairs: ["Salt Lake City"],
+      isShowFocused: true,
+      sortModes: ["new"],
+    });
+
+    expect(result.filters_applied.title_patterns).toEqual([]);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      reddit_post_id: "show-focused-no-patterns",
+      discussion_type: "live",
+      episode_number: 10,
+    });
+    expect(result.episode_matrix).toEqual([
+      {
+        episode_number: 10,
+        live: {
+          post_count: 1,
+          total_comments: 13,
+          total_upvotes: 61,
+          top_post_id: "show-focused-no-patterns",
+          top_post_url:
+            "https://www.reddit.com/r/realhousewivesofSLC/comments/show-focused-no-patterns/test/",
+        },
+        post: {
+          post_count: 0,
+          total_comments: 0,
+          total_upvotes: 0,
+          top_post_id: null,
+          top_post_url: null,
+        },
+        weekly: {
+          post_count: 0,
+          total_comments: 0,
+          total_upvotes: 0,
+          top_post_id: null,
+          top_post_url: null,
+        },
+        total_posts: 1,
+        total_comments: 13,
+        total_upvotes: 61,
+      },
+    ]);
+  });
+
   it("includes episode candidates only when posted within selected period window", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(

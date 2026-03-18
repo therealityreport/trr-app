@@ -26,6 +26,7 @@ import { LightboxMetadataPanel } from "@/components/admin/image-lightbox/Lightbo
 import { LightboxManagementActions } from "@/components/admin/image-lightbox/LightboxManagementActions";
 import { useLightboxManagementState } from "@/components/admin/image-lightbox/useLightboxManagementState";
 import { useLightboxKeyboardFocus } from "@/components/admin/image-lightbox/useLightboxKeyboardFocus";
+import { ReplaceGettyDrawer } from "@/components/admin/image-lightbox/ReplaceGettyDrawer";
 
 // Inline SVG icons to avoid external dependencies
 const XIcon = ({ className }: { className?: string }) => (
@@ -354,6 +355,7 @@ interface MetadataPanelProps {
   isExpanded: boolean;
   runtimeDimensions?: { width: number; height: number } | null;
   management?: {
+    imageId?: string;
     isArchived?: boolean;
     isStarred?: boolean;
     canManage?: boolean;
@@ -457,7 +459,6 @@ function MetadataPanel({
   onToggleExtras,
 }: MetadataPanelProps) {
   const [showFullCaption, setShowFullCaption] = useState(false);
-  const [copyMirrorFileNotice, setCopyMirrorFileNotice] = useState<string | null>(null);
   const currentContentType = normalizeContentTypeToken(
     metadata.contentType ?? metadata.sectionTag ?? "OTHER"
   );
@@ -466,6 +467,7 @@ function MetadataPanel({
   );
   const [contentTypeSaving, setContentTypeSaving] = useState(false);
   const [contentTypeError, setContentTypeError] = useState<string | null>(null);
+  const [showReplaceGetty, setShowReplaceGetty] = useState(false);
   const captionTruncateLength = 200;
   const needsTruncation =
     metadata.caption && metadata.caption.length > captionTruncateLength;
@@ -479,9 +481,6 @@ function MetadataPanel({
   const sourceBadgeLabel =
     metadata.originalSourceLabel ||
     formatSourceBadgeLabel(metadata.source, originalSourcePageUrl ?? originalSourceFileUrl);
-  const foundOnSourceUrl = originalSourcePageUrl ?? originalSourceFileUrl ?? null;
-  const foundOnSourceLabel = formatFoundOnSourceLabel(metadata.source, foundOnSourceUrl);
-  const foundOnPageTitle = metadata.sourcePageTitle || "Unknown";
   const galleryStatusNormalized = (metadata.galleryStatus ?? "").trim().toLowerCase();
   const isBrokenUnreachable = galleryStatusNormalized === "broken_unreachable";
   const galleryStatusLabel = metadata.galleryStatus ? metadata.galleryStatus.replace(/_/g, " ") : null;
@@ -697,34 +696,8 @@ function MetadataPanel({
   })();
   const metadataCoverageRows: Array<{ label: string; value: ReactNode }> = [
     { label: "Source", value: metadata.source || "—" },
-    { label: "Original Source", value: sourceBadgeLabel || "—" },
-    { label: "Original Source Page", value: sourcePageLabel ?? "—" },
-    { label: "Original Source File URL", value: originalSourceFileUrl ?? "—" },
-    { label: "Source Variant", value: metadata.sourceVariant ?? "—" },
-    { label: "Source Logo", value: metadata.sourceLogo ?? "—" },
     { label: "Name", value: metadata.assetName ?? "—" },
-    { label: "Original URL", value: metadata.originalImageUrl ?? "—" },
-    {
-      label: "Content Type",
-      value: formatContentTypeLabel(metadata.contentType ?? metadata.sectionTag ?? "OTHER"),
-    },
-    { label: "Credit Media Type", value: metadata.imdbCreditMediaType ?? metadata.imdbCreditType ?? "—" },
-    {
-      label: "Title IMDb ID",
-      value:
-        titleImdbId && titleImdbUrl ? (
-          <a
-            href={titleImdbUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sky-300 underline decoration-sky-400/60 underline-offset-2 hover:text-sky-200"
-          >
-            {titleImdbId}
-          </a>
-        ) : (
-          "—"
-        ),
-    },
+    { label: "Title Type", value: metadata.imdbCreditMediaType ?? metadata.imdbCreditType ?? "—" },
     {
       label: "Media Type",
       value:
@@ -733,19 +706,27 @@ function MetadataPanel({
     },
     {
       label: "Event Name",
+      value: metadata.eventName ?? "—",
+    },
+    {
+      label: "Event Count",
       value:
-        (metadata.mediaTypeLabel?.toLowerCase() === "event" || metadata.contentType === "EVENT")
-          ? metadata.eventName ?? metadata.sourcePageTitle ?? metadata.assetName ?? "—"
+        typeof metadata.groupedEventCount === "number" && Number.isFinite(metadata.groupedEventCount)
+          ? String(metadata.groupedEventCount)
           : "—",
     },
     { label: "Section", value: metadata.sectionLabel ?? "—" },
     { label: "Show", value: metadata.showName ?? "—" },
     { label: "Episode", value: metadata.episodeLabel ?? "—" },
     { label: "Season", value: metadata.season ? `Season ${metadata.season}` : "—" },
+    { label: "Photographer", value: metadata.photographer ?? "—" },
+    { label: "Company", value: metadata.company ?? "—" },
     { label: "Dimensions", value: dimensionsLabel },
     { label: "File Type", value: metadata.fileType?.toUpperCase() ?? "—" },
     { label: "Created", value: formatDateLabel(metadata.createdAt) },
+    { label: "Uploaded", value: formatDateLabel(metadata.uploadedAt) },
     { label: "Added", value: formatDateLabel(metadata.addedAt) },
+    { label: "Airdate", value: formatDateLabel(metadata.airdate) },
     {
       label: "Text Overlay",
       value:
@@ -782,12 +763,76 @@ function MetadataPanel({
       value: metadata.people.length > 0 ? metadata.people.join(", ") : "—",
     },
     {
+      label: "People Tags",
+      value: (metadata.peopleTags?.length ?? 0) > 0 ? metadata.peopleTags!.join(", ") : "—",
+    },
+    {
+      label: "Tags",
+      value: (metadata.filteredTags?.length ?? 0) > 0 ? metadata.filteredTags!.join(", ") : "—",
+    },
+    {
       label: "Titles",
       value: metadata.titles.length > 0 ? metadata.titles.join(", ") : "—",
     },
     { label: "Caption", value: metadata.caption ?? "—" },
     { label: "Fetched", value: formatDateLabel(metadata.fetchedAt) },
+    { label: "Getty Event URL", value: metadata.gettyEventUrl ?? "—" },
+    { label: "Getty Event ID", value: metadata.gettyEventId ?? "—" },
+    { label: "Getty Event Slug", value: metadata.gettyEventSlug ?? "—" },
+    { label: "Getty Event Date", value: metadata.gettyEventDate ?? "—" },
   ];
+  if (metadata.gettyDetails) {
+    metadataCoverageRows.push({
+      label: "Getty Restrictions",
+      value: metadata.gettyDetails.restrictions ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Credit",
+      value: metadata.gettyDetails.credit_display ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Editorial #",
+      value: metadata.gettyDetails.editorial_number ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Collection",
+      value: metadata.gettyDetails.collection_display ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Date Created",
+      value: metadata.gettyDetails.date_created_display ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Upload Date",
+      value: metadata.gettyDetails.upload_date_display ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty License",
+      value: metadata.gettyDetails.license_type_display ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Release Info",
+      value: metadata.gettyDetails.release_info ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Source",
+      value: metadata.gettyDetails.source_display ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Object Name",
+      value: metadata.gettyDetails.object_name_display ?? "—",
+    });
+    metadataCoverageRows.push({
+      label: "Getty Max File Size",
+      value: metadata.gettyDetails.max_file_size ?? "—",
+    });
+  }
+  if ((metadata.gettyTags?.length ?? 0) > 0) {
+    metadataCoverageRows.push({
+      label: "Getty Tags (All)",
+      value: metadata.gettyTags?.join(", ") ?? "—",
+    });
+  }
   if (galleryStatusLabel) {
     metadataCoverageRows.push({ label: "Gallery Status", value: galleryStatusLabel });
     metadataCoverageRows.push({
@@ -875,10 +920,6 @@ function MetadataPanel({
     : disabledReasons.edit ?? null;
 
   useEffect(() => {
-    setCopyMirrorFileNotice(null);
-  }, [hostedMediaFileName]);
-
-  useEffect(() => {
     setContentTypeValue(currentContentType);
     setContentTypeError(null);
   }, [currentContentType]);
@@ -935,60 +976,66 @@ function MetadataPanel({
                   ? "Unstar/Unflag"
                   : "Star/Flag"}
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              handleAction(
-                "featuredPoster",
-                management.isFeaturedPoster ? management.onClearFeaturedPoster : management.onSetFeaturedPoster
-              )
-            }
-            disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
-            title={featuredPosterDisabledReason ?? undefined}
-            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
-          >
-            {actionLoading === "featuredPoster"
-              ? "Saving..."
-              : management.isFeaturedPoster
-                ? "Clear Featured Poster"
-                : "Set as Featured Poster"}
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              handleAction(
-                "featuredBackdrop",
-                management.isFeaturedBackdrop ? management.onClearFeaturedBackdrop : management.onSetFeaturedBackdrop
-              )
-            }
-            disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
-            title={featuredBackdropDisabledReason ?? undefined}
-            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
-          >
-            {actionLoading === "featuredBackdrop"
-              ? "Saving..."
-              : management.isFeaturedBackdrop
-                ? "Clear Featured Backdrop"
-                : "Set as Featured Backdrop"}
-          </button>
-          <button
-            type="button"
-            onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
-            disabled={
-              actionLoading !== null ||
-              starLoading ||
-              Boolean(featuredLogoDisabledReason) ||
-              Boolean(management.isFeaturedLogo)
-            }
-            title={featuredLogoDisabledReason ?? undefined}
-            className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
-          >
-            {actionLoading === "featuredLogo"
-              ? "Saving..."
-              : management.isFeaturedLogo
-                ? "Featured Logo"
-                : "Set as Featured Logo"}
-          </button>
+          {currentContentType === "POSTER" && (
+            <button
+              type="button"
+              onClick={() =>
+                handleAction(
+                  "featuredPoster",
+                  management.isFeaturedPoster ? management.onClearFeaturedPoster : management.onSetFeaturedPoster
+                )
+              }
+              disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
+              title={featuredPosterDisabledReason ?? undefined}
+              className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "featuredPoster"
+                ? "Saving..."
+                : management.isFeaturedPoster
+                  ? "Clear Featured Poster"
+                  : "Set as Featured Poster"}
+            </button>
+          )}
+          {currentContentType === "BACKDROP" && (
+            <button
+              type="button"
+              onClick={() =>
+                handleAction(
+                  "featuredBackdrop",
+                  management.isFeaturedBackdrop ? management.onClearFeaturedBackdrop : management.onSetFeaturedBackdrop
+                )
+              }
+              disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
+              title={featuredBackdropDisabledReason ?? undefined}
+              className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "featuredBackdrop"
+                ? "Saving..."
+                : management.isFeaturedBackdrop
+                  ? "Clear Featured Backdrop"
+                  : "Set as Featured Backdrop"}
+            </button>
+          )}
+          {currentContentType === "LOGO" && (
+            <button
+              type="button"
+              onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
+              disabled={
+                actionLoading !== null ||
+                starLoading ||
+                Boolean(featuredLogoDisabledReason) ||
+                Boolean(management.isFeaturedLogo)
+              }
+              title={featuredLogoDisabledReason ?? undefined}
+              className="rounded bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+            >
+              {actionLoading === "featuredLogo"
+                ? "Saving..."
+                : management.isFeaturedLogo
+                  ? "Featured Logo"
+                  : "Set as Featured Logo"}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onToggleExtras?.()}
@@ -1004,12 +1051,9 @@ function MetadataPanel({
         <p className="mb-4 text-xs text-red-300">{actionError}</p>
       )}
 
-      {/* Source Badge */}
+      {/* Source Badges */}
       <div className="mb-4">
-        <span className="tracking-widest text-[10px] uppercase text-white/50">
-          Original Source
-        </span>
-        <div className="mt-1 flex items-center gap-2">
+        <div className="flex items-center gap-2">
           {metadata.isHostedMedia && (
             hostedMediaUrl ? (
               <a
@@ -1057,131 +1101,43 @@ function MetadataPanel({
         </div>
       </div>
 
-      {hasHostedMediaDetails && (
+      {/* Title — hyperlinked to IMDb title when available */}
         <div className="mb-4">
-          <div className="flex items-center gap-2">
-            <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Hosted Media File
-            </span>
-            {hostedMediaUrl ? (
-              <a
-                href={hostedMediaUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-block rounded bg-blue-500/80 px-2 py-0.5 text-[10px] font-medium text-white underline decoration-white/50 underline-offset-2 hover:bg-blue-500"
-                title="Open hosted media asset"
-              >
-                HOSTED MEDIA
-              </a>
-            ) : (
-              <span className="inline-block rounded px-2 py-0.5 text-[10px] font-medium text-white bg-blue-500/80">
-                HOSTED MEDIA
-              </span>
-            )}
-          </div>
-          <div className="mt-1 flex items-center gap-2">
-            <code className="max-w-[70%] break-all rounded bg-white/10 px-2 py-1 text-xs text-white/90">
-              {hostedMediaFileName ?? "—"}
-            </code>
-            <button
-              type="button"
-              onClick={async () => {
-                if (!hostedMediaFileName) return;
-                try {
-                  const copied = await copyTextToClipboard(hostedMediaFileName);
-                  setCopyMirrorFileNotice(copied ? "Copied." : "Copy failed.");
-                } catch {
-                  setCopyMirrorFileNotice("Copy failed.");
-                }
-              }}
-              disabled={!hostedMediaFileName}
-              className="rounded bg-white/10 px-2 py-1 text-xs font-semibold text-white hover:bg-white/20 disabled:opacity-50"
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Title
+          </span>
+          {metadata.episodeTitle && titleImdbUrl ? (
+            <a
+              href={titleImdbUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 block text-sm text-sky-300 underline decoration-sky-400/60 underline-offset-2 hover:text-sky-200 break-all"
             >
-              Copy
-            </button>
-          </div>
-          {copyMirrorFileNotice && (
-            <p
-              className={`mt-1 text-xs ${
-                copyMirrorFileNotice === "Copied." ? "text-emerald-300" : "text-red-300"
-              }`}
-            >
-              {copyMirrorFileNotice}
+              {metadata.episodeTitle}
+            </a>
+          ) : (
+            <p className="mt-1 text-sm text-white/90 break-all">
+              {metadata.episodeTitle ?? metadata.assetName ?? "—"}
             </p>
           )}
         </div>
-      )}
 
-      <div className="mb-4 space-y-2">
-        <div>
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Original Source File URL
-          </span>
-          {originalSourceFileUrl ? (
-            <a
-              href={originalSourceFileUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 block break-all text-xs text-white/90 underline"
-            >
-              {originalSourceFileUrl}
-            </a>
-          ) : (
-            <p className="mt-1 text-xs text-white/80">Original source file URL unavailable</p>
-          )}
-        </div>
-        <div>
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Found on
-          </span>
-          <p className="mt-1 break-words text-xs text-white/90">
-            {foundOnSourceLabel} | {foundOnPageTitle}
-          </p>
-        </div>
-      </div>
+        {/* Title Type (Credit Media Type) */}
+        {(metadata.imdbCreditMediaType || metadata.imdbCreditType) && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Title Type
+            </span>
+            <p className="mt-1 text-sm text-white/90">
+              {metadata.imdbCreditMediaType ?? metadata.imdbCreditType}
+            </p>
+          </div>
+        )}
 
+        {/* Media Type (editable content type dropdown) */}
         <div className="mb-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Source Variant
-          </span>
-          <p className="mt-1 text-sm text-white/90">{metadata.sourceVariant ?? "—"}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Original Source Page
-          </span>
-          {originalSourcePageUrl ? (
-            <a
-              href={originalSourcePageUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 block text-sm text-white/90 underline break-all"
-            >
-              {sourcePageLabel ?? originalSourcePageUrl}
-            </a>
-          ) : (
-            <p className="mt-1 text-sm text-white/90 break-all">{sourcePageLabel ?? "—"}</p>
-          )}
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Source Logo
-          </span>
-          <p className="mt-1 text-sm text-white/90">{metadata.sourceLogo ?? "—"}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Name
-          </span>
-          <p className="mt-1 text-sm text-white/90 break-all">{metadata.assetName ?? "—"}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Content Type
+            Media Type
           </span>
           {canEditContentType ? (
             <div className="mt-2 space-y-2">
@@ -1237,53 +1193,22 @@ function MetadataPanel({
           )}
         </div>
 
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Section
-          </span>
-          <p className="mt-1 text-sm text-white/90">{metadata.sectionLabel ?? "—"}</p>
-        </div>
+        {/* Event Name — only when content is event-type */}
+        {metadata.eventName && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Event Name
+            </span>
+            <p className="mt-1 text-sm text-white/90">{metadata.eventName}</p>
+          </div>
+        )}
 
-        {/* Dimensions (always shown so missing values are explicit) */}
+        {/* Show */}
         <div className="mb-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Dimensions
+            Show
           </span>
-          <p className="mt-1 text-sm text-white/90">{dimensionsLabel}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            File Type
-          </span>
-          <p className="mt-1 text-sm text-white/90">{metadata.fileType?.toUpperCase() ?? "—"}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Created
-          </span>
-          <p className="mt-1 text-sm text-white/90">{formatDateLabel(metadata.createdAt)}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            Added
-          </span>
-          <p className="mt-1 text-sm text-white/90">{formatDateLabel(metadata.addedAt)}</p>
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            TEXT OVERLAY
-          </span>
-          <p className="mt-1 text-sm font-semibold text-white/90">
-            {metadata.hasTextOverlay === true
-              ? "YES (Contains Text)"
-              : metadata.hasTextOverlay === false
-                ? "NO (No Text)"
-                : "UNKNOWN"}
-          </p>
+          <p className="mt-1 text-sm text-white/90">{metadata.showName ?? "—"}</p>
         </div>
 
         {/* Season */}
@@ -1296,12 +1221,170 @@ function MetadataPanel({
           </p>
         </div>
 
+        {/* Episode (number only) */}
         <div className="mb-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
             Episode
           </span>
-          <p className="mt-1 text-sm text-white/90">{metadata.episodeLabel ?? "—"}</p>
+          <p className="mt-1 text-sm text-white/90">
+            {metadata.episodeNumber != null ? `Episode ${metadata.episodeNumber}` : "—"}
+          </p>
         </div>
+
+        {/* Photographer (from NBCUMV or Getty credit) */}
+        {metadata.photographer && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Photographer
+            </span>
+            <p className="mt-1 text-sm text-white/90">{metadata.photographer}</p>
+          </div>
+        )}
+
+        {/* Company (from NBCUMV) */}
+        {metadata.company && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Company
+            </span>
+            <p className="mt-1 text-sm text-white/90">{metadata.company}</p>
+          </div>
+        )}
+
+        {/* Section — hidden for IMDb sources */}
+        {metadata.source?.toLowerCase() !== "imdb" && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Section
+            </span>
+            <p className="mt-1 text-sm text-white/90">{metadata.sectionLabel ?? "—"}</p>
+          </div>
+        )}
+
+        {/* Dimensions */}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Dimensions
+          </span>
+          <p className="mt-1 text-sm text-white/90">{dimensionsLabel}</p>
+        </div>
+
+        {/* File Type */}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            File Type
+          </span>
+          <p className="mt-1 text-sm text-white/90">{metadata.fileType?.toUpperCase() ?? "—"}</p>
+        </div>
+
+        {/* Dates — grouped */}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Dates
+          </span>
+          <div className="mt-1 space-y-0.5 text-sm text-white/90">
+            <p>Created: {formatDateLabel(metadata.createdAt)}</p>
+            {metadata.uploadedAt && <p>Uploaded: {formatDateLabel(metadata.uploadedAt)}</p>}
+            <p>Added: {formatDateLabel(metadata.addedAt)}</p>
+            {metadata.airdate && <p>Airdate: {formatDateLabel(metadata.airdate)}</p>}
+          </div>
+        </div>
+
+        {/* Text Overlay */}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Text Overlay
+          </span>
+          <p className="mt-1 text-sm font-semibold text-white/90">
+            {metadata.hasTextOverlay === true
+              ? "YES"
+              : metadata.hasTextOverlay === false
+                ? "NO"
+                : "—"}
+          </p>
+        </div>
+
+        {/* People Count / Face Boxes / Face Crops / Face Filtering */}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            People Count
+          </span>
+          <p className="mt-1 text-sm text-white/90">
+            {typeof metadata.peopleCount === "number" && Number.isFinite(metadata.peopleCount)
+              ? String(metadata.peopleCount)
+              : "—"}
+          </p>
+        </div>
+
+        {/* People */}
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            People
+          </span>
+          {metadata.people.length > 0 ? (
+            <div className="mt-1 max-h-32 overflow-y-auto">
+              {metadata.people.map((person, i) => (
+                <p key={i} className="text-sm text-white/90">
+                  {person}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-1 text-sm text-white/90">—</p>
+          )}
+        </div>
+
+        {/* People Tags — from Getty, pill badges */}
+        {(metadata.peopleTags?.length ?? 0) > 0 && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              People Tags
+            </span>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {metadata.peopleTags!.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-sky-500/20 px-2.5 py-0.5 text-xs font-medium text-sky-300"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Tags — filtered Getty tags, pill badges */}
+        {(metadata.filteredTags?.length ?? 0) > 0 && (
+          <div className="mb-4">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Tags
+            </span>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {metadata.filteredTags!.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-white/10 px-2.5 py-0.5 text-xs font-medium text-white/80"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Getty Event — grouped */}
+        {(metadata.gettyEventId || metadata.gettyEventDate) && (
+          <div className="mb-4 rounded border border-white/10 bg-white/[0.03] p-3">
+            <span className="tracking-widest text-[10px] uppercase text-white/50">
+              Getty Event
+            </span>
+            <div className="mt-1.5 space-y-0.5 text-sm text-white/90">
+              {metadata.gettyEventId && <p>Event ID: {metadata.gettyEventId}</p>}
+              {metadata.gettyEventDate && <p>Event Date: {metadata.gettyEventDate}</p>}
+              {metadata.eventName && <p>Event Name: {metadata.eventName}</p>}
+            </div>
+          </div>
+        )}
 
         {/* Caption */}
         <div className="mb-4">
@@ -1330,23 +1413,6 @@ function MetadataPanel({
                 </>
               )}
             </button>
-          )}
-        </div>
-
-        <div className="mb-4">
-          <span className="tracking-widest text-[10px] uppercase text-white/50">
-            People
-          </span>
-          {metadata.people.length > 0 ? (
-            <div className="mt-1 max-h-32 overflow-y-auto">
-              {metadata.people.map((person, i) => (
-                <p key={i} className="text-sm text-white/90">
-                  {person}
-                </p>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-1 text-sm text-white/90">—</p>
           )}
         </div>
 
@@ -1570,57 +1636,63 @@ function MetadataPanel({
                   ? "Unstar/Unflag"
                   : "Star/Flag"}
             </button>
-            <button
-              onClick={() =>
-                handleAction(
-                  "featuredPoster",
-                  management.isFeaturedPoster ? management.onClearFeaturedPoster : management.onSetFeaturedPoster
-                )
-              }
-              disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
-              title={featuredPosterDisabledReason ?? undefined}
-              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
-            >
-              {actionLoading === "featuredPoster"
-                ? "Saving..."
-                : management.isFeaturedPoster
-                  ? "Clear Featured Poster"
-                  : "Set as Featured Poster"}
-            </button>
-            <button
-              onClick={() =>
-                handleAction(
-                  "featuredBackdrop",
-                  management.isFeaturedBackdrop ? management.onClearFeaturedBackdrop : management.onSetFeaturedBackdrop
-                )
-              }
-              disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
-              title={featuredBackdropDisabledReason ?? undefined}
-              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
-            >
-              {actionLoading === "featuredBackdrop"
-                ? "Saving..."
-                : management.isFeaturedBackdrop
-                  ? "Clear Featured Backdrop"
-                  : "Set as Featured Backdrop"}
-            </button>
-            <button
-              onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
-              disabled={
-                actionLoading !== null ||
-                starLoading ||
-                Boolean(featuredLogoDisabledReason) ||
-                Boolean(management.isFeaturedLogo)
-              }
-              title={featuredLogoDisabledReason ?? undefined}
-              className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
-            >
-              {actionLoading === "featuredLogo"
-                ? "Saving..."
-                : management.isFeaturedLogo
-                  ? "Featured Logo"
-                  : "Set as Featured Logo"}
-            </button>
+            {currentContentType === "POSTER" && (
+              <button
+                onClick={() =>
+                  handleAction(
+                    "featuredPoster",
+                    management.isFeaturedPoster ? management.onClearFeaturedPoster : management.onSetFeaturedPoster
+                  )
+                }
+                disabled={actionLoading !== null || starLoading || Boolean(featuredPosterDisabledReason)}
+                title={featuredPosterDisabledReason ?? undefined}
+                className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+              >
+                {actionLoading === "featuredPoster"
+                  ? "Saving..."
+                  : management.isFeaturedPoster
+                    ? "Clear Featured Poster"
+                    : "Set as Featured Poster"}
+              </button>
+            )}
+            {currentContentType === "BACKDROP" && (
+              <button
+                onClick={() =>
+                  handleAction(
+                    "featuredBackdrop",
+                    management.isFeaturedBackdrop ? management.onClearFeaturedBackdrop : management.onSetFeaturedBackdrop
+                  )
+                }
+                disabled={actionLoading !== null || starLoading || Boolean(featuredBackdropDisabledReason)}
+                title={featuredBackdropDisabledReason ?? undefined}
+                className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+              >
+                {actionLoading === "featuredBackdrop"
+                  ? "Saving..."
+                  : management.isFeaturedBackdrop
+                    ? "Clear Featured Backdrop"
+                    : "Set as Featured Backdrop"}
+              </button>
+            )}
+            {currentContentType === "LOGO" && (
+              <button
+                onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
+                disabled={
+                  actionLoading !== null ||
+                  starLoading ||
+                  Boolean(featuredLogoDisabledReason) ||
+                  Boolean(management.isFeaturedLogo)
+                }
+                title={featuredLogoDisabledReason ?? undefined}
+                className="w-full rounded bg-white/10 px-3 py-2 text-left text-sm text-white hover:bg-white/20 disabled:opacity-50"
+              >
+                {actionLoading === "featuredLogo"
+                  ? "Saving..."
+                  : management.isFeaturedLogo
+                    ? "Featured Logo"
+                    : "Set as Featured Logo"}
+              </button>
+            )}
             <button
               onClick={() => onToggleExtras?.()}
               disabled={Boolean(editDisabledReason)}
@@ -1629,6 +1701,27 @@ function MetadataPanel({
             >
               {showExtras ? "Close Edit" : "Edit"}
             </button>
+            {metadata.source?.toLowerCase() === "getty" && management?.imageId && (
+              <>
+                <button
+                  onClick={() => setShowReplaceGetty((prev) => !prev)}
+                  disabled={actionLoading !== null}
+                  className="w-full rounded bg-amber-500/20 px-3 py-2 text-left text-sm text-amber-300 hover:bg-amber-500/30 disabled:opacity-50"
+                >
+                  {showReplaceGetty ? "Cancel Replace" : "Replace Getty"}
+                </button>
+                {showReplaceGetty && (
+                  <ReplaceGettyDrawer
+                    assetId={management.imageId}
+                    onClose={() => setShowReplaceGetty(false)}
+                    onReplaced={() => {
+                      setShowReplaceGetty(false);
+                      management?.onRefresh?.();
+                    }}
+                  />
+                )}
+              </>
+            )}
             <button
               onClick={() => management.onReassign?.()}
               disabled={actionLoading !== null || !canReassign}
@@ -1687,6 +1780,7 @@ export function ImageLightbox({
   thumbnailCropPreview,
   onThumbnailCropPreviewAdjust,
   // Management props (imageType/imageId used by parent to construct handlers)
+  imageId,
   isArchived,
   isStarred,
   canManage,
@@ -2307,6 +2401,7 @@ export function ImageLightbox({
               management={
                 canManage
                   ? {
+                      imageId,
                       isArchived,
                       isStarred,
                       canManage,

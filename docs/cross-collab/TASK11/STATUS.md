@@ -1,18 +1,26 @@
 # Status — Task 11 (Tab-Isolated Admin Operations + Resumable Streams)
 
 Repo: TRR-APP
-Last updated: March 13, 2026
+Last updated: March 17, 2026
 
 ## Handoff Snapshot
 ```yaml
 handoff:
   include: true
   state: active
-  last_updated: 2026-03-13
+  last_updated: 2026-03-17
   current_phase: "deploy hotfix rollout"
   next_action: "Redeploy Vercel and verify /admin same-host fallback on the live host"
   detail: self
 ```
+
+## March 17, 2026 — Status refresh only; rollout ownership unchanged
+
+- Task status refreshed to keep the workspace handoff index current.
+- Canonical task state is unchanged from the March 13 rollout note:
+  - repo-side fix remains implemented and locally validated
+  - live deploy still requires a Vercel redeploy plus `/admin` verification on the deployed host
+- No new Task 11 code changes were made in this refresh entry.
 
 ## March 13, 2026 — Admin host fallback hotfix prepared; Vercel redeploy still required
 

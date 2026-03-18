@@ -59,11 +59,12 @@ export const SEASON_BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 export const MAX_SEASON_REFRESH_LOG_ENTRIES = 180;
 
 export const SEASON_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "OFFICIAL ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYSIS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
   { id: "reddit", label: "REDDIT ANALYTICS" },
+  { id: "cast-content", label: "CAST COMPARISON" },
 ];
 
 export const isSocialAnalyticsView = (

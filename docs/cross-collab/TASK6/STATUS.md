@@ -1,7 +1,7 @@
 # Status — Task 6 (Bravo Import + Cast Eligibility + Videos/News)
 
 Repo: TRR-APP
-Last updated: February 25, 2026
+Last updated: March 16, 2026
 
 ## Phase Status
 
@@ -19,6 +19,35 @@ Last updated: February 25, 2026
 None.
 
 ## Recent Activity
+
+- March 16, 2026: Implemented unified Health Center refresh UX and gallery cleanup on show/season admin pages.
+  - Show page refresh behavior was rewritten in `apps/web/src/app/admin/trr-shows/[showId]/page.tsx`:
+    - header `Refresh` now opens the Health Center only
+    - Health Center owns the sole `Run` / `Rerun` action and starts the unified backend refresh stream
+    - explicit runs send `force_new_operation: true`
+    - separate top-level `Sync by Bravo`, inline refresh log, and standalone `Refresh Links` launcher were removed from the primary workflow
+  - Refresh log grouping now mirrors the backend stage model in `apps/web/src/lib/admin/refresh-log-pipeline.ts`:
+    - `show_core`
+    - `links`
+    - `bravo`
+    - `cast_profiles`
+    - `cast_media`
+  - Removed stale always-visible progress bars and redundant gallery headers:
+    - show assets no longer renders `Show Gallery` plus the repeated show title block
+    - season assets no longer render redundant `Season Images` / `Season Videos` title shells
+    - the modal is now the single refresh-status surface
+  - Updated shared show-page refresh constants/types:
+    - `apps/web/src/lib/admin/show-page/constants.ts`
+    - `apps/web/src/lib/admin/show-page/types.ts`
+    - `apps/web/src/lib/admin/show-page/use-show-gallery.ts`
+  - Added/updated targeted tests:
+    - `apps/web/tests/show-refresh-health-center-wiring.test.ts`
+    - `apps/web/tests/refresh-log-pipeline.test.ts`
+    - `apps/web/tests/show-refresh-stream-route.test.ts`
+  - Validation:
+    - `npm run typecheck` (pass)
+    - `npx eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/refresh-log-pipeline.ts' 'src/lib/admin/show-page/constants.ts' 'src/lib/admin/show-page/types.ts' 'src/lib/admin/show-page/use-show-gallery.ts' 'tests/refresh-log-pipeline.test.ts' 'tests/show-refresh-health-center-wiring.test.ts'` (pass)
+    - `npm test -- --run tests/show-refresh-stream-route.test.ts tests/refresh-log-pipeline.test.ts tests/show-refresh-health-center-wiring.test.ts` (pass, `10 tests`)
 
 - February 25, 2026: Fandom Sync type-error stabilization closeout completed (Fandom-only scope).
   - Added deterministic typecheck lanes:
@@ -299,3 +328,18 @@ None.
     - `pnpm -C apps/web exec eslint 'src/app/admin/trr-shows/[showId]/page.tsx' 'src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx' 'src/lib/admin/gallery-diagnostics.ts' 'tests/gallery-diagnostics.test.ts'` (warnings only)
     - `pnpm -C apps/web exec vitest run tests/gallery-diagnostics.test.ts` (5 passed)
     - `pnpm -C apps/web exec tsc --noEmit --pretty false` (pass)
+- March 16, 2026: Completed managed-Chrome validation for the unified refresh/gallery cleanup pass.
+  - Verified `/rhobh/cast` header `Refresh` opens the Health Center only and does not auto-start the pipeline.
+  - Verified the Health Center `Run` button starts the unified refresh flow and the modal no longer jumps back to the top while new refresh updates arrive.
+  - Verified `/rhobh/s15/assets` uses the cleaned season gallery shell without the removed redundant gallery title block.
+
+## Handoff Snapshot
+```yaml
+handoff:
+  include: true
+  state: recent
+  last_updated: 2026-03-16
+  current_phase: "Unified health-center refresh and gallery cleanup complete"
+  next_action: "Close out session and keep follow-up limited to regressions"
+  detail: self
+```

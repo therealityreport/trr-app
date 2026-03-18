@@ -435,6 +435,21 @@ describe("admin host proxy", () => {
     );
   });
 
+  it("rewrites person gallery routes without show context to the admin person workspace on admin host", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/people/mary-cosby/gallery");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://admin.localhost:3000/admin/trr-shows/people/mary-cosby/gallery",
+    );
+  });
+
   it.each([
     [
       "http://admin.localhost:3000/admin/trr-shows/rhoslc",

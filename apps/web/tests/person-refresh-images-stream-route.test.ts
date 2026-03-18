@@ -186,6 +186,43 @@ describe("person refresh-images stream proxy route", () => {
     expect(callHeaders?.["x-trr-request-id"]).toBe("req-forward-1");
   });
 
+  it("prefers local execution for admin.localhost in development", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const request = new NextRequest("http://admin.localhost/api/admin/trr-api/people/person-1/refresh-images/stream", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ force_mirror: true }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ personId: "person-1" }),
+      });
+      await response.text();
+
+      const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
+      const callHeaders = streamCall?.[1]?.headers as Record<string, string> | undefined;
+      expect(callHeaders?.["x-trr-prefer-local-execution"]).toBe("1");
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
   it("retries on transient backend fetch failure and emits retry progress", async () => {
     const transientError = new Error("fetch failed");
     let streamAttempts = 0;

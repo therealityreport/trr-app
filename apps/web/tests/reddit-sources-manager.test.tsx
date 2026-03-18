@@ -3528,4 +3528,71 @@ describe("RedditSourcesManager", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  const expectRecoverableEpisodeRefreshSync = async (episodeRefreshError: string) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse({ error: episodeRefreshError }, 403);
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        return jsonResponse({
+          discovery: {
+            subreddit: "BravoRealHousewives",
+            fetched_at: "2026-03-01T00:00:00.000Z",
+            terms: ["rhoslc"],
+            threads: [],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+        enableEpisodeSync
+      />,
+    );
+
+    expect(await screen.findByText("Episode 18")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sync Details/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Sync Posts/ })[0]);
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes("/episode-discussions/refresh")),
+      ).toBe(true);
+      expect(
+        fetchMock.mock.calls.some((call) => {
+          const url = String(call[0]);
+          return url.includes("/discover") && url.includes("container_key=episode-18") && url.includes("mode=sync_full");
+        }),
+      ).toBe(true);
+    });
+
+    expect(
+      await screen.findByText(/Continuing with per-window sync using existing season windows/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(`^${escapeRegExp(episodeRefreshError)}$`))).not.toBeInTheDocument();
+  };
+
+  it("continues season sync fan-out after recoverable 403 episode refresh errors", async () => {
+    await expectRecoverableEpisodeRefreshSync("Reddit request failed (403)");
+  });
+
+  it("continues season sync fan-out after recoverable Reddit search 403 episode refresh errors", async () => {
+    await expectRecoverableEpisodeRefreshSync("Reddit search request failed (403)");
+  });
 });

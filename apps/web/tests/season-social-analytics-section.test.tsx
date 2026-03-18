@@ -602,6 +602,11 @@ const jsonResponse = (body: unknown): Response =>
     json: async () => body,
   }) as Response;
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const platformTabName = (label: string) =>
+  new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`);
+
 const syncSessionStreamResponse = (body: unknown): Response =>
   new Response(`event: sync_session\ndata: ${JSON.stringify(body)}\n\n`, {
     status: 200,
@@ -702,12 +707,18 @@ function mockSeasonSocialFetch(analytics: AnalyticsPayload) {
     if (url.includes("/social/analytics?")) {
       return jsonResponse(analytics);
     }
+    if (url.includes("/cast-role-members?")) {
+      return jsonResponse([]);
+    }
     const weekDetailMatch = /\/social\/analytics\/week\/(\d+)\?/.exec(url);
     if (weekDetailMatch) {
       return jsonResponse(defaultWeekDetailResponse(Number(weekDetailMatch[1])));
     }
     if (url.includes("/social/targets?")) {
       return jsonResponse({ targets: [] });
+    }
+    if (url.includes("/social/profiles/")) {
+      return jsonResponse({ avatar_url: null, profile_url: null });
     }
     if (url.includes("/social/jobs?")) {
       return jsonResponse({ jobs: [] });
@@ -932,7 +943,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
 
-    expect(href).toContain("/show-1/s6/social/w1/details");
+    expect(href).toContain("/show-1/social/s6/w1");
     expect(href).not.toContain("source_scope=");
     expect(href).not.toContain("season_id=");
     expect(href).not.toContain("?tab=social/week");
@@ -952,11 +963,11 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByText("Weekly Trend");
     const platformTabs = screen.getByRole("navigation");
-    fireEvent.click(within(platformTabs).getByRole("button", { name: "YouTube" }));
+    fireEvent.click(within(platformTabs).getByRole("button", { name: platformTabName("YouTube") }));
 
     const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
-    expect(href).toContain("/social/w1/youtube");
+    expect(href).toContain("/social/s6/w1/youtube");
     expect(href).not.toContain("social_platform=youtube");
   });
 
@@ -1008,7 +1019,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const byeWeekLink = await screen.findByRole("link", {
       name: /bye week/i,
     });
-    expect(byeWeekLink.getAttribute("href") ?? "").toContain("/social/w2/details");
+    expect(byeWeekLink.getAttribute("href") ?? "").toContain("/social/s6/w2");
     expect(screen.getAllByText(/BYE WEEK/i).length).toBeGreaterThan(0);
   });
 
@@ -1349,59 +1360,125 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(windowValue?.textContent).toContain("to");
   });
 
-  it("renders the control rail above the season selector on the show-level wrapper", async () => {
+  it("renders the control rail into the show-level header host", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
     function ShowSocialTabHarness() {
       const [controlsHost, setControlsHost] = React.useState<HTMLDivElement | null>(null);
 
       return (
-        <ShowSocialTab
-          socialDependencyError={null}
-          selectedSocialSeason={{ id: "season-1", season_number: 6 }}
-          socialPlatformTab="overview"
-          onSelectSocialPlatformTab={() => {}}
-          socialPlatformOptions={[
-            { key: "overview", label: "Overview" },
-            { key: "instagram", label: "Instagram" },
-          ]}
-          socialSeasonOptions={[
-            { id: "season-1", season_number: 6 },
-            { id: "season-2", season_number: 5 },
-          ]}
-          selectedSocialSeasonId="season-1"
-          onSelectSocialSeasonId={() => {}}
-          onSocialControlsHostChange={setControlsHost}
-          analyticsSection={
-            <SeasonSocialAnalyticsSection
-              showId="show-1"
-              seasonNumber={6}
-              seasonId="season-1"
-              showName="Test Show"
-              platformTab="overview"
-              onPlatformTabChange={() => {}}
-              hidePlatformTabs={true}
-              externalControlsTarget={controlsHost}
-            />
-          }
-          fallbackSection={<div>Fallback</div>}
-        />
+        <div>
+          <div ref={setControlsHost} data-testid="show-social-header-host" />
+          <ShowSocialTab
+            socialDependencyError={null}
+            selectedSocialSeason={{ id: "season-1", season_number: 6 }}
+            socialSeasonOptions={[
+              { id: "season-1", season_number: 6 },
+              { id: "season-2", season_number: 5 },
+            ]}
+            selectedSocialSeasonId="season-1"
+            onSelectSocialSeasonId={() => {}}
+            analyticsSection={
+              <SeasonSocialAnalyticsSection
+                showId="show-1"
+                seasonNumber={6}
+                seasonId="season-1"
+                showName="Test Show"
+                platformTab="overview"
+                onPlatformTabChange={() => {}}
+                hidePlatformTabs={true}
+                externalControlsTarget={controlsHost}
+              />
+            }
+            fallbackSection={<div>Fallback</div>}
+          />
+        </div>
       );
     }
 
     render(<ShowSocialTabHarness />);
 
-    const tabsNav = await screen.findByRole("navigation", { name: "Social platform tabs" });
     const ingestTrigger = await screen.findByRole("button", { name: "Ingest + Export" });
     const seasonSelect = screen.getByRole("combobox", { name: "Season" });
+    const headerHost = screen.getByTestId("show-social-header-host");
 
+    expect(headerHost).toContainElement(ingestTrigger);
     expect(
-      Boolean(tabsNav.compareDocumentPosition(ingestTrigger) & Node.DOCUMENT_POSITION_FOLLOWING),
+      Boolean(headerHost.compareDocumentPosition(seasonSelect) & Node.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(true);
-    expect(
-      Boolean(ingestTrigger.compareDocumentPosition(seasonSelect) & Node.DOCUMENT_POSITION_FOLLOWING),
-    ).toBe(true);
-    expect(screen.getByTestId("show-social-controls-host")).toContainElement(ingestTrigger);
+  });
+
+  it("shows platform handle counts and linked handle tabs for the selected platform", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/analytics?")) {
+        return jsonResponse(analyticsBase);
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({
+          targets: [
+            {
+              platform: "instagram",
+              accounts: ["bravotv", "bravowwhl", "bravodailydish"],
+              hashtags: [],
+              keywords: [],
+              is_active: true,
+            },
+            {
+              platform: "youtube",
+              accounts: ["bravo", "wwhl"],
+              hashtags: [],
+              keywords: [],
+              is_active: true,
+            },
+          ],
+        });
+      }
+      if (url.includes("/social/profiles/instagram/bravowwhl/summary")) {
+        return jsonResponse({ avatar_url: "https://images.test/bravowwhl.jpg", profile_url: null });
+      }
+      if (url.includes("/social/profiles/")) {
+        return jsonResponse({ avatar_url: null, profile_url: null });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      if (url.includes("/social/runs/summary?")) {
+        return jsonResponse({ summaries: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({ runs: [] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    const instagramTab = await screen.findByRole("button", { name: /Instagram \(3\)/i });
+    expect(screen.getByRole("button", { name: /YouTube \(2\)/i })).toBeInTheDocument();
+
+    fireEvent.click(instagramTab);
+
+    const linkedHandles = await screen.findByRole("navigation", { name: "Instagram linked handles" });
+    expect(within(linkedHandles).getByText("ALL")).toBeInTheDocument();
+    expect(within(linkedHandles).getByRole("link", { name: /@bravotv$/i })).toBeInTheDocument();
+    expect(within(linkedHandles).getByRole("link", { name: /@bravowwhl$/i })).toBeInTheDocument();
+    expect(within(linkedHandles).getByRole("link", { name: /@bravodailydish$/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(linkedHandles.querySelectorAll("img").length).toBeGreaterThan(0);
+    });
   });
 
   it("preselects tab from social_platform query param and updates URL on tab change", async () => {
@@ -1424,7 +1501,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await screen.findByText("YouTube Posts Schedule");
 
     const platformTabs = screen.getByRole("navigation");
-    fireEvent.click(within(platformTabs).getByRole("button", { name: "Instagram" }));
+    fireEvent.click(within(platformTabs).getByRole("button", { name: platformTabName("Instagram") }));
     expect(window.location.search).toContain("social_platform=instagram");
   });
 
@@ -1449,7 +1526,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       });
       expect(routerReplaceMock).toHaveBeenCalledTimes(1);
       const redirectedHref = String(routerReplaceMock.mock.calls.at(-1)?.[0] ?? "");
-      expect(redirectedHref).toContain(`/show-1/s6/social/w1/${platform}`);
+      expect(redirectedHref).toContain(`/show-1/social/s6/w1/${platform}`);
     },
   );
 
@@ -1472,7 +1549,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.getByTestId("metric-youtube-reels-value")).toHaveTextContent("3");
 
     const platformTabs = screen.getByRole("navigation");
-    fireEvent.click(within(platformTabs).getByRole("button", { name: "Instagram" }));
+    fireEvent.click(within(platformTabs).getByRole("button", { name: platformTabName("Instagram") }));
     await waitFor(() => {
       expect(screen.queryByTestId("metric-youtube-videos-card")).not.toBeInTheDocument();
       expect(screen.queryByTestId("metric-youtube-reels-card")).not.toBeInTheDocument();
@@ -1523,7 +1600,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     const platformTabs = await screen.findByRole("navigation");
-    fireEvent.click(within(platformTabs).getByRole("button", { name: "YouTube" }));
+    fireEvent.click(within(platformTabs).getByRole("button", { name: platformTabName("YouTube") }));
     expect(onPlatformTabChange).toHaveBeenCalledWith("youtube");
     expect(window.location.search).not.toContain("social_platform=youtube");
 
@@ -2466,7 +2543,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByTestId("weekly-heatmap-row-1");
     const platformTabs = screen.getByRole("navigation");
-    fireEvent.click(within(platformTabs).getByRole("button", { name: "YouTube" }));
+    fireEvent.click(within(platformTabs).getByRole("button", { name: platformTabName("YouTube") }));
 
     await screen.findByText("YouTube Posts Schedule");
     expect(screen.getByTestId("weekly-heatmap-total-1")).toHaveTextContent("1 posts");
@@ -2561,10 +2638,10 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByText("Season Details")).not.toBeInTheDocument();
     expect(screen.queryByText("Filters")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Instagram" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "TikTok" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Twitter/X" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "YouTube" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: platformTabName("Instagram") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: platformTabName("TikTok") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: platformTabName("Twitter/X") })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: platformTabName("YouTube") })).not.toBeInTheDocument();
   });
 
   it("switches from bravo to reddit even when bravo refresh requests are still pending", async () => {
@@ -3386,6 +3463,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
           ],
         });
       }
+      if (url.includes("/social/profiles/")) {
+        return jsonResponse({ avatar_url: "https://images.test/avatar.jpg", profile_url: null });
+      }
       if (url.includes("/social/runs/summary?")) {
         return jsonResponse({ summaries: [] });
       }
@@ -3475,7 +3555,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     ).toBeInTheDocument();
 
     const platformTabs = screen.getByRole("navigation");
-    fireEvent.click(within(platformTabs).getByRole("button", { name: "Instagram" }));
+    fireEvent.click(within(platformTabs).getByRole("button", { name: platformTabName("Instagram") }));
 
     await waitFor(() => {
       expect(screen.getByText("Instagram Classification Rules")).toBeInTheDocument();
@@ -3646,7 +3726,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await screen.findByTestId("weekly-heatmap-row-1");
-    fireEvent.click(screen.getByRole("button", { name: "YouTube" }));
+    fireEvent.click(screen.getByRole("button", { name: platformTabName("YouTube") }));
 
     expect(await screen.findByText(/analytics unavailable/i)).toBeInTheDocument();
     expect(await screen.findByText(/Showing last successful data from/i)).toBeInTheDocument();
@@ -3842,6 +3922,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
       if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/cast-role-members?")) return jsonResponse([]);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) {
         return jsonResponse({
@@ -4075,6 +4156,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
       if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/cast-role-members?")) return jsonResponse([]);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) return jsonResponse({ runs: [] });
       if (url.includes("/social/jobs?")) return jsonResponse({ jobs: [] });
@@ -4642,6 +4724,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
       if (url.includes("/social/ingest/worker-health")) return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       if (url.includes("/social/analytics?")) return jsonResponse(analyticsBase);
+      if (url.includes("/cast-role-members?")) return jsonResponse([]);
       if (url.includes("/social/targets?")) return jsonResponse({ targets: [] });
       if (url.includes("/social/runs?")) {
         return jsonResponse({

@@ -9,8 +9,8 @@ handoff:
   include: true
   state: active
   last_updated: 2026-03-16
-  current_phase: "operator/browser evidence pending"
-  next_action: "Run a fresh-session managed Chrome walkthrough for /admin/cast-screentime and the feature-flag rollback drill once chrome-devtools is available in-thread"
+  current_phase: "mirror-prefill and proxy env guidance shipped; operator/browser evidence pending"
+  next_action: "Set TRR_INTERNAL_ADMIN_SHARED_SECRET in the TRR-APP server env, then run a fresh-session managed Chrome walkthrough for the mirrored social-week import path and the feature-flag rollback drill"
   detail: self
 ```
 
@@ -53,3 +53,5 @@ handoff:
 - 2026-03-16: Re-ran `make cast-screentime-gap-check`; the app proxy slice stayed green (`tests/cast-screentime-proxy-route.test.ts`, `4 passed`) while backend/screenalytics companion slices and Golden Dataset checks also passed in the workspace wrapper.
 - 2026-03-16: Cross-repo closeout cleared the hosted social sync-session schema blocker in TRR-Backend, so no further app sync-session changes are pending from that backend follow-through.
 - 2026-03-16: This Codex thread still did not expose a usable `chrome-devtools` tool despite the shared Chrome runtime being up, so the fresh-session `/admin/cast-screentime` walkthrough and rollback drill remain an operator follow-up rather than a completed acceptance artifact in this session.
+- 2026-03-16: Updated the social-week YouTube handoff so “Send To Cast Screentime” now prefers mirrored hosted video assets over raw YouTube watch URLs, and hardened the proxy error to name the missing `TRR_INTERNAL_ADMIN_SHARED_SECRET` env plus the legacy service-role fallback path.
+- 2026-03-16: Synced a local dev `TRR_INTERNAL_ADMIN_SHARED_SECRET` into the app and backend env files so the cast-screentime proxy can authenticate live imports again once the dev servers restart.

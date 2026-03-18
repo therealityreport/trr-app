@@ -31,7 +31,7 @@ export type PersonAdminTab =
   | "news"
   | "credits"
   | "fandom"
-  | "social-growth";
+  | "social";
 
 export type SocialAnalyticsViewSlug =
   | "official"
@@ -49,7 +49,7 @@ export type SocialAnalyticsViewSlug =
   | "tiktok-sentiment";
 export type SocialPlatformSlug = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type SocialWeekSubTab = "details" | SocialPlatformSlug;
-export type SocialAccountProfileTab = "stats" | "posts" | "hashtags" | "collaborators-tags";
+export type SocialAccountProfileTab = "stats" | "catalog" | "posts" | "hashtags" | "collaborators-tags";
 
 type RouteSource = "path" | "query" | "default";
 
@@ -155,7 +155,8 @@ const PERSON_TAB_BY_PATH_SEGMENT: Record<string, PersonAdminTab> = {
   news: "news",
   credits: "credits",
   fandom: "fandom",
-  "social-growth": "social-growth",
+  social: "social",
+  "social-growth": "social",
 };
 
 const PERSON_TAB_BY_QUERY_ALIAS: Record<string, PersonAdminTab> = {
@@ -166,7 +167,8 @@ const PERSON_TAB_BY_QUERY_ALIAS: Record<string, PersonAdminTab> = {
   news: "news",
   credits: "credits",
   fandom: "fandom",
-  "social-growth": "social-growth",
+  social: "social",
+  "social-growth": "social",
 };
 
 const SOCIAL_ANALYTICS_VIEW_SLUG_ALIASES: Record<string, SocialAnalyticsViewSlug> = {
@@ -601,6 +603,7 @@ export function parseSeasonSocialPathFilters(pathname: string): ParsedSocialPath
 const toSocialAccountProfileTab = (value: string | null | undefined): SocialAccountProfileTab | null => {
   const normalized = normalizeSegment(value);
   if (!normalized) return "stats";
+  if (normalized === "catalog") return "catalog";
   if (normalized === "posts") return "posts";
   if (normalized === "hashtags" || normalized === "hashtag") return "hashtags";
   if (
@@ -969,8 +972,9 @@ export function buildSeasonSocialWeekUrl(input: {
   const weekToken = toCanonicalWeekToken(input.weekIndex) ?? "w0";
   const week = encodeURIComponent(weekToken.slice(1));
   const platform = toSocialPlatform(input.platform ?? "");
-  const subTab: SocialWeekSubTab = platform ?? "details";
-  const base = `${toShowBasePath(input.showSlug)}/s${season}/social/w${week}/${subTab}`;
+  const base = platform
+    ? `${toShowBasePath(input.showSlug)}/social/s${season}/w${week}/${platform}`
+    : `${toShowBasePath(input.showSlug)}/social/s${season}/w${week}`;
   const nextQuery = new URLSearchParams(input.query?.toString() ?? "");
   nextQuery.delete("social_platform");
   nextQuery.delete("source_scope");
@@ -1015,6 +1019,30 @@ export function buildShowRedditCommunityUrl(input: {
   return appendQuery(path, nextQuery);
 }
 
+const ADMIN_REDDIT_BASE_PATH = "/admin/social/reddit";
+
+export function buildAdminRedditCommunityUrl(input: {
+  communitySlug: string;
+  showSlug?: string | null;
+  seasonNumber?: number | string | null;
+  query?: URLSearchParams;
+}): string {
+  const trimmedCommunity = input.communitySlug.trim();
+  const trimmedShowSlug = String(input.showSlug ?? "").trim();
+  const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+  nextQuery.delete("social_platform");
+  if (!trimmedCommunity) {
+    return appendQuery(ADMIN_REDDIT_BASE_PATH, nextQuery);
+  }
+  const season = parsePositiveSeasonNumber(input.seasonNumber);
+  const encodedCommunity = encodeURIComponent(trimmedCommunity);
+  const basePath = trimmedShowSlug
+    ? `${ADMIN_REDDIT_BASE_PATH}/${encodedCommunity}/${encodeURIComponent(trimmedShowSlug)}`
+    : `${ADMIN_REDDIT_BASE_PATH}/${encodedCommunity}`;
+  const path = season && trimmedShowSlug ? `${basePath}/s${season}` : basePath;
+  return appendQuery(path, nextQuery);
+}
+
 const normalizeRedditWindowToken = (value: string): string | null => {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return null;
@@ -1048,6 +1076,25 @@ export function buildShowRedditCommunityWindowUrl(input: {
   return appendQuery(`${communityHref}/${encodeURIComponent(token)}`, nextQuery);
 }
 
+export function buildAdminRedditCommunityWindowUrl(input: {
+  communitySlug: string;
+  showSlug?: string | null;
+  seasonNumber?: number | string | null;
+  windowKey: string;
+  query?: URLSearchParams;
+}): string {
+  const communityHref = buildAdminRedditCommunityUrl({
+    communitySlug: input.communitySlug,
+    showSlug: input.showSlug,
+    seasonNumber: input.seasonNumber,
+  });
+  const token = normalizeRedditWindowToken(input.windowKey);
+  if (!token) return communityHref;
+  const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+  nextQuery.delete("social_platform");
+  return appendQuery(`${communityHref}/${encodeURIComponent(token)}`, nextQuery);
+}
+
 export function buildShowRedditCommunityWindowPostUrl(input: {
   showSlug: string;
   communitySlug: string;
@@ -1063,6 +1110,43 @@ export function buildShowRedditCommunityWindowPostUrl(input: {
   const windowHref = buildShowRedditCommunityWindowUrl({
     showSlug: input.showSlug,
     communitySlug: input.communitySlug,
+    seasonNumber: input.seasonNumber,
+    windowKey: input.windowKey,
+  });
+  const explicitDetailSlug = String(input.detailSlug ?? "").trim();
+  const derivedDetailSlug =
+    explicitDetailSlug ||
+    ((String(input.title ?? "").trim() || String(input.author ?? "").trim()) &&
+      buildRedditDetailSlug({
+        title: input.title,
+        author: input.author,
+        postId: input.postId,
+        collision: input.collision,
+      })) ||
+    "";
+  const fallbackPostId = String(input.postId ?? "").trim();
+  const detailSegment = derivedDetailSlug || fallbackPostId;
+  if (!detailSegment) return windowHref;
+  const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
+  nextQuery.delete("social_platform");
+  return appendQuery(`${windowHref}/${encodeURIComponent(detailSegment)}`, nextQuery);
+}
+
+export function buildAdminRedditCommunityWindowPostUrl(input: {
+  communitySlug: string;
+  showSlug?: string | null;
+  seasonNumber?: number | string | null;
+  windowKey: string;
+  postId?: string;
+  detailSlug?: string | null;
+  title?: string | null;
+  author?: string | null;
+  collision?: boolean;
+  query?: URLSearchParams;
+}): string {
+  const windowHref = buildAdminRedditCommunityWindowUrl({
+    communitySlug: input.communitySlug,
+    showSlug: input.showSlug,
     seasonNumber: input.seasonNumber,
     windowKey: input.windowKey,
   });
