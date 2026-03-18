@@ -1302,7 +1302,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         reviewQueue.map((item) => {
                           const draft = reviewDrafts[item.id] ?? buildReviewResolutionDraft(item, reviewShowOptionsByItem[item.id] ?? []);
                           const itemShowOptions = reviewShowOptionsByItem[item.id] ?? [];
-                          const availableSeasonOptions = draft.show_id ? getMergedSeasonOptions(draft.show_id) : [];
+                          const availableSeasonOptions = draft.show_id ? (mergedSeasonOptionsByShow[draft.show_id] ?? []) : [];
                           const isAssigningToSeason = draft.resolution_action === "assign_season";
                           const canResolve =
                             draft.resolution_action === "mark_non_show" ||
