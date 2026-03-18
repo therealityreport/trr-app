@@ -124,6 +124,7 @@ export function ReplaceGettyDrawer({ assetId, onClose, onReplaced }: ReplaceGett
                 }`}
               >
                 {candidate.thumbnail_b64 ? (
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={candidate.thumbnail_b64}
                     alt=""

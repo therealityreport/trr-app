@@ -90,69 +90,7 @@ export function useFlashbackManager(): FlashbackManager {
   const userIdRef = useRef<string>("");
 
   // -----------------------------------------------------------------------
-  // bootstrap — load quiz, events, session, stats; restore if in-progress
-  // -----------------------------------------------------------------------
-  const bootstrap = useCallback(async (userId: string) => {
-    try {
-      setPhase("loading");
-      setError(null);
-      userIdRef.current = userId;
-
-      // 1. Fetch today's quiz
-      const quiz = await getTodaysQuiz();
-      if (!quiz) {
-        setError("No quiz available today. Check back later!");
-        setPhase("ready");
-        return;
-      }
-
-      // 2. Fetch quiz events
-      const events = await getQuizEvents(quiz.id);
-      if (events.length < 2) {
-        setError("Quiz has insufficient events.");
-        setPhase("ready");
-        return;
-      }
-      eventsRef.current = events;
-
-      // 3. Get or create session
-      const session = await getOrCreateSession(userId, quiz.id);
-      sessionRef.current = session;
-
-      // 4. Fetch user stats
-      const stats = await getUserStats(userId);
-
-      // 5. Generate deal order (deterministic per user + quiz)
-      const dealSeed = quiz.id + userId;
-      const dealOrder = generateDealOrder(events.length, dealSeed);
-      dealOrderRef.current = dealOrder;
-
-      // 6. Build game state
-      const state: FlashbackGameState = { quiz, events, session, stats };
-      setGameState(state);
-
-      // 7. Restore in-progress game or prepare fresh start
-      if (session.completed) {
-        // Game already finished — restore full timeline and results
-        restoreCompletedGame(events, session, dealOrder);
-      } else if (session.current_round > 0) {
-        // Game in progress — restore timeline to current state
-        restoreInProgressGame(events, session, dealOrder);
-      } else {
-        // Fresh game — move to ready phase
-        setPhase("ready");
-      }
-    } catch (err) {
-      console.error("[flashback] bootstrap error", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to load Flashback game",
-      );
-      setPhase("ready");
-    }
-  }, []);
-
-  // -----------------------------------------------------------------------
-  // Restore helpers
+  // Restore helpers (declared before bootstrap so they are in scope)
   // -----------------------------------------------------------------------
 
   function restoreCompletedGame(
@@ -257,6 +195,68 @@ export function useFlashbackManager(): FlashbackManager {
       setPhase("completed");
     }
   }
+
+  // -----------------------------------------------------------------------
+  // bootstrap — load quiz, events, session, stats; restore if in-progress
+  // -----------------------------------------------------------------------
+  const bootstrap = useCallback(async (userId: string) => {
+    try {
+      setPhase("loading");
+      setError(null);
+      userIdRef.current = userId;
+
+      // 1. Fetch today's quiz
+      const quiz = await getTodaysQuiz();
+      if (!quiz) {
+        setError("No quiz available today. Check back later!");
+        setPhase("ready");
+        return;
+      }
+
+      // 2. Fetch quiz events
+      const events = await getQuizEvents(quiz.id);
+      if (events.length < 2) {
+        setError("Quiz has insufficient events.");
+        setPhase("ready");
+        return;
+      }
+      eventsRef.current = events;
+
+      // 3. Get or create session
+      const session = await getOrCreateSession(userId, quiz.id);
+      sessionRef.current = session;
+
+      // 4. Fetch user stats
+      const stats = await getUserStats(userId);
+
+      // 5. Generate deal order (deterministic per user + quiz)
+      const dealSeed = quiz.id + userId;
+      const dealOrder = generateDealOrder(events.length, dealSeed);
+      dealOrderRef.current = dealOrder;
+
+      // 6. Build game state
+      const state: FlashbackGameState = { quiz, events, session, stats };
+      setGameState(state);
+
+      // 7. Restore in-progress game or prepare fresh start
+      if (session.completed) {
+        // Game already finished — restore full timeline and results
+        restoreCompletedGame(events, session, dealOrder);
+      } else if (session.current_round > 0) {
+        // Game in progress — restore timeline to current state
+        restoreInProgressGame(events, session, dealOrder);
+      } else {
+        // Fresh game — move to ready phase
+        setPhase("ready");
+      }
+    } catch (err) {
+      console.error("[flashback] bootstrap error", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to load Flashback game",
+      );
+      setPhase("ready");
+    }
+  }, []);
 
   // -----------------------------------------------------------------------
   // startGame — place anchor on timeline, deal round 1

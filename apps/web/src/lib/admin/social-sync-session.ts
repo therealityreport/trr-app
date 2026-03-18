@@ -65,7 +65,6 @@ export const buildSocialSyncSessionRequest = ({
       : (["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"] as SocialSyncPlatform[]);
   const singlePlatform = requestedPlatforms.length === 1;
   const singlePlatformTarget = singlePlatform ? requestedPlatforms[0] : null;
-  const isInstagramOnly = singlePlatformTarget === "instagram";
   const shouldUseCappedDepth = requestedPlatforms.some((platform) => CAPPED_DEPTH_PLATFORMS.has(platform));
   const shouldFetchReplies = singlePlatformTarget !== "instagram";
 
