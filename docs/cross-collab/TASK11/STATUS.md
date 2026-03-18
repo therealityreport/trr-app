@@ -7,19 +7,20 @@ Last updated: March 17, 2026
 ```yaml
 handoff:
   include: true
-  state: active
+  state: blocked
   last_updated: 2026-03-17
-  current_phase: "deploy hotfix rollout"
-  next_action: "Redeploy Vercel and verify /admin same-host fallback on the live host"
+  current_phase: "waiting for deploy credentials"
+  next_action: "Obtain Vercel CLI credentials, redeploy, and verify /admin same-host fallback on the live host"
   detail: self
 ```
 
-## March 17, 2026 — Status refresh only; rollout ownership unchanged
+## March 17, 2026 — Status refresh only; rollout remains blocked on deploy credentials
 
 - Task status refreshed to keep the workspace handoff index current.
 - Canonical task state is unchanged from the March 13 rollout note:
   - repo-side fix remains implemented and locally validated
   - live deploy still requires a Vercel redeploy plus `/admin` verification on the deployed host
+- The handoff snapshot now marks this task `blocked` instead of `active` because no deploy action can proceed until Vercel CLI credentials are available again.
 - No new Task 11 code changes were made in this refresh entry.
 
 ## March 13, 2026 — Admin host fallback hotfix prepared; Vercel redeploy still required

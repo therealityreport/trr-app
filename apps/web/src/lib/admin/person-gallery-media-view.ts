@@ -248,6 +248,32 @@ function readGalleryBucketString(
   return typeof nestedValue === "string" && nestedValue.trim() ? nestedValue.trim() : null;
 }
 
+function readPersonImageCount(
+  photo: TrrPersonPhoto,
+  metadata: Record<string, unknown>
+): number | null {
+  const galleryBucket = metadata.gallery_bucket;
+  if (typeof galleryBucket === "object" && galleryBucket !== null) {
+    const bucketMeta = galleryBucket as Record<string, unknown>;
+    if (typeof bucketMeta.person_image_count === "number") return bucketMeta.person_image_count;
+  }
+  if (typeof metadata.person_image_count === "number") return metadata.person_image_count;
+  return null;
+}
+
+function readSourceQueryScope(
+  photo: TrrPersonPhoto,
+  metadata: Record<string, unknown>
+): string | null {
+  const galleryBucket = metadata.gallery_bucket;
+  if (typeof galleryBucket === "object" && galleryBucket !== null) {
+    const bucketMeta = galleryBucket as Record<string, unknown>;
+    if (typeof bucketMeta.source_query_scope === "string") return bucketMeta.source_query_scope;
+  }
+  if (typeof metadata.source_query_scope === "string") return metadata.source_query_scope;
+  return null;
+}
+
 function readGroupedImageCount(
   photo: TrrPersonPhoto,
   metadata: Record<string, unknown>
@@ -308,6 +334,8 @@ export type PersonPhotoShowBuckets = {
   matchesUnknownShows: boolean;
   eventBucketKey: string | null;
   eventBucketLabel: string | null;
+  personImageCount: number | null;
+  sourceQueryScope: string | null;
 };
 
 export type PersonGalleryImportContext = {
@@ -380,6 +408,8 @@ export function computePersonPhotoShowBuckets(input: {
   const bucketType = readGalleryBucketString(photo, metadata, "bucket_type")?.toLowerCase() ?? null;
   const bucketKey = readGalleryBucketString(photo, metadata, "bucket_key");
   const bucketLabel = readGalleryBucketString(photo, metadata, "bucket_label");
+  const personImageCount = readPersonImageCount(photo, metadata);
+  const sourceQueryScope = readSourceQueryScope(photo, metadata);
   const resolvedBucketShowId = readGalleryBucketString(photo, metadata, "resolved_show_id");
   const resolvedBucketShowName = readGalleryBucketString(photo, metadata, "resolved_show_name");
   const groupedImageCount = readGroupedImageCount(photo, metadata);
@@ -566,6 +596,8 @@ export function computePersonPhotoShowBuckets(input: {
       matchesUnknownShows: false,
       eventBucketKey: null,
       eventBucketLabel: null,
+      personImageCount,
+      sourceQueryScope,
     };
   }
   if (bucketType === "bravocon") {
@@ -579,6 +611,8 @@ export function computePersonPhotoShowBuckets(input: {
       matchesUnknownShows: false,
       eventBucketKey: null,
       eventBucketLabel: null,
+      personImageCount,
+      sourceQueryScope,
     };
   }
   if (bucketType === "event") {
@@ -592,6 +626,8 @@ export function computePersonPhotoShowBuckets(input: {
       matchesUnknownShows: false,
       eventBucketKey: qualifiesAsEvent ? bucketKey : null,
       eventBucketLabel: qualifiesAsEvent ? bucketLabel : null,
+      personImageCount,
+      sourceQueryScope,
     };
   }
   if (bucketType === "show") {
@@ -605,6 +641,8 @@ export function computePersonPhotoShowBuckets(input: {
       matchesUnknownShows: false,
       eventBucketKey: null,
       eventBucketLabel: null,
+      personImageCount,
+      sourceQueryScope,
     };
   }
 
@@ -618,6 +656,8 @@ export function computePersonPhotoShowBuckets(input: {
     matchesUnknownShows,
     eventBucketKey: bucketType === "event" ? bucketKey : null,
     eventBucketLabel: bucketType === "event" ? bucketLabel : null,
+    personImageCount,
+    sourceQueryScope,
   };
 }
 
@@ -724,4 +764,14 @@ export function resolveGalleryShowFilterFallback(input: {
   if (input.currentFilter === "other" && !input.hasUnknownShowMatches) return fallback;
   if (input.currentFilter === "all" && !input.hasNonThisShowMatches) return fallback;
   return input.currentFilter;
+}
+
+export function getPersonEventImageCount(
+  photo: TrrPersonPhoto,
+  metadata?: Record<string, unknown> | null
+): number | null {
+  const meta = metadata ?? (photo.metadata as Record<string, unknown> | null) ?? {};
+  const personCount = readPersonImageCount(photo, meta);
+  if (personCount !== null && personCount > 0) return personCount;
+  return readGroupedImageCount(photo, meta);
 }
