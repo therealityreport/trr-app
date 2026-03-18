@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useDraggable } from "@dnd-kit/core";
@@ -144,7 +145,6 @@ function CardContent({
   return (
     <div className={`flex ${compact ? "gap-2" : "gap-3"} items-start`}>
       {event.image_url && (
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={event.image_url}
           alt=""
