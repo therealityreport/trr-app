@@ -4,8 +4,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import {
-  buildShowRedditCommunityWindowUrl,
-  buildShowRedditCommunityUrl,
+  buildAdminRedditCommunityUrl,
+  buildAdminRedditCommunityWindowUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
 import { toCanonicalFlairKey } from "@/lib/reddit/flair-key";
@@ -361,7 +361,7 @@ interface DiscoveryFetchOptions {
   forceFlairs?: string[];
   maxPages?: number;
   timeoutMs?: number;
-  mode?: "sync_posts" | "sync_details";
+  mode?: "sync_posts" | "sync_details" | "sync_full";
 }
 
 interface DiscoveryFetchResult {
@@ -779,6 +779,18 @@ const sleep = async (ms: number): Promise<void> => {
 const isTimeoutErrorMessage = (message: string): boolean => /\btimed out\b|\btimeout\b/i.test(message);
 const isRateLimitErrorMessage = (message: string): boolean =>
   /\brate[ -]?limit(?:ed)?\b|\btoo many requests\b|\b429\b/i.test(message);
+const isRecoverableEpisodeDiscussionRefreshError = (message: string): boolean => {
+  const normalized = message.trim().toLowerCase();
+  const isReddit403Failure =
+    normalized.includes("403") &&
+    (normalized.includes("reddit request failed") ||
+      normalized.includes("reddit search request failed"));
+  return (
+    isTimeoutErrorMessage(message) ||
+    isRateLimitErrorMessage(message) ||
+    isReddit403Failure
+  );
+};
 const isNoCacheYetWarning = (message: string | null | undefined): boolean =>
   typeof message === "string" && /no cached posts found yet/i.test(message);
 
@@ -855,7 +867,7 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
         ? ` · ${fmtNum(run.active_jobs)} active jobs`
         : "";
     const stalledText = run.stalled ? " · stalled heartbeat" : "";
-    return `${label}: refresh queued in backend (run ${run.run_id.slice(0, 8)})${queuePositionText}${activeJobsText}${queuedHintText}${listingText}${searchText}${stalledText}`;
+    return `${label}: sync queued in backend (run ${run.run_id.slice(0, 8)})${queuePositionText}${activeJobsText}${queuedHintText}${listingText}${searchText}${stalledText}`;
   }
   if (run.status === "running") {
     const runningHintText =
@@ -866,7 +878,7 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
     return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}${detailPostsText}${detailCommentsText}${mediaText}${stalledText}`;
   }
   if (run.status === "cancelling") {
-    return `${label}: refresh cancelling (run ${run.run_id.slice(0, 8)})${queuedHintText}${listingText}${searchText}`;
+    return `${label}: sync cancelling (run ${run.run_id.slice(0, 8)})${queuedHintText}${listingText}${searchText}`;
   }
   if (run.status === "completed" || run.status === "partial") {
     const tracked = run.totals?.tracked_flair_rows;
@@ -894,14 +906,14 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
         ? ` · ${run.partial_failures.length} partial failure${run.partial_failures.length === 1 ? "" : "s"}`
         : "";
     if (run.status === "partial") {
-      return `${label}: refresh completed with partial coverage${passText}${completenessText}${totalsText}${partialFailuresText}`;
+      return `${label}: sync completed with partial coverage${passText}${completenessText}${totalsText}${partialFailuresText}`;
     }
-    return `${label}: refresh completed${passText}${totalsText}`;
+    return `${label}: sync completed${passText}${totalsText}`;
   }
   if (run.status === "failed") {
-    return `${label}: refresh failed${run.error ? ` · ${run.error}` : ""}`;
+    return `${label}: sync failed${run.error ? ` · ${run.error}` : ""}`;
   }
-  return `${label}: refresh cancelled${run.error ? ` · ${run.error}` : ""}`;
+  return `${label}: sync cancelled${run.error ? ` · ${run.error}` : ""}`;
 };
 
 const mergeDiscoveryPayloads = (input: {
@@ -1454,10 +1466,8 @@ const renderEpisodeMatrixCards = (
     onOpenContainerPosts?: (containerKey: string) => void;
     onViewAllContainerPosts?: (containerKey: string) => void;
     onRefreshContainerPosts?: (containerKey: string) => void;
-    onSyncContainerDetails?: (containerKey: string) => void;
     refreshingContainerKey?: string | null;
     refreshingContainerKeys?: Set<string>;
-    syncingDetailsContainerKey?: string | null;
     refreshPostsDisabled?: boolean;
     periodsLoading?: boolean;
   },
@@ -1529,26 +1539,10 @@ const renderEpisodeMatrixCards = (
               }
               onClick={() => options?.onRefreshContainerPosts?.(containerKey)}
               aria-label="Sync Posts"
-              title="Sync posts for this window (add new and update existing)"
+              title="Sync posts, comments, details, and media for this window"
               className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
             >
               {(options?.refreshingContainerKeys ?? new Set()).has(containerKey) ? "⏳" : "🕷️"}
-            </button>
-            <button
-              type="button"
-              disabled={
-                options?.refreshPostsDisabled ||
-                options?.syncingDetailsContainerKey === containerKey ||
-                (options?.refreshingContainerKeys ?? new Set()).has(containerKey)
-              }
-              onClick={() => options?.onSyncContainerDetails?.(containerKey)}
-              aria-label="Sync Details"
-              title="Deep-scrape comments, media, and post details for this window"
-              className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
-            >
-              {options?.syncingDetailsContainerKey === containerKey
-                ? "Syncing Details…"
-                : "Sync Details 🕷️"}
             </button>
             <button
               type="button"
@@ -1674,26 +1668,10 @@ const renderEpisodeMatrixCards = (
                 }
                 onClick={() => options?.onRefreshContainerPosts?.(containerKey)}
                 aria-label="Sync Posts"
-                title="Sync posts for this episode window (add new and update existing)"
+                title="Sync posts, comments, details, and media for this episode window"
                 className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
               >
                 {(options?.refreshingContainerKeys ?? new Set()).has(containerKey) ? "⏳" : "🕷️"}
-              </button>
-              <button
-                type="button"
-                disabled={
-                  options?.refreshPostsDisabled ||
-                  options?.syncingDetailsContainerKey === containerKey ||
-                  (options?.refreshingContainerKeys ?? new Set()).has(containerKey)
-                }
-                onClick={() => options?.onSyncContainerDetails?.(containerKey)}
-                aria-label="Sync Details"
-                title="Deep-scrape comments, media, and post details for this episode window"
-                className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
-              >
-                {options?.syncingDetailsContainerKey === containerKey
-                  ? "Syncing Details…"
-                  : "Sync Details 🕷️"}
               </button>
               <button
                 type="button"
@@ -1873,6 +1851,172 @@ const buildPeriodOptions = (weeklyRows: SocialAnalyticsPeriodRow[]): EpisodePeri
   ];
 };
 
+const buildFallbackEpisodeWindowBoundsFromSeasonContext = (input: {
+  seasonEpisodes: SeasonEpisodeRow[];
+  periodOptions: EpisodePeriodOption[];
+}): Map<string, EpisodeWindowBounds> => {
+  const bounds = new Map<string, EpisodeWindowBounds>();
+  const rows = [...input.seasonEpisodes]
+    .filter((episode) => Number.isFinite(episode.episode_number) && episode.episode_number > 0)
+    .sort((a, b) => a.episode_number - b.episode_number);
+
+  if (rows.length > 0) {
+    const firstRow = rows[0];
+    const lastRow = rows[rows.length - 1];
+    const firstEpisodeAirMidnight = toEasternMidnightIso(firstRow?.air_date ?? null);
+    const lastEpisodeAirMidnight = toEasternMidnightIso(lastRow?.air_date ?? null);
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (!row) continue;
+      const nextRow = rows[index + 1];
+      const rowAirMidnight = toEasternMidnightIso(row.air_date);
+      const nextAirMidnight = nextRow ? toEasternMidnightIso(nextRow.air_date) : null;
+      bounds.set(`episode-${row.episode_number}`, {
+        key: `episode-${row.episode_number}`,
+        label: `Episode ${row.episode_number}`,
+        start: rowAirMidnight,
+        end: nextAirMidnight ?? addDaysUtc(lastEpisodeAirMidnight ?? rowAirMidnight, 7),
+        type: "episode",
+        source: "fallback",
+        episodeNumber: row.episode_number,
+      });
+    }
+
+    if (firstEpisodeAirMidnight) {
+      bounds.set("period-preseason", {
+        key: "period-preseason",
+        label: "Pre-Season",
+        start: firstEpisodeAirMidnight,
+        end: firstEpisodeAirMidnight,
+        type: "period",
+        source: "fallback",
+      });
+    }
+
+    const postseasonStart = lastEpisodeAirMidnight;
+    const postseasonEnd = addDaysUtc(postseasonStart, 7);
+    if (postseasonStart || postseasonEnd) {
+      bounds.set("period-postseason", {
+        key: "period-postseason",
+        label: "Post-Season",
+        start: postseasonStart,
+        end: postseasonEnd,
+        type: "period",
+        source: "fallback",
+      });
+    }
+  }
+
+  for (const period of input.periodOptions) {
+    if (period.key === "all-periods") continue;
+    const label = period.label.trim();
+    const episodeNumber = parseEpisodeNumberFromPeriodLabel(label);
+    if (episodeNumber !== null) {
+      bounds.set(`episode-${episodeNumber}`, {
+        key: `episode-${episodeNumber}`,
+        label: `Episode ${episodeNumber}`,
+        start: period.start,
+        end: period.end,
+        type: "episode",
+        source: "period",
+        episodeNumber,
+      });
+      continue;
+    }
+    if (isPreSeasonPeriodLabel(label)) {
+      bounds.set("period-preseason", {
+        key: "period-preseason",
+        label: "Pre-Season",
+        start: period.start,
+        end: period.end,
+        type: "period",
+        source: "period",
+      });
+      continue;
+    }
+    if (isPostSeasonPeriodLabel(label)) {
+      bounds.set("period-postseason", {
+        key: "period-postseason",
+        label: "Post-Season",
+        start: period.start,
+        end: period.end,
+        type: "period",
+        source: "period",
+      });
+    }
+  }
+
+  const firstEpisodeAirDate = rows.find((row) => row.episode_number === 1)?.air_date ?? null;
+  const secondEpisodeAirDate = rows.find((row) => row.episode_number === 2)?.air_date ?? null;
+  if (firstEpisodeAirDate) {
+    const preSeasonEndCutover = toEasternClockIso(firstEpisodeAirDate, 19, 0, 0);
+    const episodeOneStartCutover = toEasternClockIso(firstEpisodeAirDate, 19, 1, 1);
+    const episodeOneWindow = bounds.get("episode-1");
+    const episodeOneEndAnchor =
+      secondEpisodeAirDate ??
+      episodeOneWindow?.end ??
+      addDaysUtc(toEasternMidnightIso(firstEpisodeAirDate), 7);
+    const episodeOneEndCutover = toEasternClockIso(episodeOneEndAnchor, 19, 1, 10);
+
+    const preSeasonWindow = bounds.get("period-preseason");
+    if (preSeasonWindow && preSeasonEndCutover) {
+      bounds.set("period-preseason", {
+        ...preSeasonWindow,
+        end: preSeasonEndCutover,
+      });
+    }
+    if (episodeOneWindow) {
+      bounds.set("episode-1", {
+        ...episodeOneWindow,
+        start: episodeOneStartCutover ?? episodeOneWindow.start,
+        end: episodeOneEndCutover ?? episodeOneWindow.end,
+      });
+    }
+  }
+
+  return bounds;
+};
+
+const buildSeasonDiscoveryWindowFromEpisodeBounds = (input: {
+  episodeWindowBoundsByContainer: Map<string, EpisodeWindowBounds>;
+  periodOptions: EpisodePeriodOption[];
+  seasonEpisodes: SeasonEpisodeRow[];
+}): { start: string | null; end: string | null } => {
+  const windows = [...input.episodeWindowBoundsByContainer.values()];
+  const startCandidates = windows
+    .map((window) => parseDateMs(window.start))
+    .filter((value): value is number => value !== null);
+  const endCandidates = windows
+    .map((window) => parseDateMs(window.end))
+    .filter((value): value is number => value !== null);
+  if (startCandidates.length > 0 || endCandidates.length > 0) {
+    const minStart = startCandidates.length > 0 ? Math.min(...startCandidates) : null;
+    const maxEnd = endCandidates.length > 0 ? Math.max(...endCandidates) : null;
+    return {
+      start: minStart !== null ? new Date(minStart).toISOString() : null,
+      end: maxEnd !== null ? new Date(maxEnd).toISOString() : null,
+    };
+  }
+  const datedEpisodes = input.seasonEpisodes
+    .filter((episode) => parseDateMs(episode.air_date) !== null)
+    .sort((a, b) => a.episode_number - b.episode_number);
+  if (datedEpisodes.length === 0) {
+    return { start: null, end: null };
+  }
+  const firstEpisode = datedEpisodes[0];
+  const lastEpisode = datedEpisodes[datedEpisodes.length - 1];
+  const preSeasonOption = input.periodOptions.find((period) =>
+    /pre[\s-]?season|trailer/i.test(period.label),
+  );
+  const firstEpisodeMidnight = toEasternMidnightIso(firstEpisode?.air_date ?? null);
+  const lastEpisodeMidnight = toEasternMidnightIso(lastEpisode?.air_date ?? null);
+  return {
+    start: preSeasonOption?.start ?? firstEpisodeMidnight ?? null,
+    end: addDaysUtc(lastEpisodeMidnight, 7),
+  };
+};
+
 const parseEpisodeNumberFromPeriodLabel = (label: string): number | null => {
   const episodeMatch = label.match(/\bepisode\s*(\d{1,3})\b/i);
   if (!episodeMatch?.[1]) return null;
@@ -1994,8 +2138,22 @@ const resolveRouteRedditCommunityContextFromPath = (
   if (!pathname) {
     return { showSlug: null, communitySlug: null, seasonNumber: null };
   }
-  if (pathname.startsWith("/admin/social/") || pathname.startsWith("/admin/social-media/")) {
-    return { showSlug: null, communitySlug: null, seasonNumber: null };
+  const adminMatch = pathname.match(
+    /^\/admin\/social(?:-media)?\/reddit\/([^/]+)\/([^/]+)(?:\/s(\d+))?/i,
+  );
+  if (adminMatch) {
+    const communitySlug = adminMatch[1] ? decodeURIComponent(adminMatch[1]).trim() : null;
+    if (communitySlug?.toLowerCase() === "communities") {
+      return { showSlug: null, communitySlug: null, seasonNumber: null };
+    }
+    const showSlug = adminMatch[2] ? decodeURIComponent(adminMatch[2]).trim() : null;
+    const seasonRaw = adminMatch[3] ?? null;
+    const parsedSeason = seasonRaw ? Number.parseInt(seasonRaw, 10) : Number.NaN;
+    return {
+      showSlug: showSlug && showSlug.length > 0 ? showSlug : null,
+      communitySlug: communitySlug && communitySlug.length > 0 ? communitySlug : null,
+      seasonNumber: Number.isFinite(parsedSeason) && parsedSeason > 0 ? parsedSeason : null,
+    };
   }
   const match = pathname.match(/^\/([^/]+)\/social\/reddit(?:\/([^/]+)(?:\/s(\d+))?)?/i);
   if (!match) {
@@ -2091,12 +2249,9 @@ export default function RedditSourcesManager({
   const [episodeSelectedPostIds, setEpisodeSelectedPostIds] = useState<string[]>([]);
   const [episodeRefreshing, setEpisodeRefreshing] = useState(false);
   const [refreshingContainerKeys, setRefreshingContainerKeys] = useState<Set<string>>(new Set());
-  // Keep season fanout sequential to avoid Reddit API bursts across many windows.
-  const MAX_CONCURRENT_CONTAINER_SYNCS = 1;
+  const MAX_CONCURRENT_CONTAINER_SYNCS = 3;
   // Backwards-compatible alias: returns first active key for legacy single-key checks
   const refreshingContainerKey = refreshingContainerKeys.size > 0 ? [...refreshingContainerKeys][0] : null;
-  const [syncingDetailsContainerKey, setSyncingDetailsContainerKey] = useState<string | null>(null);
-  const [detailsSyncing, setDetailsSyncing] = useState(false);
   const [containerRefreshProgressByKey, setContainerRefreshProgressByKey] = useState<
     Record<string, ContainerRefreshProgress | undefined>
   >({});
@@ -2121,6 +2276,7 @@ export default function RedditSourcesManager({
   const discovery = seasonDiscovery;
   const [communitiesIncludeAssignedThreads, setCommunitiesIncludeAssignedThreads] = useState(false);
   const seasonOptionsCacheRef = useRef<Map<string, ShowSeasonOption[]>>(new Map());
+  const seasonEpisodesRef = useRef<SeasonEpisodeRow[]>([]);
   const periodOptionsCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
   const periodOptionsByShowCacheRef = useRef<Map<string, EpisodePeriodOption[]>>(new Map());
   const periodOptionsRef = useRef<EpisodePeriodOption[]>([]);
@@ -2173,6 +2329,10 @@ export default function RedditSourcesManager({
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
+
+  useEffect(() => {
+    seasonEpisodesRef.current = seasonEpisodes;
+  }, [seasonEpisodes]);
 
   useEffect(() => {
     periodOptionsRef.current = periodOptions;
@@ -3462,6 +3622,7 @@ export default function RedditSourcesManager({
       const periodCacheKey = `${community.trr_show_id}:${season.id}`;
       const cachedPeriods = periodOptionsCacheRef.current.get(periodCacheKey);
       if (cachedPeriods) {
+        periodOptionsRef.current = cachedPeriods;
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setPeriodOptions(cachedPeriods);
           setSelectedPeriodKey("all-periods");
@@ -3599,6 +3760,7 @@ export default function RedditSourcesManager({
       if (periods.length > 0) {
         periodOptionsCacheRef.current.set(periodCacheKey, periods);
         periodOptionsByShowCacheRef.current.set(community.trr_show_id, periods);
+        periodOptionsRef.current = periods;
         if (isEpisodeContextRequestActive(requestToken, options?.signal)) {
           setPeriodOptions(periods);
           setSelectedPeriodKey("all-periods");
@@ -3763,6 +3925,7 @@ export default function RedditSourcesManager({
         }
       }
 
+      seasonEpisodesRef.current = normalizedEpisodes;
       if (isEpisodeContextRequestActive(options?.requestToken ?? 0, options?.signal)) {
         setSeasonEpisodes(normalizedEpisodes);
       }
@@ -3988,9 +4151,9 @@ export default function RedditSourcesManager({
           : null;
 
     if (fallbackShowSlug && normalizedCommunitySlug) {
-      return buildShowRedditCommunityUrl({
-        showSlug: fallbackShowSlug,
+      return buildAdminRedditCommunityUrl({
         communitySlug: normalizedCommunitySlug,
+        showSlug: fallbackShowSlug,
         seasonNumber: fallbackSeasonNumber,
       });
     }
@@ -4003,12 +4166,17 @@ export default function RedditSourcesManager({
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
       if (derivedSlug) {
-        return buildShowRedditCommunityUrl({
-          showSlug: derivedSlug,
+        return buildAdminRedditCommunityUrl({
           communitySlug: normalizedCommunitySlug,
+          showSlug: derivedSlug,
           seasonNumber: fallbackSeasonNumber,
         });
       }
+    }
+    if (normalizedCommunitySlug) {
+      return buildAdminRedditCommunityUrl({
+        communitySlug: normalizedCommunitySlug,
+      });
     }
     return `/admin/social/reddit/communities/${encodeURIComponent(community.id)}`;
   }, [
@@ -4390,9 +4558,9 @@ export default function RedditSourcesManager({
     (nextSeasonNumber: number): string | null => {
       if (!seasonSelectionShowSlug) return null;
       if (isDedicatedCommunityView && seasonSelectionCommunitySlug) {
-        return buildShowRedditCommunityUrl({
-          showSlug: seasonSelectionShowSlug,
+        return buildAdminRedditCommunityUrl({
           communitySlug: seasonSelectionCommunitySlug,
+          showSlug: seasonSelectionShowSlug,
           seasonNumber: nextSeasonNumber,
         });
       }
@@ -4420,9 +4588,9 @@ export default function RedditSourcesManager({
     const currentHref = pathname;
     const canonicalHref = isDedicatedCommunityView
       ? seasonSelectionCommunitySlug
-        ? buildShowRedditCommunityUrl({
-            showSlug: seasonSelectionShowSlug,
+        ? buildAdminRedditCommunityUrl({
             communitySlug: seasonSelectionCommunitySlug,
+            showSlug: seasonSelectionShowSlug,
             seasonNumber: activeSeasonSelection,
           })
         : null
@@ -5399,9 +5567,9 @@ export default function RedditSourcesManager({
                 : null);
       const communityWindowHref =
         routeShowSlug && normalizedCommunitySlug && routeSeasonNumber
-          ? buildShowRedditCommunityWindowUrl({
-              showSlug: routeShowSlug,
+          ? buildAdminRedditCommunityWindowUrl({
               communitySlug: normalizedCommunitySlug,
+              showSlug: routeShowSlug,
               seasonNumber: routeSeasonNumber,
               windowKey: windowSlug,
             })
@@ -5460,11 +5628,13 @@ export default function RedditSourcesManager({
     [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
   );
 
-  const handleRefreshPostsForContainer = useCallback(
-    async (containerKey: string) => {
+  const refreshPostsForContainerWithBounds = useCallback(
+    async (
+      containerKey: string,
+      bounds: EpisodeWindowBounds,
+      options?: { preserveEpisodeContextWarning?: boolean },
+    ) => {
       if (!selectedCommunity) return;
-      const bounds = episodeWindowBoundsByContainer.get(containerKey);
-      if (!bounds) return;
       let discovered: DiscoveryPayload | null = null;
       let shouldRefreshStoredCounts = false;
       const coverageMode = containerKey === "period-preseason" ? "adaptive_deep" : "standard";
@@ -5476,10 +5646,12 @@ export default function RedditSourcesManager({
       setContainerRefreshProgress(containerKey, {
         runId: "pending",
         status: "queued",
-        message: `${bounds.label}: starting sync…`,
+        message: `${bounds.label}: starting full sync…`,
       });
       setError(null);
-      setEpisodeContextWarning(null);
+      if (!options?.preserveEpisodeContextWarning) {
+        setEpisodeContextWarning(null);
+      }
       try {
         const discoveryResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
           periodStart: bounds.start ?? null,
@@ -5493,7 +5665,7 @@ export default function RedditSourcesManager({
           waitForCompletion: false,
           maxPages: maxPagesForContainer,
           timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
-          mode: "sync_posts",
+          mode: "sync_full",
         });
         discovered = discoveryResult.discovery;
         if (!discovered) {
@@ -5655,7 +5827,6 @@ export default function RedditSourcesManager({
       }
     },
     [
-      episodeWindowBoundsByContainer,
       episodeSeasonId,
       fetchDiscoveryForCommunity,
       mergeDiscoveredFlairsIntoCommunity,
@@ -5666,160 +5837,14 @@ export default function RedditSourcesManager({
     ],
   );
 
-  const handleSyncDetailsForContainer = useCallback(
+  const handleRefreshPostsForContainer = useCallback(
     async (containerKey: string) => {
-      if (!selectedCommunity) return;
       const bounds = episodeWindowBoundsByContainer.get(containerKey);
       if (!bounds) return;
-
-      containerRefreshPollTokenRef.current[containerKey] =
-        (containerRefreshPollTokenRef.current[containerKey] ?? 0) + 1;
-      setSyncingDetailsContainerKey(containerKey);
-      setContainerRefreshProgress(containerKey, {
-        runId: "pending",
-        status: "queued",
-        message: `${bounds.label}: starting detail sync…`,
-      });
-      setError(null);
-      setEpisodeContextWarning(null);
-      try {
-        const discoveryResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
-          periodStart: bounds.start ?? null,
-          periodEnd: bounds.end ?? null,
-          containerKey,
-          periodLabel: bounds.label,
-          exhaustive: true,
-          searchBackfill: false,
-          refresh: true,
-          waitForCompletion: false,
-          timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
-          mode: "sync_details",
-        });
-        const run = discoveryResult.run;
-        if (run) {
-          setContainerRefreshProgress(containerKey, {
-            runId: run.run_id,
-            status: run.status,
-            message: buildContainerRunProgressMessage(bounds.label, run),
-          });
-          if (isRefreshRunActiveStatus(run.status)) {
-            const polled = await pollContainerRefreshRun({
-              communityId: selectedCommunity.id,
-              containerKey,
-              label: bounds.label,
-              runId: run.run_id,
-              periodStart: bounds.start ?? null,
-              periodEnd: bounds.end ?? null,
-            });
-            if (polled.discovery) {
-              upsertWindowDiscovery(containerKey, polled.discovery);
-            }
-            if (polled.warning && !polled.discovery) {
-              setEpisodeContextWarning(polled.warning);
-            }
-            return;
-          }
-          if (run.status === "failed" || run.status === "cancelled") {
-            throw new Error(run.error || `Detail sync ${run.status} for ${bounds.label}.`);
-          }
-        }
-        if (discoveryResult.discovery) {
-          upsertWindowDiscovery(containerKey, discoveryResult.discovery);
-        }
-        if (discoveryResult.warning) {
-          setEpisodeContextWarning(discoveryResult.warning);
-        }
-      } catch (err) {
-        const failedMessage = toErrorMessage(err, `Failed to sync details for ${bounds.label}.`);
-        setContainerRefreshProgress(containerKey, {
-          runId: "error",
-          status: "failed",
-          message: `${bounds.label}: ${failedMessage}`,
-        });
-        setEpisodeContextWarning(failedMessage);
-        setError(failedMessage);
-      } finally {
-        setSyncingDetailsContainerKey((current) => (current === containerKey ? null : current));
-      }
+      await refreshPostsForContainerWithBounds(containerKey, bounds);
     },
-    [
-      episodeWindowBoundsByContainer,
-      fetchDiscoveryForCommunity,
-      pollContainerRefreshRun,
-      setContainerRefreshProgress,
-      selectedCommunity,
-      upsertWindowDiscovery,
-    ],
+    [episodeWindowBoundsByContainer, refreshPostsForContainerWithBounds],
   );
-
-  const handleSyncDetails = useCallback(async () => {
-    if (!selectedCommunity) return;
-    setDetailsSyncing(true);
-    setBusyAction("sync-details");
-    setBusyLabel("Starting detail sync…");
-    setError(null);
-    setEpisodeContextWarning(null);
-    try {
-      const periodStart = selectedPeriod?.start ?? seasonDiscoveryWindow.start;
-      const periodEnd = selectedPeriod?.end ?? seasonDiscoveryWindow.end;
-      const periodLabel = selectedPeriod?.label ?? "Season";
-      const discoveryResult = await fetchDiscoveryForCommunity(selectedCommunity.id, {
-        periodStart,
-        periodEnd,
-        periodLabel,
-        exhaustive: true,
-        searchBackfill: false,
-        refresh: true,
-        waitForCompletion: false,
-        timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
-        mode: "sync_details",
-      });
-      const run = discoveryResult.run;
-      if (run) {
-        setBusyLabel(buildContainerRunProgressMessage(periodLabel, run));
-        if (isRefreshRunActiveStatus(run.status)) {
-          const polled = await pollContainerRefreshRun({
-            communityId: selectedCommunity.id,
-            containerKey: "sync-details-season",
-            label: periodLabel,
-            runId: run.run_id,
-            periodStart,
-            periodEnd,
-          });
-          if (polled.discovery) {
-            upsertWindowDiscovery("sync-details-season", polled.discovery);
-          }
-          if (polled.warning) {
-            setEpisodeContextWarning(polled.warning);
-          }
-          setBusyLabel(null);
-          return;
-        }
-        if (run.status === "failed" || run.status === "cancelled") {
-          throw new Error(run.error || `Detail sync ${run.status}.`);
-        }
-      }
-      if (discoveryResult.warning) {
-        setEpisodeContextWarning(discoveryResult.warning);
-      }
-      setBusyLabel(null);
-    } catch (err) {
-      const failedMessage = toErrorMessage(err, "Failed to sync details.");
-      setEpisodeContextWarning(failedMessage);
-      setError(failedMessage);
-      setBusyLabel(null);
-    } finally {
-      setDetailsSyncing(false);
-      setBusyAction(null);
-    }
-  }, [
-    fetchDiscoveryForCommunity,
-    pollContainerRefreshRun,
-    seasonDiscoveryWindow,
-    selectedCommunity,
-    selectedPeriod,
-    upsertWindowDiscovery,
-  ]);
 
   const saveDiscoveredThread = async (thread: DiscoveryThread) => {
     if (!selectedCommunity) return;
@@ -5862,7 +5887,40 @@ export default function RedditSourcesManager({
   const handleRefreshEpisodeDiscussions = useCallback(async () => {
     if (!selectedCommunity) return;
 
+    const resolveFallbackWindowSyncContext = (): {
+      windowBounds: Map<string, EpisodeWindowBounds>;
+      seasonWindow: { start: string | null; end: string | null };
+    } => {
+      const currentSeasonEpisodes =
+        seasonEpisodesRef.current.length > 0 ? seasonEpisodesRef.current : seasonEpisodes;
+      const currentPeriodOptions =
+        periodOptionsRef.current.length > 0 ? periodOptionsRef.current : periodOptions;
+      const fallbackWindowBounds = buildFallbackEpisodeWindowBoundsFromSeasonContext({
+        seasonEpisodes: currentSeasonEpisodes,
+        periodOptions: currentPeriodOptions,
+      });
+      return {
+        windowBounds: fallbackWindowBounds,
+        seasonWindow: buildSeasonDiscoveryWindowFromEpisodeBounds({
+          episodeWindowBoundsByContainer: fallbackWindowBounds,
+          periodOptions: currentPeriodOptions,
+          seasonEpisodes: currentSeasonEpisodes,
+        }),
+      };
+    };
+
     let shouldRefreshStoredCounts = false;
+    let recoverableEpisodeRefreshMessage: string | null = null;
+    let windowBoundsForSync = episodeWindowBoundsByContainer;
+    let seasonWindowForSync = seasonDiscoveryWindow;
+    const {
+      windowBounds: fallbackWindowBoundsFromContext,
+      seasonWindow: fallbackSeasonWindowFromContext,
+    } = resolveFallbackWindowSyncContext();
+    if (fallbackWindowBoundsFromContext.size > windowBoundsForSync.size) {
+      windowBoundsForSync = fallbackWindowBoundsFromContext;
+      seasonWindowForSync = fallbackSeasonWindowFromContext;
+    }
     setEpisodeRefreshing(true);
     setRefreshingContainerKeys(new Set());
     setError(null);
@@ -5882,39 +5940,95 @@ export default function RedditSourcesManager({
       if (enableEpisodeSync) {
         params.set("sync", "true");
       }
-      const response = await fetchWithTimeout(
-        `/api/admin/reddit/communities/${selectedCommunity.id}/episode-discussions/refresh?${params.toString()}`,
-        {
-          method: "GET",
-          headers,
-          cache: "no-store",
-          timeoutMs: REQUEST_TIMEOUT_MS.episodeRefresh,
-        },
-      );
-      const payload = (await response.json().catch(() => ({}))) as EpisodeDiscussionRefreshPayload;
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to refresh episode discussions");
+      if (windowBoundsForSync.size === 0 && selectedCommunityContextSeed) {
+        const requestToken = episodeContextRequestTokenRef.current + 1;
+        episodeContextRequestTokenRef.current = requestToken;
+        try {
+          await loadSeasonAndPeriodContext(selectedCommunityContextSeed, {
+            requestToken,
+          });
+        } catch {
+          // Best-effort only; recoverable legacy refresh failures still get another fallback attempt below.
+        }
+        const hydratedContext = resolveFallbackWindowSyncContext();
+        if (hydratedContext.windowBounds.size > windowBoundsForSync.size) {
+          windowBoundsForSync = hydratedContext.windowBounds;
+          seasonWindowForSync = hydratedContext.seasonWindow;
+        }
       }
+      let resolvedSeasonId: string | null = null;
+      try {
+        const response = await fetchWithTimeout(
+          `/api/admin/reddit/communities/${selectedCommunity.id}/episode-discussions/refresh?${params.toString()}`,
+          {
+            method: "GET",
+            headers,
+            cache: "no-store",
+            timeoutMs: REQUEST_TIMEOUT_MS.episodeRefresh,
+          },
+        );
+        const payload = (await response.json().catch(() => ({}))) as EpisodeDiscussionRefreshPayload;
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to refresh episode discussions");
+        }
 
-      if (payload.community) {
-        const nextCommunity = toCommunityModel(payload.community);
-        mergeCommunityPatch(selectedCommunity.id, {
-          episode_title_patterns: nextCommunity.episode_title_patterns,
-        });
-      }
+        if (payload.community) {
+          const nextCommunity = toCommunityModel(payload.community);
+          mergeCommunityPatch(selectedCommunity.id, {
+            episode_title_patterns: nextCommunity.episode_title_patterns,
+          });
+        }
 
-      const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-      const nextMatrix = Array.isArray(payload.episode_matrix) ? payload.episode_matrix : [];
-      setEpisodeMatrix(nextMatrix);
-      setEpisodeCandidates(nextCandidates);
-      setEpisodeSelectedPostIds(nextCandidates.map((candidate) => candidate.reddit_post_id));
-      setEpisodeMeta(payload.meta ?? null);
-      const resolvedSeasonId = payload.meta?.season_context?.season_id;
-      if (typeof resolvedSeasonId === "string" && resolvedSeasonId.trim().length > 0) {
-        setEpisodeSeasonId(resolvedSeasonId);
+        const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+        const nextMatrix = Array.isArray(payload.episode_matrix) ? payload.episode_matrix : [];
+        setEpisodeMatrix(nextMatrix);
+        setEpisodeCandidates(nextCandidates);
+        setEpisodeSelectedPostIds(nextCandidates.map((candidate) => candidate.reddit_post_id));
+        setEpisodeMeta(payload.meta ?? null);
+        resolvedSeasonId = payload.meta?.season_context?.season_id ?? null;
+        if (typeof resolvedSeasonId === "string" && resolvedSeasonId.trim().length > 0) {
+          setEpisodeSeasonId(resolvedSeasonId);
+        }
+
+        if ((payload.meta?.sync_auto_saved_count ?? 0) > 0) {
+          shouldRefreshStoredCounts = true;
+          await fetchCommunities();
+        }
+      } catch (episodeRefreshErr) {
+        const refreshMessage = toErrorMessage(
+          episodeRefreshErr,
+          "Failed to refresh episode discussions",
+        );
+        const canContinueWindowSync = isRecoverableEpisodeDiscussionRefreshError(refreshMessage);
+        if (!canContinueWindowSync) {
+          throw episodeRefreshErr;
+        }
+        if (windowBoundsForSync.size === 0) {
+          try {
+            if (selectedCommunityContextSeed) {
+              const requestToken = episodeContextRequestTokenRef.current + 1;
+              episodeContextRequestTokenRef.current = requestToken;
+              await loadSeasonAndPeriodContext(selectedCommunityContextSeed, {
+                requestToken,
+              });
+            }
+          } catch {
+            // Best-effort only; fall back to whatever season context is already cached locally.
+          }
+          const hydratedContext = resolveFallbackWindowSyncContext();
+          if (hydratedContext.windowBounds.size > 0) {
+            windowBoundsForSync = hydratedContext.windowBounds;
+            seasonWindowForSync = hydratedContext.seasonWindow;
+          }
+        }
+        if (windowBoundsForSync.size === 0) {
+          throw episodeRefreshErr;
+        }
+        recoverableEpisodeRefreshMessage = `${refreshMessage} Continuing with per-window sync using existing season windows.`;
+        setEpisodeContextWarning(recoverableEpisodeRefreshMessage);
       }
       try {
-        const seasonWindowKeys = [...episodeWindowBoundsByContainer.entries()]
+        const seasonWindowEntries = [...windowBoundsForSync.entries()]
           .filter(([containerKey, bounds]) => {
             if (containerKey === "period-preseason" || containerKey === "period-postseason") return true;
             return bounds.type === "episode" && /^episode-\d+$/i.test(containerKey);
@@ -5923,10 +6037,9 @@ export default function RedditSourcesManager({
             const startDiff = (parseDateMs(a[1].start) ?? 0) - (parseDateMs(b[1].start) ?? 0);
             if (startDiff !== 0) return startDiff;
             return a[0].localeCompare(b[0]);
-          })
-          .map(([containerKey]) => containerKey);
+          });
 
-        if (seasonWindowKeys.length === 0) {
+        if (seasonWindowEntries.length === 0) {
           setSeasonDiscovery(null);
           setEpisodeContextWarning(
             "No episode windows are available yet. Refresh episode discussions first to build season windows.",
@@ -5938,8 +6051,8 @@ export default function RedditSourcesManager({
             // by window even when some live container refreshes are rate-limited.
             const cachedSeasonDiscovery = await fetchDiscoveryForCommunity(selectedCommunity.id, {
               seasonId: requestedSeasonId ?? resolvedSeasonId ?? undefined,
-              periodStart: seasonDiscoveryWindow.start,
-              periodEnd: seasonDiscoveryWindow.end,
+              periodStart: seasonWindowForSync.start,
+              periodEnd: seasonWindowForSync.end,
               periodLabel: "Season",
               exhaustive: true,
               searchBackfill: true,
@@ -5954,16 +6067,20 @@ export default function RedditSourcesManager({
             // Non-critical: window-level refreshes still run and hydrate container payloads.
           }
           setEpisodeContextWarning(
-            `Season sync running across ${seasonWindowKeys.length} windows using each post's created timestamp.`,
+            recoverableEpisodeRefreshMessage
+              ? `${recoverableEpisodeRefreshMessage} Season sync running across ${seasonWindowEntries.length} windows using each post's created timestamp.`
+              : `Season sync running across ${seasonWindowEntries.length} windows using each post's created timestamp.`,
           );
-          const queue = [...seasonWindowKeys];
+          const queue = [...seasonWindowEntries];
           const workerCount = Math.min(MAX_CONCURRENT_CONTAINER_SYNCS, queue.length);
           await Promise.all(
             Array.from({ length: workerCount }, async () => {
               while (queue.length > 0) {
-                const nextContainerKey = queue.shift();
-                if (!nextContainerKey) return;
-                await handleRefreshPostsForContainer(nextContainerKey);
+                const nextWindow = queue.shift();
+                if (!nextWindow) return;
+                await refreshPostsForContainerWithBounds(nextWindow[0], nextWindow[1], {
+                  preserveEpisodeContextWarning: Boolean(recoverableEpisodeRefreshMessage),
+                });
               }
             }),
           );
@@ -5974,11 +6091,11 @@ export default function RedditSourcesManager({
           discoverErr,
           "Episode discussions refreshed, but tracked-flair post windows could not be synced.",
         );
-        setEpisodeContextWarning(discoverMessage);
-      }
-      if ((payload.meta?.sync_auto_saved_count ?? 0) > 0) {
-        shouldRefreshStoredCounts = true;
-        await fetchCommunities();
+        setEpisodeContextWarning(
+          recoverableEpisodeRefreshMessage
+            ? `${recoverableEpisodeRefreshMessage} ${discoverMessage}`
+            : discoverMessage,
+        );
       }
     } catch (err) {
       setError(toErrorMessage(err, "Failed to refresh episode discussions"));
@@ -5995,12 +6112,15 @@ export default function RedditSourcesManager({
     fetchDiscoveryForCommunity,
     fetchWithTimeout,
     getAuthHeaders,
-    handleRefreshPostsForContainer,
     isDedicatedCommunityView,
+    loadSeasonAndPeriodContext,
     mergeCommunityPatch,
     episodeWindowBoundsByContainer,
-    seasonDiscoveryWindow.end,
-    seasonDiscoveryWindow.start,
+    refreshPostsForContainerWithBounds,
+    seasonDiscoveryWindow,
+    seasonEpisodes,
+    periodOptions,
+    selectedCommunityContextSeed,
     selectedPeriod,
     selectedCommunity,
     resolveSeasonIdForRequests,
@@ -6303,7 +6423,9 @@ export default function RedditSourcesManager({
           Discussion Filters
         </p>
         <p className="mb-2 text-xs text-zinc-500">
-          These keyword filters drive episode-discussion matching by category.
+          {selectedCommunity.is_show_focused
+            ? "Optional title phrases for explicit episode-discussion posts. Season windows still sync any posts by timestamp."
+            : "These keyword filters drive episode-discussion matching by category."}
         </p>
         <div className="mb-2 flex flex-wrap gap-1.5">
           {EPISODE_FILTER_CATEGORY_RULES.map((rule) => (
@@ -6413,7 +6535,9 @@ export default function RedditSourcesManager({
               </p>
             </div>
             <p className="mb-2 text-xs text-zinc-500">
-              Episode discussions are post types in this subreddit matched by title phrases.
+              {selectedCommunity.is_show_focused
+                ? "Episode discussion filters are optional here. Use them only when titles explicitly say Episode Discussion, Live Thread, or similar."
+                : "Episode discussions are post types in this subreddit matched by title phrases."}
             </p>
           </>
         )}
@@ -6593,10 +6717,8 @@ export default function RedditSourcesManager({
               pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
               refreshProgressByContainer: containerRefreshProgressByKey,
               onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
-              onSyncContainerDetails: (containerKey) => void handleSyncDetailsForContainer(containerKey),
               refreshingContainerKey,
               refreshingContainerKeys,
-              syncingDetailsContainerKey,
               refreshPostsDisabled: isBusy || episodeRefreshing,
               periodsLoading,
               onOpenContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),
@@ -6950,20 +7072,10 @@ export default function RedditSourcesManager({
                   disabled={isBusy || episodeRefreshing || periodsLoading}
                   onClick={() => void handleRefreshEpisodeDiscussions()}
                   aria-label="Sync Posts"
-                  title="Scrape posts, update metrics/comments, and sync discussion candidates"
+                  title="Sync posts, comments, details, and media across preseason, episode, and postseason windows"
                   className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
-                </button>
-                <button
-                  type="button"
-                  disabled={isBusy || detailsSyncing || episodeRefreshing || periodsLoading}
-                  onClick={() => void handleSyncDetails()}
-                  aria-label="Sync Details"
-                  title="Deep-scrape comment trees, media, and post details for the current period"
-                  className="rounded-lg border border-indigo-300 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {detailsSyncing ? "Syncing Details…" : "Sync Details 🕷️"}
                 </button>
               </>
             )}
@@ -6976,20 +7088,10 @@ export default function RedditSourcesManager({
               disabled={isBusy || episodeRefreshing || periodsLoading}
               onClick={() => void handleRefreshEpisodeDiscussions()}
               aria-label="Sync Posts"
-              title="Scrape posts, update metrics/comments, and sync discussion candidates"
+              title="Sync posts, comments, details, and media across preseason, episode, and postseason windows"
               className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
-            </button>
-            <button
-              type="button"
-              disabled={isBusy || detailsSyncing || episodeRefreshing || periodsLoading}
-              onClick={() => void handleSyncDetails()}
-              aria-label="Sync Details"
-              title="Deep-scrape comment trees, media, and post details for the current period"
-              className="rounded-lg border border-indigo-300 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {detailsSyncing ? "Syncing Details…" : "Sync Details 🕷️"}
             </button>
             <button
               type="button"
@@ -8186,10 +8288,8 @@ export default function RedditSourcesManager({
                           pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
                           refreshProgressByContainer: containerRefreshProgressByKey,
                           onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
-                          onSyncContainerDetails: (containerKey) => void handleSyncDetailsForContainer(containerKey),
                           refreshingContainerKey,
                           refreshingContainerKeys,
-                          syncingDetailsContainerKey,
                           refreshPostsDisabled: isBusy || episodeRefreshing,
                           periodsLoading,
                           onOpenContainerPosts: (containerKey) => void openContainerPostsPage(containerKey),

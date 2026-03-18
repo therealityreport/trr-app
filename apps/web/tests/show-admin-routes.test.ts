@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAdminRedditCommunityUrl,
+  buildAdminRedditCommunityWindowPostUrl,
+  buildAdminRedditCommunityWindowUrl,
   buildPersonAdminUrl,
   buildPersonRouteSlug,
   buildSocialAccountProfileUrl,
@@ -147,6 +150,14 @@ describe("show-admin-routes", () => {
       buildSocialAccountProfileUrl({
         platform: "instagram",
         handle: "@BravoTV",
+        tab: "catalog",
+      }),
+    ).toBe("/admin/social/instagram/bravotv/catalog");
+
+    expect(
+      buildSocialAccountProfileUrl({
+        platform: "instagram",
+        handle: "@BravoTV",
         tab: "hashtags",
       }),
     ).toBe("/admin/social/instagram/bravotv/hashtags");
@@ -163,6 +174,13 @@ describe("show-admin-routes", () => {
       handle: "bravotv",
       tab: "collaborators-tags",
       canonicalPath: "/admin/social/instagram/bravotv/collaborators-tags",
+    });
+
+    expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/catalog")).toMatchObject({
+      platform: "instagram",
+      handle: "bravotv",
+      tab: "catalog",
+      canonicalPath: "/admin/social/instagram/bravotv/catalog",
     });
   });
 
@@ -521,6 +539,46 @@ describe("show-admin-routes", () => {
         flairKey: "salt lake city",
       }),
     ).toBe("/rhoslc/social/reddit/BravoRealHousewives/all/flairs/salt%20lake%20city");
+  });
+
+  it("builds canonical admin reddit community URLs", () => {
+    expect(
+      buildAdminRedditCommunityUrl({
+        communitySlug: "BravoRealHousewives",
+        showSlug: "rhoslc",
+      }),
+    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc");
+
+    expect(
+      buildAdminRedditCommunityUrl({
+        communitySlug: "BravoRealHousewives",
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+      }),
+    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6");
+
+    expect(
+      buildAdminRedditCommunityWindowUrl({
+        communitySlug: "BravoRealHousewives",
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+        windowKey: "episode-1",
+      }),
+    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1");
+
+    expect(
+      buildAdminRedditCommunityWindowPostUrl({
+        communitySlug: "BravoRealHousewives",
+        showSlug: "rhoslc",
+        seasonNumber: 6,
+        windowKey: "e1",
+        postId: "1abcde",
+        title: "The Real Housewives Of Salt Lake City - Season 6 - Episode 1 - Pre Episode Discussion",
+        author: "AutoModerator",
+      }),
+    ).toBe(
+      "/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1/the-real-housewives-of-salt-lake-city-season-6-episode-1-pre-episode-discussion--u-automoderator",
+    );
   });
 
   it("removes legacy tab query keys and preserves unrelated params", () => {

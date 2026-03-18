@@ -1,30 +1,18 @@
 "use client";
 
 import type { ReactNode } from "react";
-import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
-import type { PlatformTab } from "@/components/admin/season-social-analytics-section";
 
 type SocialSeason = {
   id: string;
   season_number: number;
 };
 
-type SocialPlatformOption = {
-  key: PlatformTab;
-  label: string;
-};
-
 interface ShowSocialTabProps {
   socialDependencyError: string | null;
   selectedSocialSeason: SocialSeason | null;
-  socialPlatformTab: PlatformTab;
-  isRedditView?: boolean;
-  onSelectSocialPlatformTab: (tab: PlatformTab) => void;
-  socialPlatformOptions: ReadonlyArray<SocialPlatformOption>;
   socialSeasonOptions: SocialSeason[];
   selectedSocialSeasonId: string | null;
   onSelectSocialSeasonId: (seasonId: string | null) => void;
-  onSocialControlsHostChange?: (node: HTMLDivElement | null) => void;
   analyticsSection: ReactNode;
   fallbackSection: ReactNode;
 }
@@ -32,14 +20,9 @@ interface ShowSocialTabProps {
 export default function ShowSocialTab({
   socialDependencyError,
   selectedSocialSeason,
-  socialPlatformTab,
-  isRedditView = false,
-  onSelectSocialPlatformTab,
-  socialPlatformOptions,
   socialSeasonOptions,
   selectedSocialSeasonId,
   onSelectSocialSeasonId,
-  onSocialControlsHostChange,
   analyticsSection,
   fallbackSection,
 }: ShowSocialTabProps) {
@@ -58,81 +41,42 @@ export default function ShowSocialTab({
             Social dependency warning: {socialDependencyError}. Showing available social data.
           </div>
         )}
-        {!isRedditView && (
-          <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-            {selectedSocialSeason ? (
-              <nav
-                aria-label="Social platform tabs"
-                className="mb-4 flex flex-wrap gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-2"
-              >
-                {socialPlatformOptions.map((tab) => (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => onSelectSocialPlatformTab(tab.key)}
-                    aria-pressed={socialPlatformTab === tab.key}
-                    aria-current={socialPlatformTab === tab.key ? "page" : undefined}
-                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                      socialPlatformTab === tab.key
-                        ? "bg-white text-zinc-900 shadow-sm"
-                        : "text-zinc-600 hover:bg-white/70 hover:text-zinc-800"
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <SocialPlatformTabIcon tab={tab.key} />
-                      <span>{tab.label}</span>
-                    </span>
-                  </button>
-                ))}
-              </nav>
-            ) : (
-              <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-600">
-                Platform tabs are available after selecting a season.
-              </div>
-            )}
-            {selectedSocialSeason && (
-              <div
-                ref={onSocialControlsHostChange}
-                className="mb-4 min-h-11"
-                data-testid="show-social-controls-host"
-              />
-            )}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Social Scope
-                </p>
-                <p className="text-sm text-zinc-600">
-                  Defaulting to the most recent aired/airing season.
-                </p>
-              </div>
-              {socialSeasonOptions.length > 1 ? (
-                <label
-                  htmlFor="show-social-season-select"
-                  className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500"
-                >
-                  Season
-                  <select
-                    id="show-social-season-select"
-                    value={selectedSocialSeasonId ?? ""}
-                    onChange={(event) => onSelectSocialSeasonId(event.target.value || null)}
-                    className="mt-1 block min-w-[220px] rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
-                  >
-                    {socialSeasonOptions.map((season) => (
-                      <option key={season.id} value={season.id}>
-                        Season {season.season_number}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <p className="text-sm font-semibold text-zinc-700">
-                  {selectedSocialSeason ? `Season ${selectedSocialSeason.season_number}` : "All Seasons"}
-                </p>
-              )}
+        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
+                Social Scope
+              </p>
+              <p className="text-sm text-zinc-600">
+                Defaulting to the most recent aired/airing season.
+              </p>
             </div>
+            {socialSeasonOptions.length > 1 ? (
+              <label
+                htmlFor="show-social-season-select"
+                className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500"
+              >
+                Season
+                <select
+                  id="show-social-season-select"
+                  value={selectedSocialSeasonId ?? ""}
+                  onChange={(event) => onSelectSocialSeasonId(event.target.value || null)}
+                  className="mt-1 block min-w-[220px] rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                >
+                  {socialSeasonOptions.map((season) => (
+                    <option key={season.id} value={season.id}>
+                      Season {season.season_number}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="text-sm font-semibold text-zinc-700">
+                {selectedSocialSeason ? `Season ${selectedSocialSeason.season_number}` : "All Seasons"}
+              </p>
+            )}
           </div>
-        )}
+        </div>
         {selectedSocialSeason ? analyticsSection : fallbackSection}
       </div>
     </section>

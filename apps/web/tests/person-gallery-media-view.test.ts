@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   BRAVOCON_LABEL,
   CANONICAL_SCOPED_SOURCE_ORDER,
+  buildPersonGalleryShowOptions,
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
   computePersonPhotoShowBuckets,
+  getShowDisplayLabel,
   resolvePersonGalleryImportContext,
   resolveGalleryShowFilterFallback,
   isLikelyImdbEpisodeCaption,
@@ -109,6 +111,7 @@ describe("person gallery media view helpers", () => {
             bucket_type: "event",
             bucket_key: "directv-plot-twist-featuring-bravo",
             bucket_label: "DIRECTV Plot Twist Featuring Bravo",
+            grouped_image_count: 35,
           },
         }),
       ],
@@ -124,7 +127,148 @@ describe("person gallery media view helpers", () => {
 
     expect(availability.hasBravoconMatches).toBe(true);
     expect(availability.eventOptions).toEqual([
-      { key: "directv-plot-twist-featuring-bravo", label: "DIRECTV Plot Twist Featuring Bravo" },
+      {
+        key: "directv-plot-twist-featuring-bravo",
+        label: "DIRECTV Plot Twist Featuring Bravo",
+        count: 35,
+      },
+    ]);
+  });
+
+  it("builds Real Housewives acronyms with franchise-aware shortcodes", () => {
+    expect(buildShowAcronym("The Real Housewives of Salt Lake City")).toBe("RHOSLC");
+    expect(buildShowAcronym("The Real Housewives of Beverly Hills")).toBe("RHOBH");
+    expect(getShowDisplayLabel("The Real Housewives of Salt Lake City")).toBe("RHOSLC");
+  });
+
+  it("dedupes duplicate show buckets and keeps only photo-backed show tabs", () => {
+    const options = buildPersonGalleryShowOptions([
+      makePhoto({
+        id: "rhoslc-1",
+        bucket_type: "show",
+        resolved_show_id: "show-rhoslc",
+        resolved_show_name: "The Real Housewives of Salt Lake City",
+      }),
+      makePhoto({
+        id: "rhoslc-2",
+        bucket_type: "show",
+        resolved_show_id: null,
+        resolved_show_name: "The Real Housewives of Salt Lake City (RHOSLC)",
+      }),
+      makePhoto({
+        id: "wwhl",
+        bucket_type: "show",
+        resolved_show_id: "show-wwhl",
+        resolved_show_name: "Watch What Happens Live with Andy Cohen",
+      }),
+    ]);
+
+    expect(options).toEqual([
+      {
+        key: "id:show-rhoslc",
+        showId: "show-rhoslc",
+        showName: "The Real Housewives of Salt Lake City (RHOSLC)",
+        acronym: "RHOSLC",
+      },
+    ]);
+  });
+
+  it("keeps the highest grouped event count per event bucket", () => {
+    const availability = computePersonGalleryMediaViewAvailability({
+      photos: [
+        makePhoto({
+          id: "event-1",
+          source: "getty",
+          bucket_type: "event",
+          bucket_key: "watch-what-happens-live-15th-anniversary-special",
+          bucket_label: "Watch What Happens Live 15th Anniversary Special",
+          metadata: {
+            bucket_type: "event",
+            bucket_key: "watch-what-happens-live-15th-anniversary-special",
+            bucket_label: "Watch What Happens Live 15th Anniversary Special",
+            grouped_image_count: 12,
+          },
+        }),
+        makePhoto({
+          id: "event-2",
+          source: "getty",
+          bucket_type: "event",
+          bucket_key: "watch-what-happens-live-15th-anniversary-special",
+          bucket_label: "Watch What Happens Live 15th Anniversary Special",
+          metadata: {
+            bucket_type: "event",
+            bucket_key: "watch-what-happens-live-15th-anniversary-special",
+            bucket_label: "Watch What Happens Live 15th Anniversary Special",
+            grouped_image_count: 18,
+          },
+        }),
+      ],
+      showIdForApi: "show-1",
+      activeShowName: "The Real Housewives of Salt Lake City",
+      activeShowAcronym: buildShowAcronym("The Real Housewives of Salt Lake City"),
+      allKnownShowNameMatches: ["the real housewives of salt lake city"],
+      allKnownShowAcronymMatches: new Set(["RHOSLC"]),
+      allKnownShowIds: ["show-1"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+    });
+
+    expect(availability.eventOptions).toEqual([
+      {
+        key: "watch-what-happens-live-15th-anniversary-special",
+        label: "Watch What Happens Live 15th Anniversary Special",
+        count: 18,
+      },
+    ]);
+  });
+
+  it("hides event buckets unless grouped image count is greater than one", () => {
+    const availability = computePersonGalleryMediaViewAvailability({
+      photos: [
+        makePhoto({
+          id: "event-1",
+          source: "getty",
+          bucket_type: "event",
+          bucket_key: "single-image-event",
+          bucket_label: "Single Image Event",
+          metadata: {
+            bucket_type: "event",
+            bucket_key: "single-image-event",
+            bucket_label: "Single Image Event",
+            grouped_image_count: 1,
+          },
+        }),
+        makePhoto({
+          id: "event-2",
+          source: "getty",
+          bucket_type: "event",
+          bucket_key: "multi-image-event",
+          bucket_label: "Multi Image Event",
+          metadata: {
+            bucket_type: "event",
+            bucket_key: "multi-image-event",
+            bucket_label: "Multi Image Event",
+            grouped_image_count: 3,
+          },
+        }),
+      ],
+      showIdForApi: "show-1",
+      activeShowName: "The Real Housewives of Salt Lake City",
+      activeShowAcronym: buildShowAcronym("The Real Housewives of Salt Lake City"),
+      allKnownShowNameMatches: ["the real housewives of salt lake city"],
+      allKnownShowAcronymMatches: new Set(["RHOSLC"]),
+      allKnownShowIds: ["show-1"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+    });
+
+    expect(availability.hasEventMatches).toBe(true);
+    expect(availability.eventOptions).toEqual([
+      {
+        key: "multi-image-event",
+        label: "Multi Image Event",
+        count: 3,
+      },
     ]);
   });
 

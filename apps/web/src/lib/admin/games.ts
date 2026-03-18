@@ -1,6 +1,6 @@
 import type { Route } from "next";
 
-export type AdminGameKey = "bravodle" | "realitease";
+export type AdminGameKey = "bravodle" | "realitease" | "flashback";
 
 export interface AdminGameDefinition {
   key: AdminGameKey;
@@ -39,13 +39,26 @@ export const ADMIN_GAMES: readonly AdminGameDefinition[] = [
     playHref: "/realitease/play",
     statsHref: "/realitease/play?show=stats",
   },
+  {
+    key: "flashback",
+    title: "Flashback",
+    subtitle: "Weekly timeline quiz",
+    description:
+      "Weekly timeline quiz — place 8 reality TV moments in chronological order.",
+    accentClassName: "bg-[#6B6BA0]",
+    adminHref: "/admin/games/flashback",
+    coverHref: "/flashback",
+    playHref: "/flashback",
+    statsHref: "/flashback",
+  },
 ] as const;
 
 export const ADMIN_GAME_MAP: Record<AdminGameKey, AdminGameDefinition> = {
   bravodle: ADMIN_GAMES[0],
   realitease: ADMIN_GAMES[1],
+  flashback: ADMIN_GAMES[2],
 };
 
 export function isAdminGameKey(value: string): value is AdminGameKey {
-  return value === "bravodle" || value === "realitease";
+  return value === "bravodle" || value === "realitease" || value === "flashback";
 }

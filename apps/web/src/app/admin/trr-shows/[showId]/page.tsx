@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useState, useCallback, useRef, useMemo, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, type ReactNode } from "react";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -26,6 +26,7 @@ import SocialPostsSection from "@/components/admin/social-posts-section";
 import SeasonSocialAnalyticsSection, {
   type PlatformTab,
   type SocialAnalyticsView,
+  type SocialTarget,
 } from "@/components/admin/season-social-analytics-section";
 import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import ShowSurveysTab from "@/components/admin/show-tabs/ShowSurveysTab";
@@ -96,6 +97,7 @@ import { buildSeasonSocialBreadcrumb, buildShowBreadcrumb } from "@/lib/admin/ad
 import {
   buildPipelineRows,
   isRefreshLogTerminalSuccess,
+  normalizeRefreshLogTopic,
   resolveRefreshLogTopicKey,
   shouldDedupeRefreshLogEntry,
   type RefreshLogTopicDefinition,
@@ -177,8 +179,6 @@ import {
   resolveShowPageDisplayTitle,
 } from "@/lib/admin/show-page/link-display";
 import {
-  buildLinkDiscoveryProgressSummary,
-  type LinkDiscoveryProgressSummary,
 } from "@/lib/admin/show-page/link-discovery-progress";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -452,7 +452,13 @@ type ShowRefreshTarget =
   | "cast_credits"
   | "videos"
   | "news"
-  | "social_setup";
+  | "social_setup"
+  | "show_core"
+  | "links"
+  | "bravo"
+  | "cast_profiles"
+  | "cast_media"
+  | "get_images";
 type ShowTab = { id: TabId; label: string; icon?: "home" };
 type RefreshProgressState = {
   stage?: string | null;
@@ -601,12 +607,19 @@ const ShowSettingsTab = dynamic(() => import("@/components/admin/show-tabs/ShowS
 });
 
 const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
-  { key: "shows", label: "SHOWS", description: "Show info, entities, providers" },
-  { key: "seasons", label: "SEASONS", description: "Season-level sync progress" },
-  { key: "episodes", label: "EPISODES", description: "Episode-level sync and credits" },
-  { key: "people", label: "PEOPLE", description: "Cast/member profile and person jobs" },
-  { key: "media", label: "MEDIA", description: "Images, mirroring, auto-count, cleanup" },
-  { key: "bravotv", label: "BRAVOTV", description: "Bravo preview/commit actions" },
+  { key: "show_core", label: "SHOW CORE", description: "Details, seasons, episodes, cast, and setup" },
+  { key: "links", label: "LINKS", description: "Show, season, and cast link discovery" },
+  { key: "bravo", label: "BRAVO", description: "Bravo auto-sync when eligible" },
+  { key: "cast_profiles", label: "CAST PROFILES", description: "Relationship roles, bios, and profile data" },
+  { key: "cast_media", label: "CAST MEDIA", description: "Images, mirroring, and media persistence" },
+];
+
+const FULL_SHOW_REFRESH_TARGETS: ShowRefreshTarget[] = [
+  "show_core",
+  "links",
+  "bravo",
+  "cast_profiles",
+  "cast_media",
 ];
 
 const SHOW_PAGE_TABS: ShowTab[] = [
@@ -621,11 +634,12 @@ const SHOW_PAGE_TABS: ShowTab[] = [
 ];
 
 const SHOW_SOCIAL_ANALYTICS_VIEWS: Array<{ id: SocialAnalyticsView; label: string }> = [
-  { id: "bravo", label: "OFFICIAL ANALYTICS" },
+  { id: "bravo", label: "OFFICIAL ANALYSIS" },
   { id: "sentiment", label: "SENTIMENT ANALYSIS" },
   { id: "hashtags", label: "HASHTAGS ANALYSIS" },
   { id: "advanced", label: "ADVANCED ANALYTICS" },
   { id: "reddit", label: "REDDIT ANALYTICS" },
+  { id: "cast-content", label: "CAST COMPARISON" },
 ];
 
 const isSocialAnalyticsView = (value: string | null | undefined): value is SocialAnalyticsView => {
@@ -767,10 +781,21 @@ const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   videos: "Bravo Videos",
   news: "Google News",
   social_setup: "Social Setup",
+  show_core: "Show Core",
+  links: "Links",
+  bravo: "Bravo",
+  cast_profiles: "Cast Profiles",
+  cast_media: "Cast Media",
+  get_images: "Getty/NBCUMV Images",
 };
 
 const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   starting: "Initializing",
+  show_core: "Show Core",
+  links: "Links",
+  bravo: "Bravo",
+  cast_profiles: "Cast Profiles",
+  cast_media: "Cast Media",
   details_sync_shows: "Show Info",
   details_tmdb_show_entities: "Show Entities",
   details_tmdb_watch_providers: "Watch Providers",
@@ -800,21 +825,10 @@ const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   prune: "Cleanup",
   mirroring: "S3 Mirroring",
   mirror: "S3 Mirroring",
-};
-
-const LINK_DISCOVERY_STAGE_LABELS: Record<string, string> = {
-  starting: "Initializing",
-  heartbeat: "Refresh",
-  show_discovery_started: "Show Links",
-  show_discovery_completed: "Show Links",
-  season_discovery_started: "Season Links",
-  season_discovery_completed: "Season Links",
-  people_discovery_started: "Cast Links",
-  people_discovery_completed: "Cast Links",
-  upsert_started: "Saving Links",
-  upsert_completed: "Saving Links",
-  cleanup_completed: "Validation",
-  run_timeout: "Timeout",
+  links_discover: "Links Discovery",
+  bravo_sync: "Bravo Sync",
+  cast_profiles_sync: "Cast Profiles",
+  cast_media_sync: "Cast Media",
 };
 
 const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
@@ -837,7 +851,6 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
 const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
-const LINK_DISCOVERY_STREAM_TIMEOUT_MS = 12 * 60 * 1000;
 const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
@@ -1306,47 +1319,6 @@ function SocialHandlePill({ pill }: { pill: ShowSocialLinkPill }) {
       />
       <span className="truncate">{pill.text}</span>
     </a>
-  );
-}
-
-function LinkDiscoveryStatusCard({ progress }: { progress: LinkDiscoveryProgressSummary }) {
-  return (
-    <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-3 text-blue-900">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-blue-700">Refresh in progress</p>
-          <p className="text-sm font-semibold text-blue-950">{progress.headline}</p>
-          {progress.detail ? <p className="mt-1 text-xs text-blue-800">{progress.detail}</p> : null}
-        </div>
-        {progress.elapsedLabel ? (
-          <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800">
-            {progress.elapsedLabel}
-          </span>
-        ) : null}
-      </div>
-      {(progress.stageElapsedLabel || progress.targetSummary || progress.stageProgressLabel) && (
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-blue-800">
-          {progress.stageElapsedLabel ? <span>{progress.stageElapsedLabel}</span> : null}
-          {progress.targetSummary ? <span>{progress.targetSummary}</span> : null}
-          {progress.stageProgressLabel ? <span>{progress.stageProgressLabel}</span> : null}
-        </div>
-      )}
-      {progress.currentTargetLabel ? (
-        <p className="mt-2 text-xs font-medium text-blue-900">Current target: {progress.currentTargetLabel}</p>
-      ) : null}
-      {progress.metrics.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {progress.metrics.map((metric) => (
-            <span
-              key={`${metric.label}-${metric.value}`}
-              className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-800"
-            >
-              {metric.label}: {metric.value}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -2122,6 +2094,7 @@ export default function TrrShowDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>("details");
   const [selectedSocialSeasonId, setSelectedSocialSeasonId] = useState<string | null>(null);
   const [socialControlsHost, setSocialControlsHost] = useState<HTMLDivElement | null>(null);
+  const [socialTargets, setSocialTargets] = useState<SocialTarget[]>([]);
   const [assetsView, setAssetsView] = useState<"images" | "videos" | "branding">("images");
   const [bravoVideos, setBravoVideos] = useState<BravoVideoItem[]>([]);
   const [bravoLoading, setBravoLoading] = useState(false);
@@ -2311,8 +2284,6 @@ export default function TrrShowDetailPage() {
 
   const [showLinks, setShowLinks] = useState<EntityLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
-  const [linksRefreshing, setLinksRefreshing] = useState(false);
-  const [linksRefreshProgress, setLinksRefreshProgress] = useState<LinkDiscoveryProgressSummary | null>(null);
   const [linksError, setLinksError] = useState<string | null>(null);
   const [linksLoadTimedOut, setLinksLoadTimedOut] = useState(false);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
@@ -2489,6 +2460,12 @@ export default function TrrShowDetailPage() {
     videos: false,
     news: false,
     social_setup: false,
+    show_core: false,
+    links: false,
+    bravo: false,
+    cast_profiles: false,
+    cast_media: false,
+    get_images: false,
   });
   const [refreshTargetNotice, setRefreshTargetNotice] = useState<
     Partial<Record<ShowRefreshTarget, string>>
@@ -2520,6 +2497,7 @@ export default function TrrShowDetailPage() {
   );
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
+  const healthCenterScrollTopRef = useRef(0);
 
   // Image scrape drawer state
   const [scrapeDrawerOpen, setScrapeDrawerOpen] = useState(false);
@@ -3089,18 +3067,13 @@ export default function TrrShowDetailPage() {
       grouped.get(topicKey)?.push(entry);
     }
 
-    const groups = REFRESH_LOG_TOPIC_DEFINITIONS.map((topic) => {
+    return REFRESH_LOG_TOPIC_DEFINITIONS.map((topic) => {
       const entries = grouped.get(topic.key) ?? [];
       const latest = entries.length > 0 ? entries[entries.length - 1] : null;
       const failed = isRefreshTopicFailed(latest);
       const done = !failed && isRefreshTopicDone(latest);
-      const forceActivePeopleTopic =
-        topic.key === "people" &&
-        Boolean(refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching);
       const status: "pending" | "active" | "done" | "failed" = failed
         ? "failed"
-        : forceActivePeopleTopic
-          ? "active"
         : done
           ? "done"
           : entries.length > 0
@@ -3114,17 +3087,7 @@ export default function TrrShowDetailPage() {
         status,
       };
     });
-
-    return [
-      ...groups.filter((group) => group.status !== "done"),
-      ...groups.filter((group) => group.status === "done"),
-    ];
-  }, [
-    castMediaEnriching,
-    castRefreshPipelineRunning,
-    refreshLogEntries,
-    refreshingTargets.cast_credits,
-  ]);
+  }, [refreshLogEntries]);
 
   // Refresh images for a person with streaming progress when available.
   const refreshPersonImages = useCallback(
@@ -4393,221 +4356,6 @@ export default function TrrShowDetailPage() {
       setLinksLoading(false);
     }
   }, [getAuthHeaders, showId]);
-
-  const runShowLinkDiscovery = useCallback(
-    async () => {
-      if (!showId || linksRefreshing) return;
-      setLinksNotice(null);
-      setLinksError(null);
-      setLinksLoadTimedOut(false);
-      setLinksRefreshing(true);
-      setLinksRefreshProgress(
-        buildLinkDiscoveryProgressSummary(
-          {
-            stage: "starting",
-            current_stage: "starting",
-            message: "Refreshing links: scanning show, season, and cast sources...",
-          },
-          LINK_DISCOVERY_STAGE_LABELS
-        )
-      );
-      try {
-        const headers = await getAuthHeaders();
-        let completePayload: Record<string, unknown> | null = null;
-        await adminStream(`/api/admin/trr-api/shows/${showId}/links/discover/stream`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ include_seasons: true, include_people: true }),
-          timeoutMs: LINK_DISCOVERY_STREAM_TIMEOUT_MS,
-          onEvent: async ({ event, payload }) => {
-            if (!payload || typeof payload !== "object") return;
-            const eventPayload = payload as Record<string, unknown>;
-            if (event === "progress") {
-              setLinksRefreshProgress(buildLinkDiscoveryProgressSummary(eventPayload, LINK_DISCOVERY_STAGE_LABELS));
-              return;
-            }
-            if (event === "error") {
-              const reason = typeof eventPayload.reason === "string" ? eventPayload.reason : "validation_error";
-              const detail =
-                typeof eventPayload.detail === "string"
-                  ? eventPayload.detail
-                  : typeof eventPayload.error === "string"
-                    ? eventPayload.error
-                    : "Links discovery failed";
-              throw new Error(`${reason}|${detail}`);
-            }
-            if (event === "complete") {
-              completePayload = eventPayload;
-            }
-          },
-        });
-        if (!completePayload) {
-          throw new Error("validation_error|Discovery stream ended without a completion payload.");
-        }
-
-        const payloadRecord = completePayload as Record<string, unknown>;
-        const resultCandidate = payloadRecord.result;
-        const data = (resultCandidate && typeof resultCandidate === "object"
-          ? (resultCandidate as Record<string, unknown>)
-          : payloadRecord) as {
-          discovered?: number;
-          duration_ms?: number;
-          status_counts?: {
-            approved_added?: number;
-            deleted_invalid?: number;
-            skipped_fetch_error?: number;
-            skipped_fetch_budget?: number;
-          };
-          validation_reasons?: Record<string, number>;
-          pending_person_source_links_promoted?: number;
-          invalid_people_links_deleted?: number;
-          invalid_people_links_validation_failures?: number;
-          counts_by_kind?: Record<string, number>;
-          counts_by_entity_type?: Record<string, number>;
-          fandom_domains_used?: string[];
-          fandom_links_by_entity?: Record<string, number>;
-          tmdb_season_links_discovered?: number;
-          fandom_candidates_tested?: number;
-          wikidata_identifier_links_added?: number;
-          wikidata_social_links_added?: number;
-          tmdb_social_links_added?: number;
-          timed_out?: boolean;
-          timeout?: {
-            reason?: string;
-            stage?: string;
-            detail?: string;
-            elapsed_ms?: number;
-          } | null;
-          stage_counts?: {
-            show_scanned?: number;
-            season_scanned?: number;
-            people_scanned?: number;
-            legacy_rows_normalized?: number;
-            links_validated?: number;
-            links_promoted?: number;
-          };
-        };
-
-        const discovered = typeof data.discovered === "number" ? data.discovered : 0;
-        const promoted =
-          typeof data.pending_person_source_links_promoted === "number"
-            ? data.pending_person_source_links_promoted
-            : 0;
-        const deleted =
-          typeof data.invalid_people_links_deleted === "number" ? data.invalid_people_links_deleted : 0;
-        const validationFailures =
-          typeof data.invalid_people_links_validation_failures === "number"
-            ? data.invalid_people_links_validation_failures
-            : 0;
-        const countsByKind =
-          typeof data.counts_by_kind === "object" && data.counts_by_kind ? data.counts_by_kind : {};
-        const countsByEntity =
-          typeof data.counts_by_entity_type === "object" && data.counts_by_entity_type ? data.counts_by_entity_type : {};
-        const fandomByEntity =
-          typeof data.fandom_links_by_entity === "object" && data.fandom_links_by_entity
-            ? data.fandom_links_by_entity
-            : {};
-        const fandomDomains = Array.isArray(data.fandom_domains_used)
-          ? data.fandom_domains_used.filter((value): value is string => typeof value === "string" && value.length > 0)
-          : [];
-        const tmdbSeasonLinks =
-          typeof data.tmdb_season_links_discovered === "number" ? data.tmdb_season_links_discovered : 0;
-        const fandomCandidatesTested =
-          typeof data.fandom_candidates_tested === "number" ? data.fandom_candidates_tested : 0;
-        const wikidataIdentifierLinksAdded =
-          typeof data.wikidata_identifier_links_added === "number" ? data.wikidata_identifier_links_added : 0;
-        const wikidataSocialLinksAdded =
-          typeof data.wikidata_social_links_added === "number" ? data.wikidata_social_links_added : 0;
-        const tmdbSocialLinksAdded =
-          typeof data.tmdb_social_links_added === "number" ? data.tmdb_social_links_added : 0;
-        const stageCounts = typeof data.stage_counts === "object" && data.stage_counts ? data.stage_counts : {};
-        const showScanned = Number(stageCounts.show_scanned ?? 0);
-        const seasonScanned = Number(stageCounts.season_scanned ?? 0);
-        const peopleScanned = Number(stageCounts.people_scanned ?? 0);
-        const legacyRowsNormalized = Number(stageCounts.legacy_rows_normalized ?? 0);
-        const linksValidated = Number(stageCounts.links_validated ?? 0);
-        const linksPromoted = Number(stageCounts.links_promoted ?? 0);
-        const statusCounts =
-          typeof data.status_counts === "object" && data.status_counts ? data.status_counts : {};
-        const approvedAdded = Number(statusCounts.approved_added ?? discovered);
-        const deletedInvalid = Number(statusCounts.deleted_invalid ?? deleted);
-        const skippedFetchError = Number(statusCounts.skipped_fetch_error ?? validationFailures);
-        const skippedFetchBudget = Number(statusCounts.skipped_fetch_budget ?? 0);
-        const durationMs = Number(data.duration_ms ?? 0);
-        const validationReasons =
-          typeof data.validation_reasons === "object" && data.validation_reasons ? data.validation_reasons : {};
-        const seasonLinks = Number(countsByEntity.season ?? 0);
-        const personLinks = Number(countsByEntity.person ?? 0);
-        const showLinksDiscovered = Number(countsByEntity.show ?? 0);
-        const fandomSeasonLinks = Number(fandomByEntity.season ?? 0);
-        const fandomPersonLinks = Number(fandomByEntity.person ?? 0);
-
-        const messageParts = [
-          `Refreshed ${discovered} link${discovered === 1 ? "" : "s"} in ${Math.max(0, Math.round(durationMs / 1000))}s.`,
-          `Approved added ${approvedAdded}; removed invalid ${deletedInvalid}; fetch skipped ${skippedFetchError}; budget skipped ${skippedFetchBudget}.`,
-          `Scanned show ${showScanned}, seasons ${seasonScanned}, cast ${peopleScanned}.`,
-          `Show ${showLinksDiscovered}, seasons ${seasonLinks}, cast ${personLinks}.`,
-          `Season TMDb links ${tmdbSeasonLinks}; Fandom season links ${fandomSeasonLinks}; Fandom cast links ${fandomPersonLinks}.`,
-          `Fandom candidates tested ${fandomCandidatesTested}; Wikidata identifiers ${wikidataIdentifierLinksAdded}; Wikidata social ${wikidataSocialLinksAdded}; TMDb social ${tmdbSocialLinksAdded}.`,
-          fandomDomains.length > 0 ? `Fandom domains used: ${fandomDomains.join(", ")}.` : "No valid Fandom domains were used.",
-          `Cast-member source validation: promoted ${promoted}, removed ${deleted}, fetch failures ${validationFailures}.`,
-          `Legacy kinds normalized ${legacyRowsNormalized}; validated ${linksValidated}; promoted ${linksPromoted}.`,
-        ];
-        if (data.timed_out) {
-          const timeoutStage = typeof data.timeout?.stage === "string" ? data.timeout.stage : "unknown_stage";
-          const timeoutDetail = typeof data.timeout?.detail === "string" ? data.timeout.detail : "";
-          messageParts.unshift(
-            `Server processing timeout at ${timeoutStage}${timeoutDetail ? `: ${timeoutDetail}` : ""}.`
-          );
-        }
-        const validationReasonParts = Object.entries(validationReasons)
-          .filter((entry) => Number(entry[1]) > 0)
-          .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-          .map(([reason, count]) => `${reason} ${count}`);
-        if (validationReasonParts.length > 0) {
-          messageParts.push(`Validation reasons: ${validationReasonParts.join(", ")}.`);
-        }
-        const kindParts = Object.entries(countsByKind)
-          .filter((entry) => Number(entry[1]) > 0)
-          .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-          .map(([kind, count]) => `${kind} ${count}`);
-        if (kindParts.length > 0) {
-          messageParts.push(`Kinds: ${kindParts.join(", ")}.`);
-        }
-        setLinksNotice(messageParts.join(" "));
-        await fetchShowLinks();
-      } catch (err) {
-        const mapReasonToMessage = (reason: string, detail: string): string => {
-          if (reason === "request_abort") return detail || "Client request timeout.";
-          if (reason === "server_processing_timeout") {
-            return detail || "Server processing timeout while refreshing links.";
-          }
-          if (reason === "fandom_timeout") return detail || "Fandom lookup timeout during links refresh.";
-          if (reason === "wikipedia_timeout") return detail || "Wikipedia lookup timeout during links refresh.";
-          if (reason === "validation_error") return detail || "Links refresh validation error.";
-          return detail || "Failed to discover links";
-        };
-
-        if (err instanceof AdminRequestError && err.status === 408) {
-          setLinksLoadTimedOut(true);
-          setLinksError("Client request timeout while refreshing links.");
-        } else if (err instanceof Error) {
-          const [reasonPart, detailPart] = err.message.split("|", 2);
-          const reason = reasonPart && reasonPart.trim().length > 0 ? reasonPart.trim() : "validation_error";
-          const detail = detailPart && detailPart.trim().length > 0 ? detailPart.trim() : "";
-          setLinksLoadTimedOut(reason === "request_abort");
-          setLinksError(mapReasonToMessage(reason, detail));
-        } else {
-          setLinksLoadTimedOut(false);
-          setLinksError("Failed to discover links");
-        }
-    } finally {
-        setLinksRefreshProgress(null);
-        setLinksRefreshing(false);
-      }
-    },
-    [fetchShowLinks, getAuthHeaders, linksRefreshing, showId]
-  );
 
   const syncShowScopedBrandLogos = useCallback(async () => {
     if (!showId) return;
@@ -7738,6 +7486,33 @@ export default function TrrShowDetailPage() {
   const overviewExternalIdLinks = useMemo(() => showPageLinks, [showPageLinks]);
 
   const overviewSocialHandleLinks = useMemo(() => showSocialLinks, [showSocialLinks]);
+  const socialPlatformHandleCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      instagram: 0,
+      tiktok: 0,
+      twitter: 0,
+      youtube: 0,
+      facebook: 0,
+      threads: 0,
+    };
+
+    for (const platform of Object.keys(counts)) {
+      const handles = new Set<string>();
+      for (const target of socialTargets) {
+        if (target.is_active === false) continue;
+        if (String(target.platform || "").trim().toLowerCase() !== platform) continue;
+        for (const account of target.accounts ?? []) {
+          const normalized = String(account || "").trim().replace(/^@+/, "").toLowerCase();
+          if (normalized) {
+            handles.add(normalized);
+          }
+        }
+      }
+      counts[platform] = handles.size;
+    }
+
+    return counts;
+  }, [socialTargets]);
 
   const seasonUrlCoverageRows = useMemo<SeasonUrlCoverageRow[]>(() => {
     const seasonNumberById = new Map<string, number>();
@@ -9140,7 +8915,9 @@ export default function TrrShowDetailPage() {
           const streamUrl =
             target === "photos"
               ? `/api/admin/trr-api/shows/${showId}/refresh-photos/stream`
-              : `/api/admin/trr-api/shows/${showId}/refresh/stream`;
+              : target === "get_images"
+                ? `/api/admin/trr-api/shows/${showId}/get-images/stream`
+                : `/api/admin/trr-api/shows/${showId}/refresh/stream`;
           const streamBody =
             target === "photos"
               ? {
@@ -9154,7 +8931,9 @@ export default function TrrShowDetailPage() {
                       ? seasonScopedPhotoRefresh
                       : undefined,
                 }
-              : { targets: [target] };
+              : target === "get_images"
+                ? {}
+                : { targets: [target] };
           const streamController = new AbortController();
           let streamIdleTimer: ReturnType<typeof setTimeout> | null = null;
           const bumpStreamIdleTimeout = () => {
@@ -9343,6 +9122,48 @@ export default function TrrShowDetailPage() {
                     return;
                   }
 
+                  if (target === "get_images") {
+                    const asNum = (value: unknown): number | null =>
+                      typeof value === "number" && Number.isFinite(value) ? value : null;
+                    const imported = asNum(payloadObject.imported);
+                    const skipped = asNum(payloadObject.skipped);
+                    const failed = asNum(payloadObject.failed);
+                    const totalFound = asNum(payloadObject.total_found);
+                    const personLinksCreated = asNum(payloadObject.person_links_created);
+                    const showLinksCreated = asNum(payloadObject.show_links_created);
+
+                    if (activeTab === "assets" && assetsView === "images") {
+                      await loadGalleryAssets(selectedGallerySeason);
+                    }
+
+                    const parts = [
+                      totalFound !== null ? `found: ${totalFound}` : null,
+                      imported !== null ? `imported: ${imported}` : null,
+                      skipped !== null && skipped > 0 ? `skipped: ${skipped}` : null,
+                      failed !== null && failed > 0 ? `failed: ${failed}` : null,
+                      personLinksCreated !== null ? `person links: ${personLinksCreated}` : null,
+                      showLinksCreated !== null ? `show links: ${showLinksCreated}` : null,
+                    ].filter(Boolean);
+
+                    if (!suppressSuccessNotice) {
+                      setRefreshTargetNotice((prev) => ({
+                        ...prev,
+                        get_images: parts.length > 0
+                          ? `Get Images complete: ${parts.join(", ")}`
+                          : "Get Images complete.",
+                      }));
+                    }
+                    appendRefreshLog({
+                      category: label,
+                      message: parts.length > 0
+                        ? `Get Images complete: ${parts.join(", ")}.`
+                        : "Get Images complete.",
+                      current: null,
+                      total: null,
+                    });
+                    return;
+                  }
+
                   const resultsRaw = (payloadObject as { results?: unknown }).results;
                   const results =
                     resultsRaw && typeof resultsRaw === "object"
@@ -9444,6 +9265,9 @@ export default function TrrShowDetailPage() {
           });
           if (target === "photos") {
             throw new Error("Photo refresh stream failed.");
+          }
+          if (target === "get_images") {
+            throw new Error("Get Images stream failed.");
           }
           const headers = await getAuthHeaders();
           let response: Response;
@@ -9596,85 +9420,183 @@ export default function TrrShowDetailPage() {
       stage: "Initializing",
       message: "Starting full show refresh...",
       current: 0,
-      total: 7,
+      total: FULL_SHOW_REFRESH_TARGETS.length,
     });
     appendRefreshLog({
       category: "Refresh",
       message: "Starting full refresh.",
       current: 0,
-      total: 7,
+      total: FULL_SHOW_REFRESH_TARGETS.length,
     });
 
     try {
-      const targets: ShowRefreshTarget[] = [
-        "details",
-        "seasons_episodes",
-        "cast_credits",
-        "photos",
-        "videos",
-        "news",
-        "social_setup",
-      ];
-      const failedLabels: string[] = [];
+      let streamFailed = false;
+      let sawComplete = false;
 
-      for (const [index, target] of targets.entries()) {
-        const targetLabel = getShowRefreshTargetLabel(target);
-        const targetOptions: ShowRefreshRunOptions | undefined =
-          target === "cast_credits"
-              ? { includeCastProfiles: false }
-              : target === "photos"
-                ? { photoMode: "fast", includeCastProfiles: false }
-              : undefined;
-        setRefreshAllProgress({
-          stage: targetLabel,
-          message: `Refreshing ${targetLabel}...`,
-          current: index,
-          total: targets.length,
-        });
-        const ok = await refreshShow(target, targetOptions);
-        setRefreshAllProgress({
-          stage: targetLabel,
-          message: ok ? `${targetLabel} complete.` : `${targetLabel} failed.`,
-          current: index + 1,
-          total: targets.length,
-        });
-        if (!ok) {
-          if (target === "details") failedLabels.push("show info");
-          if (target === "seasons_episodes") failedLabels.push("seasons/episodes");
-          if (target === "cast_credits") failedLabels.push("cast/credits");
-          if (target === "photos") failedLabels.push("media/photos");
-          if (target === "videos") failedLabels.push("Bravo videos");
-          if (target === "news") failedLabels.push("Google News");
-          if (target === "social_setup") failedLabels.push("social setup");
+      const applyRefreshResults = async (results: Record<string, unknown> | null) => {
+        const failedLabels = FULL_SHOW_REFRESH_TARGETS.filter((target) => {
+          const step = results?.[target];
+          return typeof step === "object" && step !== null && (step as { status?: unknown }).status === "failed";
+        }).map((target) => getShowRefreshTargetLabel(target).toLowerCase());
+
+        const skippedLabels = FULL_SHOW_REFRESH_TARGETS.filter((target) => {
+          const step = results?.[target];
+          return typeof step === "object" && step !== null && (step as { status?: unknown }).status === "skipped";
+        }).map((target) => getShowRefreshTargetLabel(target).toLowerCase());
+
+        await Promise.allSettled([
+          fetchShow(),
+          fetchSeasons(),
+          fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
+          loadBravoData({ force: true }),
+          ensureDefaultRedditCommunity(),
+        ]);
+
+        if (failedLabels.length > 0) {
+          const suffix =
+            skippedLabels.length > 0 ? ` Skipped: ${skippedLabels.join(", ")}.` : "";
+          const message = `Refresh completed with issues in: ${failedLabels.join(", ")}.${suffix}`;
+          setRefreshAllError(message);
+          appendRefreshLog({
+            category: "Refresh",
+            message,
+            current: FULL_SHOW_REFRESH_TARGETS.length,
+            total: FULL_SHOW_REFRESH_TARGETS.length,
+          });
+          return;
         }
-      }
 
-      if (failedLabels.length > 0) {
-        setRefreshAllError(`Refresh completed with issues in: ${failedLabels.join(", ")}.`);
+        const successMessage =
+          skippedLabels.length > 0
+            ? `Refreshed show core, links, cast profiles, and cast media. Skipped: ${skippedLabels.join(", ")}.`
+            : "Refreshed show core, links, Bravo, cast profiles, and cast media.";
+        setRefreshAllNotice(successMessage);
         appendRefreshLog({
           category: "Refresh",
-          message: `Completed with issues: ${failedLabels.join(", ")}.`,
-          current: targets.length,
-          total: targets.length,
+          message: successMessage,
+          current: FULL_SHOW_REFRESH_TARGETS.length,
+          total: FULL_SHOW_REFRESH_TARGETS.length,
         });
-        return;
+      };
+
+      try {
+        const headers = await getAuthHeaders();
+        await adminStream(`/api/admin/trr-api/shows/${showId}/refresh/stream`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targets: FULL_SHOW_REFRESH_TARGETS,
+            force_new_operation: true,
+          }),
+          timeoutMs: SHOW_REFRESH_STREAM_MAX_DURATION_MS,
+          onEvent: async ({ event, payload }) => {
+            if (event === "progress" && payload && typeof payload === "object") {
+              const payloadObject = payload as Record<string, unknown>;
+              const stageKeyRaw = payloadObject.stage_key ?? payloadObject.step;
+              const stageRaw =
+                payloadObject.pipeline_stage
+                ?? payloadObject.stage
+                ?? stageKeyRaw;
+              const messageRaw = payloadObject.message;
+              const current = parseProgressNumber(payloadObject.current);
+              const total = parseProgressNumber(payloadObject.total);
+              const topicRaw = payloadObject.topic;
+              const providerRaw = payloadObject.provider;
+              const skipReasonRaw = payloadObject.skip_reason;
+              const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
+              const progressMessage = buildProgressMessage(
+                stageLabel,
+                typeof skipReasonRaw === "string" && skipReasonRaw
+                  ? `${String(messageRaw ?? "")} (${skipReasonRaw})`
+                  : messageRaw,
+                "Refreshing show..."
+              );
+
+              setRefreshAllProgress({
+                stage: stageLabel ?? "Refreshing",
+                message: progressMessage,
+                current,
+                total,
+              });
+              appendRefreshLog({
+                category: "Refresh",
+                message: progressMessage,
+                current,
+                total,
+                stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
+                topic: typeof topicRaw === "string" ? normalizeRefreshLogTopic(topicRaw) : null,
+                provider: typeof providerRaw === "string" ? providerRaw : null,
+              });
+              return;
+            }
+
+            if (event === "complete") {
+              sawComplete = true;
+              const payloadObject =
+                payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+              const results =
+                payloadObject.results && typeof payloadObject.results === "object"
+                  ? (payloadObject.results as Record<string, unknown>)
+                  : null;
+              await applyRefreshResults(results);
+              return;
+            }
+
+            if (event === "error") {
+              const payloadObject =
+                payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+              const errorText =
+                typeof payloadObject.error === "string"
+                  ? payloadObject.error
+                  : "Refresh failed";
+              const detailText =
+                typeof payloadObject.detail === "string" ? payloadObject.detail : null;
+              throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+            }
+          },
+        });
+      } catch (streamError) {
+        streamFailed = true;
+        console.warn("Unified show refresh stream failed, falling back to non-stream.", streamError);
       }
 
-      await Promise.allSettled([
-        loadBravoData({ force: true }),
-        loadUnifiedNews({ force: true, forceSync: false }),
-        ensureDefaultRedditCommunity(),
-      ]);
-
-      setRefreshAllNotice(
-        "Refreshed show info, seasons/episodes, media/photos, cast/credits, Bravo videos, Google News, and social setup."
-      );
-      appendRefreshLog({
-        category: "Refresh",
-        message: "Completed full refresh successfully.",
-        current: targets.length,
-        total: targets.length,
-      });
+      if (streamFailed) {
+        appendRefreshLog({
+          category: "Refresh",
+          message: "Live stream unavailable; retrying unified refresh with fallback.",
+          current: null,
+          total: null,
+        });
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/refresh`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              targets: FULL_SHOW_REFRESH_TARGETS,
+            }),
+          },
+          SHOW_REFRESH_FALLBACK_TIMEOUT_MS
+        );
+        const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        if (!response.ok) {
+          const message =
+            typeof data.error === "string" && typeof data.detail === "string"
+              ? `${data.error}: ${data.detail}`
+              : (typeof data.error === "string" && data.error) ||
+                (typeof data.detail === "string" && data.detail) ||
+                "Refresh failed";
+          throw new Error(message);
+        }
+        const results =
+          data.results && typeof data.results === "object"
+            ? (data.results as Record<string, unknown>)
+            : null;
+        await applyRefreshResults(results);
+      } else if (!sawComplete) {
+        setRefreshAllNotice("Refresh completed.");
+      }
     } catch (err) {
       setRefreshAllError(err instanceof Error ? err.message : "Refresh failed");
       appendRefreshLog({
@@ -9690,12 +9612,42 @@ export default function TrrShowDetailPage() {
   }, [
     appendRefreshLog,
     ensureDefaultRedditCommunity,
+    fetchCast,
+    fetchSeasons,
+    fetchShow,
+    getAuthHeaders,
     loadBravoData,
-    loadUnifiedNews,
-    refreshShow,
     refreshingShowAll,
     showId,
   ]);
+
+  const captureHealthCenterScrollPosition = useCallback(() => {
+    if (typeof document === "undefined") return;
+    const panel = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Health Center"]');
+    if (!panel) return;
+    healthCenterScrollTopRef.current = panel.scrollTop;
+  }, []);
+
+  useEffect(() => {
+    if (!refreshLogOpen || typeof document === "undefined") return;
+    const panel = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Health Center"]');
+    if (!panel) return;
+    const handleScroll = () => {
+      healthCenterScrollTopRef.current = panel.scrollTop;
+    };
+    handleScroll();
+    panel.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      panel.removeEventListener("scroll", handleScroll);
+    };
+  }, [refreshLogOpen]);
+
+  useLayoutEffect(() => {
+    if (!refreshLogOpen || typeof document === "undefined") return;
+    const panel = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Health Center"]');
+    if (!panel) return;
+    panel.scrollTop = healthCenterScrollTopRef.current;
+  }, [refreshAllProgress, refreshLogEntries, refreshLogOpen, refreshingShowAll]);
 
   const refreshShowCast = useCallback(async () => {
     if (
@@ -10240,6 +10192,16 @@ export default function TrrShowDetailPage() {
       loadGalleryAssets("all");
     }
   }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
+
+  // Eagerly load gallery assets once on mount so the header logo resolves
+  // without waiting for the user to visit the Assets tab.
+  const logoLoadAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (logoLoadAttemptedRef.current) return;
+    if (!hasAccess || !showId || activeTab === "assets") return;
+    logoLoadAttemptedRef.current = true;
+    loadGalleryAssets("all");
+  }, [hasAccess, showId, activeTab, loadGalleryAssets]);
 
   const handleRefreshCastMember = useCallback(
     async (personId: string, label: string) => {
@@ -10907,23 +10869,6 @@ export default function TrrShowDetailPage() {
   const castUiTerminalReady = activeTab === "cast" && castIntelligenceSettled && castRosterSettled;
   const shouldShowRoleCreditEmptyState =
     castUiTerminalReady && availableCastRoleAndCreditFilters.length === 0;
-  const activeRefreshTarget =
-    (Object.entries(refreshingTargets).find(([, isRefreshing]) => isRefreshing)?.[0] as
-      | ShowRefreshTarget
-      | undefined) ?? null;
-  const activeTargetProgress = activeRefreshTarget
-    ? refreshTargetProgress[activeRefreshTarget]
-    : null;
-  const globalRefreshProgress = activeTargetProgress ?? refreshAllProgress;
-  const globalRefreshStage = activeTargetProgress?.stage ?? refreshAllProgress?.stage ?? null;
-  const globalRefreshMessage =
-    activeTargetProgress?.message ??
-    (activeRefreshTarget
-      ? `Refreshing ${getShowRefreshTargetLabel(activeRefreshTarget)}...`
-      : refreshAllProgress?.message ?? null);
-  const globalRefreshCurrent =
-    activeTargetProgress?.current ?? refreshAllProgress?.current ?? null;
-  const globalRefreshTotal = activeTargetProgress?.total ?? refreshAllProgress?.total ?? null;
   const castRefreshActivePhase =
     castRefreshPhaseStates.find((phase) => phase.status === "running") ?? null;
   const castRefreshActivePhaseIndex = castRefreshActivePhase
@@ -11104,7 +11049,7 @@ export default function TrrShowDetailPage() {
       detail:
         syncBravoReadinessMessage ??
         "Run Show Info, Seasons/Episodes, and Cast sync before Bravo import.",
-      onClick: refreshAllShowData,
+      onClick: () => setRefreshLogOpen(true),
     });
   }
   if (galleryAssets.length === 0) {
@@ -11122,7 +11067,7 @@ export default function TrrShowDetailPage() {
     operationsInboxItems.push({
       id: "no-bravo-videos",
       title: "No Bravo videos persisted",
-      detail: "Run Sync by Bravo and verify the target season has watch/videos content.",
+      detail: "Run Refresh and verify the target season has watch/videos content.",
       onClick: () => {
         setTab("assets");
         setAssetsSubTab("videos");
@@ -11154,6 +11099,13 @@ export default function TrrShowDetailPage() {
       onClick: () => setTab("cast"),
     });
   }
+  const hasUnifiedRefreshHistory =
+    refreshLogEntries.length > 0 || Boolean(refreshAllNotice) || Boolean(refreshAllError);
+  const refreshRunButtonLabel = refreshingShowAll
+    ? "Running..."
+    : hasUnifiedRefreshHistory
+      ? "Rerun"
+      : "Run";
 
   const socialHeaderHref = buildShowAdminUrl({
     showSlug: showSlugForRouting,
@@ -11253,66 +11205,11 @@ export default function TrrShowDetailPage() {
                 <div className="flex flex-col gap-3 sm:items-end">
                   <button
                     type="button"
-                    onClick={() => {
-                      if (isShowRefreshBusy) {
-                        setRefreshLogOpen((prev) => !prev);
-                        return;
-                      }
-                      void refreshAllShowData();
-                    }}
+                    onClick={() => setRefreshLogOpen(true)}
                     className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                   >
-                    {isShowRefreshBusy
-                      ? `Refreshing... ${refreshLogOpen ? "(Hide Health)" : "(View Health)"}`
-                      : "Refresh"}
+                    {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!canSyncByBravo) {
-                        setSyncBravoError(
-                          syncBravoReadinessMessage ||
-                            "Sync seasons, episodes, and cast first."
-                        );
-                        return;
-                      }
-                      setSyncBravoModePickerOpen(true);
-                      setSyncBravoOpen(false);
-                      setSyncBravoStep("preview");
-                      setSyncBravoError(null);
-                      setSyncBravoNotice(null);
-                    }}
-                    disabled={!canSyncByBravo || syncBravoLoading}
-                    title={syncBravoReadinessMessage || undefined}
-                    className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Sync by Bravo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRefreshLogOpen(true)}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                    title="Open Health Center"
-                  >
-                    <svg
-                      className="h-4 w-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M22 12h-4l-3 8-4-16-3 8H2" />
-                    </svg>
-                    Health
-                  </button>
-                  {syncBravoReadinessMessage && (
-                    <p className="max-w-xs text-right text-[11px] text-amber-700">
-                      {syncBravoReadinessMessage}
-                    </p>
-                  )}
 
                   {/* Ratings */}
                   {tmdbVoteAverageText && (
@@ -11333,150 +11230,6 @@ export default function TrrShowDetailPage() {
                       <span className="text-zinc-500">IMDB</span>
                     </div>
                   )}
-                  {refreshAllNotice && (
-                    <p className="max-w-xs text-right text-xs text-zinc-500">{refreshAllNotice}</p>
-                  )}
-                  {refreshAllError && (
-                    <p className="max-w-xs text-right text-xs text-red-600">{refreshAllError}</p>
-                  )}
-                  {globalRefreshProgress && (
-                    <div className="w-full max-w-xs">
-                      <RefreshProgressBar
-                        show={isShowRefreshBusy}
-                        stage={globalRefreshStage}
-                        message={globalRefreshMessage}
-                        current={globalRefreshCurrent}
-                        total={globalRefreshTotal}
-                      />
-                    </div>
-                  )}
-                  {refreshLogOpen && (
-                    <div className="w-full max-w-xl rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                        Refresh Log
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setRefreshLogOpen(false)}
-                        className="text-xs font-semibold text-zinc-500 hover:text-zinc-800"
-                      >
-                        Close
-                      </button>
-                    </div>
-                    {refreshLogEntries.length === 0 ? (
-                      <p className="text-xs text-zinc-500">No refresh activity yet.</p>
-                    ) : (
-                      <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
-                        {refreshLogTopicGroups.map(({ topic, entries, entriesForView, latest, status }) => {
-                          const latestParts = latest ? extractRefreshLogSubJob(latest) : null;
-                          const latestPercent =
-                            latest &&
-                            typeof latest.current === "number" &&
-                            typeof latest.total === "number" &&
-                            latest.total > 0
-                              ? Math.min(100, Math.round((latest.current / latest.total) * 100))
-                              : null;
-
-                          if (status === "done") {
-                            return (
-                              <article
-                                key={topic.key}
-                                className="rounded-lg border border-green-200 bg-green-50 px-3 py-2"
-                              >
-                                <p className="text-xs font-semibold text-green-800">
-                                  {topic.label}: Done ✔️
-                                </p>
-                              </article>
-                            );
-                          }
-
-                          return (
-                            <article key={topic.key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
-                                    {topic.label}
-                                  </p>
-                                  <p className="text-[11px] text-zinc-500">{topic.description}</p>
-                                </div>
-                                {latest && (
-                                  <p className="text-[10px] text-zinc-400">
-                                    {new Date(latest.at).toLocaleTimeString()}
-                                  </p>
-                                )}
-                              </div>
-
-                              {status === "failed" && (
-                                <p className="mt-2 text-xs font-semibold text-red-700">
-                                  {topic.label}: Failed ✖
-                                </p>
-                              )}
-
-                              {latest ? (
-                                <div className="mt-2 rounded-md border border-zinc-200 bg-white p-2">
-                                  <p className="text-xs font-semibold text-zinc-800">{latestParts?.subJob}</p>
-                                  <p className="mt-1 text-xs text-zinc-600">{latestParts?.details}</p>
-                                  {typeof latest.current === "number" &&
-                                    typeof latest.total === "number" && (
-                                      <p className="mt-1 text-[11px] text-zinc-500">
-                                        {latest.current.toLocaleString()}/{latest.total.toLocaleString()}
-                                        {latestPercent !== null ? ` (${latestPercent}%)` : ""}
-                                      </p>
-                                    )}
-                                </div>
-                              ) : (
-                                <p className="mt-2 text-xs text-zinc-500">No updates yet.</p>
-                              )}
-
-                              {entries.length > 0 && (
-                                <details className="mt-2" open={entries.length <= 3}>
-                                  <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                    Sub-jobs ({entries.length})
-                                  </summary>
-                                  <div className="mt-2 space-y-1">
-                                    {entriesForView.slice(0, 30).map((entry) => {
-                                      const parts = extractRefreshLogSubJob(entry);
-                                      const percent =
-                                        typeof entry.current === "number" &&
-                                        typeof entry.total === "number" &&
-                                        entry.total > 0
-                                          ? Math.min(100, Math.round((entry.current / entry.total) * 100))
-                                          : null;
-                                      return (
-                                        <div
-                                          key={entry.id}
-                                          className="rounded border border-zinc-100 bg-white px-2 py-1.5"
-                                        >
-                                          <div className="flex items-center justify-between gap-2">
-                                            <p className="text-[11px] font-semibold text-zinc-700">
-                                              {parts.subJob}
-                                            </p>
-                                            <p className="text-[10px] text-zinc-400">
-                                              {new Date(entry.at).toLocaleTimeString()}
-                                            </p>
-                                          </div>
-                                          <p className="mt-0.5 text-[11px] text-zinc-600">{parts.details}</p>
-                                          {typeof entry.current === "number" &&
-                                            typeof entry.total === "number" && (
-                                              <p className="mt-0.5 text-[10px] text-zinc-500">
-                                                {entry.current.toLocaleString()}/{entry.total.toLocaleString()}
-                                                {percent !== null ? ` (${percent}%)` : ""}
-                                              </p>
-                                            )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </details>
-                              )}
-                            </article>
-                          );
-                        })}
-                      </div>
-                    )}
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -11487,21 +11240,55 @@ export default function TrrShowDetailPage() {
                 onSelect={setTab}
               />
               {activeTab === "social" && (
-                <nav className="mt-3 flex flex-wrap gap-2">
-                  {SHOW_SOCIAL_ANALYTICS_VIEWS.map((view) => (
-                    <button
-                      key={view.id}
-                      onClick={() => setSocialAnalyticsView(view.id)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
-                        socialAnalyticsView === view.id
-                          ? "border-zinc-800 bg-zinc-800 text-white"
-                          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                      }`}
-                    >
-                      {view.label}
-                    </button>
-                  ))}
-                </nav>
+                <>
+                  <nav className="mt-3 flex flex-wrap gap-2">
+                    {SHOW_SOCIAL_ANALYTICS_VIEWS.map((view) => (
+                      <button
+                        key={view.id}
+                        onClick={() => setSocialAnalyticsView(view.id)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                          socialAnalyticsView === view.id
+                            ? "border-zinc-800 bg-zinc-800 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        {view.label}
+                      </button>
+                    ))}
+                  </nav>
+                  {socialAnalyticsView !== "reddit" && socialAnalyticsView !== "cast-content" && (
+                    <>
+                      <nav
+                        aria-label="Social platform tabs"
+                        className="mt-3 flex flex-wrap gap-2"
+                      >
+                        {SHOW_SOCIAL_PLATFORM_TABS.map((tab) => {
+                          const tabCount = tab.key === "overview" ? null : socialPlatformHandleCounts[tab.key];
+                          return (
+                            <button
+                              key={tab.key}
+                              type="button"
+                              onClick={() => setSocialPlatformTab(tab.key)}
+                              aria-pressed={socialPlatformTab === tab.key}
+                              aria-current={socialPlatformTab === tab.key ? "page" : undefined}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-semibold tracking-[0.08em] transition ${
+                                socialPlatformTab === tab.key
+                                  ? "border-zinc-800 bg-zinc-800 text-white"
+                                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                              }`}
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                <SocialPlatformTabIcon tab={tab.key} />
+                                <span>{tabCount === null ? tab.label : `${tab.label} (${tabCount})`}</span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </nav>
+                      <div ref={setSocialControlsHost} className="mt-3 min-h-11" data-testid="show-social-header-host" />
+                    </>
+                  )}
+                </>
               )}
               {activeTab === "assets" && (
                 <nav className="mt-3 flex flex-wrap gap-2">
@@ -11532,7 +11319,7 @@ export default function TrrShowDetailPage() {
             <ShowSeasonsTab
               showName={show.name}
               isShowRefreshBusy={isShowRefreshBusy}
-              onRefresh={refreshAllShowData}
+              onRefresh={() => setRefreshLogOpen(true)}
               refreshNotice={refreshTargetNotice.seasons_episodes ?? null}
               refreshError={refreshTargetError.seasons_episodes ?? null}
               refreshProgressBar={
@@ -11568,17 +11355,6 @@ export default function TrrShowDetailPage() {
           {activeTab === "assets" && (
             <ShowAssetsTab>
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  {assetsView === "images" ? "Show Gallery" : assetsView === "videos" ? "Videos" : "Branding"}
-                </p>
-                <h3 className="text-xl font-bold text-zinc-900">{show.name}</h3>
-                </div>
-
-                <div />
-              </div>
-
               {assetsView === "images" ? (
                 <>
                   {/* Season filter and Import button */}
@@ -11607,8 +11383,7 @@ export default function TrrShowDetailPage() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={refreshAllShowData}
-                        disabled={isShowRefreshBusy}
+                        onClick={() => setRefreshLogOpen(true)}
                         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -11619,7 +11394,7 @@ export default function TrrShowDetailPage() {
                             d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4"
                           />
                         </svg>
-                        {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                        {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
                       </button>
 
                       <button
@@ -11664,6 +11439,18 @@ export default function TrrShowDetailPage() {
                       </button>
 
                       <button
+                        type="button"
+                        disabled={refreshingTargets.get_images}
+                        onClick={() => refreshShow("get_images")}
+                        className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        {refreshingTargets.get_images ? "Getting Images..." : "Get Images"}
+                      </button>
+
+                      <button
                         onClick={() => {
                           if (selectedGallerySeason !== "all") {
                             const selectedSeason = visibleSeasons.find(
@@ -11693,7 +11480,7 @@ export default function TrrShowDetailPage() {
                         className="flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
                       >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                         Import Images
                       </button>
@@ -11709,13 +11496,24 @@ export default function TrrShowDetailPage() {
                       {refreshTargetError.photos || refreshTargetNotice.photos}
                     </p>
                   )}
-                  <RefreshProgressBar
-                    show={refreshingTargets.photos}
-                    stage={refreshTargetProgress.photos?.stage}
-                    message={refreshTargetProgress.photos?.message}
-                    current={refreshTargetProgress.photos?.current}
-                    total={refreshTargetProgress.photos?.total}
-                  />
+                  {(refreshTargetNotice.get_images || refreshTargetError.get_images || refreshingTargets.get_images) && (
+                    <div className="mb-4">
+                      {refreshTargetProgress.get_images && refreshingTargets.get_images && (
+                        <RefreshProgressBar
+                          show={true}
+                          stage={refreshTargetProgress.get_images.stage}
+                          message={refreshTargetProgress.get_images.message}
+                          current={refreshTargetProgress.get_images.current}
+                          total={refreshTargetProgress.get_images.total}
+                        />
+                      )}
+                      {(refreshTargetNotice.get_images || refreshTargetError.get_images) && (
+                        <p className={`text-sm ${refreshTargetError.get_images ? "text-red-600" : "text-indigo-600"}`}>
+                          {refreshTargetError.get_images || refreshTargetNotice.get_images}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {(batchJobsNotice || batchJobsError) && (
                     <p className={`mb-4 text-sm ${batchJobsError ? "text-red-600" : "text-zinc-500"}`}>
                       {batchJobsError || batchJobsNotice}
@@ -12766,14 +12564,9 @@ export default function TrrShowDetailPage() {
             <ShowSocialTab
               socialDependencyError={socialDependencyError}
               selectedSocialSeason={selectedSocialSeason}
-              socialPlatformTab={socialPlatformTab}
-              isRedditView={socialAnalyticsView === "reddit"}
-              onSelectSocialPlatformTab={setSocialPlatformTab}
-              socialPlatformOptions={SHOW_SOCIAL_PLATFORM_TABS}
               socialSeasonOptions={socialSeasonOptions}
               selectedSocialSeasonId={selectedSocialSeasonId}
               onSelectSocialSeasonId={setSelectedSocialSeasonId}
-              onSocialControlsHostChange={setSocialControlsHost}
               analyticsSection={
                 selectedSocialSeason ? (
                   <SeasonSocialAnalyticsSection
@@ -12787,6 +12580,7 @@ export default function TrrShowDetailPage() {
                     hidePlatformTabs={true}
                     externalControlsTarget={socialControlsHost}
                     analyticsView={socialAnalyticsView}
+                    onTargetsChange={setSocialTargets}
                   />
                 ) : null
               }
@@ -12824,11 +12618,11 @@ export default function TrrShowDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={refreshAllShowData}
-                    disabled={isShowRefreshBusy || showLogoSyncing}
+                    onClick={() => setRefreshLogOpen(true)}
+                    disabled={showLogoSyncing}
                     className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                    {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
                   </button>
                 </div>
               </div>
@@ -13156,20 +12950,7 @@ export default function TrrShowDetailPage() {
                 <section>
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-sm font-semibold text-zinc-700">Links</h4>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void runShowLinkDiscovery()}
-                        disabled={linksRefreshing}
-                        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                      >
-                        {linksRefreshing ? "Refreshing Links..." : "Refresh Links"}
-                      </button>
-                    </div>
                   </div>
-                  {linksRefreshing && linksRefreshProgress && (
-                    <LinkDiscoveryStatusCard progress={linksRefreshProgress} />
-                  )}
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                     <div className="mb-4 rounded-lg border border-zinc-200 bg-white p-3">
                       <p className="text-xs text-zinc-500">
@@ -13549,11 +13330,10 @@ export default function TrrShowDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={refreshAllShowData}
-                    disabled={isShowRefreshBusy}
+                    onClick={() => setRefreshLogOpen(true)}
                     className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {isShowRefreshBusy ? "Refreshing..." : "Refresh"}
+                    {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
                   </button>
                 </div>
               </div>
@@ -14014,6 +13794,7 @@ export default function TrrShowDetailPage() {
           closeLabel="Close health center"
           ariaLabel="Health Center"
           panelClassName="max-h-[90vh] max-w-5xl overflow-y-auto"
+          preserveScrollPosition={true}
         >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
@@ -14022,14 +13803,45 @@ export default function TrrShowDetailPage() {
                     Content Health, Sync Pipeline, Operations Inbox, and Refresh Log.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setRefreshLogOpen(false)}
-                  className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
-                >
-                  Close
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (refreshingShowAll) return;
+                      captureHealthCenterScrollPosition();
+                      void refreshAllShowData();
+                    }}
+                    aria-disabled={refreshingShowAll}
+                    className={`rounded-md px-3 py-1 text-sm font-semibold text-white ${
+                      refreshingShowAll
+                        ? "cursor-not-allowed bg-zinc-500"
+                        : "bg-zinc-900 hover:bg-zinc-800"
+                    }`}
+                  >
+                    {refreshRunButtonLabel}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRefreshLogOpen(false)}
+                    className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
+
+              {(refreshAllNotice || refreshAllError) && (
+                <p className={`mb-4 text-sm ${refreshAllError ? "text-red-600" : "text-zinc-500"}`}>
+                  {refreshAllError || refreshAllNotice}
+                </p>
+              )}
+              <RefreshProgressBar
+                show={refreshingShowAll}
+                stage={refreshAllProgress?.stage}
+                message={refreshAllProgress?.message}
+                current={refreshAllProgress?.current}
+                total={refreshAllProgress?.total}
+              />
 
               <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">

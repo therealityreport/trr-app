@@ -1,6 +1,13 @@
 export type SocialSyncPlatform = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type SocialSyncSourceScope = "bravo" | "creator" | "community";
 export type SocialYouTubeSourceMode = "hybrid" | "api_only" | "scraper_only";
+export type SocialSyncRetryKind =
+  | "retry_missing_comments"
+  | "retry_failed_media"
+  | "retry_missing_avatars"
+  | "retry_missing_comment_media";
+
+const CAPPED_DEPTH_PLATFORMS = new Set<SocialSyncPlatform>(["tiktok", "twitter", "facebook", "threads"]);
 
 export interface SocialSyncSessionRequest {
   source_scope: SocialSyncSourceScope;
@@ -58,17 +65,15 @@ export const buildSocialSyncSessionRequest = ({
       : (["instagram", "tiktok", "twitter", "youtube", "facebook", "threads"] as SocialSyncPlatform[]);
   const singlePlatform = requestedPlatforms.length === 1;
   const singlePlatformTarget = singlePlatform ? requestedPlatforms[0] : null;
-  const isInstagramOnly = singlePlatformTarget === "instagram";
-  const isInstagramOrTikTokOnly = requestedPlatforms.every(
-    (platform) => platform === "instagram" || platform === "tiktok",
-  );
+  const shouldUseCappedDepth = requestedPlatforms.some((platform) => CAPPED_DEPTH_PLATFORMS.has(platform));
+  const shouldFetchReplies = singlePlatformTarget !== "instagram";
 
   const payload: SocialSyncSessionRequest = {
     source_scope: sourceScope,
     max_posts_per_target: 0,
-    max_comments_per_post: 0,
-    max_replies_per_post: 0,
-    fetch_replies: !(isInstagramOnly || isInstagramOrTikTokOnly),
+    max_comments_per_post: shouldUseCappedDepth ? 5_000 : 0,
+    max_replies_per_post: shouldUseCappedDepth ? 1_000 : 0,
+    fetch_replies: shouldFetchReplies,
     sync_strategy: "incremental",
     allow_inline_dev_fallback: false,
     date_start: dateStart,
@@ -91,6 +96,12 @@ export interface SocialSyncSessionProgressSnapshot {
   status: string;
   display_status?: string | null;
   status_reason?: string | null;
+  auth_mode?: string | null;
+  execution_path?: string | null;
+  queue_cap?: number | string | null;
+  queue_wait_state?: string | null;
+  source_mode?: string | null;
+  worker_version?: string | null;
   follow_up_dimensions?: string[];
   next_pass_kind?: string | null;
   expected_after_current_pass?: string | null;
@@ -105,6 +116,35 @@ export interface SocialSyncSessionProgressSnapshot {
   pass_sequence: number;
   follow_up_reason: string | null;
   pass_history: Array<Record<string, unknown>>;
+  coverage_by_dimension?: Record<string, Record<string, unknown>>;
+  follow_up_breakdown?: Record<string, number>;
+  platform_diagnostics?: Record<
+    string,
+    {
+      platform?: string;
+      auth_mode?: string | null;
+      auth_status_reason?: string | null;
+      execution_path?: string | null;
+      queue_cap?: number | null;
+      queue_wait_state?: string | null;
+      queue_age_seconds?: number | null;
+      queue_enabled?: boolean;
+      worker_required?: boolean;
+      remote_only?: boolean;
+      source_mode?: string | null;
+      coverage_by_dimension?: Record<string, Record<string, unknown> | null>;
+      follow_up_breakdown?: Record<string, number>;
+      worker_version?: string | null;
+      warnings?: string[];
+    }
+  >;
+  worker_health?: {
+    queue_enabled?: boolean;
+    healthy?: boolean;
+    healthy_workers?: number;
+    reason?: string | null;
+    oldest_queued_age_seconds?: number | null;
+  } | null;
   completeness_snapshot: {
     up_to_date?: boolean;
     missing_asset_count?: number;

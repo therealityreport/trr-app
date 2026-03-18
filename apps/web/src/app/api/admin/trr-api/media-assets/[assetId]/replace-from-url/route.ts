@@ -1,0 +1,123 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/server/auth";
+import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+
+export const dynamic = "force-dynamic";
+const REPLACE_TIMEOUT_MS = 120_000; // Download + S3 upload + variant gen
+
+interface RouteParams {
+  params: Promise<{ assetId: string }>;
+}
+
+const fetchJsonWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<{ response: Response; data: Record<string, unknown> }> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const data = (await response.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    return { response, data };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export async function POST(request: NextRequest, { params }: RouteParams) {
+  try {
+    await requireAdmin(request);
+    const { assetId } = await params;
+
+    if (!assetId) {
+      return NextResponse.json(
+        { error: "assetId is required" },
+        { status: 400 }
+      );
+    }
+
+    const backendUrl = getBackendApiUrl(
+      `/admin/media-assets/${assetId}/replace-from-url`
+    );
+    if (!backendUrl) {
+      return NextResponse.json(
+        { error: "Backend API not configured" },
+        { status: 500 }
+      );
+    }
+
+    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      return NextResponse.json(
+        { error: "Backend auth not configured" },
+        { status: 500 }
+      );
+    }
+
+    const body = await request.json().catch(() => ({}));
+
+    let backendResponse: Response;
+    let data: Record<string, unknown> = {};
+    try {
+      const out = await fetchJsonWithTimeout(
+        backendUrl,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify(body ?? {}),
+        },
+        REPLACE_TIMEOUT_MS
+      );
+      backendResponse = out.response;
+      data = out.data;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return NextResponse.json(
+          {
+            error: "Replace timed out",
+            detail: `Timed out after ${Math.round(REPLACE_TIMEOUT_MS / 1000)}s`,
+          },
+          { status: 504 }
+        );
+      }
+      const baseDetail =
+        error instanceof Error ? error.message : "unknown error";
+      const causeDetail =
+        error instanceof Error && error.cause
+          ? `; cause=${String(error.cause)}`
+          : "";
+      return NextResponse.json(
+        {
+          error: "Backend fetch failed",
+          detail: `${baseDetail}${causeDetail} (TRR_API_URL=${process.env.TRR_API_URL ?? "unset"})`,
+        },
+        { status: 502 }
+      );
+    }
+
+    if (!backendResponse.ok) {
+      const errorMessage =
+        typeof data.error === "string" ? data.error : "Replace failed";
+      const detail = typeof data.detail === "string" ? data.detail : undefined;
+      return NextResponse.json(
+        detail ? { error: errorMessage, detail } : { error: errorMessage },
+        { status: backendResponse.status }
+      );
+    }
+
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("[api] replace-from-url failed", error);
+    const message = error instanceof Error ? error.message : "failed";
+    const status =
+      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
+    return NextResponse.json({ error: message }, { status });
+  }
+}

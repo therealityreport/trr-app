@@ -1637,14 +1637,19 @@ const collectEpisodeDiscussionCandidates = (input: {
     const text = normalizeText(`${thread.title} ${thread.text ?? ""}`);
     const discussionType = parseDiscussionTypeFromTitle(thread.title);
     if (!discussionType) continue;
-    const matchedPatterns = input.titlePatterns.filter((pattern) => {
-      const normalizedPattern = normalizeText(pattern);
-      if (title.includes(normalizedPattern)) {
-        return true;
-      }
-      const patternType = inferDiscussionTypeFromPattern(pattern);
-      return patternType !== null && discussionType === patternType;
-    });
+    const matchedPatterns =
+      input.titlePatterns.length > 0
+        ? input.titlePatterns.filter((pattern) => {
+            const normalizedPattern = normalizeText(pattern);
+            if (title.includes(normalizedPattern)) {
+              return true;
+            }
+            const patternType = inferDiscussionTypeFromPattern(pattern);
+            return patternType !== null && discussionType === patternType;
+          })
+        : input.isShowFocused
+          ? [DISCUSSION_TYPE_ALIASES[discussionType][0] ?? discussionType]
+          : [];
     if (matchedPatterns.length === 0) continue;
 
     const matchedShowTerms = findMatchedTerms(text, input.showTerms);
@@ -1750,7 +1755,7 @@ export async function discoverEpisodeDiscussionThreads(
   if (showTerms.length === 0) {
     throw new RedditDiscoveryError("Show terms are required for discovery", 400);
   }
-  if (titlePatterns.length === 0) {
+  if (!isShowFocused && titlePatterns.length === 0) {
     throw new RedditDiscoveryError("At least one episode title pattern is required", 400);
   }
 

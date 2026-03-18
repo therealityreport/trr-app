@@ -2,12 +2,14 @@
 
 import Image from "next/image";
 import type { ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { getAllowedReviewTransitions, getExecutionStatusLabel, getRunOverviewMessage } from "./run-state";
 
 type OwnerScope = "show" | "season" | "episode";
 type VideoClass = "episode" | "promo";
@@ -257,18 +259,31 @@ type ExcludedSectionEntry = {
 };
 
 const breadcrumbs = buildAdminSectionBreadcrumb("Cast Screen Time", "/admin/cast-screentime");
-const allowedReviewTransitions: Record<string, string[]> = {
-  draft: ["ready_for_review"],
-  ready_for_review: ["in_review"],
-  in_review: ["approved", "rejected"],
-  rejected: ["in_review"],
-  approved: [],
-};
 const ownerScopeOptions: OwnerScope[] = ["season", "show", "episode"];
 const promoSubtypeOptions: PromoSubtype[] = ["trailer", "episode_teaser"];
 const videoClassFilters: VideoClassFilter[] = ["all", "episode", "promo"];
 const importModes: ImportMode[] = ["youtube_url", "external_url", "social_youtube_row"];
 const decisionScopes: OwnerScope[] = ["episode", "season", "show"];
+
+function parseOwnerScope(value: string | null): OwnerScope | null {
+  return value === "show" || value === "season" || value === "episode" ? value : null;
+}
+
+function parseVideoClass(value: string | null): VideoClass | null {
+  return value === "episode" || value === "promo" ? value : null;
+}
+
+function parsePromoSubtype(value: string | null): PromoSubtype | null {
+  return value === "trailer" || value === "episode_teaser" ? value : null;
+}
+
+function parseImportMode(value: string | null): ImportMode | null {
+  return value === "youtube_url" || value === "external_url" || value === "social_youtube_row" ? value : null;
+}
+
+function parseVideoClassFilter(value: string | null): VideoClassFilter | null {
+  return value === "all" || value === "episode" || value === "promo" ? value : null;
+}
 
 function formatDurationMs(value: number): string {
   if (!Number.isFinite(value)) return "n/a";
@@ -328,17 +343,25 @@ function Badge({
 }
 
 export default function CastScreentimePageClient() {
+  const searchParams = useSearchParams();
+  const prefillContext = String(searchParams.get("prefill_context") || "").trim();
   const { checking, hasAccess } = useAdminGuard();
-  const [showId, setShowId] = useState("");
-  const [ownerScope, setOwnerScope] = useState<OwnerScope>("season");
-  const [ownerId, setOwnerId] = useState("");
-  const [videoClass, setVideoClass] = useState<VideoClass>("promo");
-  const [promoSubtype, setPromoSubtype] = useState<PromoSubtype>("trailer");
-  const [videoClassFilter, setVideoClassFilter] = useState<VideoClassFilter>("promo");
+  const [showId, setShowId] = useState(() => String(searchParams.get("show_id") || "").trim());
+  const [ownerScope, setOwnerScope] = useState<OwnerScope>(() => parseOwnerScope(searchParams.get("owner_scope")) ?? "season");
+  const [ownerId, setOwnerId] = useState(() => String(searchParams.get("owner_id") || "").trim());
+  const [videoClass, setVideoClass] = useState<VideoClass>(() => parseVideoClass(searchParams.get("video_class")) ?? "promo");
+  const [promoSubtype, setPromoSubtype] = useState<PromoSubtype>(
+    () => parsePromoSubtype(searchParams.get("promo_subtype")) ?? "trailer",
+  );
+  const [videoClassFilter, setVideoClassFilter] = useState<VideoClassFilter>(
+    () => parseVideoClassFilter(searchParams.get("video_class_filter")) ?? "promo",
+  );
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [importMode, setImportMode] = useState<ImportMode>("youtube_url");
-  const [remoteSource, setRemoteSource] = useState("");
-  const [socialYoutubeVideoId, setSocialYoutubeVideoId] = useState("");
+  const [importMode, setImportMode] = useState<ImportMode>(() => parseImportMode(searchParams.get("source_mode")) ?? "youtube_url");
+  const [remoteSource, setRemoteSource] = useState(() => String(searchParams.get("source_url") || "").trim());
+  const [socialYoutubeVideoId, setSocialYoutubeVideoId] = useState(
+    () => String(searchParams.get("social_youtube_video_id") || "").trim(),
+  );
   const [uploading, setUploading] = useState(false);
   const [importingAsset, setImportingAsset] = useState(false);
   const [launchingRun, setLaunchingRun] = useState(false);
@@ -559,6 +582,9 @@ export default function CastScreentimePageClient() {
       setRun(response.run);
       syncShowContext(videoAsset, response.run);
       await refreshRun(response.run.id, response.run.show_id || videoAsset.show_id || undefined);
+      if (response.dispatch_state === "dispatch_failed") {
+        setError(response.run.error_message || "Run dispatch failed");
+      }
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Run launch failed");
     } finally {
@@ -857,6 +883,7 @@ export default function CastScreentimePageClient() {
   const currentPublishVersion = run ? publishHistory.find((entry) => entry.run_id === run.id) ?? null : null;
   const canPublishCurrentRun =
     run?.video_class !== "promo" && run?.status === "success" && (run?.review_status || "draft") === "approved";
+  const availableReviewTransitions = getAllowedReviewTransitions(run);
   const canonicalRuns = showRuns.filter((item) => item.video_class !== "promo");
   const independentRuns = showRuns.filter((item) => item.video_class === "promo");
   const latestSuggestionDecisionByPerson = new Map<string, SuggestionDecisionEntry>();
@@ -882,6 +909,11 @@ export default function CastScreentimePageClient() {
           <p className="mt-1 text-sm text-neutral-600">
             Admin workflow for episode runs and shorter promo/test assets, including official YouTube trailers, external mirrors, and existing social YouTube rows.
           </p>
+          {prefillContext === "social_week_youtube" ? (
+            <p className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">
+              Prefilled from a social-week YouTube post. Review owner and source URL, then import the trailer into cast screentime.
+            </p>
+          ) : null}
         </div>
 
         <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
@@ -1186,20 +1218,14 @@ export default function CastScreentimePageClient() {
           </pre>
           {run ? (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              {run.is_publishable === false
-                ? "This run is a full independent report. It remains reviewable with complete artifacts, but it never contributes to canonical episode, season, or show totals."
-                : currentPublishVersion?.is_current
-                  ? `This run is the current canonical published version (v${currentPublishVersion.version_number}).`
-                  : run.status === "success" && (run.review_status || "draft") === "approved"
-                    ? "This run is approved and eligible to be published into canonical episode, season, and show totals."
-                    : "This run is still in review flow. Draft totals are visible but not canonical until approval and explicit publish."}
+              {getRunOverviewMessage(run, currentPublishVersion)}
             </div>
           ) : null}
           {run ? (
             <div className="mt-4 grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl bg-neutral-50 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-neutral-500">Execution</p>
-                <p className="mt-1 text-sm font-medium text-neutral-900">{run.status}</p>
+                <p className="mt-1 text-sm font-medium text-neutral-900">{getExecutionStatusLabel(run)}</p>
               </div>
               <div className="rounded-xl bg-neutral-50 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-neutral-500">Review</p>
@@ -1217,6 +1243,7 @@ export default function CastScreentimePageClient() {
               </div>
             </div>
           ) : null}
+          {run?.error_message ? <p className="mt-3 text-sm text-red-600">{run.error_message}</p> : null}
           <div className="mt-4 flex flex-wrap gap-3">
             <label className="flex flex-col gap-2 text-xs font-medium text-neutral-700">
               Decision Scope
@@ -1255,7 +1282,7 @@ export default function CastScreentimePageClient() {
               </button>
             ) : null}
             {run
-              ? (allowedReviewTransitions[run.review_status || "draft"] || []).map((nextStatus) => (
+              ? availableReviewTransitions.map((nextStatus) => (
                   <button
                     key={nextStatus}
                     type="button"

@@ -53,7 +53,7 @@ interface SocialGrowthData {
     total_data_points: number;
     date_range: { from: string; to: string };
     data: DailyFollowerPoint[];
-  };
+  } | null;
 }
 
 interface SocialGrowthSectionProps {
@@ -470,10 +470,11 @@ export default function SocialGrowthSection({ personId, instagramHandle }: Socia
 
   const { profile_stats: stats, rankings, daily_total_followers_chart: chart, daily_channel_metrics_60day: metrics } = data;
   const freshnessChip = getFreshnessChip(data);
+  const chartPoints = chart?.data ?? [];
 
   // Compute growth summary from chart data
   const growthSummary = (() => {
-    const pts = chart.data;
+    const pts = chartPoints;
     if (pts.length < 2) return null;
     const latest = pts[pts.length - 1].followers;
     const earliest = pts[0].followers;
@@ -597,12 +598,19 @@ export default function SocialGrowthSection({ personId, instagramHandle }: Socia
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-400">
               Follower Growth
             </p>
-            <p className="mt-0.5 text-sm text-zinc-500">
-              {chart.date_range.from} — {chart.date_range.to}
-              <span className="ml-2 text-zinc-400">
-                ({chart.total_data_points.toLocaleString()} days)
-              </span>
-            </p>
+            {chart ? (
+              <p className="mt-0.5 text-sm text-zinc-500">
+                {chart.date_range.from} — {chart.date_range.to}
+                <span className="ml-2 text-zinc-400">
+                  ({chart.total_data_points.toLocaleString()} days)
+                </span>
+              </p>
+            ) : (
+              <p className="mt-0.5 text-sm text-zinc-500">
+                No follower chart is stored yet. A fresh scrape will start building history from the
+                daily metrics table.
+              </p>
+            )}
           </div>
           {growthSummary && (
             <div className="text-right">
@@ -618,7 +626,7 @@ export default function SocialGrowthSection({ personId, instagramHandle }: Socia
             </div>
           )}
         </div>
-        <FollowerGrowthChart data={chart.data} />
+        <FollowerGrowthChart data={chartPoints} />
       </div>
 
       {/* 60-Day Daily Channel Metrics Table */}

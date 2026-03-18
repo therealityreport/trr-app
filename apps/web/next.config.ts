@@ -1,7 +1,11 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const DIST_DIR = process.env.NEXT_DIST_DIR?.trim() || ".next";
+const APP_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(APP_ROOT, "..", "..");
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -11,12 +15,14 @@ const nextConfig: NextConfig = {
     ? {
         // Keep a wider set of admin routes warm in dev so multiple open tabs do
         // not constantly fall out of Next's page buffer and trigger cold recompiles.
-        maxInactiveAge: 15 * 60 * 1000,
+        maxInactiveAge: 10 * 60 * 1000,
         pagesBufferLength: 25,
       }
     : undefined,
   turbopack: {
-    root: __dirname, // ensure Turbopack uses this app as root
+    // `next` resolves from the repo-level pnpm installation, so Turbopack needs
+    // the repo root rather than `apps/web` to see both the app and Next itself.
+    root: REPO_ROOT,
   },
   images: {
     // Next.js 16.1.x image optimization has been observed to hang in this workspace
@@ -40,18 +46,55 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "deadline.com",
       },
+      {
+        protocol: "https",
+        hostname: "lightbox-thumbnails.s3.us-west-2.amazonaws.com",
+      },
     ],
   },
   async redirects() {
     return [
+      // Old form /:showId/s:season/social/w:week → new /:showId/social/s:season/w:week
       {
-        source: "/:showId/s:seasonNumber(\\d+)/social/w:weekIndex(\\d+)/overview",
-        destination: "/:showId/s:seasonNumber/social/w:weekIndex/details",
+        source: "/:showId/s:seasonNumber(\\d+)/social/w:weekIndex(\\d+)",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex",
         permanent: false,
       },
       {
-        source: "/:showId/s:seasonNumber(\\d+)/social/week/:weekIndex(\\d+)/overview",
-        destination: "/:showId/s:seasonNumber/social/w:weekIndex/details",
+        source: "/:showId/s:seasonNumber(\\d+)/social/w:weekIndex(\\d+)/:platform",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex/:platform",
+        permanent: false,
+      },
+      {
+        source: "/:showId/s:seasonNumber(\\d+)/social/w:weekIndex(\\d+)/overview",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex",
+        permanent: false,
+      },
+      {
+        source: "/:showId/s:seasonNumber(\\d+)/social/w:weekIndex(\\d+)/details",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex",
+        permanent: false,
+      },
+      // Long form /social/week/:weekIndex → canonical
+      {
+        source: "/:showId/s:seasonNumber(\\d+)/social/week/:weekIndex(\\d+)",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex",
+        permanent: false,
+      },
+      {
+        source: "/:showId/s:seasonNumber(\\d+)/social/week/:weekIndex(\\d+)/:platform",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex/:platform",
+        permanent: false,
+      },
+      // Overview/details sub-tabs → base
+      {
+        source: "/:showId/social/s:seasonNumber(\\d+)/w:weekIndex(\\d+)/overview",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex",
+        permanent: false,
+      },
+      {
+        source: "/:showId/social/s:seasonNumber(\\d+)/w:weekIndex(\\d+)/details",
+        destination: "/:showId/social/s:seasonNumber/w:weekIndex",
         permanent: false,
       },
       {

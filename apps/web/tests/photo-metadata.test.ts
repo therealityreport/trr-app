@@ -202,6 +202,66 @@ describe("mapPhotoToMetadata", () => {
     expect(result.sourcePageTitle).toBe("Mac Forehand");
   });
 
+  it("maps grouped Getty event metadata and detail fields", () => {
+    const result = mapPhotoToMetadata({
+      id: "getty-event-1",
+      person_id: "p1",
+      source: "getty",
+      url: "https://media.gettyimages.com/preview.jpg",
+      hosted_url: "https://media.gettyimages.com/preview.jpg",
+      caption: "Lisa Barlow attends Bravo Fan Fest.",
+      width: 2000,
+      height: 3000,
+      context_type: null,
+      season: null,
+      people_names: ["Lisa Barlow", "Meredith Marks"],
+      title_names: ["Bravo Fan Fest"],
+      metadata: {
+        bucket_type: "event",
+        bucket_key: "bravo-fan-fest",
+        bucket_label: "Bravo Fan Fest",
+        grouped_image_count: 35,
+        source_resolution: "getty_watermark_fallback",
+        getty_event_url: "https://www.gettyimages.com/editorial-images/event/bravo-fan-fest",
+        getty_event_id: "event-35",
+        getty_event_slug: "bravo-fan-fest",
+        getty_event_date: "November 16, 2025",
+        getty_details: {
+          restrictions: "Editorial use only.",
+          credit: "Bravo / Contributor",
+          editorial_number: "2246511440",
+          object_name: "NUP_209171_01723.JPG",
+          max_file_size: "3000 x 2000 px (10.00 x 6.67 in) - 300 dpi - 2 MB",
+        },
+        getty_tags: ["BravoCon", "Meredith Marks", "Two People"],
+        people_count: 2,
+      },
+      fetched_at: null,
+    });
+
+    expect(result.eventName).toBe("Bravo Fan Fest");
+    expect(result.groupedEventCount).toBe(35);
+    expect(result.sourceResolution).toBe("getty_watermark_fallback");
+    expect(result.gettyEventUrl).toBe(
+      "https://www.gettyimages.com/editorial-images/event/bravo-fan-fest",
+    );
+    expect(result.gettyEventId).toBe("event-35");
+    expect(result.gettyEventSlug).toBe("bravo-fan-fest");
+    expect(result.gettyEventDate).toBe("November 16, 2025");
+    expect(result.gettyDetails).toEqual({
+      restrictions: "Editorial use only.",
+      credit: "Bravo / Contributor",
+      editorial_number: "2246511440",
+      object_name: "NUP_209171_01723.JPG",
+      max_file_size: "3000 x 2000 px (10.00 x 6.67 in) - 300 dpi - 2 MB",
+    });
+    expect(result.gettyTags).toEqual(["BravoCon", "Meredith Marks", "Two People"]);
+    expect(result.peopleCount).toBe(2);
+    expect(result.originalSourcePageUrl).toBe(
+      "https://www.gettyimages.com/editorial-images/event/bravo-fan-fest",
+    );
+  });
+
   it("parses face crops from photo payload", () => {
     const result = mapPhotoToMetadata({
       id: "face-crops-1",
