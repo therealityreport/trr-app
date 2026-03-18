@@ -8,10 +8,9 @@ Purpose: active-work index for multi-turn AI agent sessions in `TRR-APP`. Keep t
 - `TASK12 Cast Screen-Time Analytics` | last updated `2026-03-16` | current phase `operator/browser evidence pending` | next action `Run a fresh-session managed Chrome walkthrough for /admin/cast-screentime and the feature-flag rollback drill once chrome-devtools is available in-thread` | details `../cross-collab/TASK12/STATUS.md`
 - `Getty/NBCUMV person-gallery bucket normalization` | last updated `2026-03-16` | current phase `operator verification pending` | next action `Verify Mary Cosby and Britani Bateman galleries in managed Chrome if Getty or NBCUMV rows are present live` | details `local-status/getty-nbcumv-person-gallery-bucket-normalization.md`
 - `Cross-platform social sync closeout` | last updated `2026-03-16` | current phase `app tests green; managed-Chrome smoke still pending` | next action `Run the real admin season and week sync-session smoke in a Chrome-enabled thread after the backend season-repair audit settles` | details `local-status/cross-platform-social-sync-closeout.md`
-- `TASK11 Tab-Isolated Admin Operations + Resumable Streams` | last updated `2026-03-13` | current phase `deploy hotfix rollout` | next action `Redeploy Vercel and verify /admin same-host fallback on the live host` | details `../cross-collab/TASK11/STATUS.md`
 
 ## Blocked / Waiting
-- None.
+- `TASK11 Tab-Isolated Admin Operations + Resumable Streams` | last updated `2026-03-17` | current phase `waiting for deploy credentials` | next action `Obtain Vercel CLI credentials, redeploy, and verify /admin same-host fallback on the live host` | details `../cross-collab/TASK11/STATUS.md`
 
 ## Recent Completions
 - `unified brands gallery resilience and social bucket fix` | last updated `2026-03-16` | current phase `complete` | next action `Run a managed-Chrome pass on /brands?view=gallery and verify social-domain cards render under the Social Media category live` | details `local-status/unified-brands-gallery-resilience-and-social-bucket-fix.md`

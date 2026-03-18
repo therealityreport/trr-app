@@ -300,6 +300,8 @@ export function computePersonPhotoShowBuckets(input: {
   const bucketType = readGalleryBucketString(photo, metadata, "bucket_type")?.toLowerCase() ?? null;
   const bucketKey = readGalleryBucketString(photo, metadata, "bucket_key");
   const bucketLabel = readGalleryBucketString(photo, metadata, "bucket_label");
+  const personImageCount = readPersonImageCount(photo, metadata);
+  const sourceQueryScope = readSourceQueryScope(photo, metadata);
   const resolvedBucketShowId = readGalleryBucketString(photo, metadata, "resolved_show_id");
   const resolvedBucketShowName = readGalleryBucketString(photo, metadata, "resolved_show_name");
   const personImageCount = readPersonImageCount(photo, metadata);
