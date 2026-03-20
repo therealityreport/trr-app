@@ -52,6 +52,18 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.1.0)
+      '@firebase/app':
+        specifier: 0.14.9
+        version: 0.14.9
+      '@firebase/component':
+        specifier: 0.7.1
+        version: 0.7.1
+      '@firebase/logger':
+        specifier: 0.5.0
+        version: 0.5.0
+      '@firebase/util':
+        specifier: 1.14.0
+        version: 1.14.0
       '@supabase/supabase-js':
         specifier: ^2.98.0
         version: 2.98.0
