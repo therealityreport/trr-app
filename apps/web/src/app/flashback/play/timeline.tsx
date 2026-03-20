@@ -14,6 +14,10 @@ interface TimelineProps {
   onConfirmTap: () => void;
   /** When true, show the timeline in read-only review mode (no drop zones) */
   reviewMode?: boolean;
+  /** When true, show tap-target buttons instead of dnd-kit drop zones */
+  tapMode?: boolean;
+  /** Called when a tap-target position is tapped */
+  onTapPosition?: (position: number) => void;
 }
 
 export default function Timeline({
@@ -23,8 +27,11 @@ export default function Timeline({
   isDragging,
   onConfirmTap,
   reviewMode = false,
+  tapMode = false,
+  onTapPosition,
 }: TimelineProps) {
-  const showDropZones = isDragging && !reviewMode;
+  const showDropZones = isDragging && !reviewMode && !tapMode;
+  const showTapTargets = tapMode && !reviewMode;
   const showPending = pendingCard !== null && pendingPosition !== null && !isDragging && !reviewMode;
 
   // Build the display list: placed cards interspersed with drop zones
@@ -57,6 +64,35 @@ export default function Timeline({
           position={i}
           isActive={true}
         />,
+      );
+    }
+
+    // Tap-target button (accessibility alternative to drag)
+    if (showTapTargets && onTapPosition) {
+      const labelBefore = i < cards.length ? cards[i].event.description : "all events";
+      const labelAfter = i > 0 ? cards[i - 1].event.description : "all events";
+      const ariaLabel = i === 0
+        ? `Place before ${labelBefore}`
+        : i === cards.length
+          ? `Place after ${labelAfter}`
+          : `Place between ${labelAfter} and ${labelBefore}`;
+
+      displayItems.push(
+        <button
+          key={`tap-${i}`}
+          type="button"
+          onClick={() => onTapPosition(i)}
+          aria-label={ariaLabel}
+          className="flex w-full items-center justify-center rounded-lg border-2 border-dashed transition-all duration-150 hover:border-solid active:scale-[0.98]"
+          style={{
+            minHeight: 44,
+            borderColor: "var(--fb-accent)",
+            backgroundColor: "rgba(107, 107, 160, 0.06)",
+            color: "var(--fb-accent)",
+          }}
+        >
+          <span className="text-xs font-semibold">Place here</span>
+        </button>,
       );
     }
 

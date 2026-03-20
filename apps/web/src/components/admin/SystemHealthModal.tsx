@@ -69,6 +69,20 @@ type StuckJobEntry = {
   stuck_for_seconds: number;
 };
 
+type RunningJobEntry = {
+  id: string;
+  run_id: string | null;
+  platform: string;
+  job_type: string;
+  stage: string;
+  account_handle: string | null;
+  worker_id: string | null;
+  started_at: string | null;
+  heartbeat_at: string | null;
+  dispatch_backend?: string | null;
+  required_execution_backend?: string | null;
+};
+
 type WorkerDetail = {
   worker: {
     worker_id: string;
@@ -160,6 +174,7 @@ type QueueStatus = {
     runs_total?: number;
     by_platform: Record<string, Record<string, number>>;
     by_job_type: Record<string, Record<string, number>>;
+    running_jobs: RunningJobEntry[];
     stale_claims?: {
       total: number;
       by_reason: Record<string, number>;
@@ -216,6 +231,9 @@ const HEALTH_DOT_URL = "/api/admin/trr-api/social/ingest/health-dot";
 const QUEUE_STATUS_URL = "/api/admin/trr-api/social/ingest/queue-status";
 const CANCEL_STUCK_JOBS_URL = "/api/admin/trr-api/social/ingest/stuck-jobs/cancel";
 const CANCEL_ACTIVE_JOBS_URL = "/api/admin/trr-api/social/ingest/active-jobs/cancel";
+const RESET_SOCIAL_INGEST_HEALTH_URL = "/api/admin/trr-api/social/ingest/reset-health";
+const DISMISS_RECENT_FAILURES_URL = "/api/admin/trr-api/social/ingest/recent-failures/dismiss";
+const PURGE_INACTIVE_WORKERS_URL = "/api/admin/trr-api/social/ingest/workers/purge-inactive";
 const WORKER_DETAIL_URL_BASE = "/api/admin/trr-api/social/ingest/workers";
 const DEBUG_JOB_URL_BASE = "/api/admin/trr-api/social/ingest/jobs";
 
@@ -641,7 +659,8 @@ function modalQueueHealthState(queueStatus: QueueStatus): HealthState {
 
   const likelyStuckCount = Number(queueStatus.queue.stuck_jobs_total ?? 0);
   const staleClaimsCount = Number(queueStatus.queue.stale_claims?.total ?? 0);
-  if (likelyStuckCount > 0 || staleClaimsCount > 0) {
+  const recentFailureCount = Number(queueStatus.queue.recent_failures.length ?? 0);
+  if (likelyStuckCount > 0 || staleClaimsCount > 0 || recentFailureCount > 0) {
     return "degraded";
   }
 
@@ -1455,6 +1474,8 @@ function WorkersList({
   selectedWorkerId,
   onInspectWorker,
   onDebugJob,
+  onClearOlderWorkerCheckins,
+  clearingOlderWorkerCheckins,
   debugJobLoadingId,
   workersSummaryLabel,
   executionBackend,
@@ -1465,6 +1486,8 @@ function WorkersList({
   selectedWorkerId: string | null;
   onInspectWorker: (worker: WorkerEntry) => void;
   onDebugJob: (jobId: string) => void;
+  onClearOlderWorkerCheckins?: (() => void) | null;
+  clearingOlderWorkerCheckins?: boolean;
   debugJobLoadingId: string | null;
   workersSummaryLabel: string;
   executionBackend: string | null | undefined;
@@ -1488,11 +1511,10 @@ function WorkersList({
     if (!Number.isFinite(lastSeenMs)) return false;
     return now - lastSeenMs <= staleAfterSeconds * 1000;
   });
+  const derivedHiddenStaleCount = Math.max(0, originFilteredWorkers.length - freshWorkers.length);
   const hiddenStaleCount = Math.max(
     0,
-    Number.isFinite(staleHiddenCount) && showOtherWorkers
-      ? staleHiddenCount
-      : originFilteredWorkers.length - freshWorkers.length,
+    Number.isFinite(staleHiddenCount) ? staleHiddenCount : derivedHiddenStaleCount,
   );
   const visibleWorkers = (showStaleWorkers ? originFilteredWorkers : freshWorkers).map(({ worker, origin }) => ({
     worker,
@@ -1528,18 +1550,30 @@ function WorkersList({
       )}
       {hiddenStaleCount > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs text-amber-900">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <p>
               {hiddenStaleCount.toLocaleString()} older worker check-in
               {hiddenStaleCount === 1 ? "" : "s"} hidden
             </p>
-            <button
-              type="button"
-              onClick={() => setShowStaleWorkers((current) => !current)}
-              className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50"
-            >
-              {showStaleWorkers ? "Hide older worker check-ins" : "Show older worker check-ins"}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {onClearOlderWorkerCheckins ? (
+                <button
+                  type="button"
+                  onClick={onClearOlderWorkerCheckins}
+                  disabled={Boolean(clearingOlderWorkerCheckins)}
+                  className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {clearingOlderWorkerCheckins ? "Clearing..." : "Clear older worker check-ins"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setShowStaleWorkers((current) => !current)}
+                className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50"
+              >
+                {showStaleWorkers ? "Hide older worker check-ins" : "Show older worker check-ins"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1597,7 +1631,55 @@ function WorkersList({
   );
 }
 
-function RecentFailures({ failures }: { failures: FailureEntry[] }) {
+function RunningJobs({ jobs }: { jobs: RunningJobEntry[] }) {
+  if (jobs.length === 0) {
+    return <p className="text-sm text-zinc-400">No jobs are running right now.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {jobs.map((job) => (
+        <div key={job.id} className="rounded-xl border border-zinc-200 bg-white px-3 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-zinc-900">{titleCaseWords(job.platform)}</span>
+            <span className="text-xs text-zinc-500">{formatStageLabel(job.stage || job.job_type)}</span>
+            {job.account_handle ? (
+              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-700">
+                @{job.account_handle.replace(/^@+/, "")}
+              </span>
+            ) : null}
+            {job.run_id ? <span className="font-mono text-[11px] text-zinc-500">run {truncate(job.run_id, 8)}</span> : null}
+            <span className="ml-auto text-[11px] text-zinc-400">
+              Started {relativeTime(job.started_at)} · heartbeat {relativeTime(job.heartbeat_at)}
+            </span>
+          </div>
+          <div className="mt-2 grid gap-2 text-xs text-zinc-500 md:grid-cols-3">
+            <p>
+              Worker: <span className="font-mono text-zinc-700">{job.worker_id ?? "-"}</span>
+            </p>
+            <p>
+              Dispatch backend: <span className="text-zinc-700">{titleCaseWords(job.dispatch_backend ?? "unknown")}</span>
+            </p>
+            <p>
+              Required backend:{" "}
+              <span className="text-zinc-700">{titleCaseWords(job.required_execution_backend ?? "any")}</span>
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecentFailures({
+  failures,
+  dismissingFailureIds,
+  onDismissFailure,
+}: {
+  failures: FailureEntry[];
+  dismissingFailureIds: Set<string>;
+  onDismissFailure: (jobId: string) => Promise<void>;
+}) {
   if (failures.length === 0) return <p className="text-sm text-zinc-400">No recent error patterns to review.</p>;
 
   return (
@@ -1614,6 +1696,18 @@ function RecentFailures({ failures }: { failures: FailureEntry[] }) {
           {formatFailureSummary(failure).rawDetail && (
             <p className="mt-1 font-mono text-red-700">{truncate(formatFailureSummary(failure).rawDetail, 120)}</p>
           )}
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                void onDismissFailure(failure.id);
+              }}
+              disabled={dismissingFailureIds.has(failure.id)}
+              className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {dismissingFailureIds.has(failure.id) ? "Dismissing..." : "Dismiss"}
+            </button>
+          </div>
         </div>
       ))}
     </div>
@@ -1875,8 +1969,11 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const healthDot = useSharedHealthDot({ isOpen, isSocialRoute: socialRoute });
   const queueStatus = useQueueStatusModal({ isOpen });
   const [cancelingJobIds, setCancelingJobIds] = useState<Set<string>>(new Set());
+  const [dismissingFailureIds, setDismissingFailureIds] = useState<Set<string>>(new Set());
   const [clearingAll, setClearingAll] = useState(false);
   const [cancelingActiveJobs, setCancelingActiveJobs] = useState(false);
+  const [resettingHealth, setResettingHealth] = useState(false);
+  const [clearingOlderWorkerCheckins, setClearingOlderWorkerCheckins] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
@@ -2054,6 +2151,55 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     }
   }, [cancelStuckJobs]);
 
+  const dismissRecentFailure = useCallback(
+    async (jobId: string) => {
+      setActionNotice(null);
+      setActionError(null);
+      setDismissingFailureIds((current) => new Set(current).add(jobId));
+      try {
+        const response = await fetchAdminWithAuth(
+          DISMISS_RECENT_FAILURES_URL,
+          {
+            method: "POST",
+            cache: "no-store",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ job_ids: [jobId] }),
+          },
+          { allowDevAdminBypass: true },
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          dismissed_jobs?: number;
+          recent_failures_remaining?: number;
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? `HTTP ${response.status}`);
+        }
+        await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+        const dismissedJobs = Number(payload.dismissed_jobs ?? 0);
+        const remaining = Number(payload.recent_failures_remaining ?? 0);
+        if (dismissedJobs > 0) {
+          setActionNotice(
+            `Dismissed ${dismissedJobs} recent failure${dismissedJobs === 1 ? "" : "s"}. ${
+              remaining > 0 ? `${remaining} still visible.` : "No recent failures remain."
+            }`,
+          );
+        } else {
+          setActionNotice("That failure was already cleared from the panel.");
+        }
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "Failed to dismiss recent failure");
+      } finally {
+        setDismissingFailureIds((current) => {
+          const next = new Set(current);
+          next.delete(jobId);
+          return next;
+        });
+      }
+    },
+    [healthDot, queueStatus],
+  );
+
   const cancelAllActiveJobs = useCallback(async () => {
     setActionNotice(null);
     setActionError(null);
@@ -2092,6 +2238,87 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     }
   }, [healthDot, queueStatus]);
 
+  const resetSocialIngestHealth = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setResettingHealth(true);
+    try {
+      const response = await fetchAdminWithAuth(
+        RESET_SOCIAL_INGEST_HEALTH_URL,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        cancelled_jobs?: number;
+        dismissed_failures?: number;
+        dismissed_failed_runs?: number;
+        active_jobs_remaining?: number;
+        recent_failures_remaining?: number;
+        failed_runs_remaining?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      setActionNotice(
+        `Fresh slate ready: cancelled ${Number(payload.cancelled_jobs ?? 0)} active jobs, ` +
+          `dismissed ${Number(payload.dismissed_failures ?? 0)} recent failures, ` +
+          `hid ${Number(payload.dismissed_failed_runs ?? 0)} failed runs. ` +
+          `${Number(payload.active_jobs_remaining ?? 0)} active jobs, ` +
+          `${Number(payload.recent_failures_remaining ?? 0)} visible failures, and ` +
+          `${Number(payload.failed_runs_remaining ?? 0)} visible failed runs remain.`,
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to reset social ingest health");
+    } finally {
+      setResettingHealth(false);
+    }
+  }, [healthDot, queueStatus]);
+
+  const clearOlderWorkerCheckins = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setClearingOlderWorkerCheckins(true);
+    try {
+      const response = await fetchAdminWithAuth(
+        PURGE_INACTIVE_WORKERS_URL,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        deleted_workers?: number;
+        total_workers_after?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      const deletedWorkers = Number(payload.deleted_workers ?? 0);
+      const totalWorkersAfter = Number(payload.total_workers_after ?? 0);
+      setActionNotice(
+        deletedWorkers > 0
+          ? `Cleared ${deletedWorkers} older worker check-ins. ${totalWorkersAfter} workers remain visible.`
+          : "No older worker check-ins needed cleanup.",
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to clear older worker check-ins");
+    } finally {
+      setClearingOlderWorkerCheckins(false);
+    }
+  }, [healthDot, queueStatus]);
+
   return (
     <AdminModal
       isOpen={isOpen}
@@ -2100,7 +2327,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       panelClassName="relative w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl"
     >
       <div className="mb-5 flex items-start gap-3">
-        <span className={`mt-1 inline-block h-3 w-3 rounded-full ${healthDotColor(state)}`} />
+        <span className={`mt-1 inline-block h-3 w-3 rounded-full ${healthDotColor(modalState)}`} />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-semibold text-zinc-900">{modalHealthLabel(modalState)}</span>
@@ -2186,6 +2413,10 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                 onDebugJob={(jobId) => {
                   void runJobDebug(jobId, false);
                 }}
+                onClearOlderWorkerCheckins={() => {
+                  void clearOlderWorkerCheckins();
+                }}
+                clearingOlderWorkerCheckins={clearingOlderWorkerCheckins}
                 debugJobLoadingId={debugJobLoadingId}
                 workersSummaryLabel={viewModel.workersSummaryLabel}
                 executionBackend={queueStatus.data.remote_plane?.execution_backend_canonical ?? queueStatus.data.workers.executor_backend}
@@ -2205,6 +2436,16 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                   void runJobDebug(jobId, true);
                 }}
               />
+            </section>
+
+            <hr className="border-zinc-100" />
+
+            <section>
+              <SectionHeader>Running Jobs</SectionHeader>
+              <p className="mb-3 text-sm text-zinc-600">
+                These are the job rows currently marked running in the queue, regardless of which worker card they map to.
+              </p>
+              <RunningJobs jobs={queueStatus.data.queue.running_jobs ?? []} />
             </section>
 
             <hr className="border-zinc-100" />
@@ -2234,7 +2475,11 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                     These are the most recent job failures, grouped in the order they occurred.
                   </p>
                   <div className="mt-3">
-                    <RecentFailures failures={queueStatus.data.queue.recent_failures} />
+                    <RecentFailures
+                      failures={queueStatus.data.queue.recent_failures}
+                      dismissingFailureIds={dismissingFailureIds}
+                      onDismissFailure={dismissRecentFailure}
+                    />
                   </div>
                 </div>
               </div>
@@ -2245,12 +2490,26 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       {queueStatus.data && (
         <div className="mt-4 border-t border-zinc-100 pt-4">
           <SectionHeader>Admin Actions</SectionHeader>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => {
+                void resetSocialIngestHealth();
+              }}
+              disabled={resettingHealth || cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
+              className="w-full rounded-md border border-zinc-300 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {resettingHealth ? "Resetting health..." : "Fresh slate reset"}
+            </button>
+            <p className="text-xs text-zinc-500">
+              Cancels active work and hides failed job/run history from this health surface without deleting saved posts.
+            </p>
           <button
             type="button"
             onClick={() => {
               void cancelAllActiveJobs();
             }}
-            disabled={cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
+            disabled={resettingHealth || cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
             className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel all active jobs"}
@@ -2258,6 +2517,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           <p className="mt-1 text-xs text-zinc-500">
             Use only if the queue is wedged or you need to stop every active social sync job.
           </p>
+          </div>
         </div>
       )}
     </AdminModal>

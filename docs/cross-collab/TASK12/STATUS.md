@@ -1,16 +1,16 @@
 # Status — Task 12 (Cast Screen-Time Analytics)
 
 Repo: TRR-APP
-Last updated: 2026-03-16
+Last updated: 2026-03-20
 
 ## Handoff Snapshot
 ```yaml
 handoff:
   include: true
   state: active
-  last_updated: 2026-03-16
-  current_phase: "mirror-prefill and proxy env guidance shipped; operator/browser evidence pending"
-  next_action: "Set TRR_INTERNAL_ADMIN_SHARED_SECRET in the TRR-APP server env, then run a fresh-session managed Chrome walkthrough for the mirrored social-week import path and the feature-flag rollback drill"
+  last_updated: 2026-03-20
+  current_phase: "mirror-prefill and proxy env guidance remain shipped; only fresh-session operator/browser acceptance evidence is still open"
+  next_action: "Use the restarted workspace to capture the mirrored social-week import walkthrough and feature-flag rollback proof if that acceptance evidence is still needed; otherwise archive this task during the next cross-collab cleanup pass"
   detail: self
 ```
 

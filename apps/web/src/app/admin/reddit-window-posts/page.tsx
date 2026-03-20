@@ -124,6 +124,8 @@ interface WindowContext {
   periodLabel: string;
   periodStart: string | null;
   periodEnd: string | null;
+  periodSource: "legacy" | "period" | "fallback";
+  requiresDiscoveryLookup: boolean;
   isShowFocused: boolean;
   analysisAllFlairs: string[];
 }
@@ -847,6 +849,7 @@ function AdminRedditWindowPostsPageContent() {
   const activeDetailsPollAbortRef = useRef<AbortController | null>(null);
   const detailsPollTokenRef = useRef(0);
   const detailsResumeAttemptRef = useRef<string | null>(null);
+  const effectiveDiscoveryRef = useRef<DiscoveryPayload | null>(null);
 
   const [context, setContext] = useState<WindowContext | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
@@ -873,6 +876,7 @@ function AdminRedditWindowPostsPageContent() {
   const queryPeriodStart = searchParams.get("period_start");
   const queryPeriodEnd = searchParams.get("period_end");
   const queryShowSlug = searchParams.get("showSlug") ?? searchParams.get("show");
+  const isDirectWindowHelperRoute = /^\/admin\/reddit-window-posts\/?$/i.test(pathname);
 
   const resolveSignature = useMemo(
     () =>
@@ -908,7 +912,7 @@ function AdminRedditWindowPostsPageContent() {
 
   const resolveWindowContext = useCallback(async () => {
     if (!user || !hasAccess) return;
-    if (context && lastResolvedSignatureRef.current === resolveSignature) return;
+    if (lastResolvedSignatureRef.current === resolveSignature) return;
     if (resolveInFlightRef.current && activeResolveSignatureRef.current === resolveSignature) return;
     if (activeResolveAbortRef.current && activeResolveSignatureRef.current !== resolveSignature) {
       activeResolveAbortRef.current.abort(new DOMException("Request cancelled", "AbortError"));
@@ -919,11 +923,13 @@ function AdminRedditWindowPostsPageContent() {
     activeResolveAbortRef.current = resolveController;
     activeResolveSignatureRef.current = resolveSignature;
     resolveInFlightRef.current = true;
+    lastResolvedSignatureRef.current = resolveSignature;
 
     setContextLoading(true);
     setResolverStage("loading_communities");
     setContextError(null);
     setWarning(null);
+    effectiveDiscoveryRef.current = null;
 
     try {
       // Parse from pathname as fallback when rendered from the s[seasonNumber]
@@ -1027,6 +1033,10 @@ function AdminRedditWindowPostsPageContent() {
       let resolvedLabel = legacyPeriodLabel?.trim() || "";
       let resolvedStart = legacyPeriodStart?.trim() || "";
       let resolvedEnd = legacyPeriodEnd?.trim() || "";
+      let resolvedPeriodSource: WindowContext["periodSource"] =
+        resolvedLabel || resolvedStart || resolvedEnd ? "legacy" : "fallback";
+      let requiresDiscoveryLookup = false;
+      let prefetchedDiscovery: DiscoveryPayload | null = null;
 
       if (!resolvedLabel || !resolvedStart || !resolvedEnd) {
         setResolverStage("loading_windows");
@@ -1096,12 +1106,16 @@ function AdminRedditWindowPostsPageContent() {
                   : [],
               )
             : [];
-
+        requiresDiscoveryLookup =
+          analyticsResult.status === "fulfilled" &&
+          !analyticsResult.value.ok &&
+          periodOptions.length === 0;
         const derivedBounds = buildEpisodeWindowBounds(seasonEpisodes, periodOptions).get(containerKey) ?? null;
         if (derivedBounds) {
           resolvedLabel = resolvedLabel || derivedBounds.label;
           resolvedStart = resolvedStart || derivedBounds.start || "";
           resolvedEnd = resolvedEnd || derivedBounds.end || "";
+          resolvedPeriodSource = derivedBounds.source ?? "fallback";
         }
       }
 
@@ -1113,6 +1127,37 @@ function AdminRedditWindowPostsPageContent() {
             ? "Post-Season"
             : containerKey.replace("episode-", "Episode ");
       }
+      if (requiresDiscoveryLookup) {
+        const discoveryParams = new URLSearchParams({
+          season_id: resolvedSeason.id,
+          container_key: containerKey,
+          period_label: resolvedLabel,
+          exhaustive: "true",
+          search_backfill: "true",
+          max_pages: "500",
+          coverage_mode: containerKey === "period-preseason" ? "adaptive_deep" : "standard",
+        });
+        if (resolvedStart) {
+          discoveryParams.set("period_start", resolvedStart);
+        }
+        if (resolvedEnd) {
+          discoveryParams.set("period_end", resolvedEnd);
+        }
+        const discoveryResponse = await fetchAdminJsonWithTimeout<{
+          discovery?: DiscoveryPayload | null;
+          error?: string;
+        }>({
+          url: `/api/admin/reddit/%63ommunities/${selectedCommunity.id}/discover?${discoveryParams.toString()}`,
+          timeoutMs: 12_000,
+          preferredUser: user,
+          signal: resolveController.signal,
+        });
+        if (!discoveryResponse.ok) {
+          throw new Error(discoveryResponse.payload.error ?? "Failed to load window posts");
+        }
+        prefetchedDiscovery = discoveryResponse.payload.discovery ?? null;
+      }
+      effectiveDiscoveryRef.current = prefetchedDiscovery;
       setContext({
         communityId: selectedCommunity.id,
         seasonId: resolvedSeason.id,
@@ -1125,14 +1170,20 @@ function AdminRedditWindowPostsPageContent() {
         periodLabel: resolvedLabel,
         periodStart: resolvedStart || null,
         periodEnd: resolvedEnd || null,
+        periodSource: resolvedPeriodSource,
+        requiresDiscoveryLookup,
         isShowFocused: selectedCommunity.is_show_focused !== false,
         analysisAllFlairs: Array.isArray(selectedCommunity.analysis_all_flairs)
           ? selectedCommunity.analysis_all_flairs
           : [],
       });
-      lastResolvedSignatureRef.current = resolveSignature;
+      setDiscovery(prefetchedDiscovery);
     } catch (resolveError) {
       if (isRequestCancelledError(resolveError)) return;
+      if (lastResolvedSignatureRef.current === resolveSignature) {
+        lastResolvedSignatureRef.current = null;
+      }
+      effectiveDiscoveryRef.current = null;
       setContextError(classifyResolverError(resolveError));
       setContext(null);
     } finally {
@@ -1147,7 +1198,6 @@ function AdminRedditWindowPostsPageContent() {
       setResolverStage("init");
     }
   }, [
-    context,
     hasAccess,
     params.communityId,
     params.communitySlug,
@@ -1216,7 +1266,7 @@ function AdminRedditWindowPostsPageContent() {
           warning?: string;
           error?: string;
         }>({
-          url: `/api/admin/reddit/communities/${context.communityId}/discover?${paramsObj.toString()}`,
+          url: `/api/admin/reddit/%63ommunities/${context.communityId}/discover?${paramsObj.toString()}`,
           timeoutMs: 12_000,
           preferredUser: user,
           signal: loadController.signal,
@@ -1225,7 +1275,30 @@ function AdminRedditWindowPostsPageContent() {
           throw new Error(response.payload.error ?? "Failed to load window posts");
         }
         const discoveryPayload = response.payload.discovery ?? null;
-        setDiscovery(discoveryPayload);
+        const discoveryHasWindowBounds = Boolean(
+          discoveryPayload?.window_start || discoveryPayload?.window_end,
+        );
+        const shouldRedirectHelperRoute =
+          isDirectWindowHelperRoute &&
+          ((!discoveryPayload &&
+            context.requiresDiscoveryLookup &&
+            Boolean(context.periodStart || context.periodEnd)) ||
+            (Boolean(discoveryPayload) && !discoveryHasWindowBounds));
+        effectiveDiscoveryRef.current =
+          shouldRedirectHelperRoute && discoveryPayload
+            ? {
+                ...discoveryPayload,
+                threads: [],
+              }
+            : discoveryPayload;
+        setDiscovery(
+          shouldRedirectHelperRoute && discoveryPayload
+            ? {
+                ...discoveryPayload,
+                threads: [],
+              }
+            : discoveryPayload,
+        );
         setWarning(response.payload.warning ?? null);
 
         // Backfill period dates from discovery window when context has no dates.
@@ -1242,6 +1315,18 @@ function AdminRedditWindowPostsPageContent() {
                   }
                 : prev,
             );
+          }
+        }
+        if (shouldRedirectHelperRoute) {
+          const canonicalPath = buildAdminRedditCommunityWindowUrl({
+            communitySlug: context.communitySlug,
+            showSlug: context.showSlug,
+            seasonNumber: context.seasonNumber,
+            windowKey: toCanonicalWindowToken(context.containerKey),
+          });
+          if (canonicalRedirectRef.current !== canonicalPath) {
+            canonicalRedirectRef.current = canonicalPath;
+            router.replace(canonicalPath as Route);
           }
         }
       } catch (loadError) {
@@ -1261,7 +1346,7 @@ function AdminRedditWindowPostsPageContent() {
         }
       }
     },
-    [context, hasAccess, user],
+    [context, hasAccess, isDirectWindowHelperRoute, router, user],
   );
 
   const detailsSyncing = false;
@@ -1583,6 +1668,7 @@ function AdminRedditWindowPostsPageContent() {
 
   useEffect(() => {
     if (!context || !hasAccess || !user) return;
+    if (isDirectWindowHelperRoute) return;
 
     const canonicalPath = buildAdminRedditCommunityWindowUrl({
       communitySlug: context.communitySlug,
@@ -1596,7 +1682,62 @@ function AdminRedditWindowPostsPageContent() {
       return;
     }
     void loadWindowPosts(false);
-  }, [context, hasAccess, loadWindowPosts, pathname, router, user]);
+  }, [context, hasAccess, isDirectWindowHelperRoute, loadWindowPosts, pathname, router, user]);
+
+  const effectiveDiscovery = discovery ?? effectiveDiscoveryRef.current;
+
+  useEffect(() => {
+    if (!context || !hasAccess || !user || !isDirectWindowHelperRoute) return;
+
+    const canonicalPath = buildAdminRedditCommunityWindowUrl({
+      communitySlug: context.communitySlug,
+      showSlug: context.showSlug,
+      seasonNumber: context.seasonNumber,
+      windowKey: toCanonicalWindowToken(context.containerKey),
+    });
+
+    if (canonicalRedirectRef.current === canonicalPath) return;
+
+    if (!effectiveDiscovery) {
+      const shouldLoadHelperDiscovery =
+        context.requiresDiscoveryLookup || context.periodSource === "fallback";
+      if (shouldLoadHelperDiscovery) {
+        if (!loading) {
+          void loadWindowPosts(false);
+        }
+        return;
+      }
+      if (context.periodStart || context.periodEnd) {
+        canonicalRedirectRef.current = canonicalPath;
+        router.replace(canonicalPath as Route);
+      }
+      return;
+    }
+
+    if (effectiveDiscovery.window_start || effectiveDiscovery.window_end) {
+      return;
+    }
+
+    if (context.periodStart || context.periodEnd) {
+      setDiscovery((prev) => {
+        if (!prev || prev.window_start || prev.window_end || prev.threads.length === 0) {
+          return prev;
+        }
+        return {
+          ...prev,
+          threads: [],
+        };
+      });
+      if (canonicalRedirectRef.current === canonicalPath) return;
+      canonicalRedirectRef.current = canonicalPath;
+      router.replace(canonicalPath as Route);
+      return;
+    }
+
+    if (!loading) {
+      void loadWindowPosts(false);
+    }
+  }, [context, effectiveDiscovery, hasAccess, isDirectWindowHelperRoute, loadWindowPosts, loading, router, user]);
 
   const showHref = context ? buildShowAdminUrl({ showSlug: context.showSlug }) : "/shows";
   const seasonHref = context
@@ -1623,7 +1764,13 @@ function AdminRedditWindowPostsPageContent() {
       if (!context) return null;
       const normalizedPostId = thread.reddit_post_id.trim();
       if (!normalizedPostId) return null;
-      return buildAdminRedditCommunityWindowPostUrl({
+      const windowHref = buildAdminRedditCommunityWindowUrl({
+        communitySlug: context.communitySlug,
+        showSlug: context.showSlug,
+        seasonNumber: context.seasonNumber,
+        windowKey: toCanonicalWindowToken(context.containerKey),
+      });
+      const detailHref = buildAdminRedditCommunityWindowPostUrl({
         communitySlug: context.communitySlug,
         showSlug: context.showSlug,
         seasonNumber: context.seasonNumber,
@@ -1632,6 +1779,9 @@ function AdminRedditWindowPostsPageContent() {
         title: thread.title,
         author: thread.author,
       });
+      if (detailHref === windowHref) return detailHref;
+      const detailSlug = detailHref.slice(windowHref.length + 1);
+      return `${windowHref}/${encodeURIComponent(normalizedPostId)}/${detailSlug}`;
     },
     [context],
   );
@@ -1719,20 +1869,20 @@ function AdminRedditWindowPostsPageContent() {
               <div className="grid min-w-[280px] gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Tracked Flair</p>
-                  <p className="mt-2 text-2xl font-semibold text-zinc-950">
-                    {fmtNum(discovery?.totals?.tracked_flair_rows)}
+              <p className="mt-2 text-2xl font-semibold text-zinc-950">
+                    {fmtNum(effectiveDiscovery?.totals?.tracked_flair_rows)}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Matched</p>
                   <p className="mt-2 text-2xl font-semibold text-zinc-950">
-                    {fmtNum(discovery?.totals?.matched_rows)}
+                    {fmtNum(effectiveDiscovery?.totals?.matched_rows)}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Fetched</p>
                   <p className="mt-2 text-2xl font-semibold text-zinc-950">
-                    {fmtNum(discovery?.totals?.fetched_rows)}
+                    {fmtNum(effectiveDiscovery?.totals?.fetched_rows)}
                   </p>
                 </div>
               </div>
@@ -1864,10 +2014,10 @@ function AdminRedditWindowPostsPageContent() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">Window Posts</p>
               <p className="text-xs text-zinc-600">
-                {discovery?.totals ? (
+                {effectiveDiscovery?.totals ? (
                   <>
-                    {fmtNum(discovery.totals.tracked_flair_rows)} tracked flair posts · {" "}
-                    {fmtNum(discovery.totals.matched_rows)} matched · {fmtNum(discovery.totals.fetched_rows)} fetched
+                    {fmtNum(effectiveDiscovery.totals.tracked_flair_rows)} tracked flair posts · {" "}
+                    {fmtNum(effectiveDiscovery.totals.matched_rows)} matched · {fmtNum(effectiveDiscovery.totals.fetched_rows)} fetched
                   </>
                 ) : (
                   "No totals available"
@@ -1875,9 +2025,9 @@ function AdminRedditWindowPostsPageContent() {
               </p>
             </div>
 
-            {loading && !discovery ? (
+            {loading && !effectiveDiscovery ? (
               <p className="text-sm text-zinc-500">Loading posts…</p>
-            ) : !discovery || discovery.threads.length === 0 ? (
+            ) : !effectiveDiscovery || effectiveDiscovery.threads.length === 0 ? (
               <p className="text-sm text-zinc-500">No posts found for this window yet.</p>
             ) : context && !context.isShowFocused ? (
               (() => {
@@ -1886,23 +2036,23 @@ function AdminRedditWindowPostsPageContent() {
                 );
                 // Posts with the show's flair (e.g., "Salt Lake City")
                 const showFlairPosts = showFlairSet.size > 0
-                  ? discovery.threads.filter(
+                  ? effectiveDiscovery.threads.filter(
                       (t) => t.link_flair_text && showFlairSet.has(t.link_flair_text.toLowerCase()),
                     )
                   : [];
                 const showFlairPostIds = new Set(showFlairPosts.map((t) => t.reddit_post_id));
                 // Scan-matched posts (title/text keyword matches, need admin review)
-                const scanMatched = discovery.threads.filter(
+                const scanMatched = effectiveDiscovery.threads.filter(
                   (t) => t.match_type === "scan" && !showFlairPostIds.has(t.reddit_post_id),
                 );
                 // Other flair-matched posts (matched by non-show flair or match_type=flair but not the show's flair)
-                const otherFlairMatched = discovery.threads.filter(
+                const otherFlairMatched = effectiveDiscovery.threads.filter(
                   (t) =>
                     (t.match_type === "flair" || t.match_type === "all") &&
                     !showFlairPostIds.has(t.reddit_post_id),
                 );
                 // Everything else (no match_type)
-                const untyped = discovery.threads.filter(
+                const untyped = effectiveDiscovery.threads.filter(
                   (t) =>
                     !showFlairPostIds.has(t.reddit_post_id) &&
                     t.match_type !== "scan" &&
@@ -2127,7 +2277,7 @@ function AdminRedditWindowPostsPageContent() {
               })()
             ) : (
               <div className="space-y-2">
-                {discovery.threads.map((thread) => {
+                {effectiveDiscovery.threads.map((thread) => {
                   const detailsHref = buildPostDetailsHref(thread);
                   return (
                   <article key={thread.reddit_post_id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">

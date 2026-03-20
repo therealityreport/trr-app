@@ -77,7 +77,7 @@ interface SubscribeParams {
 }
 
 export class BravodleManager {
-  private static instance: BravodleManager;
+  private static instance: BravodleManager | null = null;
   private static talentCache: BravodleTalentRecord[] | null = null;
   private static talentCachePromise: Promise<BravodleTalentRecord[]> | null = null;
   private static talentCacheMap: Map<string, BravodleTalentRecord> | null = null;
@@ -86,11 +86,25 @@ export class BravodleManager {
 
   private constructor(private readonly firestore: Firestore) {}
 
-  static getInstance(): BravodleManager {
-    if (!BravodleManager.instance) {
-      BravodleManager.instance = new BravodleManager(getDb());
+  static getOptionalInstance(): BravodleManager | null {
+    const db = getDb();
+    if (!db) {
+      return null;
     }
+
+    if (!BravodleManager.instance) {
+      BravodleManager.instance = new BravodleManager(db);
+    }
+
     return BravodleManager.instance;
+  }
+
+  static getInstance(): BravodleManager {
+    const instance = BravodleManager.getOptionalInstance();
+    if (!instance) {
+      throw new Error("Firestore is not available — Bravodle requires Firebase Firestore.");
+    }
+    return instance;
   }
 
   async startGame({ uid, gameDate = getBravodleDateKey() }: StartGameParams): Promise<BravodleGameSnapshot> {
@@ -2259,5 +2273,5 @@ private evaluateEpisodesField(
 }
 
 export function useBravodleManager() {
-  return BravodleManager.getInstance();
+  return BravodleManager.getOptionalInstance();
 }

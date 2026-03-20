@@ -111,6 +111,84 @@ export type SocialAccountCatalogRun = {
   error_message?: string | null;
 };
 
+export type SocialAccountCatalogRunProgressStage = {
+  jobs_total: number;
+  jobs_completed: number;
+  jobs_failed: number;
+  jobs_active: number;
+  jobs_running?: number;
+  jobs_waiting?: number;
+  scraped_count: number;
+  saved_count: number;
+};
+
+export type SocialAccountCatalogRunProgressHandle = SocialAccountCatalogRunProgressStage & {
+  platform: string;
+  account_handle: string;
+  stage: string;
+  runner_lanes?: string[];
+  has_started?: boolean;
+  next_stage?: string | null;
+};
+
+export type SocialAccountCatalogRunProgressLogEntry = {
+  id: string;
+  timestamp: string | null;
+  platform: string;
+  account_handle: string;
+  stage: string;
+  status: string;
+  line: string;
+};
+
+export type SocialAccountCatalogRunProgressSummary = {
+  total_jobs?: number;
+  completed_jobs?: number;
+  failed_jobs?: number;
+  active_jobs?: number;
+  items_found_total?: number;
+};
+
+export type SocialAccountCatalogRunProgressSnapshot = {
+  season_id?: string | null;
+  run_id: string;
+  run_status: string;
+  source_scope: string;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  stages: Record<string, SocialAccountCatalogRunProgressStage>;
+  per_handle: SocialAccountCatalogRunProgressHandle[];
+  recent_log: SocialAccountCatalogRunProgressLogEntry[];
+  worker_runtime?: {
+    runner_strategy?: string | null;
+    runner_count?: number;
+    partition_strategy?: string | null;
+    scheduler_lanes?: string[];
+    active_workers_now?: number;
+    worker_ids_sample?: string[];
+  };
+  partition_strategy?: string | null;
+  discovery?: {
+    status?: string | null;
+    partition_strategy?: string | null;
+    partition_count?: number;
+    discovered_count?: number;
+    queued_count?: number;
+    running_count?: number;
+    completed_count?: number;
+    failed_count?: number;
+    cancelled_count?: number;
+  };
+  post_progress?: {
+    completed_posts?: number;
+    matched_posts?: number;
+    total_posts?: number | null;
+  };
+  summary?: SocialAccountCatalogRunProgressSummary;
+  updated_at?: string | null;
+};
+
 export type SocialAccountCatalogReviewItem = {
   id: string;
   platform: SocialPlatformSlug;

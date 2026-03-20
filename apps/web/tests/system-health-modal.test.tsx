@@ -58,6 +58,7 @@ describe("SystemHealthModal polling", () => {
       runs_total?: number;
       by_platform: Record<string, Record<string, number>>;
       by_job_type: Record<string, Record<string, number>>;
+      running_jobs: Array<Record<string, unknown>>;
       stale_claims?: {
         total: number;
         by_reason: Record<string, number>;
@@ -119,6 +120,7 @@ describe("SystemHealthModal polling", () => {
         by_stage: {},
         by_platform: {},
         by_job_type: {},
+        running_jobs: [],
         stale_claims: { total: 0, by_reason: {}, by_platform: {}, by_stage: {} },
         recent_failures: [],
         stuck_jobs: [],
@@ -215,6 +217,75 @@ describe("SystemHealthModal polling", () => {
           },
         };
         return jsonResponse({ cancelled_jobs: 4, active_jobs_remaining: 0 });
+      }
+      if (url.includes("/api/admin/trr-api/social/ingest/reset-health")) {
+        queueStatusPayload = {
+          ...queueStatusPayload,
+          queue: {
+            ...queueStatusPayload.queue,
+            by_status: {
+              ...queueStatusPayload.queue.by_status,
+              queued: 0,
+              pending: 0,
+              running: 0,
+              retrying: 0,
+            },
+            runs_by_status: {
+              ...queueStatusPayload.queue.runs_by_status,
+              running: 0,
+              queued: 0,
+              pending: 0,
+              failed: 0,
+              retrying: 0,
+            },
+            recent_failures: [],
+            running_jobs: [],
+          },
+        };
+        return jsonResponse({
+          cancelled_jobs: 2,
+          dismissed_failures: 3,
+          dismissed_failed_runs: 2,
+          active_jobs_remaining: 0,
+          recent_failures_remaining: 0,
+          failed_runs_remaining: 0,
+        });
+      }
+      if (url.includes("/api/admin/trr-api/social/ingest/workers/purge-inactive")) {
+        const deletedWorkers = Math.max(0, Number(queueStatusPayload.workers.stale_hidden_count ?? 0));
+        queueStatusPayload = {
+          ...queueStatusPayload,
+          workers: {
+            ...queueStatusPayload.workers,
+            stale_hidden_count: 0,
+            total_workers: Math.max(0, Number(queueStatusPayload.workers.total_workers ?? 0) - deletedWorkers),
+          },
+        };
+        return jsonResponse({
+          deleted_workers: deletedWorkers,
+          total_workers_after: queueStatusPayload.workers.total_workers,
+        });
+      }
+      if (url.includes("/api/admin/trr-api/social/ingest/recent-failures/dismiss")) {
+        const body = typeof init?.body === "string" ? (JSON.parse(init.body) as { job_ids?: string[] }) : {};
+        const dismissedIds = new Set(body.job_ids ?? []);
+        queueStatusPayload = {
+          ...queueStatusPayload,
+          queue: {
+            ...queueStatusPayload.queue,
+            recent_failures: queueStatusPayload.queue.recent_failures.filter((failure) => {
+              const failureId =
+                typeof failure === "object" && failure !== null && "id" in failure ? String(failure.id) : "";
+              return !dismissedIds.has(failureId);
+            }),
+          },
+        };
+        return jsonResponse({
+          requested_job_ids_count: dismissedIds.size,
+          dismissed_jobs: dismissedIds.size,
+          dismissed_job_ids: Array.from(dismissedIds),
+          recent_failures_remaining: queueStatusPayload.queue.recent_failures.length,
+        });
       }
       if (url.includes("/api/admin/trr-api/social/ingest/workers/") && url.endsWith("/detail")) {
         return jsonResponse(workerDetailPayload);
@@ -415,7 +486,57 @@ describe("SystemHealthModal polling", () => {
     expect(screen.getByText("Attention Needed")).toBeInTheDocument();
   });
 
-  it("keeps the modal healthy when only historical failures exist", async () => {
+  it("renders every running job in the dedicated running jobs section", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        by_status: { running: 2, pending: 0, queued: 0, retrying: 0, failed: 0, cancelled: 0, completed: 0 },
+        running_jobs: [
+          {
+            id: "job-1",
+            run_id: "run-1",
+            platform: "instagram",
+            job_type: "shared_account_posts",
+            stage: "shared_account_posts",
+            account_handle: "bravotv",
+            worker_id: "modal:social-dispatcher",
+            started_at: "2026-03-19T12:00:00.000Z",
+            heartbeat_at: "2026-03-19T12:01:00.000Z",
+            dispatch_backend: "modal",
+            required_execution_backend: "modal",
+          },
+          {
+            id: "job-2",
+            run_id: "run-2",
+            platform: "twitter",
+            job_type: "comments",
+            stage: "comments",
+            account_handle: "andycohen",
+            worker_id: "modal:admin-dispatcher",
+            started_at: "2026-03-19T12:02:00.000Z",
+            heartbeat_at: "2026-03-19T12:03:00.000Z",
+            dispatch_backend: "modal",
+            required_execution_backend: null,
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Running Jobs")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/These are the job rows currently marked running/i)).toBeInTheDocument();
+    expect(screen.getByText("@bravotv")).toBeInTheDocument();
+    expect(screen.getByText("@andycohen")).toBeInTheDocument();
+    expect(screen.getAllByText("Modal").length).toBeGreaterThan(0);
+    expect(screen.getByText("Any")).toBeInTheDocument();
+  });
+
+  it("marks the modal as needing attention when recent failures exist", async () => {
     queueStatusPayload = {
       ...queueStatusPayload,
       queue: {
@@ -444,11 +565,55 @@ describe("SystemHealthModal polling", () => {
     render(<SystemHealthModal isOpen onClose={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Healthy").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Needs Attention").length).toBeGreaterThan(0);
     });
 
     expect(screen.getByText("Workers are available, but there are recent failures to review.")).toBeInTheDocument();
     expect(screen.getByText("1 recent failures")).toBeInTheDocument();
+  });
+
+  it("dismisses a recent failure from the panel", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        recent_failures: [
+          {
+            id: "failure-1",
+            run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            platform: "instagram",
+            job_type: "shared_account_discovery",
+            status: "failed",
+            error_message: "invalid input syntax for type uuid",
+            last_error_code: null,
+            last_error_class: "InvalidTextRepresentation",
+            created_at: "2026-03-02T10:00:00.000Z",
+            completed_at: "2026-03-02T10:01:00.000Z",
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/recent-failures/dismiss"),
+        ),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Dismissed 1 recent failure/)).toBeInTheDocument();
+      expect(screen.getByText("No recent error patterns to review.")).toBeInTheDocument();
+    });
   });
 
   it("renders stuck jobs and cancels one", async () => {
@@ -706,7 +871,7 @@ describe("SystemHealthModal polling", () => {
     });
 
     expect(screen.getByText(/1 healthy · 1 seen recently · 3 recorded/i)).toBeInTheDocument();
-    expect(screen.getByText(/1 older worker check-in hidden/)).toBeInTheDocument();
+    expect(screen.getByText(/2 older worker check-ins hidden/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /show older worker check-ins/i })).toBeInTheDocument();
     expect(screen.getByText(/social-worker:ip-172-31-115-232\.ec2\.internal:healthy/i)).toBeInTheDocument();
     expect(screen.getAllByText(/thomass-MacBook-Pro\.local/i).length).toBeGreaterThan(0);
@@ -767,6 +932,101 @@ describe("SystemHealthModal polling", () => {
         ),
       ).toBe(true);
       expect(screen.getByText(/Cancelled 4 active jobs/)).toBeInTheDocument();
+    });
+  });
+
+  it("runs fresh slate reset and clears visible health noise without deleting posts", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      queue: {
+        ...queueStatusPayload.queue,
+        by_status: { running: 1, pending: 0, queued: 1, retrying: 1, failed: 4, cancelled: 0, completed: 20 },
+        runs_by_status: { running: 1, retrying: 1, failed: 2, completed: 8 },
+        recent_failures: [
+          {
+            id: "failure-1",
+            run_id: "run-reset",
+            platform: "instagram",
+            job_type: "shared_account_posts",
+            status: "failed",
+            error_message: "remote executor failed",
+            last_error_code: "ERR",
+            last_error_class: "RuntimeError",
+            created_at: "2026-03-19T10:00:00.000Z",
+            completed_at: "2026-03-19T10:01:00.000Z",
+          },
+        ],
+        running_jobs: [
+          {
+            id: "job-reset",
+            run_id: "run-reset",
+            platform: "instagram",
+            job_type: "shared_account_posts",
+            stage: "shared_account_posts",
+            account_handle: "bravotv",
+            worker_id: "modal:social-dispatcher",
+            started_at: "2026-03-19T12:00:00.000Z",
+            heartbeat_at: "2026-03-19T12:01:00.000Z",
+            dispatch_backend: "modal",
+            required_execution_backend: "modal",
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Fresh slate reset" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Fresh slate reset" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/reset-health"),
+        ),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Fresh slate ready/i)).toBeInTheDocument();
+      expect(screen.getByText("No recent error patterns to review.")).toBeInTheDocument();
+      expect(screen.getByText("No jobs are running right now.")).toBeInTheDocument();
+    });
+  });
+
+  it("clears hidden older worker check-ins from the worker panel", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      workers: {
+        ...queueStatusPayload.workers,
+        stale_hidden_count: 116,
+        total_workers: 186,
+        workers: [],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Clear older worker check-ins" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear older worker check-ins" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/workers/purge-inactive"),
+        ),
+      ).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cleared 116 older worker check-ins/)).toBeInTheDocument();
+      expect(screen.queryByText(/116 older worker check-ins hidden/i)).not.toBeInTheDocument();
     });
   });
 });

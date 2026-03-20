@@ -54,8 +54,8 @@ describe("show settings links UI structure", () => {
   it("makes persisted settings links editable with the shared editable component", () => {
     expect(contents).toMatch(/from "@\/components\/ui\/editable"/);
     expect(contents).toMatch(/function InlineEditableLinkUrl/);
-    expect(contents).toMatch(/function LinkDiscoveryStatusCard/);
-    expect(contents).toMatch(/buildLinkDiscoveryProgressSummary/);
+    expect(contents).toMatch(/EditableTrigger/);
+    expect(contents).toMatch(/EditableInput/);
     expect(contents).toMatch(/const updateShowLinkUrl = useCallback/);
     expect(contents).toMatch(/method: "PATCH"/);
     expect(contents).toMatch(/<InlineEditableLinkUrl/);

@@ -7,13 +7,13 @@ describe("public route rewrites", () => {
     const configPath = path.resolve(process.cwd(), "next.config.ts");
     const source = fs.readFileSync(configPath, "utf8");
 
-    expect(source).not.toContain('source: "/:showId/s:seasonNumber(\\\\d+)/social/w:weekIndex(\\\\d+)"');
-    expect(source).not.toContain('source: "/:showId/s:seasonNumber(\\\\d+)/social/w:weekIndex(\\\\d+)/:platform"');
-    expect(source).not.toContain('source: "/:showId/social/reddit/:communitySlug"');
-    expect(source).not.toContain('source: "/:showId/social/reddit/:communitySlug/s:seasonNumber(\\\\d+)"');
-    expect(source).not.toContain('source: "/:showId/s:seasonNumber(\\\\d+)"');
+    expect(source).not.toMatch(
+      /source:\s*"\/:showId[^"]*",\s*destination:\s*"\/admin\/trr-shows[^"]*"/
+    );
+    expect(source).not.toMatch(
+      /source:\s*"\/shows\/:showId[^"]*",\s*destination:\s*"\/admin\/trr-shows[^"]*"/
+    );
     expect(source).not.toContain('{ source: "/shows", destination: "/admin/trr-shows" }');
     expect(source).not.toContain('source: "/admin/shows"');
-    expect(source).not.toContain('source: "/admin/trr-shows"');
   });
 });

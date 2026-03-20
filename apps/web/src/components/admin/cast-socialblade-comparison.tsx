@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import {
+  buildFollowersGainedSeries,
+  type CastComparisonWindow,
+  type DailyFollowerPoint,
+} from "@/lib/admin/cast-socialblade-charting";
 
 // ============================================================================
 // Types
@@ -21,11 +26,6 @@ interface Rankings {
   followers_rank: string;
   engagement_rate_rank: string;
   grade: string;
-}
-
-interface DailyFollowerPoint {
-  date: string;
-  followers: number;
 }
 
 interface SocialGrowthData {
@@ -49,6 +49,7 @@ interface CastMember {
   person_name: string | null;
   display_name: string | null;
   instagram_handle: string | null;
+  roles: string[];
 }
 
 interface CastEntry {
@@ -64,6 +65,8 @@ interface CastEntry {
 
 interface CastSocialBladeComparisonProps {
   castMembers: CastMember[];
+  seasonNumber: number;
+  comparisonWindow: CastComparisonWindow | null;
 }
 
 // ============================================================================
@@ -209,6 +212,279 @@ function HorizontalBarChart({
 // ============================================================================
 // Growth Overlay Chart
 // ============================================================================
+
+function FollowersGainedLineChart({
+  entries,
+  seasonNumber,
+  comparisonWindow,
+}: {
+  entries: CastEntry[];
+  seasonNumber: number;
+  comparisonWindow: CastComparisonWindow | null;
+}) {
+  const [hoverInfo, setHoverInfo] = useState<{
+    dateLabel: string;
+    values: { name: string; color: string; gained: number }[];
+    svgX: number;
+  } | null>(null);
+
+  const seriesWithData = useMemo(() => {
+    if (!comparisonWindow) return [];
+    return entries
+      .map((entry) => {
+        const chartData = entry.data?.daily_total_followers_chart?.data ?? [];
+        const series = buildFollowersGainedSeries(chartData, comparisonWindow);
+        return series.length > 1 ? { entry, series } : null;
+      })
+      .filter((value): value is { entry: CastEntry; series: Array<{ date: string; gained: number }> } => Boolean(value));
+  }, [comparisonWindow, entries]);
+
+  const chartConfig = useMemo(() => {
+    if (seriesWithData.length === 0 || !comparisonWindow) return null;
+
+    const width = 800;
+    const height = 300;
+    const pad = { top: 20, right: 20, bottom: 36, left: 65 };
+    const plotW = width - pad.left - pad.right;
+    const plotH = height - pad.top - pad.bottom;
+
+    const allDates = new Set<string>();
+    for (const { series } of seriesWithData) {
+      for (const point of series) {
+        allDates.add(point.date);
+      }
+    }
+    allDates.add(comparisonWindow.start);
+    allDates.add(comparisonWindow.end);
+    const dateArray = [...allDates].sort();
+    if (dateArray.length === 0) return null;
+
+    let globalMin = 0;
+    let globalMax = 0;
+    const seriesData = seriesWithData.map(({ entry, series }) => {
+      const dataMap = new Map(series.map((point) => [point.date, point.gained]));
+      const values: (number | null)[] = dateArray.map((date) => dataMap.get(date) ?? null);
+      for (const value of values) {
+        if (value === null) continue;
+        if (value < globalMin) globalMin = value;
+        if (value > globalMax) globalMax = value;
+      }
+      return { entry, values };
+    });
+
+    const buffer = Math.max((globalMax - globalMin) * 0.05, 1);
+    const bufMin = Math.min(0, globalMin - buffer);
+    const bufMax = globalMax + buffer;
+    const yRange = Math.max(bufMax - bufMin, 1);
+
+    const lines = seriesData.map(({ entry, values }) => {
+      const segments: string[] = [];
+      for (let i = 0; i < values.length; i += 1) {
+        const value = values[i];
+        if (value === null) continue;
+        const x = pad.left + (i / Math.max(dateArray.length - 1, 1)) * plotW;
+        const y = pad.top + plotH - ((value - bufMin) / yRange) * plotH;
+        segments.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+      }
+      return { color: entry.color, name: entry.name, points: segments.join(" "), values };
+    });
+
+    const yTicks: { y: number; label: string }[] = [];
+    for (let i = 0; i <= 4; i += 1) {
+      const value = bufMin + (i / 4) * yRange;
+      yTicks.push({
+        y: pad.top + plotH - ((value - bufMin) / yRange) * plotH,
+        label: value >= 0 ? `+${formatCompact(Math.round(value))}` : formatCompact(Math.round(value)),
+      });
+    }
+
+    const xTicks: { x: number; label: string }[] = [];
+    const step = Math.max(1, Math.floor(dateArray.length / 8));
+    for (let i = 0; i < dateArray.length; i += step) {
+      const date = new Date(`${dateArray[i]}T00:00:00`);
+      xTicks.push({
+        x: pad.left + (i / Math.max(dateArray.length - 1, 1)) * plotW,
+        label: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      });
+    }
+    if (dateArray.length > 1) {
+      const lastDate = new Date(`${dateArray[dateArray.length - 1]}T00:00:00`);
+      xTicks.push({
+        x: pad.left + plotW,
+        label: lastDate.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      });
+    }
+
+    return { width, height, pad, plotW, plotH, lines, yTicks, xTicks, dateArray, seriesData };
+  }, [comparisonWindow, seriesWithData]);
+
+  if (!comparisonWindow || seriesWithData.length === 0 || !chartConfig) {
+    return (
+      <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-sm">
+        <p className="text-sm text-zinc-500">No season-window follower history available for comparison</p>
+      </div>
+    );
+  }
+
+  const { width, height, pad, plotW, plotH, lines, yTicks, xTicks, dateArray, seriesData } = chartConfig;
+  const startLabel = new Date(`${comparisonWindow.start}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const endLabel = new Date(`${comparisonWindow.end}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
+            Followers Gained
+          </p>
+          <p className="mt-1 text-xs font-medium text-zinc-500">
+            Season {seasonNumber} pre-season through post-season, starting at 0 on {startLabel}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {lines.map((line) => (
+            <div key={line.name} className="flex items-center gap-1.5">
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: line.color }} />
+              <span className="text-[10px] font-semibold text-zinc-500">{line.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="relative">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full"
+          preserveAspectRatio="xMidYMid meet"
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const scaleX = width / rect.width;
+            const svgX = (e.clientX - rect.left) * scaleX;
+            const idx = Math.round(((svgX - pad.left) / plotW) * (dateArray.length - 1));
+            if (idx >= 0 && idx < dateArray.length) {
+              const date = dateArray[idx];
+              const dateLabel = new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              });
+              const values = seriesData
+                .map(({ entry, values }) => ({
+                  name: entry.name,
+                  color: entry.color,
+                  gained: values[idx] ?? 0,
+                }))
+                .sort((a, b) => b.gained - a.gained);
+              setHoverInfo({
+                dateLabel,
+                values,
+                svgX: pad.left + (idx / Math.max(dateArray.length - 1, 1)) * plotW,
+              });
+            }
+          }}
+          onMouseLeave={() => setHoverInfo(null)}
+        >
+          {yTicks.map((tick, i) => (
+            <line
+              key={`gain-grid-${i}`}
+              x1={pad.left}
+              y1={tick.y}
+              x2={pad.left + plotW}
+              y2={tick.y}
+              stroke="#e4e4e7"
+              strokeWidth="0.5"
+              strokeDasharray="4,4"
+            />
+          ))}
+          {yTicks.map((tick, i) => (
+            <text
+              key={`gain-y-${i}`}
+              x={pad.left - 8}
+              y={tick.y + 4}
+              textAnchor="end"
+              fontSize="10"
+              fill="#a1a1aa"
+              fontFamily="system-ui"
+            >
+              {tick.label}
+            </text>
+          ))}
+          {xTicks.map((tick, i) => (
+            <text
+              key={`gain-x-${i}`}
+              x={tick.x}
+              y={height - 6}
+              textAnchor="middle"
+              fontSize="10"
+              fill="#a1a1aa"
+              fontFamily="system-ui"
+            >
+              {tick.label}
+            </text>
+          ))}
+          {lines.map((line) => (
+            <polyline
+              key={line.name}
+              points={line.points}
+              fill="none"
+              stroke={line.color}
+              strokeWidth="2.5"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              opacity="0.9"
+            />
+          ))}
+          {hoverInfo && (
+            <line
+              x1={hoverInfo.svgX}
+              y1={pad.top}
+              x2={hoverInfo.svgX}
+              y2={pad.top + plotH}
+              stroke="#71717a"
+              strokeWidth="0.75"
+              strokeDasharray="3,3"
+              opacity="0.5"
+            />
+          )}
+        </svg>
+
+        {hoverInfo && hoverInfo.values.length > 0 && (
+          <div
+            className="pointer-events-none absolute top-2 z-10 rounded-lg border border-zinc-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur-sm"
+            style={{
+              left: `${(hoverInfo.svgX / width) * 100}%`,
+              transform: hoverInfo.svgX > width / 2 ? "translateX(-110%)" : "translateX(10%)",
+            }}
+          >
+            <p className="mb-1 text-[10px] font-bold text-zinc-400">{hoverInfo.dateLabel}</p>
+            {hoverInfo.values.map((value) => (
+              <div key={value.name} className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: value.color }} />
+                <span className="text-[10px] font-semibold text-zinc-600">{value.name}</span>
+                <span className="ml-auto pl-3 text-[10px] font-bold tabular-nums text-zinc-900">
+                  {value.gained >= 0 ? "+" : ""}
+                  {value.gained.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="mt-3 text-[11px] text-zinc-500">
+        Window: {startLabel} through {endLabel}
+      </p>
+    </div>
+  );
+}
 
 function GrowthOverlayChart({ entries }: { entries: CastEntry[] }) {
   const [hoverInfo, setHoverInfo] = useState<{
@@ -665,9 +941,13 @@ function formatScrapedAtLabel(data: SocialGrowthData | null): string {
 // Main Component
 // ============================================================================
 
-export default function CastSocialBladeComparison({ castMembers }: CastSocialBladeComparisonProps) {
+export default function CastSocialBladeComparison({
+  castMembers,
+  seasonNumber,
+  comparisonWindow,
+}: CastSocialBladeComparisonProps) {
   const membersWithIG = useMemo(
-    () => castMembers.filter((m) => m.instagram_handle),
+    () => castMembers.filter((m) => m.instagram_handle && Array.isArray(m.roles) && m.roles.length > 0),
     [castMembers]
   );
 
@@ -1074,6 +1354,12 @@ export default function CastSocialBladeComparison({ castMembers }: CastSocialBla
           </div>
         )}
       </div>
+
+      <FollowersGainedLineChart
+        entries={loadedEntries}
+        seasonNumber={seasonNumber}
+        comparisonWindow={comparisonWindow}
+      />
 
       {/* Follower Count Leaderboard */}
       <HorizontalBarChart

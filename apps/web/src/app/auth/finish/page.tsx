@@ -267,9 +267,9 @@ function FinishProfileContent() {
       try {
         console.log("Finish: Writing profile directly to Firestore");
         const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
-        const { getDb } = await import("@/lib/firebase-db");
-        
-        const userRef = doc(getDb(), "users", u.uid);
+        const { requireDb } = await import("@/lib/firebase-db");
+
+        const userRef = doc(requireDb(), "users", u.uid);
         const profileData = {
           uid: u.uid,
           email: u.email ?? null,

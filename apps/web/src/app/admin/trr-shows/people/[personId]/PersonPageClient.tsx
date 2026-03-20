@@ -8543,6 +8543,7 @@ export default function PersonProfilePage() {
                         photo.caption ??
                         "Unknown Event";
                       const personCount = getPersonEventImageCount(photo, metadata);
+                      const eventImageSrc = photo.thumb_url || photo.hosted_url || photo.url || null;
 
                       return (
                         <button
@@ -8556,13 +8557,20 @@ export default function PersonProfilePage() {
                           }}
                           className="group relative overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm transition hover:shadow-md"
                         >
-                          <div className="aspect-[3/4] w-full overflow-hidden bg-zinc-100">
-                            <img
-                              src={photo.thumb_url || photo.hosted_url || photo.url || undefined}
-                              alt={eventTitle}
-                              className="h-full w-full object-cover transition group-hover:scale-105"
-                              loading="lazy"
-                            />
+                          <div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-100">
+                            {eventImageSrc ? (
+                              <Image
+                                src={eventImageSrc}
+                                alt={eventTitle}
+                                fill
+                                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+                                className="object-cover transition group-hover:scale-105"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-xs text-zinc-400">
+                                No image
+                              </div>
+                            )}
                           </div>
                           <div className="p-2">
                             <p className="truncate text-xs font-medium text-zinc-800">{eventTitle}</p>

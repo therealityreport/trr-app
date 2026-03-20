@@ -361,27 +361,12 @@ function parseShortSeasonSocialWeekPath(segments: string[]): {
   weekNumber: string;
   subTab: string | null;
 } | null {
-  // Old form: /:showId/s:season/social/w:week[/:platform]
+  // Canonical short form: /:showId/s:season/social/w:week[/:platform|/details]
   if (segments.length >= 4 && segments.length <= 5) {
     const [showSegment, seasonToken, socialSegment, weekToken, subTabSegment] = segments;
     if (showSegment && isSeasonToken(seasonToken ?? "") &&
         (socialSegment ?? "").trim().toLowerCase() === "social" &&
         isWeekToken(weekToken ?? "")) {
-      const subTab = resolveSocialWeekSubTab(subTabSegment);
-      if (segments.length === 5 && !subTab) return null;
-      return {
-        showSegment,
-        seasonNumber: (seasonToken ?? "").slice(1),
-        weekNumber: (weekToken ?? "").slice(1),
-        subTab,
-      };
-    }
-  }
-  // New canonical form: /:showId/social/s:season/w:week[/:platform]
-  if (segments.length >= 4 && segments.length <= 5) {
-    const [showSegment, socialSegment, seasonToken, weekToken, subTabSegment] = segments;
-    if (showSegment && (socialSegment ?? "").trim().toLowerCase() === "social" &&
-        isSeasonToken(seasonToken ?? "") && isWeekToken(weekToken ?? "")) {
       const subTab = resolveSocialWeekSubTab(subTabSegment);
       if (segments.length === 5 && !subTab) return null;
       return {
@@ -418,6 +403,16 @@ function parseLongSeasonSocialWeekPath(segments: string[]): {
     weekNumber: weekNumber ?? "",
     subTab,
   };
+}
+
+function buildCanonicalSeasonSocialWeekPath(input: {
+  showSegment: string;
+  seasonNumber: string;
+  weekNumber: string;
+  subTab: string | null;
+}): string {
+  const base = `/${encodeURIComponent(input.showSegment)}/s${input.seasonNumber}/social/w${input.weekNumber}`;
+  return input.subTab && input.subTab !== "details" ? `${base}/${input.subTab}` : `${base}/details`;
 }
 
 function isCanonicalShortAdminPath(pathname: string): boolean {
@@ -467,12 +462,7 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
 
   const longSeasonSocialWeekPath = parseLongSeasonSocialWeekPath(segments);
   if (longSeasonSocialWeekPath) {
-    const canonicalSubTab = longSeasonSocialWeekPath.subTab;
-    const weekBase = `/${encodeURIComponent(longSeasonSocialWeekPath.showSegment)}/social/s${longSeasonSocialWeekPath.seasonNumber}/w${longSeasonSocialWeekPath.weekNumber}`;
-    return appendSearch(
-      canonicalSubTab && canonicalSubTab !== "details" ? `${weekBase}/${canonicalSubTab}` : weekBase,
-      searchParams,
-    );
+    return appendSearch(buildCanonicalSeasonSocialWeekPath(longSeasonSocialWeekPath), searchParams);
   }
 
   if (normalizedFirst === "people" && secondSegment && segments.length === 2) {
@@ -532,10 +522,13 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
     showTail[3]?.toLowerCase() === "week" &&
     /^[0-9]{1,3}$/.test(showTail[4] ?? "")
   ) {
-    const canonicalSubTab = resolveSocialWeekSubTab(showTail[5]);
-    const weekBase = `/${encodedShowSegment}/social/s${showTail[1]}/w${showTail[4]}`;
     return appendSearch(
-      canonicalSubTab && canonicalSubTab !== "details" ? `${weekBase}/${canonicalSubTab}` : weekBase,
+      buildCanonicalSeasonSocialWeekPath({
+        showSegment,
+        seasonNumber: showTail[1] ?? "",
+        weekNumber: showTail[4] ?? "",
+        subTab: resolveSocialWeekSubTab(showTail[5]),
+      }),
       searchParams,
     );
   }

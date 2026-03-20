@@ -3,11 +3,13 @@
 
 /* Hosted fonts are loaded from /hosted-fonts.css — map CSS variables for Tailwind theme */
 :root {
+  /* ── Font Family Primitives ──────────────────────────────────────────── */
   --font-hamburg: "Hamburg Serial";
   --font-gloucester: "Gloucester";
   --font-plymouth-serial: "Plymouth Serial";
   --font-rude-slab: "Rude Slab Condensed";
   --font-goodall: "Goodall";
+
   /*
    * Runtime aliases used by inline style stacks in preview components.
    * Tailwind @theme tokens are not exposed as regular CSS custom properties,
@@ -18,31 +20,140 @@
   --font-display: "Gloucester", "Playfair Display", Georgia, "Times New Roman", serif;
   --font-body: "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
   --font-games: "Plymouth Serial", "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ── Semantic Color Tokens (shadcn-compatible) ───────────────────────── */
+  /* Surfaces */
+  --background: #ffffff;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+
+  /* Actions */
+  --primary: #111111;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #171717;
+  --accent: #0B57D0;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  /* States */
+  --muted: #f4f4f5;
+  --muted-foreground: #737373;
+  --success: #4A9E6F;
+  --success-foreground: #ffffff;
+  --warning: #F1991B;
+  --warning-foreground: #ffffff;
+
+  /* Borders & Focus */
+  --border: #E6E6E6;
+  --input: #E6E6E6;
+  --ring: #0B57D0;
+
+  /* ── Shape Tokens ────────────────────────────────────────────────────── */
+  --radius: 0.375rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-full: 9999px;
+
+  /* ── Elevation Tokens ────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  --shadow-side-menu: 3px 6px 20px rgba(0, 0, 0, 0.18);
+  --shadow-card: 0 2px 6px rgba(15, 23, 42, 0.04);
+
+  /* ── Layout Tokens ───────────────────────────────────────────────────── */
+  --side-menu-width: min(384px, 92vw);
+  --header-height: 56px;
+
+  /* ── Flashback Game Tokens ───────────────────────────────────────────── */
+  --fb-bg: #E8E0D0;
+  --fb-card: #FFFFFF;
+  --fb-card-shadow: rgba(0, 0, 0, 0.08);
+  --fb-card-drag-shadow: rgba(0, 0, 0, 0.18);
+  --fb-accent: #6B6BA0;
+  --fb-correct: #4A9E6F;
+  --fb-incorrect: #D4564A;
+  --fb-confirm-border: #D4A843;
+  --fb-timeline: #C4BCB0;
+  --fb-text: #3D3D3D;
+  --fb-text-muted: #8A8478;
+
+  /* ── Realitease Game Tokens ──────────────────────────────────────────── */
+  --rt-tile-size: 58px;
+  --rt-tile-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --rt-flip-duration: 620ms;
+  --rt-flip-easing: cubic-bezier(0.42, 0.17, 0.3, 1.02);
+  --rt-perspective: 900px;
 }
 
-/* Tailwind v4 theme tokens */
+/* Tailwind v4 theme tokens — expose CSS vars as Tailwind utilities */
 @theme {
-  /* Colors */
-  --color-background: #ffffff;
-  --color-foreground: #171717;
-  --color-accent: #0B57D0;
-  --color-ink: #111111;
-  --color-line: #E6E6E6;
+  /* ── Core Colors ─────────────────────────────────────────────────────── */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
 
-  /* Fonts (hosted fonts are provided by /hosted-fonts.css) */
+  /* ── Action Colors ───────────────────────────────────────────────────── */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  /* ── State Colors ────────────────────────────────────────────────────── */
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+
+  /* ── Border & Focus ──────────────────────────────────────────────────── */
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* ── Legacy Aliases (backward compat) ────────────────────────────────── */
+  --color-ink: var(--primary);
+  --color-line: var(--border);
+
+  /* ── Fonts (hosted fonts are provided by /hosted-fonts.css) ──────────── */
   --font-sans: var(--font-hamburg), var(--font-inter), var(--font-geist-sans);
   --font-serif: var(--font-gloucester), var(--font-playfair), var(--font-figma-serif), Georgia, "Times New Roman", serif;
   --font-display: var(--font-gloucester);
   --font-body: var(--font-hamburg);
   --font-games: var(--font-plymouth-serial), var(--font-hamburg), var(--font-inter), var(--font-geist-sans);
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ── Radius ──────────────────────────────────────────────────────────── */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
 }
 
-/* Base element styling */
+/* Base element styling — references semantic tokens */
 @layer base {
   html, body {
     min-height: 100%;
-    background-color: #ffffff;
-    color: #000000;
+    background-color: var(--background);
+    color: var(--foreground);
   }
 
   h1, h2, h3 {
@@ -55,7 +166,7 @@
   }
 
   a {
-    color: #0B57D0;
+    color: var(--accent);
     text-underline-offset: 2px;
   }
 }

@@ -1,10 +1,10 @@
-import { getDb } from "@/lib/firebase-db";
+import { requireDb } from "@/lib/firebase-db";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import type { SurveyXResponses, SurveyXState } from "@/lib/validation/user";
 
 export async function getSurveyXState(uid: string): Promise<SurveyXState | null> {
-  const ref = doc(getDb(), "users", uid);
+  const ref = doc(requireDb(), "users", uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
 
@@ -21,7 +21,7 @@ export async function getSurveyXState(uid: string): Promise<SurveyXState | null>
 
 export async function saveSurveyXResponses(user: User, responses: SurveyXResponses): Promise<void> {
   const uid = user.uid;
-  const ref = doc(getDb(), "users", uid);
+  const ref = doc(requireDb(), "users", uid);
   const existing = await getDoc(ref);
   const existingData = existing.exists() ? (existing.data() as { username?: string | null }) : null;
   const username = typeof existingData?.username === "string" ? existingData.username : null;

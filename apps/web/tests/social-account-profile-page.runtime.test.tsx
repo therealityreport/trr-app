@@ -130,7 +130,7 @@ describe("SocialAccountProfilePage", () => {
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Backfill History" })).toBeInTheDocument();
@@ -140,6 +140,381 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Catalog Posts")).toBeInTheDocument();
     expect(screen.getByText("Pending Review")).toBeInTheDocument();
     expect(screen.queryByText("Catalog Actions Unavailable In V1")).not.toBeInTheDocument();
+  });
+
+  it("shows cancel controls and discovery progress for an active catalog run", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-active-1",
+              status: "running",
+              created_at: "2026-03-18T11:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-active-1/progress")) {
+        return jsonResponse({
+          run_id: "run-active-1",
+          run_status: "running",
+          source_scope: "bravo",
+          created_at: "2026-03-18T11:00:00.000Z",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 1,
+              jobs_waiting: 0,
+              scraped_count: 420,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          worker_runtime: {
+            runner_strategy: "full_history_cursor_breakpoints",
+            runner_count: 4,
+            scheduler_lanes: ["A", "B", "C", "D"],
+          },
+          discovery: {
+            status: "queued",
+            partition_strategy: "cursor_breakpoints",
+            partition_count: 4,
+            discovered_count: 4,
+            queued_count: 4,
+            running_count: 0,
+            completed_count: 0,
+            failed_count: 0,
+            cancelled_count: 0,
+          },
+          post_progress: {
+            completed_posts: 420,
+            matched_posts: 420,
+            total_posts: 4500,
+          },
+          summary: {
+            total_jobs: 5,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 5,
+            items_found_total: 420,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText((content) => content.includes("420") && content.includes("posts checked")),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText((content) => content.includes("420") && content.includes("matched")),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("420 scraped")).not.toBeInTheDocument();
+  });
+
+  it("blocks duplicate backfill actions while the same profile already has an active run", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-active-2",
+              status: "retrying",
+              created_at: "2026-03-18T11:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-active-2/progress")) {
+        return jsonResponse({
+          run_id: "run-active-2",
+          run_status: "retrying",
+          source_scope: "bravo",
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          summary: {
+            total_jobs: 3,
+            completed_jobs: 1,
+            failed_jobs: 0,
+            active_jobs: 2,
+            items_found_total: 24,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill History" })).toBeDisabled();
+    });
+
+    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+    expect(screen.getByText(/Run run-acti is Retrying\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Start buttons unlock after it finishes or you cancel it\./i)).toBeInTheDocument();
+  });
+
+  it("shows restart backfill after a terminal catalog run", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-failed-1",
+              status: "failed",
+              created_at: "2026-03-18T11:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-failed-1/progress")) {
+        return jsonResponse({
+          run_id: "run-failed-1",
+          run_status: "failed",
+          source_scope: "bravo",
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 1,
+            active_jobs: 0,
+            items_found_total: 0,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill History" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Restart Backfill" })).not.toBeInTheDocument();
+    expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
+  });
+
+  it("falls back to the account total when inspecting a terminal run with no catalog denominator", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 16453,
+          catalog_total_posts: 4049,
+          catalog_recent_runs: [
+            {
+              run_id: "run-discovery-only",
+              status: "failed",
+              created_at: "2026-03-18T18:04:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-discovery-only/progress")) {
+        return jsonResponse({
+          run_id: "run-discovery-only",
+          run_status: "failed",
+          source_scope: "bravo",
+          created_at: "2026-03-18T18:04:00.000Z",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          discovery: {
+            status: "completed",
+            partition_strategy: "cursor_breakpoints",
+            partition_count: 0,
+            discovered_count: 0,
+            queued_count: 0,
+            running_count: 0,
+            completed_count: 0,
+            failed_count: 0,
+            cancelled_count: 0,
+          },
+          post_progress: {
+            completed_posts: 0,
+            matched_posts: 0,
+            total_posts: null,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 1,
+            failed_jobs: 0,
+            active_jobs: 0,
+            items_found_total: 0,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("0%")).toBeInTheDocument();
+      expect(screen.getByText("0 / 16,453 posts checked")).toBeInTheDocument();
+    });
+  });
+
+  it("uses the newest inspected catalog run from the summary when discovery outranks an older failed posts run", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-discovery-new",
+              status: "failed",
+              created_at: "2026-03-18T12:00:00.000Z",
+            },
+            {
+              run_id: "run-posts-old",
+              status: "failed",
+              created_at: "2026-03-18T08:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-discovery-new/progress")) {
+        return jsonResponse({
+          run_id: "run-discovery-new",
+          run_status: "failed",
+          source_scope: "bravo",
+          created_at: "2026-03-18T12:00:00.000Z",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 1,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 1,
+            active_jobs: 0,
+            items_found_total: 0,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "View Details" }).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "View Details" })[0]);
+
+    await waitFor(() => {
+      expect(
+        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+          String(input).includes("/catalog/runs/run-discovery-new/progress"),
+        ),
+      ).toBe(true);
+    });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/catalog/runs/run-posts-old/progress"),
+      ),
+    ).toBe(false);
+  });
+
+  it("dismisses a failed recent run and returns the page to the ready state", async () => {
+    let dismissed = false;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: dismissed
+            ? []
+            : [
+                {
+                  run_id: "run-failed-dismiss",
+                  status: "failed",
+                  created_at: "2026-03-19T22:00:00.000Z",
+                },
+              ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-failed-dismiss/dismiss")) {
+        expect(init?.method).toBe("POST");
+        dismissed = true;
+        return jsonResponse({
+          run_id: "run-failed-dismiss",
+          status: "failed",
+          dismissed: true,
+          dismissed_at: "2026-03-19T23:00:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Dismissed run run-fail.")).toBeInTheDocument();
   });
 
   it("hides catalog actions for unsupported platforms", async () => {

@@ -1,15 +1,15 @@
 # Getty/NBCUMV person-gallery bucket normalization
 
-Last updated: 2026-03-16
+Last updated: 2026-03-20
 
 ## Handoff Snapshot
 ```yaml
 handoff:
   include: true
   state: active
-  last_updated: 2026-03-16
-  current_phase: "Lisa Barlow gallery tabs now render from photo-backed buckets with short show labels and filtered event inventory"
-  next_action: "Monitor a few more person galleries for legacy zero-count event rows and decide whether a data backfill is worth doing"
+  last_updated: 2026-03-20
+  current_phase: "Lisa Barlow gallery tab normalization is in place, with only occasional live-gallery checks left for regressions in show chips or event counts"
+  next_action: "Recheck another affected person gallery only if a live admin session shows duplicate show chips or zero-count event rows again; otherwise archive this handoff during the next cleanup pass"
   detail: self
 ```
 

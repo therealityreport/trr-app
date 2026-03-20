@@ -86,7 +86,7 @@ interface SubscribeParams {
 }
 
 export class RealiteaseManager {
-  private static instance: RealiteaseManager;
+  private static instance: RealiteaseManager | null = null;
   private static talentCache: RealiteaseTalentRecord[] | null = null;
   private static talentCachePromise: Promise<RealiteaseTalentRecord[]> | null = null;
   private static talentCacheMap: Map<string, RealiteaseTalentRecord> | null = null;
@@ -95,11 +95,25 @@ export class RealiteaseManager {
 
   private constructor(private readonly firestore: Firestore) {}
 
-  static getInstance(): RealiteaseManager {
-    if (!RealiteaseManager.instance) {
-      RealiteaseManager.instance = new RealiteaseManager(getDb());
+  static getOptionalInstance(): RealiteaseManager | null {
+    const db = getDb();
+    if (!db) {
+      return null;
     }
+
+    if (!RealiteaseManager.instance) {
+      RealiteaseManager.instance = new RealiteaseManager(db);
+    }
+
     return RealiteaseManager.instance;
+  }
+
+  static getInstance(): RealiteaseManager {
+    const instance = RealiteaseManager.getOptionalInstance();
+    if (!instance) {
+      throw new Error("Firestore is not available — Realitease requires Firebase Firestore.");
+    }
+    return instance;
   }
 
   async startGame({ uid, gameDate = getRealiteaseDateKey() }: StartGameParams): Promise<RealiteaseGameSnapshot> {
@@ -2553,5 +2567,5 @@ export class RealiteaseManager {
 }
 
 export function useRealiteaseManager() {
-  return RealiteaseManager.getInstance();
+  return RealiteaseManager.getOptionalInstance();
 }

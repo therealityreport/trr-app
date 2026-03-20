@@ -12,6 +12,9 @@ import { User } from "firebase/auth";
 import GameHeader from "@/components/GameHeader";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
+const REALITEASE_UNAVAILABLE_MESSAGE =
+  "Realitease is temporarily unavailable because Firebase Firestore is not configured in this environment.";
+
 function RealiteaseIcon() {
   return (
     <Image
@@ -39,6 +42,9 @@ export default function RealiteaseCover() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const userId = user?.uid ?? null;
   const ctaLabel = useMemo(() => {
+    if (!manager) {
+      return "Unavailable";
+    }
     switch (cta) {
       case "stats":
         return "See Stats";
@@ -49,8 +55,9 @@ export default function RealiteaseCover() {
       default:
         return "Loading...";
     }
-  }, [cta]);
-  const isCtaDisabled = isBootstrapping || cta === "loading";
+  }, [cta, manager]);
+  const isCtaDisabled = !manager || isBootstrapping || cta === "loading";
+  const displayMessage = errorMessage ?? (!manager ? REALITEASE_UNAVAILABLE_MESSAGE : null);
   const dailyClue = useMemo(() => {
     const clue = gameSnapshot?.answerKey?.clue;
     if (clue && clue.trim().length > 0) return clue.trim();
@@ -67,7 +74,8 @@ export default function RealiteaseCover() {
   }, []);
 
   useEffect(() => {
-    if (!userId) return;
+    const activeManager = manager;
+    if (!activeManager || !userId) return;
 
     let isActive = true;
     setIsBootstrapping(true);
@@ -80,12 +88,12 @@ export default function RealiteaseCover() {
           puzzleDateKey,
         });
 
-        const initial = await manager.startGame({ uid: userId, gameDate: puzzleDateKey });
+        const initial = await activeManager.startGame({ uid: userId, gameDate: puzzleDateKey });
         if (!isActive) return;
         setGameSnapshot(initial);
         setCta(resolveCta(initial));
 
-        const refreshed = await manager.updateGameStatus({ uid: userId, gameDate: puzzleDateKey });
+        const refreshed = await activeManager.updateGameStatus({ uid: userId, gameDate: puzzleDateKey });
         if (!isActive) return;
         if (refreshed) {
           setGameSnapshot(refreshed);
@@ -112,10 +120,16 @@ export default function RealiteaseCover() {
   }, [manager, puzzleDateKey, resolveCta, userId]);
 
   useEffect(() => {
+    const activeManager = manager;
+    if (!activeManager) {
+      setPuzzleNumber(null);
+      return;
+    }
+
     let isMounted = true;
     (async () => {
       try {
-        const displayNumber = await manager.getPuzzleNumber(puzzleDateKey);
+        const displayNumber = await activeManager.getPuzzleNumber(puzzleDateKey);
         if (isMounted) {
           setPuzzleNumber(displayNumber);
         }
@@ -160,6 +174,11 @@ export default function RealiteaseCover() {
   }, []);
 
   const handlePrimaryCta = async () => {
+    if (!manager) {
+      setErrorMessage(REALITEASE_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
     if (!userId) {
       AuthDebugger.log("Realitease Cover: No user logged in, redirecting to register");
       router.push("/auth/register");
@@ -248,8 +267,8 @@ export default function RealiteaseCover() {
               {ctaLabel}
             </button>
 
-            {errorMessage ? (
-              <p className="text-sm text-white/90">{errorMessage}</p>
+            {displayMessage ? (
+              <p className="text-sm text-white/90">{displayMessage}</p>
             ) : dailyClue ? (
               <div className="mx-auto w-full max-w-[380px] rounded-2xl border border-white/20 bg-white/20 px-4 py-3 text-sm text-white shadow-sm backdrop-blur">
                 <p className="font-semibold uppercase tracking-wide text-white/90">Daily Clue</p>

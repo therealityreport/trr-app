@@ -7,6 +7,7 @@ import type { Route } from "next";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { buildPersonRouteSlug } from "@/lib/admin/show-admin-routes";
 import CastSocialBladeComparison from "@/components/admin/cast-socialblade-comparison";
+import type { CastComparisonWindow } from "@/lib/admin/cast-socialblade-charting";
 
 // ============================================================================
 // Types
@@ -30,6 +31,7 @@ interface CastContentSectionProps {
   showId: string;
   showSlug: string;
   seasonNumber: number;
+  comparisonWindow: CastComparisonWindow | null;
 }
 
 type SubView = "profiles" | "socialblade";
@@ -83,7 +85,12 @@ function getSocialHandles(member: CastMemberWithSocial): { platform: string; han
 // Component
 // ============================================================================
 
-export default function CastContentSection({ showId, showSlug, seasonNumber }: CastContentSectionProps) {
+export default function CastContentSection({
+  showId,
+  showSlug,
+  seasonNumber,
+  comparisonWindow,
+}: CastContentSectionProps) {
   const [castMembers, setCastMembers] = useState<CastMemberWithSocial[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -305,7 +312,11 @@ export default function CastContentSection({ showId, showSlug, seasonNumber }: C
           })}
         </div>
       ) : (
-        <CastSocialBladeComparison castMembers={castMembers} />
+        <CastSocialBladeComparison
+          castMembers={castMembers}
+          seasonNumber={seasonNumber}
+          comparisonWindow={comparisonWindow}
+        />
       )}
     </div>
   );

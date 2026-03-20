@@ -88,7 +88,7 @@ export async function getRecentPeopleViews(
   } catch (error) {
     if (isMissingRecentPeopleViewsTableError(error)) {
       console.warn(
-        `[recent-people] ${TABLE} is missing; returning empty recent-views list until migrations are applied`,
+        `[recent-people] ${TABLE} is missing; GET /api/admin/recent-people and the admin people-home recent-view section will return empty results until migrations are applied`,
       );
       return [];
     }
@@ -154,7 +154,7 @@ export async function recordRecentPersonView(
   } catch (error) {
     if (isMissingRecentPeopleViewsTableError(error)) {
       console.warn(
-        `[recent-people] ${TABLE} is missing; skipping recent-view write until migrations are applied`,
+        `[recent-people] ${TABLE} is missing; POST /api/admin/recent-people recent-view writes are skipped until migrations are applied`,
       );
       return;
     }

@@ -21,6 +21,9 @@
     "web:build": "pnpm -C apps/web run build",
     "web:start": "pnpm -C apps/web run start",
     "web:clean": "pnpm -C apps/web run clean",
+    "web:vercel:version": "cd apps/web && ../../scripts/vercel.sh --version",
+    "web:vercel:build": "cd apps/web && ../../scripts/vercel.sh build",
+    "web:vercel:deploy": "cd apps/web && ../../scripts/vercel.sh deploy",
     "wordle:dev": "pnpm -C apps/vue-wordle run dev",
     "wordle:build": "pnpm -C apps/vue-wordle run build",
     "wordle:preview": "pnpm -C apps/vue-wordle run preview"

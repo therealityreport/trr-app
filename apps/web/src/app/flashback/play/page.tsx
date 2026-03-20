@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DndContext, PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
 import type { User } from "firebase/auth";
 
 import { auth } from "@/lib/firebase";
 import { useFlashbackManager } from "@/lib/flashback/manager";
-import type { GamePhase, RoundResult } from "@/lib/flashback/manager";
+import type { RoundResult } from "@/lib/flashback/manager";
 import GameHeader from "@/components/GameHeader";
 
 import ClueCard from "./clue-card";
@@ -112,6 +112,7 @@ export default function FlashbackPlay() {
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [tapMode, setTapMode] = useState(false);
 
   const userId = user?.uid ?? null;
 
@@ -176,7 +177,7 @@ export default function FlashbackPlay() {
   // -------------------------------------------------------------------------
   // DnD handlers
   // -------------------------------------------------------------------------
-  const handleDragStart = useCallback((_event: DragStartEvent) => {
+  const handleDragStart = useCallback(() => {
     setIsDragging(true);
   }, []);
 
@@ -201,6 +202,20 @@ export default function FlashbackPlay() {
   const handleDragCancel = useCallback(() => {
     setIsDragging(false);
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Tap-to-place handler (accessibility alternative to drag)
+  // -------------------------------------------------------------------------
+  const handleTapPosition = useCallback(
+    (position: number) => {
+      if (manager.phase === "playing") {
+        manager.placeCard(position);
+      } else if (manager.phase === "confirming") {
+        manager.repositionCard(position);
+      }
+    },
+    [manager],
+  );
 
   // -------------------------------------------------------------------------
   // Confirm placement handler (tap overlay)
@@ -357,16 +372,28 @@ export default function FlashbackPlay() {
               roundResults={manager.roundResults}
             />
 
-            {/* Current clue card (draggable) */}
+            {/* Mode toggle */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setTapMode((v) => !v)}
+                className="text-xs font-medium underline underline-offset-2 transition hover:opacity-70"
+                style={{ color: "var(--fb-text-muted)" }}
+              >
+                {tapMode ? "Switch to drag mode" : "Switch to tap mode"}
+              </button>
+            </div>
+
+            {/* Current clue card */}
             {manager.currentCard && !isConfirming && !isRevealing && (
               <div>
                 <p
                   className="mb-2 text-center text-xs font-semibold uppercase tracking-wider"
                   style={{ color: "var(--fb-text-muted)" }}
                 >
-                  Drag to place on timeline
+                  {tapMode ? "Tap a slot on the timeline below" : "Drag to place on timeline"}
                 </p>
-                <ClueCard event={manager.currentCard} isDraggable={true} />
+                <ClueCard event={manager.currentCard} isDraggable={!tapMode} />
               </div>
             )}
 
@@ -391,7 +418,21 @@ export default function FlashbackPlay() {
               pendingPosition={manager.pendingPosition}
               isDragging={isDragging}
               onConfirmTap={handleConfirm}
+              tapMode={tapMode && (manager.phase === "playing" || manager.phase === "confirming")}
+              onTapPosition={handleTapPosition}
             />
+
+            {/* Confirm button in tap mode */}
+            {tapMode && isConfirming && (
+              <button
+                type="button"
+                onClick={handleConfirm}
+                className="w-full rounded-full py-3 text-center text-sm font-semibold text-white transition hover:opacity-90 active:scale-[0.98]"
+                style={{ backgroundColor: "var(--fb-accent)" }}
+              >
+                Confirm Placement
+              </button>
+            )}
           </div>
         </main>
       </div>

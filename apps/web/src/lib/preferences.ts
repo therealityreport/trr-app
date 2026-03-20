@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/firebase-db";
+import { requireDb } from "@/lib/firebase-db";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export type RealiteasePrefs = {
@@ -19,13 +19,13 @@ const COLLECTION = "user_preferences";
 
 export async function getUserPreferences(uid: string): Promise<UserPreferences> {
   if (!uid) return {};
-  const ref = doc(getDb(), COLLECTION, uid);
+  const ref = doc(requireDb(), COLLECTION, uid);
   const snap = await getDoc(ref);
   return (snap.exists() ? (snap.data() as UserPreferences) : {}) ?? {};
 }
 
 export async function updateUserPreferences(uid: string, patch: Partial<UserPreferences>): Promise<void> {
   if (!uid) return;
-  const ref = doc(getDb(), COLLECTION, uid);
+  const ref = doc(requireDb(), COLLECTION, uid);
   await setDoc(ref, patch, { merge: true });
 }

@@ -15,7 +15,11 @@ import type {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(): any {
-  return createClient();
+  const client = createClient();
+  if (!client) {
+    throw new Error("Supabase is not configured. Games require NEXT_PUBLIC_SUPABASE_URL.");
+  }
+  return client;
 }
 
 // ---------------------------------------------------------------------------

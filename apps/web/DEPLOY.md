@@ -10,6 +10,11 @@ Build
 - Node support: 24.x (primary) and 22.x (compatibility lane)
 - Local default: Node 24 (`TRR-APP/.nvmrc`)
 - Deploy recommendation: Node 24.x
+- Local Vercel CLI: use the repo wrapper instead of a global install:
+  - `pnpm --dir ../.. run web:vercel:version`
+  - `pnpm --dir ../.. run web:vercel:build`
+  - `pnpm --dir ../.. run web:vercel:deploy`
+- Why: older global Vercel CLIs can reject `engines.node: "24.x"` even though current Vercel project settings and platform docs support Node 24.
 
 Environment Variables (Preview + Production)
 - `NEXT_PUBLIC_FIREBASE_API_KEY`
