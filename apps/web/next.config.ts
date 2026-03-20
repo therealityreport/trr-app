@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
@@ -23,11 +24,25 @@ const firebaseInternals = [
   "@firebase/util",
   "@firebase/logger",
 ] as const;
-const firebaseAliases = Object.fromEntries(
-  firebaseInternals.map((pkg) => [
-    pkg,
+const resolveExistingFirebaseAliasPath = (pkg: string): string | null => {
+  for (const candidate of [
     path.resolve(APP_ROOT, "node_modules", pkg),
-  ]),
+    path.resolve(REPO_ROOT, "node_modules", pkg),
+  ]) {
+    if (fs.existsSync(candidate)) {
+      if (pkg === "@firebase/firestore") {
+        return path.resolve(candidate, "dist", "index.esm.js");
+      }
+      return candidate;
+    }
+  }
+  return null;
+};
+const firebaseAliases = Object.fromEntries(
+  firebaseInternals.flatMap((pkg) => {
+    const aliasPath = resolveExistingFirebaseAliasPath(pkg);
+    return aliasPath ? [[pkg, aliasPath]] : [];
+  }),
 );
 
 const nextConfig: NextConfig = {
