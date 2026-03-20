@@ -11,10 +11,12 @@ Build
 - Local default: Node 24 (`TRR-APP/.nvmrc`)
 - Deploy recommendation: Node 24.x
 - Local Vercel CLI: use the repo wrapper instead of a global install:
-  - `pnpm --dir ../.. run web:vercel:version`
-  - `pnpm --dir ../.. run web:vercel:build`
-  - `pnpm --dir ../.. run web:vercel:deploy`
-- Why: older global Vercel CLIs can reject `engines.node: "24.x"` even though current Vercel project settings and platform docs support Node 24.
+  - `pnpm run web:vercel:version`
+  - `pnpm run web:vercel:build`
+  - `pnpm run web:vercel:deploy`
+- Run those commands from `TRR-APP/`, not `apps/web/`.
+- Why: the linked production project is the repo-root `trr-app` Vercel project, which is configured with `apps/web` as its Vercel Root Directory. Deploying from `apps/web` can accidentally target the separate local `web` project link, which builds from `.` and fails against the repo-root `package.json`.
+- Older global Vercel CLIs can also reject `engines.node: "24.x"` even though current Vercel project settings and platform docs support Node 24.
 
 Environment Variables (Preview + Production)
 - `NEXT_PUBLIC_FIREBASE_API_KEY`
