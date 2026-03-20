@@ -78,6 +78,17 @@ describe("show-admin-routes", () => {
 
     expect(
       buildShowAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        tab: "social",
+        socialView: "cast-content",
+        socialRoute: {
+          seasonNumber: 6,
+        },
+      }),
+    ).toBe("/the-real-housewives-of-salt-lake-city/social/s6/cast-comparison");
+
+    expect(
+      buildShowAdminUrl({
         showSlug: "rhoslc",
         tab: "social",
         socialView: "reddit",
@@ -379,7 +390,9 @@ describe("show-admin-routes", () => {
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/official/reddit")).toBe("reddit");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/bravo")).toBe("bravo");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/tiktok-overview")).toBe("tiktok-overview");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/social/s6/cast-comparison")).toBe("cast-content");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/social/reddit")).toBe("reddit");
+    expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/social/cast-comparison")).toBe("cast-content");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/social/official/reddit")).toBe("reddit");
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/e1/social/twitter")).toBeNull();
     expect(parseSocialAnalyticsViewFromPath("/rhoslc/s6/cast")).toBeNull();
@@ -409,6 +422,12 @@ describe("show-admin-routes", () => {
       platform: "instagram",
       handle: "bravotv",
       canonicalPathSuffix: "/social/s6/instagram/account/bravotv",
+    });
+
+    expect(parseShowSocialPathFilters("/rhoslc/social/s6/cast-comparison")).toMatchObject({
+      view: "cast-content",
+      seasonNumber: 6,
+      canonicalPathSuffix: "/social/s6/cast-comparison",
     });
 
     expect(parseShowSocialPathFilters("/rhoslc/social/official/instagram/account/BravoTV")).toMatchObject({

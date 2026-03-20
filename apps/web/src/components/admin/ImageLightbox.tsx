@@ -246,27 +246,6 @@ const resolveTopCandidateName = (
   return null;
 };
 
-const copyTextToClipboard = async (value: string): Promise<boolean> => {
-  if (!value) return false;
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return true;
-  }
-
-  if (typeof document === "undefined") return false;
-  const textArea = document.createElement("textarea");
-  textArea.value = value;
-  textArea.style.position = "fixed";
-  textArea.style.left = "-9999px";
-  textArea.style.opacity = "0";
-  document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
-  const didCopy = document.execCommand("copy");
-  document.body.removeChild(textArea);
-  return didCopy;
-};
-
 export type ImageType = "cast" | "episode" | "season";
 
 interface ImageManagementProps {
@@ -674,6 +653,7 @@ function MetadataPanel({
   const titleImdbUrl =
     metadata.imdbTitleUrl ??
     (titleImdbId ? `https://www.imdb.com/title/${titleImdbId}/` : null);
+  const titleLabel = metadata.episodeTitle ?? titleImdbId ?? metadata.assetName ?? "—";
   const faceFilteringSummary = (() => {
     const raw = metadata.faceCountRaw;
     const filtered = metadata.faceCountFiltered;
@@ -696,17 +676,13 @@ function MetadataPanel({
   })();
   const metadataCoverageRows: Array<{ label: string; value: ReactNode }> = [
     { label: "Source", value: metadata.source || "—" },
+    { label: "Source Variant", value: metadata.sourceVariant ?? "—" },
     { label: "Name", value: metadata.assetName ?? "—" },
-    { label: "Title Type", value: metadata.imdbCreditMediaType ?? metadata.imdbCreditType ?? "—" },
     {
-      label: "Media Type",
+      label: "Asset Media Type",
       value:
         metadata.mediaTypeLabel ??
         (metadata.imdbType ? metadata.imdbType.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "—"),
-    },
-    {
-      label: "Event Name",
-      value: metadata.eventName ?? "—",
     },
     {
       label: "Event Count",
@@ -716,7 +692,6 @@ function MetadataPanel({
           : "—",
     },
     { label: "Section", value: metadata.sectionLabel ?? "—" },
-    { label: "Show", value: metadata.showName ?? "—" },
     { label: "Episode", value: metadata.episodeLabel ?? "—" },
     { label: "Season", value: metadata.season ? `Season ${metadata.season}` : "—" },
     { label: "Photographer", value: metadata.photographer ?? "—" },
@@ -915,6 +890,21 @@ function MetadataPanel({
     ? disabledReasons.featuredLogo ??
       "Featured logo selection is unavailable for this image."
     : disabledReasons.featuredLogo ?? null;
+  const showFeaturedPosterAction =
+    currentContentType === "POSTER" ||
+    Boolean(management?.isFeaturedPoster) ||
+    canSetFeaturedPoster ||
+    Boolean(disabledReasons.featuredPoster);
+  const showFeaturedBackdropAction =
+    currentContentType === "BACKDROP" ||
+    Boolean(management?.isFeaturedBackdrop) ||
+    canSetFeaturedBackdrop ||
+    Boolean(disabledReasons.featuredBackdrop);
+  const showFeaturedLogoAction =
+    currentContentType === "LOGO" ||
+    Boolean(management?.isFeaturedLogo) ||
+    canSetFeaturedLogo ||
+    Boolean(disabledReasons.featuredLogo);
   const editDisabledReason = !canEditTools
     ? disabledReasons.edit ?? "Edit tools are unavailable for this image."
     : disabledReasons.edit ?? null;
@@ -976,7 +966,7 @@ function MetadataPanel({
                   ? "Unstar/Unflag"
                   : "Star/Flag"}
           </button>
-          {currentContentType === "POSTER" && (
+          {showFeaturedPosterAction && (
             <button
               type="button"
               onClick={() =>
@@ -996,7 +986,7 @@ function MetadataPanel({
                   : "Set as Featured Poster"}
             </button>
           )}
-          {currentContentType === "BACKDROP" && (
+          {showFeaturedBackdropAction && (
             <button
               type="button"
               onClick={() =>
@@ -1016,7 +1006,7 @@ function MetadataPanel({
                   : "Set as Featured Backdrop"}
             </button>
           )}
-          {currentContentType === "LOGO" && (
+          {showFeaturedLogoAction && (
             <button
               type="button"
               onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
@@ -1101,23 +1091,68 @@ function MetadataPanel({
         </div>
       </div>
 
+      <div className="mb-4">
+        <span className="tracking-widest text-[10px] uppercase text-white/50">
+          Original URL
+        </span>
+        {originalSourceFileUrl ? (
+          <a
+            href={originalSourceFileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 block break-all text-sm text-sky-300 underline decoration-sky-400/60 underline-offset-2 hover:text-sky-200"
+          >
+            {originalSourceFileUrl}
+          </a>
+        ) : (
+          <p className="mt-1 text-sm text-white/90">Original source file URL unavailable</p>
+        )}
+      </div>
+
+      <div className="mb-4">
+        <span className="tracking-widest text-[10px] uppercase text-white/50">
+          Found on
+        </span>
+        {originalSourcePageUrl &&
+        (((metadata.originalSourceLabel ?? "").trim().toUpperCase() === "GETTY") ||
+          /gettyimages\.com/i.test(originalSourcePageUrl)) ? (
+          <p className="mt-1 text-sm text-white/90">
+            {`${formatFoundOnSourceLabel(metadata.source, originalSourcePageUrl ?? originalSourceFileUrl)} | `}
+            <a
+              href={originalSourcePageUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sky-300 underline decoration-sky-400/60 underline-offset-2 hover:text-sky-200"
+            >
+              {sourcePageLabel ?? "Unknown Page"}
+            </a>
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-white/90">
+            {`${formatFoundOnSourceLabel(metadata.source, originalSourcePageUrl ?? originalSourceFileUrl)} | ${
+              sourcePageLabel ?? "Unknown Page"
+            }`}
+          </p>
+        )}
+      </div>
+
       {/* Title — hyperlinked to IMDb title when available */}
         <div className="mb-4">
           <span className="tracking-widest text-[10px] uppercase text-white/50">
             Title
           </span>
-          {metadata.episodeTitle && titleImdbUrl ? (
+          {titleImdbUrl && titleLabel !== "—" ? (
             <a
               href={titleImdbUrl}
               target="_blank"
               rel="noreferrer"
               className="mt-1 block text-sm text-sky-300 underline decoration-sky-400/60 underline-offset-2 hover:text-sky-200 break-all"
             >
-              {metadata.episodeTitle}
+              {titleLabel}
             </a>
           ) : (
             <p className="mt-1 text-sm text-white/90 break-all">
-              {metadata.episodeTitle ?? metadata.assetName ?? "—"}
+              {titleLabel}
             </p>
           )}
         </div>
@@ -1126,7 +1161,7 @@ function MetadataPanel({
         {(metadata.imdbCreditMediaType || metadata.imdbCreditType) && (
           <div className="mb-4">
             <span className="tracking-widest text-[10px] uppercase text-white/50">
-              Title Type
+              Credit Media Type
             </span>
             <p className="mt-1 text-sm text-white/90">
               {metadata.imdbCreditMediaType ?? metadata.imdbCreditType}
@@ -1636,7 +1671,7 @@ function MetadataPanel({
                   ? "Unstar/Unflag"
                   : "Star/Flag"}
             </button>
-            {currentContentType === "POSTER" && (
+            {showFeaturedPosterAction && (
               <button
                 onClick={() =>
                   handleAction(
@@ -1655,7 +1690,7 @@ function MetadataPanel({
                     : "Set as Featured Poster"}
               </button>
             )}
-            {currentContentType === "BACKDROP" && (
+            {showFeaturedBackdropAction && (
               <button
                 onClick={() =>
                   handleAction(
@@ -1674,7 +1709,7 @@ function MetadataPanel({
                     : "Set as Featured Backdrop"}
               </button>
             )}
-            {currentContentType === "LOGO" && (
+            {showFeaturedLogoAction && (
               <button
                 onClick={() => handleAction("featuredLogo", management.onSetFeaturedLogo)}
                 disabled={
@@ -1708,7 +1743,7 @@ function MetadataPanel({
                   disabled={actionLoading !== null}
                   className="w-full rounded bg-amber-500/20 px-3 py-2 text-left text-sm text-amber-300 hover:bg-amber-500/30 disabled:opacity-50"
                 >
-                  {showReplaceGetty ? "Cancel Replace" : "Replace Getty"}
+                  {showReplaceGetty ? "Cancel Watermark Removal" : "Remove Watermarks"}
                 </button>
                 {showReplaceGetty && (
                   <ReplaceGettyDrawer

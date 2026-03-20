@@ -179,6 +179,10 @@ const SOCIAL_ANALYTICS_VIEW_SLUG_ALIASES: Record<string, SocialAnalyticsViewSlug
   hashtag: "hashtags",
   sentiment: "sentiment",
   advanced: "advanced",
+  "cast-content": "cast-content",
+  castcontent: "cast-content",
+  "cast-comparison": "cast-content",
+  castcomparison: "cast-content",
   "tiktok-overview": "tiktok-overview",
   "tiktok_overview": "tiktok-overview",
   tiktokoverview: "tiktok-overview",
@@ -206,6 +210,15 @@ const normalizeCanonicalSocialViewSlug = (
   if (!normalized) return null;
   if (normalized === "bravo") return "official";
   return normalized;
+};
+
+const toCanonicalSocialViewPathSegment = (
+  value: Exclude<SocialAnalyticsViewSlug, "bravo">,
+): string => {
+  if (value === "cast-content") {
+    return "cast-comparison";
+  }
+  return value;
 };
 
 const UUID_RE =
@@ -444,8 +457,13 @@ const buildCanonicalPersonQuery = (
 export function parseSocialAnalyticsViewFromPath(pathname: string): SocialAnalyticsViewSlug | null {
   const showSegments = getShowBaseSegments(pathname);
   if (showSegments && normalizeSegment(showSegments[0]) === "social") {
-    if (parseTokenNumber(showSegments[1] ?? "", "s") != null) {
-      return "official";
+    const seasonToken = parseTokenNumber(showSegments[1] ?? "", "s");
+    if (seasonToken != null) {
+      const seasonView = normalizeSocialAnalyticsViewSlug(showSegments[2]);
+      if ((seasonView === "official" || seasonView === "bravo") && normalizeSegment(showSegments[3]) === "reddit") {
+        return "reddit";
+      }
+      return seasonView ?? "official";
     }
     const first = normalizeSocialAnalyticsViewSlug(showSegments[1]);
     if ((first === "official" || first === "bravo") && normalizeSegment(showSegments[2]) === "reddit") {
@@ -519,25 +537,34 @@ const parseSocialPathFilters = (
   socialSegments: string[] | null | undefined,
 ): ParsedSocialPathFilters | null => {
   if (!socialSegments || normalizeSegment(socialSegments[0]) !== "social") return null;
-  const maybeView = normalizeCanonicalSocialViewSlug(socialSegments[1]);
+  const parsedSeason = parseTokenNumber(socialSegments[1] ?? "", "s");
+  const maybeView =
+    parsedSeason != null
+      ? normalizeCanonicalSocialViewSlug(socialSegments[2])
+      : normalizeCanonicalSocialViewSlug(socialSegments[1]);
   let canonicalView = maybeView ?? "official";
-  const remaining = socialSegments.slice(maybeView ? 2 : 1);
+  const remaining =
+    parsedSeason != null
+      ? socialSegments.slice(maybeView ? 3 : 2)
+      : socialSegments.slice(maybeView ? 2 : 1);
   if (canonicalView === "official" && normalizeSegment(remaining[0]) === "reddit") {
     canonicalView = "reddit";
     remaining.shift();
   }
   let cursor = 0;
-  let seasonNumber: number | null = null;
+  let seasonNumber: number | null = parsedSeason;
   let weekToken: string | null = null;
   let weekIndex: number | null = null;
   let platform: SocialPlatformSlug | null = null;
   let handle: string | null = null;
 
   if (canonicalView === "official") {
-    const parsedSeason = parseTokenNumber(remaining[cursor] ?? "", "s");
-    if (parsedSeason != null) {
-      seasonNumber = parsedSeason;
-      cursor += 1;
+    if (parsedSeason == null) {
+      const nestedSeason = parseTokenNumber(remaining[cursor] ?? "", "s");
+      if (nestedSeason != null) {
+        seasonNumber = nestedSeason;
+        cursor += 1;
+      }
     }
 
     const first = remaining[cursor];
@@ -570,10 +597,15 @@ const parseSocialPathFilters = (
   }
 
   const canonicalSegments = ["social"];
-  if (canonicalView === "official") {
+  if (seasonNumber != null) {
+    canonicalSegments.push(`s${seasonNumber}`);
+    if (canonicalView !== "official") {
+      canonicalSegments.push(toCanonicalSocialViewPathSegment(canonicalView));
+    }
+  } else if (canonicalView === "official") {
     if (seasonNumber != null) canonicalSegments.push(`s${seasonNumber}`);
   } else {
-    canonicalSegments.push(canonicalView);
+    canonicalSegments.push(toCanonicalSocialViewPathSegment(canonicalView));
   }
   if (weekToken) canonicalSegments.push(weekToken);
   if (platform) canonicalSegments.push(platform);
@@ -857,9 +889,15 @@ export function buildShowAdminUrl(input: {
     const weekToken = toCanonicalWeekToken(input.socialRoute?.weekIndex);
     const platform = toSocialPlatform(input.socialRoute?.platform);
     const segments =
-      socialView === "official"
-        ? [`${base}/social${season ? `/s${season}` : ""}`]
-        : [`${base}/social/${socialView}`];
+      season != null
+        ? [
+            socialView === "official"
+              ? `${base}/social/s${season}`
+              : `${base}/social/s${season}/${toCanonicalSocialViewPathSegment(socialView)}`,
+          ]
+        : socialView === "official"
+          ? [`${base}/social`]
+          : [`${base}/social/${toCanonicalSocialViewPathSegment(socialView)}`];
     if (weekToken) segments.push(weekToken);
     if (platform) segments.push(platform);
     return appendQuery(segments.join("/"), nextQuery);
@@ -940,7 +978,10 @@ export function buildSeasonAdminUrl(input: {
     }
     const weekToken = toCanonicalWeekToken(input.socialRoute?.weekIndex);
     const platform = toSocialPlatform(input.socialRoute?.platform);
-    const segments = socialView === "official" ? [`${base}/social`] : [`${base}/social/${socialView}`];
+    const segments =
+      socialView === "official"
+        ? [`${base}/social`]
+        : [`${base}/social/${toCanonicalSocialViewPathSegment(socialView)}`];
     if (weekToken) segments.push(weekToken);
     if (platform) segments.push(platform);
     return appendQuery(segments.join("/"), nextQuery);
@@ -972,14 +1013,13 @@ export function buildSeasonSocialWeekUrl(input: {
   const weekToken = toCanonicalWeekToken(input.weekIndex) ?? "w0";
   const week = encodeURIComponent(weekToken.slice(1));
   const platform = toSocialPlatform(input.platform ?? "");
-  const base = platform
-    ? `${toShowBasePath(input.showSlug)}/social/s${season}/w${week}/${platform}`
-    : `${toShowBasePath(input.showSlug)}/social/s${season}/w${week}`;
+  const base = `${toShowBasePath(input.showSlug)}/s${season}/social/w${week}`;
+  const path = platform ? `${base}/${platform}` : `${base}/details`;
   const nextQuery = new URLSearchParams(input.query?.toString() ?? "");
   nextQuery.delete("social_platform");
   nextQuery.delete("source_scope");
   nextQuery.delete("season_id");
-  return appendQuery(base, nextQuery);
+  return appendQuery(path, nextQuery);
 }
 
 export function buildShowRedditUrl(input: {

@@ -14,8 +14,8 @@ describe("show social subnav no-season behavior", () => {
 
     expect(contents).toMatch(/selectedSocialSeason=\{selectedSocialSeason\}/);
     expect(contents).toMatch(/fallbackSection=\s*{\s*<SocialPostsSection/);
-    expect(socialTabContents).toMatch(/selectedSocialSeason \?/);
-    expect(socialTabContents).toMatch(/Platform tabs are available after selecting a season/);
+    expect(socialTabContents).toMatch(/selectedSocialSeason \? analyticsSection : fallbackSection/);
+    expect(socialTabContents).toMatch(/Defaulting to the most recent aired\/airing season\./);
     expect(contents).toMatch(/<SocialPostsSection/);
   });
 });

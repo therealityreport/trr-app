@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Route } from "next";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
@@ -12,6 +12,11 @@ import {
   type CatalogSyncRecentRequest,
   type SocialAccountCatalogPost,
   type SocialAccountCatalogReviewItem,
+  type SocialAccountCatalogRun,
+  type SocialAccountCatalogRunProgressHandle,
+  type SocialAccountCatalogRunProgressLogEntry,
+  type SocialAccountCatalogRunProgressSnapshot,
+  type SocialAccountCatalogRunProgressStage,
   type SocialAccountProfileHashtag,
   type SocialAccountProfileHashtagAssignment,
   type SocialAccountProfilePost,
@@ -84,7 +89,48 @@ type CollaboratorsTagsResponse = {
   tags: SocialAccountProfileCollaboratorTagAggregate[];
 };
 
+type CatalogRunProgressResponse = SocialAccountCatalogRunProgressSnapshot & {
+  error?: string;
+};
+
+type CatalogRunProgressStageStats = {
+  total: number;
+  completed: number;
+  failed: number;
+  active: number;
+  running: number;
+  waiting: number;
+  scraped: number;
+  saved: number;
+};
+
+type CatalogRunProgressHandleCard = {
+  id: string;
+  platform: string;
+  handle: string;
+  runnerLanes: string[];
+  hasStarted: boolean;
+  nextStage: string | null;
+  totals: CatalogRunProgressStageStats;
+  stages: Array<CatalogRunProgressStageStats & { stage: string }>;
+};
+
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
+const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
+const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const CATALOG_PROGRESS_POLL_INTERVAL_MS = 5_000;
+const CATALOG_STAGE_SORT_ORDER: Record<string, number> = {
+  posts: 0,
+  comments: 1,
+  media_mirror: 2,
+  comment_media_mirror: 3,
+  shared_account_discovery: 4,
+  shared_account_posts: 5,
+  post_classify: 6,
+  season_materialize: 7,
+  analytics_refresh: 8,
+  other: 99,
+};
 
 const formatInteger = (value: number | null | undefined): string => {
   return INTEGER_FORMATTER.format(Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -100,6 +146,108 @@ const formatDateTime = (value?: string | null): string => {
 const formatSeasonLabel = (seasonNumber?: number | null): string => {
   return seasonNumber ? `Season ${seasonNumber}` : "All seasons";
 };
+
+const formatRunStatusLabel = (value?: string | null): string => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "Unknown";
+  return normalized
+    .split("_")
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+};
+
+const formatRunStageLabel = (value?: string | null): string => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "Other";
+  if (normalized === "media_mirror") return "Media Mirror";
+  if (normalized === "comment_media_mirror") return "Comment Media Mirror";
+  if (normalized === "shared_account_discovery") return "History Discovery";
+  if (normalized === "shared_account_posts") return "Shard Workers";
+  if (normalized === "post_classify") return "Classifying Posts";
+  if (normalized === "season_materialize") return "Season Materialize";
+  if (normalized === "analytics_refresh") return "Analytics Refresh";
+  return normalized
+    .split("_")
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+};
+
+const formatHandleLabel = (value?: string | null): string => {
+  const normalized = String(value || "").trim().replace(/^@+/, "");
+  return normalized ? `@${normalized}` : "@unknown";
+};
+
+const formatCatalogStageActivitySummary = (
+  stageName: string,
+  stats: Pick<CatalogRunProgressStageStats, "scraped" | "saved">,
+): string => {
+  const normalized = String(stageName || "").trim().toLowerCase();
+  if (normalized === "shared_account_discovery") {
+    return [
+      `${formatInteger(stats.scraped)} checked`,
+      stats.saved > 0 ? `${formatInteger(stats.saved)} partitions created` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (normalized === "post_classify") {
+    return [
+      `${formatInteger(stats.scraped)} classified`,
+      stats.saved > 0 ? `${formatInteger(stats.saved)} saved` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  return [
+    `${formatInteger(stats.scraped)} scraped`,
+    stats.saved > 0 ? `${formatInteger(stats.saved)} saved` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+};
+
+const shortRunId = (value?: string | null): string => {
+  const normalized = String(value || "").trim();
+  return normalized ? normalized.slice(0, 8) : "pending";
+};
+
+const getCatalogRunStatusTone = (value?: string | null): string => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (normalized === "failed") return "border-red-200 bg-red-50 text-red-700";
+  if (normalized === "cancelled") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-sky-200 bg-sky-50 text-sky-700";
+};
+
+const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
+  const discovery = progress?.discovery;
+  const activeDiscoveryJobs = Number(progress?.stages?.shared_account_discovery?.jobs_active ?? 0);
+  if (activeDiscoveryJobs > 0) {
+    return "Discovering history";
+  }
+  if (Number(discovery?.partition_count ?? 0) > 0) {
+    if (Number(discovery?.running_count ?? 0) > 0 || Number(discovery?.queued_count ?? 0) > 0) {
+      return "Running shard workers";
+    }
+    if (Number(discovery?.completed_count ?? 0) === Number(discovery?.partition_count ?? 0)) {
+      return "Classifying posts";
+    }
+  }
+  return null;
+};
+
+const normalizeStageStats = (
+  stage: SocialAccountCatalogRunProgressStage | SocialAccountCatalogRunProgressHandle,
+): CatalogRunProgressStageStats => ({
+  total: Number(stage.jobs_total ?? 0),
+  completed: Number(stage.jobs_completed ?? 0),
+  failed: Number(stage.jobs_failed ?? 0),
+  active: Number(stage.jobs_active ?? 0),
+  running: Number(stage.jobs_running ?? 0),
+  waiting: Number(stage.jobs_waiting ?? 0),
+  scraped: Number(stage.scraped_count ?? 0),
+  saved: Number(stage.saved_count ?? 0),
+});
 
 export default function SocialAccountProfilePage({ platform, handle, activeTab }: Props) {
   const { user, checking, hasAccess } = useAdminGuard();
@@ -136,6 +284,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [collaboratorsTags, setCollaboratorsTags] = useState<CollaboratorsTagsResponse | null>(null);
   const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
   const [collaboratorsError, setCollaboratorsError] = useState<string | null>(null);
+  const [catalogProgressRunId, setCatalogProgressRunId] = useState<string | null>(null);
+  const [catalogRunProgress, setCatalogRunProgress] = useState<SocialAccountCatalogRunProgressSnapshot | null>(null);
+  const [catalogRunProgressError, setCatalogRunProgressError] = useState<string | null>(null);
+  const [catalogRunProgressLoading, setCatalogRunProgressLoading] = useState(false);
+  const [cancellingCatalogRun, setCancellingCatalogRun] = useState(false);
+  const [dismissingCatalogRunId, setDismissingCatalogRunId] = useState<string | null>(null);
+  const [catalogProgressLastSuccessAt, setCatalogProgressLastSuccessAt] = useState<string | null>(null);
+  const [catalogLogsExpanded, setCatalogLogsExpanded] = useState(false);
+  const catalogTerminalSummaryRefreshRunIdRef = useRef<string | null>(null);
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
 
   useEffect(() => {
@@ -144,13 +301,20 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setReviewDrafts({});
     setReviewSeasonOptionsByShow({});
     setReviewSeasonLoadingByShow({});
+    setCatalogProgressRunId(null);
+    setCatalogRunProgress(null);
+    setCatalogRunProgressError(null);
+    setCatalogRunProgressLoading(false);
+    setCatalogProgressLastSuccessAt(null);
+    setCatalogLogsExpanded(false);
+    catalogTerminalSummaryRefreshRunIdRef.current = null;
   }, [platform, handle]);
 
   useEffect(() => {
     setCatalogPage(1);
   }, [catalogFilter]);
 
-  const refreshSummary = async () => {
+  const refreshSummary = useCallback(async () => {
     if (!user) return;
     const response = await fetchAdminWithAuth(
       `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
@@ -162,7 +326,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       throw new Error(data.error || "Failed to load social account profile summary");
     }
     setSummary(data);
-  };
+  }, [handle, platform, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess) return;
@@ -378,6 +542,247 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [activeTab, checking, handle, hasAccess, platform, user]);
 
+  const activeCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
+    const runs = summary?.catalog_recent_runs ?? [];
+    return runs.find((run) => ACTIVE_CATALOG_RUN_STATUSES.has(String(run.status || "").trim().toLowerCase())) ?? null;
+  }, [summary?.catalog_recent_runs]);
+
+  const displayedCatalogRunSummary = useMemo<SocialAccountCatalogRun | null>(() => {
+    const runs = summary?.catalog_recent_runs ?? [];
+    if (catalogProgressRunId) {
+      return runs.find((run) => run.run_id === catalogProgressRunId) ?? null;
+    }
+    return activeCatalogRun;
+  }, [activeCatalogRun, catalogProgressRunId, summary?.catalog_recent_runs]);
+
+  const displayedCatalogRunId = useMemo(() => {
+    return (
+      (catalogRunProgress?.run_id && catalogRunProgress.run_id.trim()) ||
+      (catalogProgressRunId && catalogProgressRunId.trim()) ||
+      (displayedCatalogRunSummary?.run_id && displayedCatalogRunSummary.run_id.trim()) ||
+      null
+    );
+  }, [catalogProgressRunId, catalogRunProgress?.run_id, displayedCatalogRunSummary?.run_id]);
+
+  const displayedCatalogRunStatus = useMemo(() => {
+    const selectedRunId = displayedCatalogRunId?.trim() ?? "";
+    const progressStatus =
+      selectedRunId && catalogRunProgress?.run_id === selectedRunId ? catalogRunProgress.run_status : null;
+    const summaryStatus =
+      selectedRunId && displayedCatalogRunSummary?.run_id === selectedRunId ? displayedCatalogRunSummary.status : null;
+    const candidates = [
+      summaryStatus,
+      progressStatus,
+      selectedRunId && catalogProgressRunId === selectedRunId ? "queued" : null,
+    ];
+    for (const candidate of candidates) {
+      const normalized = String(candidate || "").trim().toLowerCase();
+      if (normalized) return normalized;
+    }
+    return "";
+  }, [
+    displayedCatalogRunSummary?.run_id,
+    displayedCatalogRunSummary?.status,
+    catalogProgressRunId,
+    catalogRunProgress?.run_id,
+    catalogRunProgress?.run_status,
+    displayedCatalogRunId,
+  ]);
+
+  const displayedCatalogRunIsActive = useMemo(() => {
+    return ACTIVE_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus);
+  }, [displayedCatalogRunStatus]);
+
+  const catalogActionsBlocked = runningCatalogAction !== null || displayedCatalogRunIsActive;
+
+  const catalogPhaseLabel = useMemo(() => {
+    return getCatalogPhaseLabel(catalogRunProgress);
+  }, [catalogRunProgress]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || !supportsCatalog) return;
+    if (!displayedCatalogRunId) return;
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const loadProgress = async () => {
+      if (cancelled) return;
+      setCatalogRunProgressLoading(true);
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(displayedCatalogRunId)}/progress?recent_log_limit=25`,
+          undefined,
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as CatalogRunProgressResponse;
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load social account catalog run progress");
+        }
+        if (cancelled) return;
+        setCatalogRunProgress(data);
+        setCatalogRunProgressError(null);
+        setCatalogProgressLastSuccessAt(new Date().toISOString());
+        if (TERMINAL_CATALOG_RUN_STATUSES.has(String(data.run_status || "").trim().toLowerCase())) return;
+      } catch (error) {
+        if (cancelled) return;
+        setCatalogRunProgressError(
+          error instanceof Error ? error.message : "Failed to load social account catalog run progress",
+        );
+      } finally {
+        if (!cancelled) {
+          setCatalogRunProgressLoading(false);
+        }
+      }
+
+      if (cancelled) return;
+      timeoutId = window.setTimeout(() => {
+        void loadProgress();
+      }, CATALOG_PROGRESS_POLL_INTERVAL_MS);
+    };
+
+    void loadProgress();
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [checking, displayedCatalogRunId, handle, hasAccess, platform, supportsCatalog, user]);
+
+  useEffect(() => {
+    const runId = String(catalogRunProgress?.run_id || "").trim();
+    const runStatus = String(catalogRunProgress?.run_status || "").trim().toLowerCase();
+    if (!runId || !TERMINAL_CATALOG_RUN_STATUSES.has(runStatus)) return;
+    if (catalogTerminalSummaryRefreshRunIdRef.current === runId) return;
+    catalogTerminalSummaryRefreshRunIdRef.current = runId;
+    void refreshSummary().catch(() => {});
+  }, [catalogRunProgress?.run_id, catalogRunProgress?.run_status, refreshSummary]);
+
+  const catalogStageEntries = useMemo(() => {
+    return Object.entries(catalogRunProgress?.stages ?? {})
+      .map(([stage, stats]) => [stage, normalizeStageStats(stats)] as const)
+      .filter(([, stats]) => stats.total > 0 || stats.active > 0 || stats.scraped > 0 || stats.saved > 0)
+      .sort(([left], [right]) => {
+        const leftOrder = CATALOG_STAGE_SORT_ORDER[left] ?? 50;
+        const rightOrder = CATALOG_STAGE_SORT_ORDER[right] ?? 50;
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+        return left.localeCompare(right);
+      });
+  }, [catalogRunProgress?.stages]);
+
+  const catalogProgressSummary = useMemo(() => {
+    const summaryPayload = catalogRunProgress?.summary ?? {};
+    const stageStats = catalogStageEntries.map(([, stats]) => stats);
+    const total = Number(summaryPayload.total_jobs ?? stageStats.reduce((sum, stage) => sum + stage.total, 0));
+    const completed = Number(summaryPayload.completed_jobs ?? stageStats.reduce((sum, stage) => sum + stage.completed, 0));
+    const failed = Number(summaryPayload.failed_jobs ?? stageStats.reduce((sum, stage) => sum + stage.failed, 0));
+    const active = Number(summaryPayload.active_jobs ?? stageStats.reduce((sum, stage) => sum + stage.active, 0));
+    const running = stageStats.reduce((sum, stage) => sum + stage.running, 0);
+    const waiting = stageStats.reduce((sum, stage) => sum + stage.waiting, 0);
+    const items = Number(summaryPayload.items_found_total ?? stageStats.reduce((sum, stage) => sum + stage.scraped, 0));
+    const finished = completed + failed;
+    const pct = total > 0 ? Math.round((finished / total) * 100) : active > 0 ? 5 : 0;
+    return {
+      total,
+      completed,
+      failed,
+      active,
+      running,
+      waiting,
+      items,
+      finished,
+      pct: Math.max(0, Math.min(100, pct)),
+    };
+  }, [catalogRunProgress?.summary, catalogStageEntries]);
+
+  const catalogPostProgress = useMemo(() => {
+    const payload = catalogRunProgress?.post_progress ?? {};
+    const rawCompleted = Number(payload.completed_posts ?? 0);
+    const completed = rawCompleted > 0 ? rawCompleted : Number(catalogProgressSummary.items ?? 0);
+    const matched = Number(payload.matched_posts ?? 0);
+    const fallbackTotal = Number(summary?.total_posts ?? 0);
+    const total = Number(payload.total_posts ?? 0) || fallbackTotal;
+    const pct = total > 0 ? Math.round((completed / total) * 100) : catalogProgressSummary.pct;
+    return {
+      completed,
+      matched,
+      total,
+      pct: Math.max(0, Math.min(100, pct)),
+      hasTotal: total > 0,
+      hasCompleted: completed > 0,
+    };
+  }, [catalogProgressSummary.items, catalogProgressSummary.pct, catalogRunProgress?.post_progress, summary?.total_posts]);
+
+  const catalogHandleCards = useMemo((): CatalogRunProgressHandleCard[] => {
+    const cards = new Map<string, CatalogRunProgressHandleCard>();
+    for (const entry of catalogRunProgress?.per_handle ?? []) {
+      const normalizedHandle = String(entry.account_handle || "").trim().replace(/^@+/, "") || "unknown";
+      const normalizedPlatform = String(entry.platform || "").trim().toLowerCase() || platform;
+      const cardId = `${normalizedPlatform}:${normalizedHandle}`;
+      const stageStats = normalizeStageStats(entry);
+      const existing = cards.get(cardId) ?? {
+        id: cardId,
+        platform: normalizedPlatform,
+        handle: normalizedHandle,
+        runnerLanes: [],
+        hasStarted: false,
+        nextStage: null,
+        totals: { total: 0, completed: 0, failed: 0, active: 0, running: 0, waiting: 0, scraped: 0, saved: 0 },
+        stages: [],
+      };
+      existing.totals.total += stageStats.total;
+      existing.totals.completed += stageStats.completed;
+      existing.totals.failed += stageStats.failed;
+      existing.totals.active += stageStats.active;
+      existing.totals.running += stageStats.running;
+      existing.totals.waiting += stageStats.waiting;
+      existing.totals.scraped += stageStats.scraped;
+      existing.totals.saved += stageStats.saved;
+      existing.runnerLanes = Array.from(
+        new Set([
+          ...existing.runnerLanes,
+          ...((entry.runner_lanes ?? [])
+            .map((lane) => String(lane || "").trim())
+            .filter((lane) => lane.length > 0)),
+        ]),
+      ).sort();
+      existing.hasStarted = existing.hasStarted || Boolean(entry.has_started);
+      if (!existing.nextStage && typeof entry.next_stage === "string" && entry.next_stage.trim()) {
+        existing.nextStage = entry.next_stage.trim();
+      }
+      existing.stages.push({ ...stageStats, stage: entry.stage });
+      cards.set(cardId, existing);
+    }
+    return Array.from(cards.values())
+      .map((card) => ({
+        ...card,
+        stages: [...card.stages].sort((left, right) => {
+          const leftOrder = CATALOG_STAGE_SORT_ORDER[left.stage] ?? 50;
+          const rightOrder = CATALOG_STAGE_SORT_ORDER[right.stage] ?? 50;
+          if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+          return left.stage.localeCompare(right.stage);
+        }),
+      }))
+      .sort((left, right) => left.handle.localeCompare(right.handle));
+  }, [catalogRunProgress?.per_handle, platform]);
+
+  const catalogLogs = useMemo((): SocialAccountCatalogRunProgressLogEntry[] => {
+    return (catalogRunProgress?.recent_log ?? [])
+      .map((entry) => ({
+        ...entry,
+        line: String(entry.line || "")
+          .replace(/ · 0p\/0c/g, "")
+          .replace(/ · saved 0p\/0c/g, "")
+          .trim(),
+      }))
+      .filter((entry) => entry.line.length > 0);
+  }, [catalogRunProgress?.recent_log]);
+
+  useEffect(() => {
+    setCatalogLogsExpanded(false);
+  }, [displayedCatalogRunId]);
+
   const showOptions = useMemo<ShowOption[]>(() => {
     return [...(summary?.per_show_counts ?? [])]
       .filter((item) => item.show_id && item.show_name)
@@ -466,7 +871,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }
       return next;
     });
-  }, [reviewQueue, reviewShowOptionsByItem]);
+  }, [buildReviewResolutionDraft, reviewQueue, reviewShowOptionsByItem]);
 
   const loadReviewSeasonOptions = useCallback(async (showId: string) => {
     if (!user || !showId) return;
@@ -600,14 +1005,30 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         },
         { preferredUser: user },
       );
-      const data = (await response.json().catch(() => ({}))) as { error?: string; run_id?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        run_id?: string;
+        detail?: { message?: string; run_id?: string; status?: string };
+      };
       if (!response.ok) {
-        throw new Error(data.error || `Failed to ${action === "backfill" ? "start backfill" : "sync recent catalog content"}`);
+        throw new Error(
+          data.error ||
+            data.message ||
+            data.detail?.message ||
+            `Failed to ${action === "backfill" ? "start backfill" : "sync recent catalog content"}`,
+        );
       }
+      const queuedRunId = String(data.run_id || "").trim() || null;
+      setCatalogProgressRunId(queuedRunId);
+      setCatalogRunProgress(null);
+      setCatalogRunProgressError(null);
+      setCatalogLogsExpanded(false);
+      catalogTerminalSummaryRefreshRunIdRef.current = null;
       setCatalogActionMessage(
         action === "backfill"
-          ? `Backfill queued${data.run_id ? ` (${data.run_id.slice(0, 8)})` : ""}.`
-          : `Recent sync queued${data.run_id ? ` (${data.run_id.slice(0, 8)})` : ""}.`,
+          ? `Backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
+          : `Recent sync queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`,
       );
       await refreshSummary();
     } catch (error) {
@@ -618,6 +1039,65 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       );
     } finally {
       setRunningCatalogAction(null);
+    }
+  };
+
+  const cancelCatalogRun = async () => {
+    if (!user || !displayedCatalogRunId) return;
+    setCancellingCatalogRun(true);
+    setCatalogActionMessage(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(displayedCatalogRunId)}/cancel`,
+        {
+          method: "POST",
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to cancel catalog run");
+      }
+      setCatalogActionMessage(`Cancelled run ${shortRunId(displayedCatalogRunId)}.`);
+      await refreshSummary();
+    } catch (error) {
+      setCatalogActionMessage(error instanceof Error ? error.message : "Failed to cancel catalog run");
+    } finally {
+      setCancellingCatalogRun(false);
+    }
+  };
+
+  const dismissCatalogRun = async (runId: string) => {
+    const normalizedRunId = runId.trim();
+    if (!user || !normalizedRunId) return;
+    setDismissingCatalogRunId(normalizedRunId);
+    setCatalogActionMessage(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(normalizedRunId)}/dismiss`,
+        {
+          method: "POST",
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to dismiss catalog run");
+      }
+      if (catalogProgressRunId === normalizedRunId) {
+        setCatalogProgressRunId(null);
+      }
+      if (catalogRunProgress?.run_id === normalizedRunId) {
+        setCatalogRunProgress(null);
+        setCatalogRunProgressError(null);
+      }
+      setCatalogProgressLastSuccessAt(null);
+      setCatalogActionMessage(`Dismissed run ${shortRunId(normalizedRunId)}.`);
+      await refreshSummary();
+    } catch (error) {
+      setCatalogActionMessage(error instanceof Error ? error.message : "Failed to dismiss catalog run");
+    } finally {
+      setDismissingCatalogRunId(null);
     }
   };
 
@@ -740,7 +1220,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             backfill_scope: "full_history",
                           })
                         }
-                        disabled={runningCatalogAction !== null}
+                        disabled={catalogActionsBlocked}
                         className="inline-flex rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {runningCatalogAction === "backfill" ? "Queueing Backfill…" : "Backfill History"}
@@ -752,11 +1232,27 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             lookback_days: 1,
                           })
                         }
-                        disabled={runningCatalogAction !== null}
+                        disabled={catalogActionsBlocked}
                         className="inline-flex rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
                       </button>
+                      {activeCatalogRun?.run_id ? (
+                        <button
+                          type="button"
+                          onClick={() => void cancelCatalogRun()}
+                          disabled={runningCatalogAction !== null || cancellingCatalogRun}
+                          className="inline-flex rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {cancellingCatalogRun ? "Cancelling Run…" : "Cancel Run"}
+                        </button>
+                      ) : null}
+                      {activeCatalogRun?.run_id ? (
+                        <span className="text-xs font-medium text-zinc-500">
+                          Run {shortRunId(activeCatalogRun.run_id)} is {formatRunStatusLabel(activeCatalogRun.status)}.
+                          Start buttons unlock after it finishes or you cancel it.
+                        </span>
+                      ) : null}
                     </>
                   ) : (
                     <span className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">
@@ -823,6 +1319,225 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           {summaryLoading ? <div className="text-sm text-zinc-500">Loading account summary…</div> : null}
           {summaryError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{summaryError}</div>
+          ) : null}
+
+          {!summaryLoading && !summaryError && supportsCatalog && displayedCatalogRunId ? (
+            <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg font-semibold text-zinc-900">Catalog Run Progress</h2>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${getCatalogRunStatusTone(
+                        displayedCatalogRunStatus,
+                      )}`}
+                    >
+                      {formatRunStatusLabel(displayedCatalogRunStatus)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Run {shortRunId(displayedCatalogRunId)} · {formatRunStatusLabel(displayedCatalogRunStatus)}
+                    {catalogRunProgress?.created_at ? ` · queued ${formatDateTime(catalogRunProgress.created_at)}` : ""}
+                    {catalogProgressLastSuccessAt ? ` · last refresh ${formatDateTime(catalogProgressLastSuccessAt)}` : ""}
+                  </p>
+                  {catalogPhaseLabel ? <p className="mt-2 text-sm font-medium text-zinc-700">{catalogPhaseLabel}</p> : null}
+                  {catalogRunProgressError ? (
+                    <p className="mt-2 text-sm text-red-700">{catalogRunProgressError}</p>
+                  ) : null}
+                </div>
+                <div className="min-w-[190px] rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Overall Progress</p>
+                  <p className="mt-2 text-3xl font-bold text-zinc-900">
+                    {catalogPostProgress.hasTotal ? catalogPostProgress.pct : catalogProgressSummary.pct}%
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-600">
+                    {catalogPostProgress.hasTotal
+                      ? `${formatInteger(catalogPostProgress.completed)} / ${formatInteger(catalogPostProgress.total)} posts checked`
+                      : catalogPostProgress.hasCompleted
+                        ? `${formatInteger(catalogPostProgress.completed)} posts checked`
+                        : `${formatInteger(catalogProgressSummary.finished)} / ${formatInteger(catalogProgressSummary.total)} jobs`}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {catalogPostProgress.hasTotal || catalogPostProgress.hasCompleted
+                      ? `${formatInteger(catalogPostProgress.matched)} matched`
+                      : `${formatInteger(catalogProgressSummary.items)} scraped`}
+                    {catalogProgressSummary.running > 0 ? ` · ${formatInteger(catalogProgressSummary.running)} running` : ""}
+                    {catalogProgressSummary.waiting > 0 ? ` · ${formatInteger(catalogProgressSummary.waiting)} queued` : ""}
+                    {catalogProgressSummary.failed > 0 ? ` · ${formatInteger(catalogProgressSummary.failed)} failed` : ""}
+                  </p>
+                  {catalogRunProgress?.discovery?.partition_count ? (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {formatInteger(catalogRunProgress.discovery.completed_count)} /{" "}
+                      {formatInteger(catalogRunProgress.discovery.partition_count)} shards complete
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    displayedCatalogRunStatus === "failed"
+                      ? "bg-red-500"
+                      : displayedCatalogRunStatus === "cancelled"
+                        ? "bg-amber-500"
+                        : "bg-emerald-500"
+                  }`}
+                  style={{ width: `${Math.max(catalogPostProgress.hasTotal ? catalogPostProgress.pct : catalogProgressSummary.pct, 2)}%` }}
+                />
+              </div>
+
+              {catalogRunProgressLoading && !catalogRunProgress ? (
+                <p className="mt-4 text-sm text-zinc-500">Loading live run progress…</p>
+              ) : null}
+
+              {catalogStageEntries.length > 0 ? (
+                <div className={`mt-4 grid gap-3 ${catalogStageEntries.length >= 3 ? "xl:grid-cols-3" : "md:grid-cols-2"}`}>
+                  {catalogStageEntries.map(([stage, stats]) => (
+                    <div key={stage} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-zinc-900">{formatRunStageLabel(stage)}</p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {formatInteger(stats.completed + stats.failed)} / {formatInteger(stats.total)} jobs complete
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                            stats.failed > 0
+                              ? "bg-red-100 text-red-700"
+                              : stats.running > 0
+                                ? "bg-sky-100 text-sky-700"
+                                : stats.waiting > 0
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-emerald-100 text-emerald-700"
+                          }`}
+                        >
+                          {stats.failed > 0
+                            ? "Issue"
+                            : stats.running > 0
+                              ? "Running"
+                              : stats.waiting > 0
+                                ? "Queued"
+                                : "Done"}
+                        </span>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                        <div
+                          className="h-full rounded-full bg-zinc-900 transition-all duration-500"
+                          style={{
+                            width: `${Math.max(
+                              stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0,
+                              stats.running > 0 || stats.waiting > 0 ? 6 : 0,
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <p className="mt-3 text-sm text-zinc-700">{formatCatalogStageActivitySummary(stage, stats)}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {stats.running > 0 ? `${formatInteger(stats.running)} running · ` : ""}
+                        {stats.waiting > 0 ? `${formatInteger(stats.waiting)} queued · ` : ""}
+                        {stats.failed > 0 ? `${formatInteger(stats.failed)} failed` : "No failures"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : !catalogRunProgressLoading ? (
+                <p className="mt-4 text-sm text-zinc-500">Waiting for the job to report stage-level progress…</p>
+              ) : null}
+
+              {catalogLogs.length > 0 ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <button
+                    type="button"
+                    onClick={() => setCatalogLogsExpanded((current) => !current)}
+                    className="flex w-full items-center justify-between text-left"
+                  >
+                    <div>
+                      <h3 className="text-sm font-semibold text-zinc-900">Recent Logs</h3>
+                      <p className="text-xs text-zinc-500">Latest worker events for this account run</p>
+                    </div>
+                    <span className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                      {catalogLogsExpanded ? "Hide" : "Show"}
+                    </span>
+                  </button>
+                  {catalogLogsExpanded ? (
+                    <div className="mt-3 space-y-2">
+                      {catalogLogs.map((entry) => (
+                        <div key={entry.id} className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
+                            {formatRunStageLabel(entry.stage)} · {formatRunStatusLabel(entry.status)}
+                          </p>
+                          <p className="mt-1 text-sm text-zinc-700">{entry.line}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {catalogHandleCards.length > 0 ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <h3 className="text-sm font-semibold text-zinc-900">Per-Handle Job Progress</h3>
+                  <p className="text-xs text-zinc-500">Lane allocation and stage completion by social account handle</p>
+                  <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                    {catalogHandleCards.map((card) => (
+                      <div key={card.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-zinc-900">{formatHandleLabel(card.handle)}</p>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {card.hasStarted ? "Started" : "Pending start"}
+                              {card.nextStage ? ` · Next ${formatRunStageLabel(card.nextStage)}` : ""}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-600">
+                            {card.runnerLanes.length > 0 ? `Lanes ${card.runnerLanes.join(", ")}` : "Lane pending"}
+                          </span>
+                        </div>
+                        <p className="mt-3 text-sm text-zinc-700">
+                          {formatInteger(card.totals.completed + card.totals.failed)} / {formatInteger(card.totals.total)} complete
+                          {card.totals.running > 0 ? ` · ${formatInteger(card.totals.running)} running` : ""}
+                          {card.totals.waiting > 0 ? ` · ${formatInteger(card.totals.waiting)} queued` : ""}
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          {card.stages.map((stage) => (
+                            <div key={`${card.id}-${stage.stage}`} className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-medium text-zinc-800">{formatRunStageLabel(stage.stage)}</p>
+                                <p className="text-xs text-zinc-500">
+                                  {formatInteger(stage.completed + stage.failed)} / {formatInteger(stage.total)}
+                                </p>
+                              </div>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {stage.running > 0 ? `${formatInteger(stage.running)} running · ` : ""}
+                                {stage.waiting > 0 ? `${formatInteger(stage.waiting)} queued · ` : ""}
+                                {formatCatalogStageActivitySummary(stage.stage, stage)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : !summaryLoading && !summaryError && supportsCatalog ? (
+            <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-900">Catalog Run Progress</h2>
+                  <p className="mt-2 text-sm text-zinc-600">No active catalog run. Ready to start the next backfill.</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Use Recent Catalog Runs to inspect or dismiss older failed runs without letting them own this page.
+                  </p>
+                </div>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                  Ready
+                </span>
+              </div>
+            </section>
           ) : null}
 
           {!summaryLoading && !summaryError && activeTab === "stats" ? (
@@ -1047,10 +1762,49 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       <p className="text-sm text-zinc-500">No catalog runs recorded yet.</p>
                     ) : (
                       (summary?.catalog_recent_runs ?? []).map((run) => (
-                        <div key={run.job_id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="font-semibold text-zinc-900">{run.status ?? "unknown"}</p>
-                            <p className="text-xs text-zinc-500">{formatDateTime(run.created_at)}</p>
+                        <div key={run.job_id || run.run_id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${getCatalogRunStatusTone(
+                                    run.status,
+                                  )}`}
+                                >
+                                  {formatRunStatusLabel(run.status)}
+                                </span>
+                                <span className="text-xs font-semibold text-zinc-500">Run {shortRunId(run.run_id)}</span>
+                              </div>
+                              <p className="mt-2 text-xs text-zinc-500">
+                                Queued {formatDateTime(run.created_at)}
+                                {run.started_at ? ` · started ${formatDateTime(run.started_at)}` : ""}
+                                {run.completed_at ? ` · finished ${formatDateTime(run.completed_at)}` : ""}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {(String(run.status || "").trim().toLowerCase() === "failed" ||
+                                String(run.status || "").trim().toLowerCase() === "cancelled") && (
+                                <button
+                                  type="button"
+                                  onClick={() => void dismissCatalogRun(run.run_id)}
+                                  disabled={dismissingCatalogRunId === run.run_id}
+                                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {dismissingCatalogRunId === run.run_id ? "Dismissing…" : "Dismiss"}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCatalogProgressRunId(run.run_id);
+                                  setCatalogRunProgress(null);
+                                  setCatalogRunProgressError(null);
+                                }}
+                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                              >
+                                View Details
+                              </button>
+                            </div>
                           </div>
                           {run.error_message ? <p className="mt-2 text-xs text-red-700">{run.error_message}</p> : null}
                         </div>

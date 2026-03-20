@@ -22,6 +22,9 @@ import GameHeader from "@/components/GameHeader";
 import { getUserPreferences, updateUserPreferences } from "@/lib/preferences";
 import { addIdentityToken } from "@/lib/games/identity";
 
+const REALITEASE_UNAVAILABLE_MESSAGE =
+  "Realitease is temporarily unavailable because Firebase Firestore is not configured in this environment.";
+
 const BOARD_ROWS = 8; // maximum guesses
 const BOARD_MIN_ROWS = 7; // initial visible rows
 const TILE_FLIP_DURATION_MS = 620;
@@ -560,7 +563,8 @@ export default function RealiteaseGamePage() {
 
   // Load user preferences
   useEffect(() => {
-    if (!userId) return;
+    const activeManager = manager;
+    if (!activeManager || !userId) return;
     (async () => {
       try {
         const prefs = await getUserPreferences(userId);
@@ -568,7 +572,7 @@ export default function RealiteaseGamePage() {
         if (prefs?.realitease?.serviceMode) setServiceMode(prefs.realitease.serviceMode);
       } catch {}
     })();
-  }, [userId]);
+  }, [manager, userId]);
 
   const handleShareResults = useCallback(async () => {
     if (!gameSnapshot) return;
@@ -651,7 +655,8 @@ export default function RealiteaseGamePage() {
   }, [authLoading, router, userId]);
 
   useEffect(() => {
-    if (!userId) return;
+    const activeManager = manager;
+    if (!activeManager || !userId) return;
 
     let isActive = true;
     let unsubscribe: (() => void) | null = null;
@@ -666,12 +671,12 @@ export default function RealiteaseGamePage() {
           puzzleDateKey,
         });
 
-        const snapshot = await manager.startGame({ uid: userId, gameDate: puzzleDateKey });
+        const snapshot = await activeManager.startGame({ uid: userId, gameDate: puzzleDateKey });
         if (!isActive) return;
 
         setGameSnapshot(snapshot);
 
-        unsubscribe = manager.subscribeToGame({
+        unsubscribe = activeManager.subscribeToGame({
           uid: userId,
           gameDate: puzzleDateKey,
           onChange: (next) => {
@@ -827,11 +832,19 @@ export default function RealiteaseGamePage() {
   }, []);
 
   useEffect(() => {
+    const activeManager = manager;
+    if (!activeManager) {
+      setTalentIndex(null);
+      setTalentError(REALITEASE_UNAVAILABLE_MESSAGE);
+      setTalentLoading(false);
+      return;
+    }
+
     let isMounted = true;
     setTalentError(null);
     setTalentLoading(true);
 
-    manager
+    activeManager
       .getTalentIndex()
       .then((talents) => {
         if (!isMounted) return;
@@ -1053,6 +1066,7 @@ export default function RealiteaseGamePage() {
     if (clue && clue.trim().length > 0) return clue.trim();
     return null;
   }, [gameSnapshot?.answerKey]);
+  const blockingErrorMessage = errorMessage ?? (!manager ? REALITEASE_UNAVAILABLE_MESSAGE : null);
 
   if (authLoading || (isBootstrapping && !gameSnapshot)) {
     return (
@@ -1062,12 +1076,12 @@ export default function RealiteaseGamePage() {
     );
   }
 
-  if (errorMessage) {
+  if (blockingErrorMessage) {
     return (
       <div className="min-h-screen bg-blue-300 flex items-center justify-center px-4">
         <div className="max-w-md w-full bg-white p-8 rounded-lg shadow-lg text-center space-y-4">
           <h1 className="text-2xl font-bold text-gray-900">Something went wrong</h1>
-          <p className="text-gray-600">{errorMessage}</p>
+          <p className="text-gray-600">{blockingErrorMessage}</p>
           <button
             onClick={() => router.push("/realitease/cover")}
             className="mt-2 inline-flex items-center justify-center rounded-full bg-black px-6 py-3 text-white hover:bg-gray-800"

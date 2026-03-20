@@ -12,6 +12,7 @@ import {
   buildAdminRedditCommunityUrl,
   buildSeasonAdminUrl,
   buildShowAdminUrl,
+  buildShowRedditCommunityUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -62,7 +63,10 @@ const parseRootRedditCommunityPath = (
       seasonNumber: Number.isFinite(seasonNumber) && seasonNumber !== null ? seasonNumber : null,
     };
   }
-  const match = pathname.match(/^\/([^/]+)\/social\/reddit\/([^/]+?)(?:\/s(\d+))?\/?$/i);
+  if (/^\/admin\/social(?:-media)?\/reddit(?:\/|$)/i.test(pathname)) {
+    return null;
+  }
+  const match = pathname.match(/^\/(?:shows\/)?([^/]+)\/social\/reddit\/([^/]+?)(?:\/s(\d+))?\/?$/i);
   if (!match) return null;
   let showSlug = "";
   let communitySlug = "";
@@ -106,6 +110,7 @@ export default function RedditCommunityViewPage() {
   }>();
   const searchParams = useSearchParams();
   const canonicalRedirectRef = useRef<string | null>(null);
+  const isAdminCommunityRoute = /^\/admin\/social(?:-media)?\/reddit(?:\/|$)/i.test(pathname);
 
   const initialCommunityKey =
     typeof params.communitySlug === "string"
@@ -145,6 +150,7 @@ export default function RedditCommunityViewPage() {
     return parsed;
   })();
   const backHref = resolveBackHref(searchParams.get("return_to"));
+  const returnPathContext = useMemo(() => parseRootRedditCommunityPath(backHref), [backHref]);
   const [communityContext, setCommunityContext] = useState<RedditCommunityContext | null>(null);
   const [pinnedShowSlug, setPinnedShowSlug] = useState<string | null>(() => routeShowSlug);
   const showSlug = useMemo(() => {
@@ -158,7 +164,14 @@ export default function RedditCommunityViewPage() {
         isAliasLikeShowSlug(candidate),
       ) ?? null;
     if (aliasPreferred) return aliasPreferred;
-    return pathnameCandidate ?? pathCandidate ?? queryCandidate ?? pinnedCandidate ?? contextShowSlug ?? null;
+    return (
+      pathnameCandidate ??
+      pathCandidate ??
+      queryCandidate ??
+      pinnedCandidate ??
+      contextShowSlug ??
+      null
+    );
   }, [communityContext?.showSlug, pathShowSlug, pathnameShowSlug, pinnedShowSlug, queryShowSlug]);
   const seasonNumber = routeSeasonNumber ?? querySeasonNumber ?? communityContext?.seasonNumber;
   const canonicalSeasonNumber = routeSeasonNumber ?? querySeasonNumber ?? communityContext?.seasonNumber;
@@ -182,14 +195,22 @@ export default function RedditCommunityViewPage() {
       })
     : backHref;
   const effectiveBackHref = showSlug ? showHref : backHref;
+  const prefersPublicCommunityRoute = Boolean(pathnameShowSlug || queryShowSlug || returnPathContext?.showSlug);
   const canonicalCommunityHref = useMemo(() => {
     if (!showSlug || !communitySlug) return null;
-    return buildAdminRedditCommunityUrl({
+    if (!prefersPublicCommunityRoute && isAdminCommunityRoute) {
+      return buildAdminRedditCommunityUrl({
+        communitySlug,
+        showSlug,
+        seasonNumber: canonicalSeasonNumber,
+      });
+    }
+    return buildShowRedditCommunityUrl({
       communitySlug,
       showSlug,
       seasonNumber: canonicalSeasonNumber,
     });
-  }, [canonicalSeasonNumber, communitySlug, showSlug]);
+  }, [canonicalSeasonNumber, communitySlug, isAdminCommunityRoute, prefersPublicCommunityRoute, showSlug]);
 
   useEffect(() => {
     const candidate = pathnameShowSlug ?? pathShowSlug ?? queryShowSlug;

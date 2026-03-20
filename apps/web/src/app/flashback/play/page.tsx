@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DndContext, PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
 import type { User } from "firebase/auth";
 
 import { auth } from "@/lib/firebase";
 import { useFlashbackManager } from "@/lib/flashback/manager";
-import type { GamePhase, RoundResult } from "@/lib/flashback/manager";
+import type { RoundResult } from "@/lib/flashback/manager";
 import GameHeader from "@/components/GameHeader";
 
 import ClueCard from "./clue-card";
@@ -177,7 +177,7 @@ export default function FlashbackPlay() {
   // -------------------------------------------------------------------------
   // DnD handlers
   // -------------------------------------------------------------------------
-  const handleDragStart = useCallback((_event: DragStartEvent) => {
+  const handleDragStart = useCallback(() => {
     setIsDragging(true);
   }, []);
 

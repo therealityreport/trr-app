@@ -3,20 +3,13 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import ShowSocialTab from "@/components/admin/show-tabs/ShowSocialTab";
 
 describe("ShowSocialTab runtime", () => {
-  it("renders platform controls for selected season and dispatches callbacks", () => {
-    const onSelectSocialPlatformTab = vi.fn();
+  it("renders season controls for a selected season and dispatches callbacks", () => {
     const onSelectSocialSeasonId = vi.fn();
 
     render(
       <ShowSocialTab
         socialDependencyError={null}
         selectedSocialSeason={{ id: "s6", season_number: 6 }}
-        socialPlatformTab="overview"
-        onSelectSocialPlatformTab={onSelectSocialPlatformTab}
-        socialPlatformOptions={[
-          { key: "overview", label: "Overview" },
-          { key: "instagram", label: "Instagram" },
-        ]}
         socialSeasonOptions={[
           { id: "s5", season_number: 5 },
           { id: "s6", season_number: 6 },
@@ -29,13 +22,9 @@ describe("ShowSocialTab runtime", () => {
     );
 
     expect(screen.getByRole("tabpanel")).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Social platform tabs" })).toBeInTheDocument();
     expect(screen.getByText("Social Scope")).toBeInTheDocument();
     expect(screen.getByText("analytics section")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true");
-
-    fireEvent.click(screen.getByRole("button", { name: "Instagram" }));
-    expect(onSelectSocialPlatformTab).toHaveBeenCalledWith("instagram");
+    expect(screen.getByRole("combobox", { name: "Season" })).toHaveValue("s6");
 
     fireEvent.change(screen.getByLabelText("Season"), { target: { value: "s5" } });
     expect(onSelectSocialSeasonId).toHaveBeenCalledWith("s5");
@@ -46,9 +35,6 @@ describe("ShowSocialTab runtime", () => {
       <ShowSocialTab
         socialDependencyError="missing dependency"
         selectedSocialSeason={null}
-        socialPlatformTab="overview"
-        onSelectSocialPlatformTab={() => {}}
-        socialPlatformOptions={[{ key: "overview", label: "Overview" }]}
         socialSeasonOptions={[{ id: "s6", season_number: 6 }]}
         selectedSocialSeasonId={null}
         onSelectSocialSeasonId={() => {}}
@@ -59,36 +45,26 @@ describe("ShowSocialTab runtime", () => {
 
     expect(screen.getByText(/Social dependency warning:/)).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Social dependency warning");
-    expect(screen.getByText("Platform tabs are available after selecting a season.")).toBeInTheDocument();
+    expect(screen.getByText("All Seasons")).toBeInTheDocument();
     expect(screen.getByText("fallback section")).toBeInTheDocument();
   });
 
-  it("hides platform controls and social scope chrome in reddit mode", () => {
+  it("shows a static season label when only one season option exists", () => {
     render(
       <ShowSocialTab
         socialDependencyError={null}
         selectedSocialSeason={{ id: "s6", season_number: 6 }}
-        socialPlatformTab="overview"
-        isRedditView
-        onSelectSocialPlatformTab={() => {}}
-        socialPlatformOptions={[
-          { key: "overview", label: "Overview" },
-          { key: "instagram", label: "Instagram" },
-        ]}
-        socialSeasonOptions={[
-          { id: "s5", season_number: 5 },
-          { id: "s6", season_number: 6 },
-        ]}
+        socialSeasonOptions={[{ id: "s6", season_number: 6 }]}
         selectedSocialSeasonId="s6"
         onSelectSocialSeasonId={() => {}}
-        analyticsSection={<div>reddit analytics section</div>}
+        analyticsSection={<div>analytics section</div>}
         fallbackSection={<div>fallback section</div>}
       />
     );
 
-    expect(screen.queryByText("Social Scope")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Overview" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Instagram" })).not.toBeInTheDocument();
-    expect(screen.getByText("reddit analytics section")).toBeInTheDocument();
+    expect(screen.getByText("Social Scope")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Season" })).not.toBeInTheDocument();
+    expect(screen.getByText("Season 6")).toBeInTheDocument();
+    expect(screen.getByText("analytics section")).toBeInTheDocument();
   });
 });

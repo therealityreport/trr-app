@@ -15,7 +15,7 @@ Use this repo-local skill when a Figma file, node, or screenshot parity target i
 
 ## Ownership boundary
 1. This skill owns TRR-APP-side implementation and parity behavior.
-2. Keep `/Users/thomashulihan/.codex/skills/figma/SKILL.md` as the global MCP/tool workflow owner.
+2. Keep `/Users/thomashulihan/.codex/skills/figma/SKILL.md` as the global dual-MCP workflow owner for official Figma MCP plus `figma-console`.
 
 ## Preflight
 1. Confirm the Figma node or URL exists.
@@ -23,7 +23,7 @@ Use this repo-local skill when a Figma file, node, or screenshot parity target i
 3. Identify which screen/component in `TRR-APP` is the implementation target.
 
 ## Design-to-code checklist
-1. Use the global `figma` skill for MCP context, screenshots, variables, and assets.
+1. Use the global `figma` skill to choose between official Figma MCP context tools and `figma-console` write/debug flows.
 2. Translate design intent into existing TRR-APP conventions instead of cloning raw reference code blindly.
 3. Verify:
    - layout and spacing

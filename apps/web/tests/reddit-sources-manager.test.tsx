@@ -250,14 +250,17 @@ const findCardByPeriodLabel = (label: string): HTMLElement => {
   const foundCard = articleCards.find((article) => {
     const hasLabel = !!within(article).queryByRole("heading", { name: exactLabelRegex });
     const refreshPostsButtons = within(article).queryAllByRole("button", { name: "Sync Posts" });
-    return hasLabel && refreshPostsButtons.length === 1;
+    const episodeButtons = within(article).queryAllByRole("button", { name: /^Episode \d+$/ });
+    return hasLabel && refreshPostsButtons.length === 1 && episodeButtons.length === 0;
   });
   if (foundCard) {
     return foundCard as HTMLElement;
   }
 
   const fallbackCard = articleCards.find(
-    (article) => !!within(article).queryByText((content) => exactLabelRegex.test(content.trim())),
+    (article) =>
+      !!within(article).queryByText((content) => exactLabelRegex.test(content.trim())) &&
+      within(article).queryAllByRole("button", { name: /^Episode \d+$/ }).length === 0,
   );
   if (!fallbackCard) {
     throw new Error(`Unable to find period card for label ${label}`);
@@ -392,8 +395,8 @@ describe("RedditSourcesManager", () => {
     expect(screen.queryByText("No episode discussion rows found for this community yet.")).not.toBeInTheDocument();
   });
 
-  it("canonicalizes show-level reddit route to season-scoped path once season context resolves", async () => {
-    usePathnameMock.mockReturnValue("/rhoslc/social/reddit");
+  it("keeps the show-level reddit landing route stable while season context resolves", async () => {
+    usePathnameMock.mockReturnValue("/admin/social/reddit");
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -409,13 +412,13 @@ describe("RedditSourcesManager", () => {
 
     render(<RedditSourcesManager mode="global" initialCommunityId="community-1" />);
 
-    await waitFor(() => {
-      expect(useRouterReplaceMock).toHaveBeenCalledWith("/rhoslc/s6/social/reddit");
-    });
+    expect(await screen.findByRole("heading", { name: /reddit communities/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Season Selection" })).toBeInTheDocument();
+    expect(useRouterReplaceMock).not.toHaveBeenCalled();
   });
 
-  it("canonicalizes dedicated community route to include season token once season resolves", async () => {
-    usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives");
+  it("keeps the dedicated community route stable while season context resolves", async () => {
+    usePathnameMock.mockReturnValue("/admin/social/reddit/BravoRealHousewives");
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -433,11 +436,9 @@ describe("RedditSourcesManager", () => {
       <RedditSourcesManager mode="global" hideCommunityList initialCommunityId="community-1" />,
     );
 
-    await waitFor(() => {
-      expect(useRouterReplaceMock).toHaveBeenCalledWith(
-        "/rhoslc/social/reddit/BravoRealHousewives/s6",
-      );
-    });
+    expect(await screen.findByRole("heading", { name: "r/BravoRealHousewives" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Season" })).toBeDisabled();
+    expect(useRouterReplaceMock).not.toHaveBeenCalled();
   });
 
   it("renders EPISODE DISCUSSION badge from source_kind and allows collapsing assigned threads", async () => {
@@ -506,7 +507,7 @@ describe("RedditSourcesManager", () => {
         }),
       ).toHaveAttribute(
         "href",
-        "/rhoslc/social/reddit/BravoRealHousewives/s6",
+        "/admin/social/reddit/BravoRealHousewives/rhoslc/s6",
       );
     });
   });
@@ -571,7 +572,7 @@ describe("RedditSourcesManager", () => {
         }),
       ).toHaveAttribute(
         "href",
-        "/rhoslc/social/reddit/BravoRealHousewives/s6",
+        "/admin/social/reddit/BravoRealHousewives/rhoslc/s6",
       );
     });
   });
@@ -615,7 +616,7 @@ describe("RedditSourcesManager", () => {
         mode="global"
         hideCommunityList
         initialCommunityId="community-1"
-        backHref="/shows/rhoslc/social/reddit/BravoRealHousewives/s6"
+        backHref="/admin/social/reddit/BravoRealHousewives/rhoslc/s6"
       />,
     );
 
@@ -628,7 +629,7 @@ describe("RedditSourcesManager", () => {
     expect(await screen.findByText("Network Community")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to communities" })).toHaveAttribute(
       "href",
-      "/shows/rhoslc/social/reddit/BravoRealHousewives/s6",
+      "/admin/social/reddit/BravoRealHousewives/rhoslc/s6",
     );
     expect(screen.queryByText("Season Selection")).not.toBeInTheDocument();
     const dedicatedSeasonButton = screen.getByRole("button", { name: "Season 6" });
@@ -1607,7 +1608,7 @@ describe("RedditSourcesManager", () => {
   });
 
   it("opens canonical community week URLs even from /:show/social/reddit base route", async () => {
-    usePathnameMock.mockReturnValue("/rhoslc/social/reddit");
+    usePathnameMock.mockReturnValue("/admin/social/reddit");
     const refreshPayload = {
       community: baseCommunity,
       candidates: [],
@@ -1687,8 +1688,8 @@ describe("RedditSourcesManager", () => {
 
     expect(useRouterPushMock).toHaveBeenCalled();
     const pushedPath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
-    expect(pushedPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
-    expect(pushedPath).not.toBe("/rhoslc/social/reddit");
+    expect(pushedPath).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1");
+    expect(pushedPath).not.toBe("/admin/social/reddit");
   });
 
   it("renders episode pills and opens modal with linked + unassigned posts on demand", async () => {
@@ -1922,7 +1923,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(viewAllPostsButton);
     expect(useRouterPushMock).toHaveBeenCalledTimes(1);
     const pushedPath = String(useRouterPushMock.mock.calls[0]?.[0] ?? "");
-    expect(pushedPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
+    expect(pushedPath).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1");
     expect(discoverUrls.some((url) => url.includes("force_flair="))).toBe(false);
     expect(screen.queryByRole("columnheader", { name: "Live" })).not.toBeInTheDocument();
   });
@@ -2126,7 +2127,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Episode 1" }));
     expect(useRouterPushMock).toHaveBeenCalled();
     const episodeOnePath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
-    expect(episodeOnePath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/e1");
+    expect(episodeOnePath).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1");
 
     const preSeasonCard = findCardByPeriodLabel("Pre-Season");
     fireEvent.click(within(preSeasonCard as HTMLElement).getAllByRole("button", { name: "Sync Posts" })[0]);
@@ -2136,7 +2137,7 @@ describe("RedditSourcesManager", () => {
     clickPeriodViewAllPosts("Pre-Season");
     expect(useRouterPushMock).toHaveBeenCalled();
     const preSeasonPath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
-    expect(preSeasonPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+    expect(preSeasonPath).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/w0");
 
     await waitFor(() => {
       const discoverUrls = fetchMock.mock.calls
@@ -2340,7 +2341,7 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(useRouterPushMock).toHaveBeenCalled();
       const pushedPath = String(useRouterPushMock.mock.calls.at(-1)?.[0] ?? "");
-      expect(pushedPath).toBe("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
+      expect(pushedPath).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/w0");
     });
   }, 15_000);
 
@@ -2583,7 +2584,29 @@ describe("RedditSourcesManager", () => {
         return jsonResponse(refreshPayload);
       }
       if (url.includes("/api/admin/reddit/runs/")) {
-        return new Promise<Response>(() => {});
+        return jsonResponse({
+          run_id: "63a7be5d-0000-4000-8000-000000000000",
+          status: "running",
+          queue: {
+            running_total: 1,
+            queued_total: 0,
+            other_running: 0,
+            other_queued: 0,
+            queued_ahead: 0,
+          },
+          diagnostics: {
+            progress: {
+              stage: "fetching_comments",
+              listing_pages_fetched: 12,
+              search_pages_fetched: 4,
+              rows_discovered_raw: 210,
+              rows_matched: 35,
+              comments_targets_total: 20,
+              comments_targets_done: 6,
+              comments_rows_upserted: 880,
+            },
+          },
+        });
       }
       if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
         if (url.includes("refresh=true")) {
@@ -2748,10 +2771,11 @@ describe("RedditSourcesManager", () => {
     expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
 
     clickPeriodRefreshPosts("Pre-Season");
+    const preSeasonCard = findCardByPeriodLabel("Pre-Season");
 
     await waitFor(() => {
-      expect(screen.getByText(/comments 6\/20 posts/i)).toBeInTheDocument();
-      expect(screen.getByText(/comment rows 880/i)).toBeInTheDocument();
+      expect(within(preSeasonCard).getByText(/comments 6\/20 posts/i)).toBeInTheDocument();
+      expect(within(preSeasonCard).getByText(/comment rows 880/i)).toBeInTheDocument();
     }, { timeout: 60_000 });
   }, 60_000);
 
@@ -3323,7 +3347,7 @@ describe("RedditSourcesManager", () => {
     await waitFor(() => {
       expect(bravoCommunityLink).toHaveAttribute(
         "href",
-        "/rhoslc/social/reddit/BravoRealHousewives/s6",
+        "/admin/social/reddit/BravoRealHousewives/rhoslc/s6",
       );
     });
     const bravoCard = bravoCommunityLink.closest("article") as HTMLElement;

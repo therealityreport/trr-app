@@ -9,7 +9,7 @@ import { SeasonTabsNav } from "@/components/admin/season-tabs/SeasonTabsNav";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
-  buildSeasonWeekBreadcrumb,
+  buildSeasonSocialBreadcrumb,
   humanizeSlug,
 } from "@/lib/admin/admin-breadcrumbs";
 import {
@@ -8091,11 +8091,6 @@ export default function WeekDetailPage() {
     tab: "social",
     socialView: "official",
   });
-  const breadcrumbWeekHref = buildSeasonSocialWeekUrl({
-    showSlug: showSlugForRouting,
-    seasonNumber,
-    weekIndex: weekIndexInt,
-  });
   const socialHeaderTitle = `${recentShowLabel} · Season ${
     Number.isFinite(seasonNumberInt) ? seasonNumberInt : seasonNumber
   }`;
@@ -8108,13 +8103,12 @@ export default function WeekDetailPage() {
   return (
     <div className="min-h-screen bg-zinc-50">
       <SocialAdminPageHeader
-        breadcrumbs={buildSeasonWeekBreadcrumb(recentShowLabel, seasonNumber, weekLabel, {
+        breadcrumbs={buildSeasonSocialBreadcrumb(recentShowLabel, seasonNumber, {
           showHref: breadcrumbShowHref,
           seasonHref: breadcrumbSeasonHref,
-          weekHref: breadcrumbWeekHref,
           socialHref: breadcrumbSocialHref,
           socialLabel: "Social Media",
-          subTabLabel: "Official Analysis",
+          subTabLabel: "Official Analytics",
           subTabHref: breadcrumbSocialHref,
         })}
         title={`${socialHeaderTitle} · ${weekLabel}`}

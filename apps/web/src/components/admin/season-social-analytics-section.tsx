@@ -24,6 +24,7 @@ import {
   parseSeasonEpisodeNumberFromPath,
   parseSeasonSocialPathSegment,
 } from "@/lib/admin/show-admin-routes";
+import { deriveCastComparisonWindow } from "@/lib/admin/cast-socialblade-charting";
 import {
   buildSocialSyncSessionRequest,
   consumeSocialSyncSessionStream,
@@ -4107,6 +4108,7 @@ export default function SeasonSocialAnalyticsSection({
     requeueMirrorJobs,
     getAuthHeaders,
     ingestStartedAt,
+    jobs,
     runningIngest,
     scope,
     seasonId,
@@ -5739,6 +5741,10 @@ export default function SeasonSocialAnalyticsSection({
   const isAdvancedView = analyticsView === "advanced";
   const isRedditView = analyticsView === "reddit";
   const isCastContentView = analyticsView === "cast-content";
+  const castComparisonWindow = useMemo(
+    () => deriveCastComparisonWindow(analytics?.weekly),
+    [analytics?.weekly],
+  );
   const selectedRunLabel = selectedRunId ? (runOptionLabelById.get(selectedRunId) ?? null) : null;
   const platformHandleCounts = useMemo(() => {
     const counts: Record<Platform, number> = {
@@ -6931,6 +6937,7 @@ export default function SeasonSocialAnalyticsSection({
           showId={showId}
           showSlug={showRouteSlug}
           seasonNumber={seasonNumber}
+          comparisonWindow={castComparisonWindow}
         />
       ) : isRedditView ? (
         <RedditSourcesManager

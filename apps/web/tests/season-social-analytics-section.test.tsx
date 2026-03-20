@@ -943,7 +943,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
 
-    expect(href).toContain("/show-1/social/s6/w1");
+    expect(href).toContain("/show-1/s6/social/w1");
     expect(href).not.toContain("source_scope=");
     expect(href).not.toContain("season_id=");
     expect(href).not.toContain("?tab=social/week");
@@ -967,7 +967,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     const weekOneLink = await screen.findByRole("link", { name: /Week 1/i });
     const href = weekOneLink.getAttribute("href") ?? "";
-    expect(href).toContain("/social/s6/w1/youtube");
+    expect(href).toContain("/s6/social/w1/youtube");
     expect(href).not.toContain("social_platform=youtube");
   });
 
@@ -1019,7 +1019,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const byeWeekLink = await screen.findByRole("link", {
       name: /bye week/i,
     });
-    expect(byeWeekLink.getAttribute("href") ?? "").toContain("/social/s6/w2");
+    expect(byeWeekLink.getAttribute("href") ?? "").toContain("/s6/social/w2");
     expect(screen.getAllByText(/BYE WEEK/i).length).toBeGreaterThan(0);
   });
 
@@ -1526,7 +1526,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
       });
       expect(routerReplaceMock).toHaveBeenCalledTimes(1);
       const redirectedHref = String(routerReplaceMock.mock.calls.at(-1)?.[0] ?? "");
-      expect(redirectedHref).toContain(`/show-1/social/s6/w1/${platform}`);
+      expect(redirectedHref).toContain(`/show-1/s6/social/w1/${platform}`);
     },
   );
 

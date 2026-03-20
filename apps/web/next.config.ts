@@ -4,13 +4,41 @@ import type { NextConfig } from "next";
 
 const IS_DEV = process.env.NODE_ENV === "development";
 const DIST_DIR = process.env.NEXT_DIST_DIR?.trim() || ".next";
+// Next.js 16.1.x route type generation can hang indefinitely in this app during
+// the "Running TypeScript" build phase. Keep typed routes opt-in so production
+// builds complete, while still allowing targeted investigation via env override.
+const TYPED_ROUTES_ENABLED = process.env.NEXT_TYPED_ROUTES === "true";
 const APP_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(APP_ROOT, "..", "..");
 
+// Force all @firebase internal packages to resolve to a single copy so the
+// component service registry is shared between firebase/app and firebase/firestore.
+// Without this, pnpm can hoist different versions of @firebase/component and the
+// Firestore service factory registers on a different container than the one the
+// app instance uses, causing "Service firestore is not available".
+const firebaseInternals = [
+  "@firebase/app",
+  "@firebase/component",
+  "@firebase/firestore",
+  "@firebase/util",
+  "@firebase/logger",
+] as const;
+const firebaseAliases = Object.fromEntries(
+  firebaseInternals.map((pkg) => [
+    pkg,
+    path.resolve(APP_ROOT, "node_modules", pkg),
+  ]),
+);
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  typedRoutes: true,
+  typedRoutes: TYPED_ROUTES_ENABLED,
   distDir: DIST_DIR,
+  webpack(config) {
+    config.resolve = config.resolve ?? {};
+    config.resolve.alias = { ...config.resolve.alias, ...firebaseAliases };
+    return config;
+  },
   onDemandEntries: IS_DEV
     ? {
         // Keep a wider set of admin routes warm in dev so multiple open tabs do

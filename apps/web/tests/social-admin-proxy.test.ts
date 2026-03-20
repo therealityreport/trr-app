@@ -56,8 +56,11 @@ describe("social-admin-proxy", () => {
     });
 
     expect(payload).toEqual({ ok: true });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const firstInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const backendCalls = fetchMock.mock.calls.filter(
+      (call) => String(call[0]) === "http://backend.local/api/v1/admin/socials/seasons/season-1/analytics",
+    );
+    expect(backendCalls).toHaveLength(2);
+    const firstInit = backendCalls[0]?.[1] as RequestInit | undefined;
     const firstHeaders = (firstInit?.headers ?? {}) as Record<string, string>;
     expect(typeof firstHeaders["x-trace-id"]).toBe("string");
     expect(firstHeaders["x-trace-id"].length).toBeGreaterThan(0);

@@ -82,7 +82,7 @@ export function ReplaceGettyDrawer({ assetId, onClose, onReplaced }: ReplaceGett
   return (
     <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-4">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-white">Replace Getty Image</span>
+        <span className="text-sm font-medium text-white">Remove Watermarks</span>
         <button
           onClick={onClose}
           className="text-white/50 hover:text-white"
