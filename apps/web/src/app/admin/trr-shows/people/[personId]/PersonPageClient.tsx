@@ -8570,58 +8570,53 @@ export default function PersonProfilePage() {
                     )}
                   </div>
                   {galleryShowFilter === "events" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedEventSubcategoryKey("all");
-                          setSelectedEventBucketKey("all");
-                        }}
-                        className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                          selectedEventSubcategoryKey === "all"
-                            ? "border-zinc-900 bg-zinc-900 text-white"
-                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                        }`}
-                      >
-                        All Events
-                      </button>
-                      {eventSubcategoryOptions.map((option) => (
-                        <button
-                          type="button"
-                          key={option.key}
-                          onClick={() => {
-                            setSelectedEventSubcategoryKey(option.key);
+                    <div className="mt-2 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label
+                          htmlFor="event-subcategory-filter"
+                          className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500"
+                        >
+                          Event Category
+                        </label>
+                        <select
+                          id="event-subcategory-filter"
+                          value={selectedEventSubcategoryKey}
+                          onChange={(event) => {
+                            setSelectedEventSubcategoryKey(event.target.value);
                             setSelectedEventBucketKey("all");
                             setGalleryShowFilter("events");
                           }}
-                          className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                            selectedEventSubcategoryKey === option.key
-                              ? "border-zinc-900 bg-zinc-900 text-white"
-                              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                          }`}
+                          className="min-w-[280px] rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 shadow-sm focus:border-zinc-400 focus:outline-none"
                         >
-                          {option.label}
-                        </button>
-                      ))}
-                      {eventOptionsForSelectedSubcategory.length > 0 &&
-                        eventOptionsForSelectedSubcategory.map((option) => (
-                          <button
-                            type="button"
-                            key={option.key}
-                            onClick={() => {
-                              setSelectedEventBucketKey(option.key);
-                              setGalleryShowFilter("events");
-                            }}
-                            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                              selectedEventBucketKey === option.key
-                                ? "border-zinc-900 bg-zinc-900 text-white"
-                                : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                            }`}
-                          >
-                            {option.label}
-                            {typeof option.count === "number" ? ` (${option.count})` : ""}
-                          </button>
-                        ))}
+                          <option value="all">All Events</option>
+                          {eventSubcategoryOptions.map((option) => (
+                            <option key={option.key} value={option.key}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {eventOptionsForSelectedSubcategory.length > 0 &&
+                          eventOptionsForSelectedSubcategory.map((option) => (
+                            <button
+                              type="button"
+                              key={option.key}
+                              onClick={() => {
+                                setSelectedEventBucketKey(option.key);
+                                setGalleryShowFilter("events");
+                              }}
+                              className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                                selectedEventBucketKey === option.key
+                                  ? "border-zinc-900 bg-zinc-900 text-white"
+                                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                              }`}
+                            >
+                              {option.label}
+                              {typeof option.count === "number" ? ` (${option.count})` : ""}
+                            </button>
+                          ))}
+                      </div>
                     </div>
                   )}
                 </div>
