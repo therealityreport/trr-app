@@ -8547,23 +8547,39 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        <select
-                          aria-label="Event category filter"
-                          value={galleryShowFilter === "events" ? selectedEventSubcategoryKey : "all"}
-                          onChange={(event) => {
-                            setSelectedEventSubcategoryKey(event.target.value);
-                            setSelectedEventBucketKey("all");
-                            setGalleryShowFilter("events");
-                          }}
-                          className="bg-transparent pr-6 text-xs font-semibold outline-none"
-                        >
-                          <option value="all">Events</option>
-                          {eventSubcategoryOptions.map((option) => (
-                            <option key={option.key} value={option.key}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative flex items-center">
+                          <select
+                            aria-label="Event category filter"
+                            value={galleryShowFilter === "events" ? selectedEventSubcategoryKey : "all"}
+                            onChange={(event) => {
+                              setSelectedEventSubcategoryKey(event.target.value);
+                              setSelectedEventBucketKey("all");
+                              setGalleryShowFilter("events");
+                            }}
+                            className={`appearance-none bg-transparent pl-0 pr-5 text-xs font-semibold outline-none ${
+                              galleryShowFilter === "events" ? "text-white" : "text-zinc-700"
+                            }`}
+                          >
+                            <option value="all">Events</option>
+                            {eventSubcategoryOptions.map((option) => (
+                              <option key={option.key} value={option.key}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <svg
+                            className={`pointer-events-none absolute right-0 h-3 w-3 ${
+                              galleryShowFilter === "events" ? "text-white" : "text-zinc-500"
+                            }`}
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            aria-hidden="true"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6l4 4 4-4" />
+                          </svg>
+                        </div>
                       </div>
                     )}
                     {hasUnknownShowMatches && (
