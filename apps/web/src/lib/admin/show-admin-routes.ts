@@ -26,6 +26,7 @@ export type SeasonAdminTab =
 export type SeasonAssetsSubTab = "images" | "videos" | "branding";
 export type PersonAdminTab =
   | "overview"
+  | "settings"
   | "gallery"
   | "videos"
   | "news"
@@ -150,6 +151,7 @@ const SEASON_TAB_BY_QUERY_ALIAS: Record<string, SeasonAdminTab> = {
 const PERSON_TAB_BY_PATH_SEGMENT: Record<string, PersonAdminTab> = {
   overview: "overview",
   details: "overview",
+  settings: "settings",
   gallery: "gallery",
   videos: "videos",
   news: "news",
@@ -162,6 +164,7 @@ const PERSON_TAB_BY_PATH_SEGMENT: Record<string, PersonAdminTab> = {
 const PERSON_TAB_BY_QUERY_ALIAS: Record<string, PersonAdminTab> = {
   overview: "overview",
   details: "overview",
+  settings: "settings",
   gallery: "gallery",
   videos: "videos",
   news: "news",
@@ -438,18 +441,6 @@ const buildCanonicalQuery = (query: URLSearchParams | undefined, opts?: { remove
   next.delete("assets");
   if (opts?.removeSocialView) {
     next.delete("social_view");
-  }
-  return next;
-};
-
-const buildCanonicalPersonQuery = (
-  query: URLSearchParams | undefined,
-  showContext: string | undefined,
-): URLSearchParams => {
-  const next = buildCanonicalQuery(query);
-  const normalized = showContext?.trim();
-  if (normalized) {
-    next.set("showId", normalized);
   }
   return next;
 };
@@ -915,9 +906,9 @@ export function buildPersonAdminUrl(input: {
 }): string {
   const personSlug = encodeURIComponent(input.personSlug.trim());
   const tab = input.tab ?? "overview";
-  const showContext = (input.showId ?? input.showSlug)?.trim();
+  const query = buildCanonicalQuery(input.query);
+  query.delete("showId");
   const base = `/people/${personSlug}`;
-  const query = buildCanonicalPersonQuery(input.query, showContext);
   const path = tab === "overview" ? base : `${base}/${tab}`;
   return appendQuery(path, query);
 }

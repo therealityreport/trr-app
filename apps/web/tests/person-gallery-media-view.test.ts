@@ -126,6 +126,12 @@ describe("person gallery media view helpers", () => {
     });
 
     expect(availability.hasBravoconMatches).toBe(true);
+    expect(availability.eventSubcategoryOptions).toEqual([
+      {
+        key: "reality_tv_bravo_franchise",
+        label: "Reality TV / Bravo / Franchise Event",
+      },
+    ]);
     expect(availability.eventOptions).toEqual([
       {
         key: "directv-plot-twist-featuring-bravo",
@@ -462,6 +468,21 @@ describe("person gallery media view helpers", () => {
     expect(fallback).toBe("other-shows");
   });
 
+  it("falls back from unsorted when there are no unsorted matches", () => {
+    const fallback = resolveGalleryShowFilterFallback({
+      currentFilter: "unsorted",
+      showContextEnabled: false,
+      hasWwhlMatches: false,
+      hasBravoconMatches: false,
+      hasEventMatches: true,
+      hasOtherShowMatches: true,
+      hasUnknownShowMatches: false,
+      hasSelectedOtherShowMatches: false,
+      hasNonThisShowMatches: true,
+    });
+    expect(fallback).toBe("all");
+  });
+
   it("does not classify movie captions as episode captions", () => {
     expect(
       isLikelyImdbEpisodeCaption(
@@ -648,6 +669,66 @@ describe("person gallery media view helpers", () => {
 
     expect(buckets.matchesEvents).toBe(true);
     expect(buckets.matchesUnknownShows).toBe(false);
+  });
+
+  it("routes event rows tagged as other shows out of generic events", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "getty",
+        bucket_type: "event",
+        bucket_key: "big-brother-finale-party",
+        bucket_label: "Big Brother Finale Party",
+        metadata: {
+          bucket_type: "event",
+          bucket_key: "big-brother-finale-party",
+          bucket_label: "Big Brother Finale Party",
+          grouped_image_count: 4,
+          event_subcategory_keys: ["other_shows"],
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors"],
+      allKnownShowAcronymMatches: new Set(["T"]),
+      allKnownShowIds: ["show-traitors"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesEvents).toBe(false);
+    expect(buckets.matchesOtherShows).toBe(true);
+  });
+
+  it("routes event rows tagged as unsorted into the unsorted bucket", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "getty",
+        bucket_type: "event",
+        bucket_key: "mystery-event",
+        bucket_label: "Mystery Event",
+        metadata: {
+          bucket_type: "event",
+          bucket_key: "mystery-event",
+          bucket_label: "Mystery Event",
+          grouped_image_count: 3,
+          event_subcategory_keys: ["unsorted"],
+        },
+      }),
+      showIdForApi: "show-traitors",
+      activeShowName: "The Traitors",
+      activeShowAcronym: "T",
+      allKnownShowNameMatches: ["the traitors"],
+      allKnownShowAcronymMatches: new Set(["T"]),
+      allKnownShowIds: ["show-traitors"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesEvents).toBe(false);
+    expect(buckets.matchesUnknownShows).toBe(true);
   });
 
   it("prioritizes explicit Getty/NBCUMV bucket metadata over caption heuristics", () => {

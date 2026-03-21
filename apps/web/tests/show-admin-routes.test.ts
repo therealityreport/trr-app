@@ -633,6 +633,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams()
       )
     ).toMatchObject({ tab: "gallery", source: "path" });
+
+    expect(
+      parsePersonRouteState(
+        "/people/meredith-marks--7f528757/settings",
+        new URLSearchParams()
+      )
+    ).toMatchObject({ tab: "settings", source: "path" });
   });
 
   it("builds canonical person URLs", () => {
@@ -641,7 +648,15 @@ describe("show-admin-routes", () => {
         showSlug: "the-real-housewives-of-salt-lake-city",
         personSlug: "meredith-marks--7f528757",
       })
-    ).toBe("/people/meredith-marks--7f528757?showId=the-real-housewives-of-salt-lake-city");
+    ).toBe("/people/meredith-marks--7f528757");
+
+    expect(
+      buildPersonAdminUrl({
+        showSlug: "the-real-housewives-of-salt-lake-city",
+        personSlug: "meredith-marks--7f528757",
+        tab: "settings",
+      })
+    ).toBe("/people/meredith-marks--7f528757/settings");
 
     expect(
       buildPersonAdminUrl({
@@ -649,9 +664,7 @@ describe("show-admin-routes", () => {
         personSlug: "meredith-marks--7f528757",
         tab: "gallery",
       })
-    ).toBe(
-      "/people/meredith-marks--7f528757/gallery?showId=the-real-housewives-of-salt-lake-city",
-    );
+    ).toBe("/people/meredith-marks--7f528757/gallery");
 
     expect(
       buildPersonAdminUrl({
@@ -659,7 +672,7 @@ describe("show-admin-routes", () => {
         personSlug: "meredith-marks--7f528757",
         tab: "gallery",
       })
-    ).toBe("/people/meredith-marks--7f528757/gallery?showId=7f528757-5017-4599-8252-c02f0d0736cf");
+    ).toBe("/people/meredith-marks--7f528757/gallery");
 
     expect(
       buildPersonAdminUrl({

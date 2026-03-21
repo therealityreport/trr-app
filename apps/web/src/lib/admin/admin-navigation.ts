@@ -28,6 +28,14 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     activeMatchPrefixes: ["/admin/shows", "/admin/trr-shows", "/shows"],
   },
   {
+    key: "screenlaytics",
+    title: "Screenalytics",
+    href: "/screenlaytics" as Route,
+    description: "Pick a show and jump into the show-level admin workspace used for screen-time and related operations.",
+    badge: "Screen",
+    activeMatchPrefixes: ["/screenlaytics", "/screenalytics", "/admin/trr-shows"],
+  },
+  {
     key: "people",
     title: "People",
     href: "/people",
@@ -105,6 +113,15 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     description: "Reference for fonts, survey question components, and form patterns used across the app.",
     badge: "Design",
     activeMatchPrefixes: ["/design-system"],
+  },
+  {
+    key: "design-docs",
+    title: "Design Docs",
+    href: "/admin/design-docs" as Route,
+    description:
+      "Data visualization and editorial design system — typography, colors, charts, layout, and component patterns.",
+    badge: "Design",
+    activeMatchPrefixes: ["/admin/design-docs"],
   },
   {
     key: "settings",

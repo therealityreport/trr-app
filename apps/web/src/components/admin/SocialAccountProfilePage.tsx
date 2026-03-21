@@ -6,6 +6,7 @@ import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import SocialAccountProfileHashtagTimelineChart from "@/components/admin/SocialAccountProfileHashtagTimelineChart";
 import {
   type CatalogBackfillRequest,
   type CatalogReviewResolveRequest,
@@ -19,6 +20,7 @@ import {
   type SocialAccountCatalogRunProgressStage,
   type SocialAccountProfileHashtag,
   type SocialAccountProfileHashtagAssignment,
+  type SocialAccountProfileHashtagTimeline,
   type SocialAccountProfilePost,
   type SocialAccountProfileSummary,
   type SocialAccountProfileTab,
@@ -61,6 +63,10 @@ type CatalogPostsResponse = {
 
 type HashtagsResponse = {
   items: SocialAccountProfileHashtag[];
+};
+
+type HashtagTimelineResponse = SocialAccountProfileHashtagTimeline & {
+  error?: string;
 };
 
 type CatalogReviewQueueResponse = {
@@ -109,6 +115,7 @@ type CatalogRunProgressHandleCard = {
   platform: string;
   handle: string;
   runnerLanes: string[];
+  frontierLabel?: string | null;
   hasStarted: boolean;
   nextStage: string | null;
   totals: CatalogRunProgressStageStats;
@@ -156,13 +163,14 @@ const formatRunStatusLabel = (value?: string | null): string => {
     .join(" ");
 };
 
-const formatRunStageLabel = (value?: string | null): string => {
+const formatRunStageLabel = (value?: string | null, options?: { frontierMode?: boolean }): string => {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "Other";
+  const frontierMode = Boolean(options?.frontierMode);
   if (normalized === "media_mirror") return "Media Mirror";
   if (normalized === "comment_media_mirror") return "Comment Media Mirror";
-  if (normalized === "shared_account_discovery") return "History Discovery";
-  if (normalized === "shared_account_posts") return "Shard Workers";
+  if (normalized === "shared_account_discovery") return frontierMode ? "History Bootstrap" : "History Discovery";
+  if (normalized === "shared_account_posts") return frontierMode ? "Catalog Fetch" : "Shard Workers";
   if (normalized === "post_classify") return "Classifying Posts";
   if (normalized === "season_materialize") return "Season Materialize";
   if (normalized === "analytics_refresh") return "Analytics Refresh";
@@ -180,12 +188,30 @@ const formatHandleLabel = (value?: string | null): string => {
 const formatCatalogStageActivitySummary = (
   stageName: string,
   stats: Pick<CatalogRunProgressStageStats, "scraped" | "saved">,
+  options?: { frontierMode?: boolean },
 ): string => {
   const normalized = String(stageName || "").trim().toLowerCase();
+  const frontierMode = Boolean(options?.frontierMode);
   if (normalized === "shared_account_discovery") {
+    if (frontierMode) {
+      return [
+        `${formatInteger(stats.scraped)} checked`,
+        stats.saved > 0 ? `${formatInteger(stats.saved)} saved` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
     return [
       `${formatInteger(stats.scraped)} checked`,
       stats.saved > 0 ? `${formatInteger(stats.saved)} partitions created` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (normalized === "shared_account_posts" && frontierMode) {
+    return [
+      `${formatInteger(stats.scraped)} checked`,
+      stats.saved > 0 ? `${formatInteger(stats.saved)} saved` : null,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -219,11 +245,64 @@ const getCatalogRunStatusTone = (value?: string | null): string => {
   return "border-sky-200 bg-sky-50 text-sky-700";
 };
 
+const getCatalogStageBadge = (
+  stage: string,
+  stats: CatalogRunProgressStageStats,
+  options?: { scrapeComplete?: boolean },
+): { label: string; tone: string } => {
+  const normalizedStage = String(stage || "").trim().toLowerCase();
+  const classifyBackground = normalizedStage === "post_classify" && Boolean(options?.scrapeComplete);
+  if (classifyBackground && (stats.running > 0 || stats.waiting > 0 || stats.failed > 0)) {
+    return {
+      label: "Background",
+      tone: "bg-zinc-100 text-zinc-700",
+    };
+  }
+  if (stats.failed > 0) {
+    return {
+      label: "Issue",
+      tone: "bg-red-100 text-red-700",
+    };
+  }
+  if (stats.running > 0) {
+    return {
+      label: "Running",
+      tone: "bg-sky-100 text-sky-700",
+    };
+  }
+  if (stats.waiting > 0) {
+    return {
+      label: "Queued",
+      tone: "bg-amber-100 text-amber-700",
+    };
+  }
+  return {
+    label: "Done",
+    tone: "bg-emerald-100 text-emerald-700",
+  };
+};
+
 const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
+  const frontierMode =
+    String(progress?.worker_runtime?.frontier_strategy || progress?.partition_strategy || "")
+      .trim()
+      .toLowerCase() === "newest_first_frontier";
+  if (progress?.scrape_complete) {
+    return progress?.classify_incomplete ? "Catalog fetch complete" : "Catalog fetch complete";
+  }
   const discovery = progress?.discovery;
+  const frontier = progress?.frontier;
   const activeDiscoveryJobs = Number(progress?.stages?.shared_account_discovery?.jobs_active ?? 0);
   if (activeDiscoveryJobs > 0) {
-    return "Discovering history";
+    return frontierMode ? "Bootstrapping history" : "Discovering history";
+  }
+  if (frontierMode) {
+    if (Number(progress?.stages?.shared_account_posts?.jobs_active ?? 0) > 0) {
+      return "Fetching catalog pages";
+    }
+    if (frontier?.status === "completed" || frontier?.exhausted) {
+      return "Classifying posts";
+    }
   }
   if (Number(discovery?.partition_count ?? 0) > 0) {
     if (Number(discovery?.running_count ?? 0) > 0 || Number(discovery?.queued_count ?? 0) > 0) {
@@ -262,6 +341,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogPosts, setCatalogPosts] = useState<CatalogPostsResponse | null>(null);
   const [catalogPostsLoading, setCatalogPostsLoading] = useState(false);
   const [catalogPostsError, setCatalogPostsError] = useState<string | null>(null);
+  const [catalogCardPreview, setCatalogCardPreview] = useState<{
+    total: number;
+    latestPostedAt: string | null;
+  } | null>(null);
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogFilter, setCatalogFilter] = useState<"all" | "assigned" | "unassigned" | "ambiguous" | "needs_review">("all");
   const [catalogActionMessage, setCatalogActionMessage] = useState<string | null>(null);
@@ -280,6 +363,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [savingHashtag, setSavingHashtag] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [draftAssignments, setDraftAssignments] = useState<Record<string, SocialAccountProfileHashtagAssignment[]>>({});
+  const [hashtagTimeline, setHashtagTimeline] = useState<SocialAccountProfileHashtagTimeline | null>(null);
+  const [hashtagTimelineLoading, setHashtagTimelineLoading] = useState(false);
+  const [hashtagTimelineError, setHashtagTimelineError] = useState<string | null>(null);
 
   const [collaboratorsTags, setCollaboratorsTags] = useState<CollaboratorsTagsResponse | null>(null);
   const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
@@ -298,6 +384,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   useEffect(() => {
     setPage(1);
     setCatalogPage(1);
+    setCatalogCardPreview(null);
     setReviewDrafts({});
     setReviewSeasonOptionsByShow({});
     setReviewSeasonLoadingByShow({});
@@ -308,6 +395,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogProgressLastSuccessAt(null);
     setCatalogLogsExpanded(false);
     catalogTerminalSummaryRefreshRunIdRef.current = null;
+    setHashtagTimeline(null);
+    setHashtagTimelineError(null);
+    setHashtagTimelineLoading(false);
   }, [platform, handle]);
 
   useEffect(() => {
@@ -326,6 +416,39 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       throw new Error(data.error || "Failed to load social account profile summary");
     }
     setSummary(data);
+  }, [handle, platform, user]);
+
+  const refreshHashtags = useCallback(async () => {
+    if (!user) return;
+    const response = await fetchAdminWithAuth(
+      `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags`,
+      undefined,
+      { preferredUser: user },
+    );
+    const data = (await response.json().catch(() => ({}))) as HashtagsResponse & { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to load social account profile hashtags");
+    }
+    setHashtags(data.items ?? []);
+    setDraftAssignments(
+      Object.fromEntries(
+        (data.items ?? []).map((item) => [item.hashtag, item.assignments?.map((assignment) => ({ ...assignment })) ?? []]),
+      ),
+    );
+  }, [handle, platform, user]);
+
+  const refreshHashtagTimeline = useCallback(async () => {
+    if (!user || platform !== "instagram") return;
+    const response = await fetchAdminWithAuth(
+      `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags/timeline`,
+      undefined,
+      { preferredUser: user },
+    );
+    const data = (await response.json().catch(() => ({}))) as HashtagTimelineResponse;
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to load social account hashtag timeline");
+    }
+    setHashtagTimeline(data);
   }, [handle, platform, user]);
 
   useEffect(() => {
@@ -360,6 +483,56 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       cancelled = true;
     };
   }, [checking, handle, hasAccess, platform, user]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || !supportsCatalog) return;
+    const liveCatalogTotal = Number(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts ?? 0);
+    const hasCatalogHistory = Number(summary?.catalog_recent_runs?.length ?? 0) > 0;
+    if (liveCatalogTotal > 0 || !hasCatalogHistory) {
+      setCatalogCardPreview(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadCatalogCardPreview = async () => {
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/posts?page=1&page_size=1&filter=all`,
+          undefined,
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as CatalogPostsResponse & { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load catalog preview");
+        }
+        if (cancelled) return;
+        setCatalogCardPreview({
+          total: Number(data.pagination?.total ?? 0),
+          latestPostedAt: data.items?.[0]?.posted_at ?? null,
+        });
+      } catch {
+        if (!cancelled) {
+          setCatalogCardPreview(null);
+        }
+      }
+    };
+
+    void loadCatalogCardPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    checking,
+    handle,
+    hasAccess,
+    platform,
+    summary?.catalog_recent_runs,
+    summary?.catalog_total_posts,
+    summary?.live_catalog_total_posts,
+    supportsCatalog,
+    user,
+  ]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || activeTab !== "posts") return;
@@ -442,22 +615,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setHashtagsLoading(true);
       setHashtagsError(null);
       try {
-        const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags`,
-          undefined,
-          { preferredUser: user },
-        );
-        const data = (await response.json().catch(() => ({}))) as HashtagsResponse & { error?: string };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to load social account profile hashtags");
-        }
+        await refreshHashtags();
         if (cancelled) return;
-        setHashtags(data.items ?? []);
-        setDraftAssignments(
-          Object.fromEntries(
-            (data.items ?? []).map((item) => [item.hashtag, item.assignments?.map((assignment) => ({ ...assignment })) ?? []]),
-          ),
-        );
       } catch (error) {
         if (cancelled) return;
         setHashtagsError(error instanceof Error ? error.message : "Failed to load social account profile hashtags");
@@ -470,7 +629,37 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, handle, hasAccess, platform, user]);
+  }, [activeTab, checking, hasAccess, refreshHashtags, user]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || activeTab !== "hashtags" || platform !== "instagram") {
+      if (platform !== "instagram") {
+        setHashtagTimeline(null);
+        setHashtagTimelineError(null);
+        setHashtagTimelineLoading(false);
+      }
+      return;
+    }
+    let cancelled = false;
+
+    const loadHashtagTimeline = async () => {
+      setHashtagTimelineLoading(true);
+      setHashtagTimelineError(null);
+      try {
+        await refreshHashtagTimeline();
+      } catch (error) {
+        if (cancelled) return;
+        setHashtagTimelineError(error instanceof Error ? error.message : "Failed to load social account hashtag timeline");
+      } finally {
+        if (!cancelled) setHashtagTimelineLoading(false);
+      }
+    };
+
+    void loadHashtagTimeline();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, checking, hasAccess, platform, refreshHashtagTimeline, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog || (activeTab !== "hashtags" && activeTab !== "catalog")) {
@@ -547,22 +736,82 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return runs.find((run) => ACTIVE_CATALOG_RUN_STATUSES.has(String(run.status || "").trim().toLowerCase())) ?? null;
   }, [summary?.catalog_recent_runs]);
 
+  const latestCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
+    const runs = summary?.catalog_recent_runs ?? [];
+    return runs[0] ?? null;
+  }, [summary?.catalog_recent_runs]);
+
+  const selectedCatalogRunId = useMemo(() => {
+    const normalized = String(catalogProgressRunId || "").trim();
+    return normalized || null;
+  }, [catalogProgressRunId]);
+
+  const latestCatalogRunId = useMemo(() => {
+    const normalized = String(latestCatalogRun?.run_id || "").trim();
+    return normalized || null;
+  }, [latestCatalogRun?.run_id]);
+
+  const activeCatalogRunId = useMemo(() => {
+    return activeCatalogRun?.run_id?.trim() || null;
+  }, [activeCatalogRun?.run_id]);
+
+  const activeCatalogRunStatus = useMemo(() => {
+    const normalized = String(activeCatalogRun?.status || "").trim().toLowerCase();
+    return normalized || null;
+  }, [activeCatalogRun?.status]);
+
+  const activeCatalogRunDisplayStatus = useMemo(() => {
+    if (activeCatalogRunId && catalogRunProgress?.run_id === activeCatalogRunId && catalogRunProgress?.scrape_complete) {
+      return "completed";
+    }
+    return activeCatalogRunStatus;
+  }, [activeCatalogRunId, activeCatalogRunStatus, catalogRunProgress?.run_id, catalogRunProgress?.scrape_complete]);
+
+  const activeCatalogRunBlocksActions = useMemo(() => {
+    return activeCatalogRunId !== null && ACTIVE_CATALOG_RUN_STATUSES.has(activeCatalogRunDisplayStatus || "");
+  }, [activeCatalogRunDisplayStatus, activeCatalogRunId]);
+
+  const backgroundCatalogRunId = useMemo(() => {
+    return selectedCatalogRunId || activeCatalogRunId || latestCatalogRunId || null;
+  }, [activeCatalogRunId, latestCatalogRunId, selectedCatalogRunId]);
+
+  const backgroundCatalogRunStatus = useMemo(() => {
+    if (!backgroundCatalogRunId || catalogRunProgress?.run_id !== backgroundCatalogRunId) return "";
+    return String(catalogRunProgress?.run_status || "").trim().toLowerCase();
+  }, [backgroundCatalogRunId, catalogRunProgress?.run_id, catalogRunProgress?.run_status]);
+
+  const backgroundCatalogRunIsActive = useMemo(() => {
+    return ACTIVE_CATALOG_RUN_STATUSES.has(backgroundCatalogRunStatus);
+  }, [backgroundCatalogRunStatus]);
+
   const displayedCatalogRunSummary = useMemo<SocialAccountCatalogRun | null>(() => {
     const runs = summary?.catalog_recent_runs ?? [];
-    if (catalogProgressRunId) {
-      return runs.find((run) => run.run_id === catalogProgressRunId) ?? null;
+    if (selectedCatalogRunId) {
+      return runs.find((run) => run.run_id === selectedCatalogRunId) ?? null;
     }
-    return activeCatalogRun;
-  }, [activeCatalogRun, catalogProgressRunId, summary?.catalog_recent_runs]);
+    if (activeCatalogRunId) {
+      return runs.find((run) => run.run_id === activeCatalogRunId) ?? null;
+    }
+    if (backgroundCatalogRunIsActive && backgroundCatalogRunId) {
+      return runs.find((run) => run.run_id === backgroundCatalogRunId) ?? null;
+    }
+    return null;
+  }, [
+    activeCatalogRunId,
+    backgroundCatalogRunId,
+    backgroundCatalogRunIsActive,
+    selectedCatalogRunId,
+    summary?.catalog_recent_runs,
+  ]);
 
   const displayedCatalogRunId = useMemo(() => {
     return (
-      (catalogRunProgress?.run_id && catalogRunProgress.run_id.trim()) ||
-      (catalogProgressRunId && catalogProgressRunId.trim()) ||
-      (displayedCatalogRunSummary?.run_id && displayedCatalogRunSummary.run_id.trim()) ||
+      selectedCatalogRunId ||
+      activeCatalogRunId ||
+      (backgroundCatalogRunIsActive ? backgroundCatalogRunId : null) ||
       null
     );
-  }, [catalogProgressRunId, catalogRunProgress?.run_id, displayedCatalogRunSummary?.run_id]);
+  }, [activeCatalogRunId, backgroundCatalogRunId, backgroundCatalogRunIsActive, selectedCatalogRunId]);
 
   const displayedCatalogRunStatus = useMemo(() => {
     const selectedRunId = displayedCatalogRunId?.trim() ?? "";
@@ -571,8 +820,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const summaryStatus =
       selectedRunId && displayedCatalogRunSummary?.run_id === selectedRunId ? displayedCatalogRunSummary.status : null;
     const candidates = [
-      summaryStatus,
       progressStatus,
+      summaryStatus,
       selectedRunId && catalogProgressRunId === selectedRunId ? "queued" : null,
     ];
     for (const candidate of candidates) {
@@ -583,17 +832,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [
     displayedCatalogRunSummary?.run_id,
     displayedCatalogRunSummary?.status,
-    catalogProgressRunId,
     catalogRunProgress?.run_id,
     catalogRunProgress?.run_status,
+    catalogProgressRunId,
     displayedCatalogRunId,
   ]);
 
-  const displayedCatalogRunIsActive = useMemo(() => {
-    return ACTIVE_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus);
-  }, [displayedCatalogRunStatus]);
-
-  const catalogActionsBlocked = runningCatalogAction !== null || displayedCatalogRunIsActive;
+  const catalogActionsBlocked = runningCatalogAction !== null || activeCatalogRunBlocksActions;
 
   const catalogPhaseLabel = useMemo(() => {
     return getCatalogPhaseLabel(catalogRunProgress);
@@ -601,7 +846,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog) return;
-    if (!displayedCatalogRunId) return;
+    if (!backgroundCatalogRunId) return;
 
     let cancelled = false;
     let timeoutId: number | null = null;
@@ -611,7 +856,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setCatalogRunProgressLoading(true);
       try {
         const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(displayedCatalogRunId)}/progress?recent_log_limit=25`,
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(backgroundCatalogRunId)}/progress?recent_log_limit=25`,
           undefined,
           { preferredUser: user },
         );
@@ -648,7 +893,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         window.clearTimeout(timeoutId);
       }
     };
-  }, [checking, displayedCatalogRunId, handle, hasAccess, platform, supportsCatalog, user]);
+  }, [backgroundCatalogRunId, checking, handle, hasAccess, platform, supportsCatalog, user]);
 
   useEffect(() => {
     const runId = String(catalogRunProgress?.run_id || "").trim();
@@ -658,6 +903,52 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogTerminalSummaryRefreshRunIdRef.current = runId;
     void refreshSummary().catch(() => {});
   }, [catalogRunProgress?.run_id, catalogRunProgress?.run_status, refreshSummary]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || !supportsCatalog || !backgroundCatalogRunIsActive) return;
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const refreshLiveAccountState = async () => {
+      try {
+        await refreshSummary();
+        if (!cancelled && activeTab === "hashtags") {
+          await refreshHashtags();
+          if (platform === "instagram") {
+            await refreshHashtagTimeline();
+          }
+        }
+      } catch {
+        // The progress poll already surfaces run-level failures; keep live-summary refresh best effort.
+      }
+      if (cancelled) return;
+      timeoutId = window.setTimeout(() => {
+        void refreshLiveAccountState();
+      }, CATALOG_PROGRESS_POLL_INTERVAL_MS);
+    };
+
+    timeoutId = window.setTimeout(() => {
+      void refreshLiveAccountState();
+    }, CATALOG_PROGRESS_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    activeTab,
+    backgroundCatalogRunIsActive,
+    checking,
+    hasAccess,
+    platform,
+    refreshHashtagTimeline,
+    refreshHashtags,
+    refreshSummary,
+    supportsCatalog,
+    user,
+  ]);
 
   const catalogStageEntries = useMemo(() => {
     return Object.entries(catalogRunProgress?.stages ?? {})
@@ -714,7 +1005,96 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [catalogProgressSummary.items, catalogProgressSummary.pct, catalogRunProgress?.post_progress, summary?.total_posts]);
 
+  const catalogTerminalCoverageMessage = useMemo(() => {
+    const status = displayedCatalogRunStatus;
+    if (!TERMINAL_CATALOG_RUN_STATUSES.has(status)) return null;
+    if (!catalogPostProgress.hasTotal || catalogPostProgress.total <= 0) return null;
+    if (catalogPostProgress.completed >= catalogPostProgress.total) return null;
+    const discoveryComplete = Number(catalogRunProgress?.discovery?.completed_count ?? 0) > 0;
+    if (!discoveryComplete && status !== "failed") return null;
+    if (catalogRunProgress?.completion_gap_reason === "source_total_drift") {
+      return `Catalog fetch reached the stored frontier, but the live source total moved during the run. This run checked ${formatInteger(catalogPostProgress.completed)} of the original ${formatInteger(catalogPostProgress.total)} expected posts.`;
+    }
+    return `History discovery finished, but this run only checked ${formatInteger(catalogPostProgress.completed)} of ${formatInteger(catalogPostProgress.total)} posts. Review recent logs before starting the next backfill.`;
+  }, [
+    catalogPostProgress.completed,
+    catalogPostProgress.hasTotal,
+    catalogPostProgress.total,
+    catalogRunProgress?.completion_gap_reason,
+    catalogRunProgress?.discovery?.completed_count,
+    displayedCatalogRunStatus,
+  ]);
+
+  const catalogScrapeCompletionMessage = useMemo(() => {
+    if (!catalogRunProgress?.scrape_complete) return null;
+    if (catalogRunProgress?.classify_incomplete) {
+      return "Catalog fetch is complete. Saved catalog totals and hashtags are live while post classification finishes in the background.";
+    }
+    return "Catalog fetch is complete and the saved catalog totals shown above reflect the latest stored rows.";
+  }, [catalogRunProgress?.classify_incomplete, catalogRunProgress?.scrape_complete]);
+
+  const displayEngagement = useMemo(() => {
+    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0) {
+      return Number(summary?.live_catalog_total_engagement ?? 0);
+    }
+    return Number(summary?.total_engagement ?? 0);
+  }, [summary?.live_catalog_total_engagement, summary?.live_catalog_total_posts, summary?.total_engagement, supportsCatalog]);
+
+  const displayViews = useMemo(() => {
+    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0) {
+      return Number(summary?.live_catalog_total_views ?? 0);
+    }
+    return Number(summary?.total_views ?? 0);
+  }, [summary?.live_catalog_total_posts, summary?.live_catalog_total_views, summary?.total_views, supportsCatalog]);
+
+  const displayLastPostAt = useMemo(() => {
+    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0 && summary?.live_catalog_last_post_at) {
+      return summary.live_catalog_last_post_at;
+    }
+    if (supportsCatalog && Number(catalogCardPreview?.total ?? 0) > 0 && catalogCardPreview?.latestPostedAt) {
+      return catalogCardPreview.latestPostedAt;
+    }
+    return summary?.last_post_at;
+  }, [
+    catalogCardPreview?.latestPostedAt,
+    catalogCardPreview?.total,
+    summary?.last_post_at,
+    summary?.live_catalog_last_post_at,
+    summary?.live_catalog_total_posts,
+    supportsCatalog,
+  ]);
+
+  const displayCatalogTotalPosts = useMemo(() => {
+    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0) {
+      return Number(summary?.live_catalog_total_posts ?? 0);
+    }
+    if (supportsCatalog && Number(catalogCardPreview?.total ?? 0) > 0) {
+      return Number(catalogCardPreview?.total ?? 0);
+    }
+    return Number(summary?.catalog_total_posts ?? 0);
+  }, [
+    catalogCardPreview?.total,
+    summary?.catalog_total_posts,
+    summary?.live_catalog_total_posts,
+    supportsCatalog,
+  ]);
+
   const catalogHandleCards = useMemo((): CatalogRunProgressHandleCard[] => {
+    const frontierMode =
+      String(catalogRunProgress?.worker_runtime?.frontier_strategy || catalogRunProgress?.partition_strategy || "")
+        .trim()
+        .toLowerCase() === "newest_first_frontier";
+    const frontierLabel =
+      frontierMode && catalogRunProgress?.frontier
+        ? [
+            catalogRunProgress.frontier.lease_owner ? "Frontier active" : "Frontier queued",
+            catalogRunProgress.frontier.transport
+              ? `Transport ${String(catalogRunProgress.frontier.transport).trim()}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : null;
     const cards = new Map<string, CatalogRunProgressHandleCard>();
     for (const entry of catalogRunProgress?.per_handle ?? []) {
       const normalizedHandle = String(entry.account_handle || "").trim().replace(/^@+/, "") || "unknown";
@@ -726,6 +1106,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         platform: normalizedPlatform,
         handle: normalizedHandle,
         runnerLanes: [],
+        frontierLabel,
         hasStarted: false,
         nextStage: null,
         totals: { total: 0, completed: 0, failed: 0, active: 0, running: 0, waiting: 0, scraped: 0, saved: 0 },
@@ -748,6 +1129,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         ]),
       ).sort();
       existing.hasStarted = existing.hasStarted || Boolean(entry.has_started);
+      if (!existing.frontierLabel && frontierLabel) {
+        existing.frontierLabel = frontierLabel;
+      }
       if (!existing.nextStage && typeof entry.next_stage === "string" && entry.next_stage.trim()) {
         existing.nextStage = entry.next_stage.trim();
       }
@@ -765,7 +1149,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         }),
       }))
       .sort((left, right) => left.handle.localeCompare(right.handle));
-  }, [catalogRunProgress?.per_handle, platform]);
+  }, [catalogRunProgress?.frontier, catalogRunProgress?.partition_strategy, catalogRunProgress?.per_handle, catalogRunProgress?.worker_runtime?.frontier_strategy, platform]);
 
   const catalogLogs = useMemo((): SocialAccountCatalogRunProgressLogEntry[] => {
     return (catalogRunProgress?.recent_log ?? [])
@@ -778,6 +1162,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }))
       .filter((entry) => entry.line.length > 0);
   }, [catalogRunProgress?.recent_log]);
+
+  const frontierMode = useMemo(
+    () =>
+      String(catalogRunProgress?.worker_runtime?.frontier_strategy || catalogRunProgress?.partition_strategy || "")
+        .trim()
+        .toLowerCase() === "newest_first_frontier",
+    [catalogRunProgress?.partition_strategy, catalogRunProgress?.worker_runtime?.frontier_strategy],
+  );
 
   useEffect(() => {
     setCatalogLogsExpanded(false);
@@ -953,7 +1345,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       .filter((assignment) => assignment.show_id)
       .map((assignment) => ({
         show_id: assignment.show_id,
-        season_id: assignment.season_id ?? null,
+        season_id: null,
       }));
 
     setSavingHashtag(hashtag);
@@ -1043,12 +1435,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   };
 
   const cancelCatalogRun = async () => {
-    if (!user || !displayedCatalogRunId) return;
+    if (!user || !activeCatalogRunId) return;
     setCancellingCatalogRun(true);
     setCatalogActionMessage(null);
     try {
       const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(displayedCatalogRunId)}/cancel`,
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(activeCatalogRunId)}/cancel`,
         {
           method: "POST",
         },
@@ -1058,7 +1450,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       if (!response.ok) {
         throw new Error(data.error || "Failed to cancel catalog run");
       }
-      setCatalogActionMessage(`Cancelled run ${shortRunId(displayedCatalogRunId)}.`);
+      setCatalogActionMessage(`Cancelled run ${shortRunId(activeCatalogRunId)}.`);
       await refreshSummary();
     } catch (error) {
       setCatalogActionMessage(error instanceof Error ? error.message : "Failed to cancel catalog run");
@@ -1237,7 +1629,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       >
                         {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
                       </button>
-                      {activeCatalogRun?.run_id ? (
+                      {activeCatalogRunId && activeCatalogRunBlocksActions ? (
                         <button
                           type="button"
                           onClick={() => void cancelCatalogRun()}
@@ -1247,10 +1639,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           {cancellingCatalogRun ? "Cancelling Run…" : "Cancel Run"}
                         </button>
                       ) : null}
-                      {activeCatalogRun?.run_id ? (
+                      {activeCatalogRunId ? (
                         <span className="text-xs font-medium text-zinc-500">
-                          Run {shortRunId(activeCatalogRun.run_id)} is {formatRunStatusLabel(activeCatalogRun.status)}.
-                          Start buttons unlock after it finishes or you cancel it.
+                          {activeCatalogRunBlocksActions
+                            ? `Run ${shortRunId(activeCatalogRunId)} is ${formatRunStatusLabel(activeCatalogRunDisplayStatus)}. Start buttons unlock after it finishes or you cancel it.`
+                            : `Run ${shortRunId(activeCatalogRunId)} is scrape-complete. New backfills are unlocked while classification continues in the background.`}
                         </span>
                       ) : null}
                     </>
@@ -1269,21 +1662,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Engagement</p>
-                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(summary?.total_engagement)}</p>
+                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayEngagement)}</p>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Views</p>
-                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(summary?.total_views)}</p>
+                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayViews)}</p>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Last Post</p>
-                  <p className="mt-2 text-sm font-semibold text-zinc-900">{formatDateTime(summary?.last_post_at)}</p>
+                  <p className="mt-2 text-sm font-semibold text-zinc-900">{formatDateTime(displayLastPostAt)}</p>
                 </div>
                 {supportsCatalog ? (
                   <>
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Catalog Posts</p>
-                      <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(summary?.catalog_total_posts)}</p>
+                      <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayCatalogTotalPosts)}</p>
                     </div>
                     <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Pending Review</p>
@@ -1344,6 +1737,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   {catalogRunProgressError ? (
                     <p className="mt-2 text-sm text-red-700">{catalogRunProgressError}</p>
                   ) : null}
+                  {catalogScrapeCompletionMessage ? (
+                    <p className="mt-2 text-sm text-emerald-700">{catalogScrapeCompletionMessage}</p>
+                  ) : null}
+                  {catalogTerminalCoverageMessage ? (
+                    <p className="mt-2 text-sm text-amber-700">{catalogTerminalCoverageMessage}</p>
+                  ) : null}
                 </div>
                 <div className="min-w-[190px] rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Overall Progress</p>
@@ -1365,7 +1764,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     {catalogProgressSummary.waiting > 0 ? ` · ${formatInteger(catalogProgressSummary.waiting)} queued` : ""}
                     {catalogProgressSummary.failed > 0 ? ` · ${formatInteger(catalogProgressSummary.failed)} failed` : ""}
                   </p>
-                  {catalogRunProgress?.discovery?.partition_count ? (
+                  {frontierMode && catalogRunProgress?.frontier ? (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {formatInteger(catalogRunProgress.frontier.pages_scanned)} pages scanned
+                      {catalogRunProgress.frontier.transport ? ` · ${String(catalogRunProgress.frontier.transport)} transport` : ""}
+                      {catalogRunProgress.frontier.retry_count ? ` · ${formatInteger(catalogRunProgress.frontier.retry_count)} retries` : ""}
+                    </p>
+                  ) : catalogRunProgress?.discovery?.partition_count ? (
                     <p className="mt-1 text-xs text-zinc-500">
                       {formatInteger(catalogRunProgress.discovery.completed_count)} /{" "}
                       {formatInteger(catalogRunProgress.discovery.partition_count)} shards complete
@@ -1393,54 +1798,47 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
               {catalogStageEntries.length > 0 ? (
                 <div className={`mt-4 grid gap-3 ${catalogStageEntries.length >= 3 ? "xl:grid-cols-3" : "md:grid-cols-2"}`}>
-                  {catalogStageEntries.map(([stage, stats]) => (
-                    <div key={stage} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-zinc-900">{formatRunStageLabel(stage)}</p>
-                          <p className="mt-1 text-xs text-zinc-500">
-                            {formatInteger(stats.completed + stats.failed)} / {formatInteger(stats.total)} jobs complete
-                          </p>
+                  {catalogStageEntries.map(([stage, stats]) => {
+                    const badge = getCatalogStageBadge(stage, stats, {
+                      scrapeComplete: Boolean(catalogRunProgress?.scrape_complete),
+                    });
+                    return (
+                      <div key={stage} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-zinc-900">
+                              {formatRunStageLabel(stage, { frontierMode })}
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {formatInteger(stats.completed + stats.failed)} / {formatInteger(stats.total)} jobs complete
+                            </p>
+                          </div>
+                          <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${badge.tone}`}>
+                            {badge.label}
+                          </span>
                         </div>
-                        <span
-                          className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
-                            stats.failed > 0
-                              ? "bg-red-100 text-red-700"
-                              : stats.running > 0
-                                ? "bg-sky-100 text-sky-700"
-                                : stats.waiting > 0
-                                  ? "bg-amber-100 text-amber-700"
-                                  : "bg-emerald-100 text-emerald-700"
-                          }`}
-                        >
-                          {stats.failed > 0
-                            ? "Issue"
-                            : stats.running > 0
-                              ? "Running"
-                              : stats.waiting > 0
-                                ? "Queued"
-                                : "Done"}
-                        </span>
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                          <div
+                            className="h-full rounded-full bg-zinc-900 transition-all duration-500"
+                            style={{
+                              width: `${Math.max(
+                                stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0,
+                                stats.running > 0 || stats.waiting > 0 ? 6 : 0,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                        <p className="mt-3 text-sm text-zinc-700">
+                          {formatCatalogStageActivitySummary(stage, stats, { frontierMode })}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {stats.running > 0 ? `${formatInteger(stats.running)} running · ` : ""}
+                          {stats.waiting > 0 ? `${formatInteger(stats.waiting)} queued · ` : ""}
+                          {stats.failed > 0 ? `${formatInteger(stats.failed)} failed` : "No failures"}
+                        </p>
                       </div>
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
-                        <div
-                          className="h-full rounded-full bg-zinc-900 transition-all duration-500"
-                          style={{
-                            width: `${Math.max(
-                              stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0,
-                              stats.running > 0 || stats.waiting > 0 ? 6 : 0,
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      <p className="mt-3 text-sm text-zinc-700">{formatCatalogStageActivitySummary(stage, stats)}</p>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {stats.running > 0 ? `${formatInteger(stats.running)} running · ` : ""}
-                        {stats.waiting > 0 ? `${formatInteger(stats.waiting)} queued · ` : ""}
-                        {stats.failed > 0 ? `${formatInteger(stats.failed)} failed` : "No failures"}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : !catalogRunProgressLoading ? (
                 <p className="mt-4 text-sm text-zinc-500">Waiting for the job to report stage-level progress…</p>
@@ -1466,7 +1864,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       {catalogLogs.map((entry) => (
                         <div key={entry.id} className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
-                            {formatRunStageLabel(entry.stage)} · {formatRunStatusLabel(entry.status)}
+                            {formatRunStageLabel(entry.stage, { frontierMode })} · {formatRunStatusLabel(entry.status)}
                           </p>
                           <p className="mt-1 text-sm text-zinc-700">{entry.line}</p>
                         </div>
@@ -1479,7 +1877,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               {catalogHandleCards.length > 0 ? (
                 <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
                   <h3 className="text-sm font-semibold text-zinc-900">Per-Handle Job Progress</h3>
-                  <p className="text-xs text-zinc-500">Lane allocation and stage completion by social account handle</p>
+                  <p className="text-xs text-zinc-500">
+                    {frontierMode
+                      ? "Frontier ownership and stage completion by social account handle"
+                      : "Lane allocation and stage completion by social account handle"}
+                  </p>
                   <div className="mt-3 grid gap-3 xl:grid-cols-2">
                     {catalogHandleCards.map((card) => (
                       <div key={card.id} className="rounded-2xl border border-zinc-200 bg-white p-4">
@@ -1488,11 +1890,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             <p className="text-sm font-semibold text-zinc-900">{formatHandleLabel(card.handle)}</p>
                             <p className="mt-1 text-xs text-zinc-500">
                               {card.hasStarted ? "Started" : "Pending start"}
-                              {card.nextStage ? ` · Next ${formatRunStageLabel(card.nextStage)}` : ""}
+                              {card.nextStage ? ` · Next ${formatRunStageLabel(card.nextStage, { frontierMode })}` : ""}
                             </p>
                           </div>
                           <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-600">
-                            {card.runnerLanes.length > 0 ? `Lanes ${card.runnerLanes.join(", ")}` : "Lane pending"}
+                            {frontierMode
+                              ? card.frontierLabel || "Frontier pending"
+                              : card.runnerLanes.length > 0
+                                ? `Lanes ${card.runnerLanes.join(", ")}`
+                                : "Lane pending"}
                           </span>
                         </div>
                         <p className="mt-3 text-sm text-zinc-700">
@@ -1504,7 +1910,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           {card.stages.map((stage) => (
                             <div key={`${card.id}-${stage.stage}`} className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
                               <div className="flex items-center justify-between gap-3">
-                                <p className="text-sm font-medium text-zinc-800">{formatRunStageLabel(stage.stage)}</p>
+                                <p className="text-sm font-medium text-zinc-800">
+                                  {formatRunStageLabel(stage.stage, { frontierMode })}
+                                </p>
                                 <p className="text-xs text-zinc-500">
                                   {formatInteger(stage.completed + stage.failed)} / {formatInteger(stage.total)}
                                 </p>
@@ -1512,7 +1920,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               <p className="mt-1 text-xs text-zinc-500">
                                 {stage.running > 0 ? `${formatInteger(stage.running)} running · ` : ""}
                                 {stage.waiting > 0 ? `${formatInteger(stage.waiting)} queued · ` : ""}
-                                {formatCatalogStageActivitySummary(stage.stage, stage)}
+                                {formatCatalogStageActivitySummary(stage.stage, stage, { frontierMode })}
                               </p>
                             </div>
                           ))}
@@ -1910,136 +2318,120 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           ) : null}
 
           {!summaryLoading && !summaryError && activeTab === "hashtags" ? (
-            <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <div className="flex flex-col gap-2">
-                <h2 className="text-lg font-semibold text-zinc-900">Hashtags</h2>
-                <p className="text-sm text-zinc-500">
-                  Each hashtag shows current assignments plus show/season contexts observed on this account’s posts.
-                </p>
-                {saveMessage ? <p className="text-sm text-zinc-600">{saveMessage}</p> : null}
-              </div>
-              {hashtagsLoading ? <p className="mt-4 text-sm text-zinc-500">Loading hashtags…</p> : null}
-              {hashtagsError ? <p className="mt-4 text-sm text-red-700">{hashtagsError}</p> : null}
-              {!hashtagsLoading && !hashtagsError ? (
-                <div className="mt-4 space-y-4">
-                  {hashtags.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No hashtags found for this account.</p>
-                  ) : (
-                    hashtags.map((item) => {
-                      const assignments = draftAssignments[item.hashtag] ?? [];
-                      return (
-                        <div key={item.hashtag} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                            <div>
-                              <p className="text-lg font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
-                              <p className="text-xs text-zinc-500">
-                                {formatInteger(item.usage_count)} uses · Last seen {formatDateTime(item.latest_seen_at)}
-                              </p>
-                              <p className="mt-2 text-xs text-zinc-500">
-                                Observed on {(item.observed_shows ?? []).map((show) => show.show_name).filter(Boolean).join(", ") || "no assigned shows yet"}
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => addHashtagAssignmentRow(item.hashtag)}
-                                disabled={showOptions.length === 0}
-                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Add Assignment
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void saveHashtagAssignments(item.hashtag)}
-                                disabled={savingHashtag === item.hashtag}
-                                className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {savingHashtag === item.hashtag ? "Saving…" : "Save"}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 space-y-3">
-                            {assignments.length === 0 ? (
-                              <p className="text-sm text-zinc-500">No assignments saved for this hashtag yet.</p>
-                            ) : (
-                              assignments.map((assignment, index) => {
-                                const selectedShowId = assignment.show_id ?? showOptions[0]?.show_id ?? "";
-                                const seasonOptions = seasonOptionsByShow.get(selectedShowId) ?? [];
-                                return (
-                                  <div key={`${item.hashtag}-${assignment.show_id ?? "show"}-${assignment.season_id ?? "all"}-${index}`} className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-3 lg:grid-cols-[1fr_1fr_auto]">
-                                    <label className="text-sm font-medium text-zinc-700">
-                                      Show
-                                      <select
-                                        value={selectedShowId}
-                                        onChange={(event) => {
-                                          const nextShowId = event.target.value;
-                                          updateHashtagAssignments(
-                                            item.hashtag,
-                                            assignments.map((entry, entryIndex) =>
-                                              entryIndex === index ? { ...entry, show_id: nextShowId, season_id: null } : entry,
-                                            ),
-                                          );
-                                        }}
-                                        className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
-                                      >
-                                        {showOptions.map((show) => (
-                                          <option key={show.show_id} value={show.show_id}>
-                                            {show.show_name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-                                    <label className="text-sm font-medium text-zinc-700">
-                                      Season
-                                      <select
-                                        value={assignment.season_id ?? ""}
-                                        onChange={(event) => {
-                                          const nextSeasonId = event.target.value || null;
-                                          updateHashtagAssignments(
-                                            item.hashtag,
-                                            assignments.map((entry, entryIndex) =>
-                                              entryIndex === index ? { ...entry, season_id: nextSeasonId } : entry,
-                                            ),
-                                          );
-                                        }}
-                                        className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
-                                      >
-                                        <option value="">All seasons</option>
-                                        {seasonOptions.map((season) => (
-                                          <option key={season.season_id} value={season.season_id}>
-                                            {formatSeasonLabel(season.season_number)}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-                                    <div className="flex items-end">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          updateHashtagAssignments(
-                                            item.hashtag,
-                                            assignments.filter((_, entryIndex) => entryIndex !== index),
-                                          )
-                                        }
-                                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
-                                      >
-                                        Remove
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+            <div className="space-y-6">
+              {platform === "instagram" ? (
+                <SocialAccountProfileHashtagTimelineChart
+                  timeline={hashtagTimeline}
+                  loading={hashtagTimelineLoading}
+                  error={hashtagTimelineError}
+                />
               ) : null}
-              {supportsCatalog ? (
-                <div className="mt-8 border-t border-zinc-200 pt-6">
+              <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-2">
+                  <h2 className="text-lg font-semibold text-zinc-900">Hashtags</h2>
+                  <p className="text-sm text-zinc-500">
+                    Each hashtag shows show-level assignments plus the show and season contexts observed on this account’s posts.
+                  </p>
+                  {saveMessage ? <p className="text-sm text-zinc-600">{saveMessage}</p> : null}
+                </div>
+                {hashtagsLoading ? <p className="mt-4 text-sm text-zinc-500">Loading hashtags…</p> : null}
+                {hashtagsError ? <p className="mt-4 text-sm text-red-700">{hashtagsError}</p> : null}
+                {!hashtagsLoading && !hashtagsError ? (
+                  <div className="mt-4 space-y-4">
+                    {hashtags.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No hashtags found for this account.</p>
+                    ) : (
+                      hashtags.map((item) => {
+                        const assignments = draftAssignments[item.hashtag] ?? [];
+                        return (
+                          <div key={item.hashtag} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div>
+                                <p className="text-lg font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
+                                <p className="text-xs text-zinc-500">
+                                  {formatInteger(item.usage_count)} uses · Last seen {formatDateTime(item.latest_seen_at)}
+                                </p>
+                                <p className="mt-2 text-xs text-zinc-500">
+                                  Observed on {(item.observed_shows ?? []).map((show) => show.show_name).filter(Boolean).join(", ") || "no assigned shows yet"}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => addHashtagAssignmentRow(item.hashtag)}
+                                  disabled={showOptions.length === 0}
+                                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Add Assignment
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void saveHashtagAssignments(item.hashtag)}
+                                  disabled={savingHashtag === item.hashtag}
+                                  className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {savingHashtag === item.hashtag ? "Saving…" : "Save"}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 space-y-3">
+                              {assignments.length === 0 ? (
+                                <p className="text-sm text-zinc-500">No assignments saved for this hashtag yet.</p>
+                              ) : (
+                                assignments.map((assignment, index) => {
+                                  const selectedShowId = assignment.show_id ?? showOptions[0]?.show_id ?? "";
+                                  return (
+                                    <div key={`${item.hashtag}-${assignment.show_id ?? "show"}-${index}`} className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-3 lg:grid-cols-[1fr_auto]">
+                                      <label className="text-sm font-medium text-zinc-700">
+                                        Show
+                                        <select
+                                          value={selectedShowId}
+                                          onChange={(event) => {
+                                            const nextShowId = event.target.value;
+                                            updateHashtagAssignments(
+                                              item.hashtag,
+                                              assignments.map((entry, entryIndex) =>
+                                                entryIndex === index ? { ...entry, show_id: nextShowId, season_id: null } : entry,
+                                              ),
+                                            );
+                                          }}
+                                          className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                        >
+                                          {showOptions.map((show) => (
+                                            <option key={show.show_id} value={show.show_id}>
+                                              {show.show_name}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <div className="flex items-end">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            updateHashtagAssignments(
+                                              item.hashtag,
+                                              assignments.filter((_, entryIndex) => entryIndex !== index),
+                                            )
+                                          }
+                                          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : null}
+                {supportsCatalog ? (
+                  <div className="mt-8 border-t border-zinc-200 pt-6">
                   <div className="flex flex-col gap-2">
                     <h3 className="text-base font-semibold text-zinc-900">Unknown Hashtags</h3>
                     <p className="text-sm text-zinc-500">
@@ -2182,9 +2574,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       )}
                     </div>
                   ) : null}
-                </div>
-              ) : null}
-            </section>
+                  </div>
+                ) : null}
+              </section>
+            </div>
           ) : null}
 
           {!summaryLoading && !summaryError && activeTab === "collaborators-tags" ? (

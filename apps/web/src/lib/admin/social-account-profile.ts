@@ -15,6 +15,7 @@ export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatf
   "instagram",
   "tiktok",
   "twitter",
+  "youtube",
   "threads",
 ];
 
@@ -23,6 +24,12 @@ export type SocialAccountProfileSummary = {
   account_handle: string;
   profile_url?: string | null;
   avatar_url?: string | null;
+  display_name?: string | null;
+  bio?: string | null;
+  is_verified?: boolean | null;
+  follower_count?: number | null;
+  following_count?: number | null;
+  live_total_posts?: number | null;
   total_posts: number;
   total_engagement: number;
   total_views: number;
@@ -34,6 +41,14 @@ export type SocialAccountProfileSummary = {
   catalog_pending_review_posts?: number;
   catalog_first_post_at?: string | null;
   catalog_last_post_at?: string | null;
+  live_catalog_total_posts?: number;
+  live_catalog_total_engagement?: number;
+  live_catalog_total_views?: number;
+  live_catalog_first_post_at?: string | null;
+  live_catalog_last_post_at?: string | null;
+  live_catalog_caption_rows?: number;
+  live_catalog_hashtag_instances?: number;
+  live_catalog_unique_hashtags?: number;
   last_catalog_run_at?: string | null;
   last_catalog_run_status?: string | null;
   catalog_recent_runs?: SocialAccountCatalogRun[];
@@ -149,6 +164,21 @@ export type SocialAccountCatalogRunProgressSummary = {
   items_found_total?: number;
 };
 
+export type SocialAccountCatalogVerification = {
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  run_id?: string | null;
+  expected_total_posts?: number | null;
+  catalog_posts: number;
+  caption_rows: number;
+  stored_hashtag_instances: number;
+  aggregated_hashtag_instances: number;
+  catalog_complete: boolean;
+  caption_complete: boolean;
+  hashtag_counts_match: boolean;
+  verified: boolean;
+};
+
 export type SocialAccountCatalogRunProgressSnapshot = {
   season_id?: string | null;
   run_id: string;
@@ -164,6 +194,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     runner_strategy?: string | null;
     runner_count?: number;
     partition_strategy?: string | null;
+    frontier_strategy?: string | null;
     scheduler_lanes?: string[];
     active_workers_now?: number;
     worker_ids_sample?: string[];
@@ -180,11 +211,30 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     failed_count?: number;
     cancelled_count?: number;
   };
+  frontier?: {
+    status?: string | null;
+    strategy?: string | null;
+    next_cursor_present?: boolean;
+    pages_scanned?: number;
+    posts_checked?: number;
+    posts_saved?: number;
+    expected_total_posts?: number;
+    transport?: string | null;
+    lease_owner?: string | null;
+    retry_count?: number;
+    exhausted?: boolean;
+    updated_at?: string | null;
+  };
   post_progress?: {
     completed_posts?: number;
     matched_posts?: number;
     total_posts?: number | null;
   };
+  source_total_posts_current?: number | null;
+  completion_gap_posts?: number;
+  completion_gap_reason?: string | null;
+  scrape_complete?: boolean;
+  classify_incomplete?: boolean;
   summary?: SocialAccountCatalogRunProgressSummary;
   updated_at?: string | null;
 };
@@ -242,6 +292,41 @@ export type SocialAccountProfileHashtag = {
   assigned_seasons?: SocialAccountProfileSeasonBucket[];
   observed_shows?: SocialAccountProfileShowBucket[];
   observed_seasons?: SocialAccountProfileSeasonBucket[];
+};
+
+export type SocialAccountProfileHashtagTimelineYear = {
+  year: number;
+  label: string;
+  order: number;
+};
+
+export type SocialAccountProfileHashtagTimelinePoint = {
+  year: number;
+  label: string;
+  order: number;
+  rank: number;
+  usage_count: number;
+  in_top_ten: boolean;
+  segment_id?: number | null;
+};
+
+export type SocialAccountProfileHashtagTimelineSeries = {
+  hashtag: string;
+  display_hashtag: string;
+  first_top_order?: number | null;
+  last_top_order?: number | null;
+  latest_top_order?: number | null;
+  latest_top_rank?: number | null;
+  points: SocialAccountProfileHashtagTimelinePoint[];
+};
+
+export type SocialAccountProfileHashtagTimeline = {
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  years: SocialAccountProfileHashtagTimelineYear[];
+  series: SocialAccountProfileHashtagTimelineSeries[];
+  top_rank_limit: number;
+  off_chart_rank: number;
 };
 
 export type SocialAccountProfileCollaboratorTagAggregate = {

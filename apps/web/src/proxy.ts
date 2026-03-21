@@ -92,6 +92,7 @@ const ROOT_SHOW_ROUTE_ADMIN_SHOW_ASSET_SEGMENTS = new Map<string, "images" | "vi
 const PERSON_ROUTE_ADMIN_TAB_SEGMENTS = new Set([
   "overview",
   "details",
+  "settings",
   "gallery",
   "videos",
   "news",
@@ -257,6 +258,25 @@ function toPathSegments(pathname: string): string[] {
 function appendSearch(pathname: string, searchParams?: URLSearchParams): string {
   const search = searchParams?.toString();
   return search ? `${pathname}?${search}` : pathname;
+}
+
+function appendCanonicalPersonSearch(pathname: string, searchParams?: URLSearchParams): string {
+  const next = new URLSearchParams(searchParams?.toString() ?? "");
+  next.delete("showId");
+  next.delete("tab");
+  return appendSearch(pathname, next);
+}
+
+function buildCanonicalPersonPath(personSegment: string, tabSegment?: string | null): string {
+  const base = `/people/${encodeURIComponent(personSegment)}`;
+  const normalizedTab = tabSegment?.trim().toLowerCase() ?? "";
+  if (!normalizedTab || normalizedTab === "overview" || normalizedTab === "details") {
+    return base;
+  }
+  if (!PERSON_ROUTE_ADMIN_TAB_SEGMENTS.has(normalizedTab)) {
+    return base;
+  }
+  return `${base}/${normalizedTab}`;
 }
 
 function buildBrandsWorkspaceRedirect(
@@ -465,15 +485,15 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
     return appendSearch(buildCanonicalSeasonSocialWeekPath(longSeasonSocialWeekPath), searchParams);
   }
 
-  if (normalizedFirst === "people" && secondSegment && segments.length === 2) {
+  if (normalizedFirst === "people" && secondSegment && segments.length <= 3) {
     const query = new URLSearchParams(searchParams?.toString() ?? "");
     const queryTab = query.get("tab")?.trim().toLowerCase() ?? "";
+    const hasShowId = query.has("showId");
     if (PERSON_ROUTE_ADMIN_TAB_SEGMENTS.has(queryTab)) {
-      query.delete("tab");
-      const base = `/people/${encodeURIComponent(secondSegment)}`;
-      const path =
-        queryTab === "overview" || queryTab === "details" ? base : `${base}/${queryTab}`;
-      return appendSearch(path, query);
+      return appendCanonicalPersonSearch(buildCanonicalPersonPath(secondSegment, queryTab), query);
+    }
+    if (hasShowId) {
+      return appendCanonicalPersonSearch(buildCanonicalPersonPath(secondSegment, segments[2] ?? null), query);
     }
   }
 
@@ -487,11 +507,8 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   }
 
   if (adminSegments[0]?.toLowerCase() === "people" && adminSegments[1]) {
-    const query = new URLSearchParams(searchParams?.toString() ?? "");
-    const base = `/people/${encodeURIComponent(adminSegments[1])}`;
-    const tab = adminSegments[2]?.trim().toLowerCase() ?? "";
-    const path = tab && tab !== "overview" && tab !== "details" ? `${base}/${encodeURIComponent(tab)}` : base;
-    return appendSearch(path, query);
+    const tabSegment = adminSegments[2] ?? null;
+    return appendCanonicalPersonSearch(buildCanonicalPersonPath(adminSegments[1], tabSegment), searchParams);
   }
 
   const showSegment = adminSegments[0];
@@ -502,12 +519,8 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   const showTail = adminSegments.slice(1);
 
   if (showTail[0]?.toLowerCase() === "people" && showTail[1]) {
-    const query = new URLSearchParams(searchParams?.toString() ?? "");
-    query.set("showId", showSegment);
-    const base = `/people/${encodeURIComponent(showTail[1])}`;
-    const tab = showTail[2]?.trim().toLowerCase() ?? "";
-    const path = tab && tab !== "overview" && tab !== "details" ? `${base}/${encodeURIComponent(tab)}` : base;
-    return appendSearch(path, query);
+    const tabSegment = showTail[2] ?? null;
+    return appendCanonicalPersonSearch(buildCanonicalPersonPath(showTail[1], tabSegment), searchParams);
   }
 
   if (showTail.length === 0) {
@@ -621,10 +634,7 @@ function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchPa
   }
 
   if (normalizedFirst === "people" && secondSegment) {
-    const showContext = searchParams?.get("showId")?.trim();
-    const base = showContext
-      ? `/admin/trr-shows/${encodeURIComponent(showContext)}/people/${encodeURIComponent(secondSegment)}`
-      : `/admin/trr-shows/people/${encodeURIComponent(secondSegment)}`;
+    const base = `/admin/trr-shows/people/${encodeURIComponent(secondSegment)}`;
     if (segments.length === 2) {
       return base;
     }

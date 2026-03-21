@@ -222,6 +222,8 @@ describe("mapPhotoToMetadata", () => {
         bucket_label: "Bravo Fan Fest",
         grouped_image_count: 35,
         source_resolution: "getty_watermark_fallback",
+        google_reverse_image_search_url:
+          "https://www.google.com/searchbyimage?image_url=https%3A%2F%2Fmedia.gettyimages.com%2Fpreview.jpg",
         getty_event_url: "https://www.gettyimages.com/editorial-images/event/bravo-fan-fest",
         getty_event_id: "event-35",
         getty_event_slug: "bravo-fan-fest",
@@ -257,6 +259,9 @@ describe("mapPhotoToMetadata", () => {
     });
     expect(result.gettyTags).toEqual(["BravoCon", "Meredith Marks", "Two People"]);
     expect(result.peopleCount).toBe(2);
+    expect(result.googleReverseImageSearchUrl).toBe(
+      "https://www.google.com/searchbyimage?image_url=https%3A%2F%2Fmedia.gettyimages.com%2Fpreview.jpg",
+    );
     expect(result.originalSourcePageUrl).toBe(
       "https://www.gettyimages.com/editorial-images/event/bravo-fan-fest",
     );

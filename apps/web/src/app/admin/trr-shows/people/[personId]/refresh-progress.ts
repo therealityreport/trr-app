@@ -584,10 +584,10 @@ const REFRESH_PIPELINE_STEPS: PersonRefreshPipelineStepDefinition[] = [
   { id: "word_id", label: "Text Overlay", modes: new Set(["refresh", "reprocess"]) },
   {
     id: "centering_cropping",
-    label: "Centering/Cropping",
+    label: "Crop (Save Framing)",
     modes: new Set(["refresh", "reprocess"]),
   },
-  { id: "resizing", label: "Resizing", modes: new Set(["refresh", "reprocess"]) },
+  { id: "resizing", label: "Auto-Crop (Generate Variants)", modes: new Set(["refresh", "reprocess"]) },
 ];
 
 const SOURCE_SYNC_STAGE_PREFIXES = ["sync_"];

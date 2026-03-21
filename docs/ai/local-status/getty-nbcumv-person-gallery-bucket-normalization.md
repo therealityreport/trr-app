@@ -8,8 +8,8 @@ handoff:
   include: true
   state: active
   last_updated: 2026-03-20
-  current_phase: "Lisa Barlow gallery tab normalization is in place, with only occasional live-gallery checks left for regressions in show chips or event counts"
-  next_action: "Recheck another affected person gallery only if a live admin session shows duplicate show chips or zero-count event rows again; otherwise archive this handoff during the next cleanup pass"
+  current_phase: "Gallery normalization remains in place, and the latest follow-up now constrains Get Images source selection to All/Getty/IMDb/TMDb while exposing manual Google reverse-search links for Getty fallback rows"
+  next_action: "Run one live person-gallery Get Images pass if needed to confirm Run All skips Fandom, Getty maps to the fused Getty/NBCUMV path, and the lightbox shows the Google reverse-search link on Getty fallback rows; otherwise archive this handoff in the next cleanup pass"
   detail: self
 ```
 
@@ -26,3 +26,10 @@ handoff:
   - `pnpm exec eslint src/lib/admin/person-gallery-media-view.ts src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx tests/person-gallery-media-view.test.ts`
 - Managed Chrome confirmed that `Get Images` now sends a fresh POST to `/api/admin/trr-api/people/:personId/refresh-images/stream` instead of resuming an old operation stream.
 - Live verification on 2026-03-16 now shows Lisa Barlow at `373` photos with live `NBCUMV` and `Getty` cards present, a single `RHOSLC` tab, and the `Events` button no longer exposing the stale zero-count `DIRECTV Plot Twist` entry after reload.
+- 2026-03-20 follow-up:
+  - The gallery tab already had a source-selection control scaffold; this pass tightened the behavior so `Run All` now sends an explicit backend source list for `nbcumv + imdb + tmdb` instead of falling back to the backend default source set.
+  - `Getty` remains the fused Getty/NBCUMV press-image path on the operator-facing control.
+  - Shared photo metadata and the lightbox now expose a `Google Image Search` link when Getty fallback rows provide a manual reverse-search URL.
+  - Focused validation passed:
+    - `pnpm exec vitest run tests/person-refresh-request-id-wiring.test.ts tests/photo-metadata.test.ts tests/image-lightbox-metadata.test.tsx`
+    - `pnpm exec eslint 'src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx' 'src/lib/photo-metadata.ts' 'src/components/admin/ImageLightbox.tsx' 'tests/person-refresh-request-id-wiring.test.ts' 'tests/photo-metadata.test.ts' 'tests/image-lightbox-metadata.test.tsx'`

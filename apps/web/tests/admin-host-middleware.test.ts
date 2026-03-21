@@ -420,7 +420,7 @@ describe("admin host proxy", () => {
     );
   });
 
-  it("rewrites person gallery routes while keeping the short admin-host URL visible", () => {
+  it("redirects legacy person gallery URLs with show query noise back to the clean short admin-host URL", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -429,10 +429,8 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc");
     const response = proxy(request);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-rewrite")).toBe(
-      "http://admin.localhost:3000/admin/trr-shows/rhoslc/people/mary-cosby/gallery?showId=rhoslc",
-    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/people/mary-cosby/gallery");
   });
 
   it("rewrites person gallery routes without show context to the admin person workspace on admin host", () => {
@@ -460,14 +458,6 @@ describe("admin host proxy", () => {
       "http://admin.localhost:3000/rhoslc/s6/social",
     ],
     [
-      "http://admin.localhost:3000/admin/trr-shows/people/mary-cosby/gallery?showId=rhoslc",
-      "http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc",
-    ],
-    [
-      "http://admin.localhost:3000/admin/trr-shows/rhoslc/people/mary-cosby/gallery",
-      "http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc",
-    ],
-    [
       "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0",
       "http://admin.localhost:3000/rhoslc/s6/social/w0/details",
     ],
@@ -490,6 +480,21 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(expectedLocation);
+  });
+
+  it("redirects internal admin person workspace URLs back to the short canonical /people URL", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    delete process.env.ADMIN_APP_HOSTS;
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/people/mary-cosby/settings",
+    );
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/people/mary-cosby/settings");
   });
 
   it("redirects unmatched show-level public routes away from guard pages and back into the admin workspace", () => {

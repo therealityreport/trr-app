@@ -30,7 +30,7 @@ import {
   parsePersonRouteState,
 } from "@/lib/admin/show-admin-routes";
 import { recordAdminRecentShow } from "@/lib/admin/admin-recent-shows";
-import { ExternalLinks, TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
+import { TmdbLinkIcon, ImdbLinkIcon } from "@/components/admin/ExternalLinks";
 import { ImageLightbox, type ImageType } from "@/components/admin/ImageLightbox";
 import ShowNewsTab from "@/components/admin/show-tabs/ShowNewsTab";
 import FandomSyncModal from "@/components/admin/FandomSyncModal";
@@ -39,6 +39,10 @@ import ReassignImageModal from "@/components/admin/ReassignImageModal";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import SocialGrowthSection from "@/components/admin/social-growth-section";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
+import {
+  PersonExternalIdsEditor,
+  type PersonExternalIdDraft,
+} from "@/components/admin/PersonExternalIdsEditor";
 import {
   type FandomDynamicSection,
   type FandomSyncOptions,
@@ -70,6 +74,7 @@ import {
 import {
   BRAVOCON_LABEL,
   CANONICAL_SCOPED_SOURCE_ORDER,
+  UNSORTED_LABEL,
   buildPersonGalleryShowOptions,
   buildShowAcronym,
   computePersonGalleryMediaViewAvailability,
@@ -106,6 +111,11 @@ import {
   normalizeContentTypeToken,
 } from "@/lib/media/content-type";
 import {
+  PERSON_EXTERNAL_ID_SOURCES,
+  type PersonExternalIdRecord,
+  type PersonExternalIdSource,
+} from "@/lib/admin/person-external-ids";
+import {
   applyFacebankSeedUpdateToLightbox,
   applyFacebankSeedUpdateToPhotos,
 } from "./facebank-seed-state";
@@ -138,7 +148,7 @@ interface TrrPerson {
   full_name: string;
   known_for: string | null;
   external_ids: Record<string, unknown>;
-  // Canonical multi-source fields (jsonb, keyed by source: tmdb/fandom/manual)
+  // Canonical multi-source fields (jsonb, keyed by source like imdb/tmdb/fandom/manual)
   birthday?: Record<string, unknown>;
   gender?: Record<string, unknown>;
   biography?: Record<string, unknown>;
@@ -156,9 +166,11 @@ type ResolvedField = {
   sources: Array<{ source: string; value: string }>;
 };
 
-const DEFAULT_CANONICAL_SOURCE_ORDER = ["tmdb", "imdb", "fandom", "manual"] as const;
+const DEFAULT_CANONICAL_SOURCE_ORDER = ["imdb", "tmdb", "fandom", "manual"] as const;
 type CanonicalSource = (typeof DEFAULT_CANONICAL_SOURCE_ORDER)[number];
 type CanonicalSourceOrder = CanonicalSource[];
+type GetImagesSourceSelection = "all" | "getty" | "imdb" | "tmdb";
+type BackendGetImagesSource = "nbcumv" | "imdb" | "tmdb";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -211,6 +223,34 @@ const readCanonicalSourceOrderFromExternalIds = (
   return normalizeCanonicalSourceOrder(externalIds.canonical_profile_source_order);
 };
 
+const GET_IMAGES_SOURCE_OPTIONS: Array<{
+  value: GetImagesSourceSelection;
+  label: string;
+  description: string;
+}> = [
+  { value: "all", label: "Run All", description: "Run Bravo / Getty / NBCUMV, IMDb, and TMDb." },
+  {
+    value: "getty",
+    label: "Bravo / Getty / NBCUMV",
+    description: "Run the shared Bravo / Getty / NBCUMV path, including Getty image replacements.",
+  },
+  { value: "imdb", label: "IMDb", description: "Run IMDb image refresh only." },
+  { value: "tmdb", label: "TMDb", description: "Run TMDb image refresh only." },
+];
+
+const GET_IMAGES_SELECTION_BACKEND_SOURCES: Record<GetImagesSourceSelection, BackendGetImagesSource[]> = {
+  all: ["nbcumv", "imdb", "tmdb"],
+  getty: ["nbcumv"],
+  imdb: ["imdb"],
+  tmdb: ["tmdb"],
+};
+
+const getImagesSourcesForSelection = (selection: GetImagesSourceSelection): BackendGetImagesSource[] =>
+  [...GET_IMAGES_SELECTION_BACKEND_SOURCES[selection]];
+
+const getImagesSelectionLabel = (selection: GetImagesSourceSelection): string =>
+  GET_IMAGES_SOURCE_OPTIONS.find((option) => option.value === selection)?.label ?? selection.toUpperCase();
+
 const formatCanonicalSourceLabel = (source: CanonicalSource): string =>
   source === "tmdb"
     ? "TMDB"
@@ -219,6 +259,24 @@ const formatCanonicalSourceLabel = (source: CanonicalSource): string =>
       : source === "fandom"
         ? "Fandom"
         : "Manual";
+
+function LinkOutIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 3H3v10h10V9" />
+      <path d="M10 3h3v3" />
+      <path d="M6.5 9.5L13 3" />
+    </svg>
+  );
+}
 
 const resolveMultiSourceField = (
   field: MultiSourceField,
@@ -390,6 +448,8 @@ interface PersonCreditShowScope {
   other_show_credits: TrrPersonCredit[];
 }
 
+type PersonCreditsByShow = Omit<PersonCreditShowScope, "other_show_credits">;
+
 interface CoverPhoto {
   person_id: string;
   photo_id: string;
@@ -498,7 +558,7 @@ interface UnifiedNewsFacets {
   seasons: UnifiedNewsFacetSeason[];
 }
 
-type TabId = "overview" | "gallery" | "videos" | "news" | "credits" | "fandom" | "social";
+type TabId = "overview" | "settings" | "gallery" | "videos" | "news" | "credits" | "fandom" | "social";
 type ReprocessStageKey = "all" | "tagging" | "crop" | "id_text" | "resize";
 type StageTargetScope = "filtered" | "full";
 type StageTargets = {
@@ -577,88 +637,58 @@ const formatEpisodeCode = (
   return `S${season}E${episode}`;
 };
 
-const isSelfCreditCategory = (creditCategory: string | null | undefined): boolean =>
-  typeof creditCategory === "string" && creditCategory.trim().toLowerCase() === "self";
+const createEmptyExternalIdDraft = (): PersonExternalIdDraft => ({
+  source_id: PERSON_EXTERNAL_ID_SOURCES[0],
+  external_id: "",
+});
 
-const normalizeRoleLabel = (role: string | null | undefined): string =>
-  typeof role === "string" ? role.trim() : "";
+const buildExternalIdDraftsFromRecords = (
+  records: PersonExternalIdRecord[]
+): PersonExternalIdDraft[] =>
+  records.map((record) => ({
+    source_id: record.source_id,
+    external_id: record.external_id,
+  }));
 
-const resolveOtherShowKey = (credit: TrrPersonCredit): string => {
-  if (typeof credit.show_id === "string" && credit.show_id.trim().length > 0) {
-    return `show:${credit.show_id.trim()}`;
-  }
-  if (typeof credit.show_name === "string" && credit.show_name.trim().length > 0) {
-    return `name:${credit.show_name.trim().toLowerCase()}`;
-  }
-  return `credit:${credit.id}`;
-};
-
-const partitionOtherShowCredits = (
-  otherShowCredits: TrrPersonCredit[]
-): { otherShowCastCredits: TrrPersonCredit[]; otherShowCrewCredits: TrrPersonCredit[] } => {
-  const hasExplicitCastRoleByShow = new Map<string, boolean>();
-
-  for (const credit of otherShowCredits) {
-    const showKey = resolveOtherShowKey(credit);
-    const isCastCredit = isSelfCreditCategory(credit.credit_category);
-    const roleLabel = normalizeRoleLabel(credit.role);
-    if (isCastCredit && roleLabel.length > 0) {
-      hasExplicitCastRoleByShow.set(showKey, true);
-    } else if (!hasExplicitCastRoleByShow.has(showKey)) {
-      hasExplicitCastRoleByShow.set(showKey, false);
-    }
-  }
-
-  const otherShowCastCredits: TrrPersonCredit[] = [];
-  const otherShowCrewCredits: TrrPersonCredit[] = [];
-
-  for (const credit of otherShowCredits) {
-    const showKey = resolveOtherShowKey(credit);
-    const isCastCredit = isSelfCreditCategory(credit.credit_category);
-    const roleLabel = normalizeRoleLabel(credit.role);
-    const hasExplicitCastRole = hasExplicitCastRoleByShow.get(showKey) ?? false;
-
-    if (isCastCredit && roleLabel.length === 0 && hasExplicitCastRole) {
-      continue;
-    }
-
-    if (isCastCredit) {
-      otherShowCastCredits.push(credit);
-      continue;
-    }
-    otherShowCrewCredits.push(credit);
-  }
-
-  return { otherShowCastCredits, otherShowCrewCredits };
-};
-
-const groupCreditsByShow = (
-  credits: TrrPersonCredit[]
-): Array<{ showKey: string; showName: string; credits: TrrPersonCredit[] }> => {
-  const groups = new Map<
-    string,
-    { showKey: string; showName: string; credits: TrrPersonCredit[] }
-  >();
-
-  for (const credit of credits) {
-    const showKey = resolveOtherShowKey(credit);
-    const existing = groups.get(showKey);
-    if (existing) {
-      existing.credits.push(credit);
-      continue;
-    }
-    const showName =
-      typeof credit.show_name === "string" && credit.show_name.trim().length > 0
-        ? credit.show_name.trim()
-        : "Unknown Show";
-    groups.set(showKey, {
-      showKey,
-      showName,
-      credits: [credit],
+const buildExternalIdRecordsFromPerson = (
+  person: TrrPerson | null | undefined
+): PersonExternalIdRecord[] => {
+  if (!person) return [];
+  const externalIds = (person.external_ids ?? {}) as Record<string, unknown>;
+  const records: PersonExternalIdRecord[] = [];
+  for (const source of PERSON_EXTERNAL_ID_SOURCES) {
+    const rawValue = externalIds[source] ?? externalIds[`${source}_id`];
+    if (rawValue === null || rawValue === undefined || rawValue === "") continue;
+    records.push({
+      id: null,
+      source_id: source,
+              external_id: String(rawValue),
+              is_primary: true,
+      valid_from: null,
+      valid_to: null,
+      observed_at: null,
     });
   }
+  return records;
+};
 
-  return Array.from(groups.values());
+const formatCreditsGroupSummary = (group: PersonCreditsByShow): string => {
+  const castCount =
+    group.cast_groups.length +
+    group.cast_non_episodic.length;
+  const crewCount =
+    group.crew_groups.length +
+    group.crew_non_episodic.length;
+  if (castCount > 0 && crewCount > 0) {
+    return `${castCount} cast • ${crewCount} crew`;
+  }
+  if (castCount > 0) {
+    return `${castCount} cast`;
+  }
+  if (crewCount > 0) {
+    return `${crewCount} crew`;
+  }
+  return "No grouped credits";
 };
 
 const clampFaceCoord = (value: number): number => Math.min(1, Math.max(0, value));
@@ -1065,7 +1095,7 @@ function ProfilePhoto({ urls, name }: { urls: Array<string | null | undefined>; 
 
   if (!currentSrc || hasError) {
     return (
-      <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
+      <div className="relative aspect-[3/4] w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
         <div className="flex h-full items-center justify-center text-zinc-400">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
@@ -1077,7 +1107,7 @@ function ProfilePhoto({ urls, name }: { urls: Array<string | null | undefined>; 
   }
 
   return (
-    <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
+    <div className="relative aspect-[3/4] w-32 flex-shrink-0 overflow-hidden rounded-xl bg-zinc-200">
       <Image
         src={currentSrc}
         alt={name}
@@ -2802,6 +2832,12 @@ export default function PersonProfilePage() {
   const [creditsError, setCreditsError] = useState<string | null>(null);
   const [creditsLoading, setCreditsLoading] = useState(false);
   const [showScopedCredits, setShowScopedCredits] = useState<PersonCreditShowScope | null>(null);
+  const [creditsByShow, setCreditsByShow] = useState<PersonCreditsByShow[]>([]);
+  const [externalIdDrafts, setExternalIdDrafts] = useState<PersonExternalIdDraft[]>([]);
+  const [externalIdsLoading, setExternalIdsLoading] = useState(false);
+  const [externalIdsSaving, setExternalIdsSaving] = useState(false);
+  const [externalIdsError, setExternalIdsError] = useState<string | null>(null);
+  const [externalIdsNotice, setExternalIdsNotice] = useState<string | null>(null);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
   const [fandomError, setFandomError] = useState<string | null>(null);
   const [fandomLoaded, setFandomLoaded] = useState(false);
@@ -2874,6 +2910,8 @@ export default function PersonProfilePage() {
   // Refresh images state
   const [refreshingImages, setRefreshingImages] = useState(false);
   const [reprocessingImages, setReprocessingImages] = useState(false);
+  const [getImagesSourceSelection, setGetImagesSourceSelection] =
+    useState<GetImagesSourceSelection>("all");
   const [refreshProgress, setRefreshProgress] = useState<{
     current?: number | null;
     total?: number | null;
@@ -3068,6 +3106,7 @@ export default function PersonProfilePage() {
   // Gallery filter/sort state
   const [galleryShowFilter, setGalleryShowFilter] = useState<GalleryShowFilter>("all");
   const [selectedOtherShowKey, setSelectedOtherShowKey] = useState<string>("all");
+  const [selectedEventSubcategoryKey, setSelectedEventSubcategoryKey] = useState<string>("all");
   const [selectedEventBucketKey, setSelectedEventBucketKey] = useState<string>("all");
   const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
   const canonicalSourceOrderDirty = useMemo(
@@ -3242,6 +3281,7 @@ export default function PersonProfilePage() {
     hasWwhlMatches,
     hasBravoconMatches,
     hasEventMatches,
+    eventSubcategoryOptions,
     eventOptions,
     hasOtherShowMatches,
     hasUnknownShowMatches,
@@ -3249,14 +3289,71 @@ export default function PersonProfilePage() {
   } = mediaViewAvailability;
 
   useEffect(() => {
-    if (eventOptions.length === 0) {
+    if (eventSubcategoryOptions.length === 0) {
+      setSelectedEventSubcategoryKey("all");
+      return;
+    }
+    if (selectedEventSubcategoryKey === "all") return;
+    if (eventSubcategoryOptions.some((option) => option.key === selectedEventSubcategoryKey)) return;
+    setSelectedEventSubcategoryKey(eventSubcategoryOptions[0]?.key ?? "all");
+  }, [eventSubcategoryOptions, selectedEventSubcategoryKey]);
+
+  const eventOptionsForSelectedSubcategory = useMemo(() => {
+    if (selectedEventSubcategoryKey === "all") return eventOptions;
+    const optionsByKey = new Map<string, (typeof eventOptions)[number]>();
+    for (const photo of photos) {
+      const bucketMatches = computePersonPhotoShowBuckets({
+        photo,
+        showIdForApi,
+        activeShowName,
+        activeShowAcronym,
+        allKnownShowNameMatches,
+        allKnownShowAcronymMatches,
+        allKnownShowIds,
+        otherShowNameMatches,
+        otherShowAcronymMatches,
+        selectedOtherShow,
+      });
+      if (!bucketMatches.matchesEvents) continue;
+      if (!bucketMatches.eventSubcategoryKeys.includes(selectedEventSubcategoryKey)) continue;
+      if (!bucketMatches.eventBucketKey || !bucketMatches.eventBucketLabel) continue;
+      const existing = optionsByKey.get(bucketMatches.eventBucketKey);
+      const photoMetadata = (photo.metadata ?? {}) as Record<string, unknown>;
+      const count = getPersonEventImageCount(photo, photoMetadata);
+      optionsByKey.set(bucketMatches.eventBucketKey, {
+        key: bucketMatches.eventBucketKey,
+        label: bucketMatches.eventBucketLabel,
+        count:
+          typeof count === "number"
+            ? Math.max(existing?.count ?? 0, count)
+            : existing?.count ?? null,
+      });
+    }
+    return Array.from(optionsByKey.values()).sort((left, right) => left.label.localeCompare(right.label));
+  }, [
+    activeShowAcronym,
+    activeShowName,
+    allKnownShowAcronymMatches,
+    allKnownShowIds,
+    allKnownShowNameMatches,
+    eventOptions,
+    otherShowAcronymMatches,
+    otherShowNameMatches,
+    photos,
+    selectedEventSubcategoryKey,
+    selectedOtherShow,
+    showIdForApi,
+  ]);
+
+  useEffect(() => {
+    if (eventOptionsForSelectedSubcategory.length === 0) {
       setSelectedEventBucketKey("all");
       return;
     }
     if (selectedEventBucketKey === "all") return;
-    if (eventOptions.some((option) => option.key === selectedEventBucketKey)) return;
-    setSelectedEventBucketKey(eventOptions[0]?.key ?? "all");
-  }, [eventOptions, selectedEventBucketKey]);
+    if (eventOptionsForSelectedSubcategory.some((option) => option.key === selectedEventBucketKey)) return;
+    setSelectedEventBucketKey(eventOptionsForSelectedSubcategory[0]?.key ?? "all");
+  }, [eventOptionsForSelectedSubcategory, selectedEventBucketKey]);
 
   const hasSelectedOtherShowMatches = useMemo(() => {
     if (!selectedOtherShow) {
@@ -3292,7 +3389,7 @@ export default function PersonProfilePage() {
 
   const hasSelectedEventMatches = useMemo(() => {
     if (selectedEventBucketKey === "all") {
-      return eventOptions.length > 0;
+      return eventOptionsForSelectedSubcategory.length > 0;
     }
     return photos.some((photo) => {
       const bucketMatches = computePersonPhotoShowBuckets({
@@ -3307,6 +3404,12 @@ export default function PersonProfilePage() {
         otherShowAcronymMatches,
         selectedOtherShow,
       });
+      if (
+        selectedEventSubcategoryKey !== "all" &&
+        !bucketMatches.eventSubcategoryKeys.includes(selectedEventSubcategoryKey)
+      ) {
+        return false;
+      }
       return bucketMatches.matchesEvents && bucketMatches.eventBucketKey === selectedEventBucketKey;
     });
   }, [
@@ -3315,11 +3418,12 @@ export default function PersonProfilePage() {
     allKnownShowAcronymMatches,
     allKnownShowIds,
     allKnownShowNameMatches,
-    eventOptions.length,
+    eventOptionsForSelectedSubcategory.length,
     otherShowAcronymMatches,
     otherShowNameMatches,
     photos,
     selectedEventBucketKey,
+    selectedEventSubcategoryKey,
     selectedOtherShow,
     showIdForApi,
   ]);
@@ -3357,17 +3461,17 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     if (galleryShowFilter !== "events") return;
-    if (hasEventMatches && eventOptions.length === 0) {
+    if (hasEventMatches && eventOptionsForSelectedSubcategory.length === 0) {
       setSelectedEventBucketKey("all");
       return;
     }
     if (hasSelectedEventMatches) return;
-    if (eventOptions[0]?.key) {
-      setSelectedEventBucketKey(eventOptions[0].key);
+    if (eventOptionsForSelectedSubcategory[0]?.key) {
+      setSelectedEventBucketKey(eventOptionsForSelectedSubcategory[0].key);
       return;
     }
     setGalleryShowFilter(Boolean(showIdParam) ? "this-show" : "all");
-  }, [eventOptions, galleryShowFilter, hasEventMatches, hasSelectedEventMatches, showIdParam]);
+  }, [eventOptionsForSelectedSubcategory, galleryShowFilter, hasEventMatches, hasSelectedEventMatches, showIdParam]);
 
   // Compute unique sources from photos
   const uniqueSources = useMemo(() => {
@@ -3420,52 +3524,71 @@ export default function PersonProfilePage() {
     [seasonPremiereMap]
   );
 
+  const filterPhotosByCurrentGalleryScope = useCallback((photoList: TrrPersonPhoto[]) => {
+    if (galleryShowFilter === "all") return [...photoList];
+    return photoList.filter((photo) => {
+      const bucketMatches = computePersonPhotoShowBuckets({
+        photo,
+        showIdForApi,
+        activeShowName,
+        activeShowAcronym,
+        allKnownShowNameMatches,
+        allKnownShowAcronymMatches,
+        allKnownShowIds,
+        otherShowNameMatches,
+        otherShowAcronymMatches,
+        selectedOtherShow,
+      });
+
+      if (galleryShowFilter === "this-show") {
+        return bucketMatches.matchesThisShow;
+      }
+      if (galleryShowFilter === "wwhl") {
+        return bucketMatches.matchesWwhl;
+      }
+      if (galleryShowFilter === "bravocon") {
+        return bucketMatches.matchesBravocon;
+      }
+      if (galleryShowFilter === "events") {
+        if (
+          selectedEventSubcategoryKey !== "all" &&
+          !bucketMatches.eventSubcategoryKeys.includes(selectedEventSubcategoryKey)
+        ) {
+          return false;
+        }
+        if (selectedEventBucketKey !== "all") {
+          return bucketMatches.matchesEvents && bucketMatches.eventBucketKey === selectedEventBucketKey;
+        }
+        return bucketMatches.matchesEvents;
+      }
+      if (galleryShowFilter === "other-shows") {
+        return selectedOtherShow
+          ? bucketMatches.matchesSelectedOtherShow
+          : bucketMatches.matchesOtherShows;
+      }
+      if (galleryShowFilter === "unsorted") {
+        return bucketMatches.matchesUnknownShows;
+      }
+      return true;
+    });
+  }, [
+    activeShowAcronym,
+    activeShowName,
+    allKnownShowAcronymMatches,
+    allKnownShowIds,
+    allKnownShowNameMatches,
+    galleryShowFilter,
+    otherShowAcronymMatches,
+    otherShowNameMatches,
+    selectedEventBucketKey,
+    selectedEventSubcategoryKey,
+    selectedOtherShow,
+    showIdForApi,
+  ]);
+
   // Filter and sort photos for gallery
   const filteredPhotos = useMemo(() => {
-    let result = [...photos];
-
-    // Apply show filter
-    if (galleryShowFilter !== "all") {
-      result = result.filter((photo) => {
-        const bucketMatches = computePersonPhotoShowBuckets({
-          photo,
-          showIdForApi,
-          activeShowName,
-          activeShowAcronym,
-          allKnownShowNameMatches,
-          allKnownShowAcronymMatches,
-          allKnownShowIds,
-          otherShowNameMatches,
-          otherShowAcronymMatches,
-          selectedOtherShow,
-        });
-
-        if (galleryShowFilter === "this-show") {
-          return bucketMatches.matchesThisShow;
-        }
-        if (galleryShowFilter === "wwhl") {
-          return bucketMatches.matchesWwhl;
-        }
-        if (galleryShowFilter === "bravocon") {
-          return bucketMatches.matchesBravocon;
-        }
-        if (galleryShowFilter === "events") {
-          if (selectedEventBucketKey !== "all") {
-            return bucketMatches.matchesEvents && bucketMatches.eventBucketKey === selectedEventBucketKey;
-          }
-          return bucketMatches.matchesEvents;
-        }
-        if (galleryShowFilter === "other-shows") {
-          return selectedOtherShow
-            ? bucketMatches.matchesSelectedOtherShow
-            : bucketMatches.matchesOtherShows;
-        }
-        if (galleryShowFilter === "other") {
-          return bucketMatches.matchesUnknownShows;
-        }
-        return true;
-      });
-    }
+    let result = filterPhotosByCurrentGalleryScope(photos);
 
     // Apply sources filter (OR within category)
     if (advancedFilters.sources.length > 0) {
@@ -3568,7 +3691,6 @@ export default function PersonProfilePage() {
     return result;
   }, [
     photos,
-    galleryShowFilter,
     advancedFilters.sources,
     advancedFilters.text,
     advancedFilters.people,
@@ -3577,16 +3699,7 @@ export default function PersonProfilePage() {
     advancedFilters.sort,
     referencesFilterActive,
     wantsReferences,
-    showIdForApi,
-    allKnownShowNameMatches,
-    allKnownShowAcronymMatches,
-    allKnownShowIds,
-    activeShowName,
-    activeShowAcronym,
-    otherShowNameMatches,
-    otherShowAcronymMatches,
-    selectedOtherShow,
-    selectedEventBucketKey,
+    filterPhotosByCurrentGalleryScope,
     getPhotoSortDate,
   ]);
 
@@ -3870,16 +3983,16 @@ export default function PersonProfilePage() {
 
   // Fetch person details
   const fetchPerson = useCallback(async (options?: { signal?: AbortSignal }) => {
-    if (!personId) return;
+    if (!personId) return null;
     const signal = options?.signal;
-    if (signal?.aborted) return;
+    if (signal?.aborted) return null;
     try {
       const headers = await getAuthHeaders();
-      if (signal?.aborted) return;
+      if (signal?.aborted) return null;
       const response = await fetch(`/api/admin/trr-api/people/${personId}`, { headers, signal });
       if (!response.ok) throw new Error("Failed to fetch person");
       const data = await response.json();
-      if (signal?.aborted) return;
+      if (signal?.aborted) return null;
       setPerson(data.person);
       const nextSourceOrder = readCanonicalSourceOrderFromExternalIds(
         data.person?.external_ids as Record<string, unknown> | null | undefined
@@ -3888,11 +4001,95 @@ export default function PersonProfilePage() {
       setInitialCanonicalSourceOrder(nextSourceOrder);
       setCanonicalSourceOrderError(null);
       setCanonicalSourceOrderNotice(null);
+      return (data.person as TrrPerson) ?? null;
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) return;
       setError(err instanceof Error ? err.message : "Failed to load person");
+      return null;
     }
   }, [personId, getAuthHeaders]);
+
+  const fetchExternalIds = useCallback(async (options?: { signal?: AbortSignal; fallbackPerson?: TrrPerson | null }) => {
+    if (!personId) return;
+    const signal = options?.signal;
+    const fallbackPerson = options?.fallbackPerson ?? null;
+    if (signal?.aborted) return;
+    try {
+      setExternalIdsLoading(true);
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `/api/admin/trr-api/people/${personId}/external-ids`,
+        { headers, signal }
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        external_ids?: PersonExternalIdRecord[];
+        error?: string;
+      };
+      if (signal?.aborted) return;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch external IDs");
+      }
+      const records =
+        Array.isArray(data.external_ids) && data.external_ids.length > 0
+          ? data.external_ids
+          : buildExternalIdRecordsFromPerson(fallbackPerson);
+      setExternalIdDrafts(
+        records.length > 0 ? buildExternalIdDraftsFromRecords(records) : []
+      );
+      setExternalIdsError(null);
+    } catch (err) {
+      if (signal?.aborted || isAbortError(err)) return;
+      const fallbackRecords = buildExternalIdRecordsFromPerson(fallbackPerson);
+      setExternalIdDrafts(
+        fallbackRecords.length > 0 ? buildExternalIdDraftsFromRecords(fallbackRecords) : []
+      );
+      setExternalIdsError(err instanceof Error ? err.message : "Failed to load external IDs");
+    } finally {
+      setExternalIdsLoading(false);
+    }
+  }, [getAuthHeaders, personId]);
+
+  const saveExternalIds = useCallback(async () => {
+    if (!personId) return;
+    try {
+      setExternalIdsSaving(true);
+      setExternalIdsError(null);
+      setExternalIdsNotice(null);
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/people/${personId}/external-ids`, {
+        method: "PUT",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          external_ids: externalIdDrafts
+            .map((draft) => ({
+              source_id: draft.source_id,
+              external_id: draft.external_id,
+            }))
+            .filter((draft) => draft.external_id.trim().length > 0),
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        external_ids?: PersonExternalIdRecord[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to save external IDs");
+      }
+      const nextRecords = Array.isArray(data.external_ids) ? data.external_ids : [];
+      setExternalIdDrafts(
+        nextRecords.length > 0 ? buildExternalIdDraftsFromRecords(nextRecords) : []
+      );
+      await fetchPerson();
+      setExternalIdsNotice("Saved external IDs.");
+    } catch (err) {
+      setExternalIdsError(err instanceof Error ? err.message : "Failed to save external IDs");
+    } finally {
+      setExternalIdsSaving(false);
+    }
+  }, [externalIdDrafts, fetchPerson, getAuthHeaders, personId]);
 
   const moveCanonicalSource = useCallback(
     (source: CanonicalSource, direction: "up" | "down") => {
@@ -3970,6 +4167,36 @@ export default function PersonProfilePage() {
     getAuthHeaders,
     personId,
   ]);
+
+  const handleChangeExternalIdDraft = useCallback(
+    (index: number, field: keyof PersonExternalIdDraft, value: string) => {
+      setExternalIdDrafts((prev) =>
+        prev.map((draft, draftIndex) =>
+          draftIndex === index
+            ? {
+                ...draft,
+                [field]: field === "source_id" ? (value as PersonExternalIdSource) : value,
+              }
+            : draft
+        )
+      );
+      setExternalIdsError(null);
+      setExternalIdsNotice(null);
+    },
+    []
+  );
+
+  const handleAddExternalIdDraft = useCallback(() => {
+    setExternalIdDrafts((prev) => [...prev, createEmptyExternalIdDraft()]);
+    setExternalIdsError(null);
+    setExternalIdsNotice(null);
+  }, []);
+
+  const handleRemoveExternalIdDraft = useCallback((index: number) => {
+    setExternalIdDrafts((prev) => prev.filter((_, draftIndex) => draftIndex !== index));
+    setExternalIdsError(null);
+    setExternalIdsNotice(null);
+  }, []);
 
   // Fetch photos
   const fetchPhotos = useCallback(async (options?: { signal?: AbortSignal; includeBroken?: boolean }): Promise<TrrPersonPhoto[]> => {
@@ -4129,7 +4356,7 @@ export default function PersonProfilePage() {
       setCreditsLoading(true);
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
-      params.set("limit", showIdForApi ? "500" : "50");
+      params.set("limit", "500");
       if (showIdForApi) {
         params.set("showId", showIdForApi);
       }
@@ -4140,6 +4367,7 @@ export default function PersonProfilePage() {
       const data = (await response.json().catch(() => ({}))) as {
         credits?: TrrPersonCredit[];
         show_scope?: PersonCreditShowScope;
+        credits_by_show?: PersonCreditsByShow[];
         error?: string;
       };
       if (signal?.aborted) return;
@@ -4152,11 +4380,13 @@ export default function PersonProfilePage() {
           ? (data.show_scope as PersonCreditShowScope)
           : null
       );
+      setCreditsByShow(Array.isArray(data.credits_by_show) ? data.credits_by_show : []);
       setCreditsError(null);
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) return;
       setCredits([]);
       setShowScopedCredits(null);
+      setCreditsByShow([]);
       setCreditsError(err instanceof Error ? err.message : "Failed to fetch credits");
       console.error("Failed to fetch credits:", err);
     } finally {
@@ -5421,9 +5651,12 @@ export default function PersonProfilePage() {
     }
   }, [personId, person?.full_name, fetchPhotos]);
 
-  const handleRefreshImages = useCallback(async (mode: "full" | "sync" = "full") => {
-    if (!personId) return;
-    if (refreshingImages || reprocessingImages) return;
+  const handleRefreshImages = useCallback(async (
+    mode: "full" | "sync" = "full",
+    options?: { openFollowUpPrompt?: boolean }
+  ): Promise<TrrPersonPhoto[] | null> => {
+    if (!personId) return null;
+    if (refreshingImages || reprocessingImages) return null;
     if (mode === "full") {
       setGetImagesFollowUpPromptOpen(false);
     }
@@ -5437,7 +5670,7 @@ export default function PersonProfilePage() {
         message,
         level: "info",
       });
-      return;
+      return [];
     }
     if (mode === "sync" && scopedStageTargets.sources.length === 0) {
       const message = `No eligible filtered sources to sync${effectiveGalleryImportSuffix}.`;
@@ -5449,7 +5682,7 @@ export default function PersonProfilePage() {
         message,
         level: "info",
       });
-      return;
+      return [];
     }
     const requestId = buildPersonRefreshRequestId();
     const pipelineMode: PersonRefreshPipelineMode = "ingest";
@@ -5457,11 +5690,13 @@ export default function PersonProfilePage() {
       execution_profile: "speed" as const,
       prefer_fast_pass: true,
       async_job: true,
-      max_parallelism: { sync: 3, mirror: 12, tagging: 8, crop: 8 },
-      batch_size: { tagging: 32, mirror: 200, crop: 64 },
+      max_parallelism: { sync: 4, mirror: 16, tagging: 12, crop: 12 },
+      batch_size: { tagging: 48, mirror: 256, crop: 96 },
     };
     const perSourceLimit =
       effectiveGalleryImportContext.showId ?? effectiveGalleryImportContext.showName ? 500 : 1000;
+    const selectedGetImagesSources =
+      mode === "full" ? getImagesSourcesForSelection(getImagesSourceSelection) : undefined;
     const refreshBody = {
       ...speedExecutionConfig,
       skip_mirror: false,
@@ -5475,7 +5710,12 @@ export default function PersonProfilePage() {
       skip_centering: true,
       skip_resize: true,
       skip_prune: true,
-      sources: mode === "sync" && scopedStageTargets.sources.length > 0 ? scopedStageTargets.sources : undefined,
+      sources:
+        mode === "sync"
+          ? scopedStageTargets.sources.length > 0
+            ? scopedStageTargets.sources
+            : undefined
+          : selectedGetImagesSources,
       show_id: effectiveGalleryImportContext.showId ?? undefined,
       show_name: effectiveGalleryImportContext.showName ?? undefined,
     };
@@ -5499,13 +5739,16 @@ export default function PersonProfilePage() {
     setRefreshError(null);
     setRefreshLiveCounts(null);
     setPhotosError(null);
-    appendRefreshLog({
-      source: "page_refresh",
-      stage: "syncing",
-      message: `${mode === "sync" ? "Sync stage started" : "Get Images started"}${effectiveGalleryImportSuffix}`,
-      level: "info",
-      runId: requestId,
-    });
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "syncing",
+        message:
+          mode === "sync"
+            ? `Sync stage started${effectiveGalleryImportSuffix}`
+            : `Get Images started${effectiveGalleryImportSuffix} (${getImagesSelectionLabel(getImagesSourceSelection)})`,
+        level: "info",
+        runId: requestId,
+      });
     if (mode === "sync") {
       appendRefreshLog({
         source: "page_refresh",
@@ -5515,8 +5758,26 @@ export default function PersonProfilePage() {
         level: "info",
         runId: requestId,
       });
+    } else {
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "syncing",
+        message:
+          getImagesSourceSelection === "all"
+            ? "Get Images source selection: Run All."
+            : `Get Images source selection: ${getImagesSelectionLabel(getImagesSourceSelection)}.`,
+        detail:
+          getImagesSourceSelection === "getty"
+            ? "Runs the shared Bravo / Getty / NBCUMV path, including Getty image replacements."
+            : getImagesSourceSelection === "all"
+              ? "Runs Bravo / Getty / NBCUMV, IMDb, and TMDb."
+              : `${getImagesSelectionLabel(getImagesSourceSelection)} only.`,
+        level: "info",
+        runId: requestId,
+      });
     }
 
+    let refreshedPhotosAfterRun: TrrPersonPhoto[] = [];
     try {
       const runStreamAttempt = async () => {
         const syncProgressTracker = createSyncProgressTracker();
@@ -6214,12 +6475,13 @@ export default function PersonProfilePage() {
         fetchFandomData(),
         fetchBravoVideos(),
         loadUnifiedNews({ force: true }),
-        fetchPhotos(),
         fetchCoverPhoto(),
       ]);
-      if (mode === "full") {
+      refreshedPhotosAfterRun = await fetchPhotos();
+      if (mode === "full" && options?.openFollowUpPrompt !== false) {
         setGetImagesFollowUpPromptOpen(true);
       }
+      return refreshedPhotosAfterRun;
     } catch (err) {
       console.error("Failed to get images:", err);
       const baseErrorMessage = err instanceof Error ? err.message : "Failed to get images";
@@ -6256,6 +6518,7 @@ export default function PersonProfilePage() {
         level: "error",
         runId: requestId,
       });
+      return null;
     } finally {
       setRefreshingImages(false);
       setRefreshLiveCounts(null);
@@ -6279,14 +6542,19 @@ export default function PersonProfilePage() {
     effectiveGalleryImportContext.showId,
     effectiveGalleryImportContext.showName,
     effectiveGalleryImportSuffix,
+    getImagesSourceSelection,
     scopedStageTargets,
   ]);
 
   const handleReprocessImages = useCallback(
-    async (stage: ReprocessStageKey = "all", scope: StageTargetScope = "filtered") => {
-    const stageTargets = scope === "full" ? fullStageTargets : scopedStageTargets;
-    if (!personId) return;
-    if (refreshingImages || reprocessingImages) return;
+    async (
+      stage: ReprocessStageKey = "all",
+      scope: StageTargetScope = "filtered",
+      stageTargetsOverride?: StageTargets
+    ): Promise<boolean> => {
+    const stageTargets = stageTargetsOverride ?? (scope === "full" ? fullStageTargets : scopedStageTargets);
+    if (!personId) return false;
+    if (refreshingImages || reprocessingImages) return false;
     setGetImagesFollowUpPromptOpen(false);
     if (stageTargets.totalFiltered === 0) {
       const message =
@@ -6301,7 +6569,7 @@ export default function PersonProfilePage() {
         message,
         level: "info",
       });
-      return;
+      return false;
     }
     if (
       stageTargets.targetCastPhotoIds.length === 0 &&
@@ -6319,7 +6587,7 @@ export default function PersonProfilePage() {
         message,
         level: "info",
       });
-      return;
+      return false;
     }
     const requestId = buildPersonRefreshRequestId();
     const pipelineMode: PersonRefreshPipelineMode = "reprocess";
@@ -6357,12 +6625,12 @@ export default function PersonProfilePage() {
           force_tagging_recount: true,
           run_id_text: true,
           run_crop: true,
-          run_resize: false,
+          run_resize: true,
         },
-        startLabel: "Refresh Details started",
-        startMessage: "Refreshing existing image details...",
-        defaultSuccessMessage: "Refresh Details complete.",
-        failureLabel: "Refresh Details failed",
+        startLabel: "Run Person Pipeline started",
+        startMessage: "Running the person pipeline end-to-end...",
+        defaultSuccessMessage: "Run Person Pipeline complete.",
+        failureLabel: "Run Person Pipeline failed",
       },
       tagging: {
         body: {
@@ -6382,7 +6650,7 @@ export default function PersonProfilePage() {
       crop: {
         body: { run_metadata: false, run_count: false, run_id_text: false, run_crop: true, run_resize: false },
         startLabel: "Crop stage started",
-        startMessage: "Reprocessing crop stage...",
+        startMessage: "Saving thumbnail framing metadata...",
         defaultSuccessMessage: "Crop stage complete.",
         failureLabel: "Crop stage failed",
       },
@@ -6396,7 +6664,7 @@ export default function PersonProfilePage() {
       resize: {
         body: { run_metadata: false, run_count: false, run_id_text: false, run_crop: false, run_resize: true },
         startLabel: "Auto-Crop stage started",
-        startMessage: "Reprocessing resize/auto-crop stage...",
+        startMessage: "Generating auto-crop and resize variants...",
         defaultSuccessMessage: "Auto-Crop stage complete.",
         failureLabel: "Auto-Crop stage failed",
       },
@@ -6451,8 +6719,8 @@ export default function PersonProfilePage() {
       const requestBody = JSON.stringify({
         ...selectedStage.body,
         execution_profile: "speed",
-        max_parallelism: { tagging: 8, crop: 8, mirror: 12, sync: 3 },
-        batch_size: { tagging: 32, crop: 64, mirror: 200 },
+        max_parallelism: { tagging: 12, crop: 12, mirror: 16, sync: 4 },
+        batch_size: { tagging: 48, crop: 96, mirror: 256 },
         prefer_fast_pass: true,
         async_job: true,
         sources: stageTargets.sources.length > 0 ? stageTargets.sources : undefined,
@@ -6747,7 +7015,7 @@ export default function PersonProfilePage() {
             appendRefreshLog({
               source: "page_refresh",
               stage: rawPhase ?? "reprocess_progress",
-              message: enrichedMessage || baseDetailMessage || message || "Refresh Details progress update",
+              message: enrichedMessage || baseDetailMessage || message || "Person pipeline progress update",
               level: "info",
               runId: resolvedRunId,
             });
@@ -6928,6 +7196,7 @@ export default function PersonProfilePage() {
 
       // Reload photos to show updated crops/counts
       await fetchPhotos();
+      return true;
     } catch (err) {
       console.error("Failed to reprocess images:", err);
       const errorMessage =
@@ -6953,6 +7222,7 @@ export default function PersonProfilePage() {
         level: "error",
         runId: requestId,
       });
+      return false;
     } finally {
       setReprocessingImages(false);
       setRefreshLiveCounts(null);
@@ -6973,6 +7243,15 @@ export default function PersonProfilePage() {
     effectiveGalleryImportSuffix,
   ]);
 
+  const handleRunPersonPipeline = useCallback(async (scope: StageTargetScope = "filtered") => {
+    const refreshedPhotos = await handleRefreshImages("full", { openFollowUpPrompt: false });
+    if (!refreshedPhotos) return false;
+    const scopedPhotos =
+      scope === "full" ? refreshedPhotos : filterPhotosByCurrentGalleryScope(refreshedPhotos);
+    const stageTargets = buildStageTargetsFromPhotos(scopedPhotos);
+    return handleReprocessImages("all", scope, stageTargets);
+  }, [filterPhotosByCurrentGalleryScope, handleRefreshImages, handleReprocessImages]);
+
   const handleGetImagesFollowUpSelection = useCallback(
     (scope: StageTargetScope) => {
       setGetImagesFollowUpPromptOpen(false);
@@ -6992,9 +7271,10 @@ export default function PersonProfilePage() {
     const loadData = async () => {
       setLoading(true);
       try {
-        await fetchPerson({ signal });
+        const fetchedPerson = await fetchPerson({ signal });
         if (signal.aborted) return;
         await Promise.all([
+          fetchExternalIds({ signal, fallbackPerson: fetchedPerson }),
           fetchPhotos({ signal }),
           fetchCredits({ signal }),
           fetchCoverPhoto({ signal }),
@@ -7014,7 +7294,7 @@ export default function PersonProfilePage() {
       cancelled = true;
       controller.abort();
     };
-  }, [hasAccess, fetchPerson, fetchPhotos, fetchCredits, fetchCoverPhoto, personId]);
+  }, [hasAccess, fetchCredits, fetchCoverPhoto, fetchExternalIds, fetchPerson, fetchPhotos, personId]);
 
   useEffect(() => {
     if (activeTab !== "videos") return;
@@ -7392,23 +7672,6 @@ export default function PersonProfilePage() {
       profileImageUrl: resolveMultiSourceField(person?.profile_image_url, canonicalSourceOrder),
     };
   }, [person, canonicalSourceOrder]);
-
-  const { otherShowCastCredits, otherShowCrewCredits } = useMemo(
-    () => partitionOtherShowCredits(showScopedCredits?.other_show_credits ?? []),
-    [showScopedCredits]
-  );
-  const otherShowCastGroups = useMemo(
-    () => groupCreditsByShow(otherShowCastCredits),
-    [otherShowCastCredits]
-  );
-  const otherShowCrewGroups = useMemo(
-    () => groupCreditsByShow(otherShowCrewCredits),
-    [otherShowCrewCredits]
-  );
-  const currentScopedShowName =
-    showScopedCredits?.show_name && showScopedCredits.show_name.trim().length > 0
-      ? showScopedCredits.show_name.trim()
-      : "Unknown Show";
   const breadcrumbShowName =
     showScopedCredits?.show_name && showScopedCredits.show_name.trim().length > 0
       ? showScopedCredits.show_name.trim()
@@ -7468,87 +7731,6 @@ export default function PersonProfilePage() {
     const queryString = searchParams.toString();
     return queryString ? `${pathname}?${queryString}` : pathname;
   })();
-  const currentShowCastEpisodeTotal = useMemo(
-    () =>
-      (showScopedCredits?.cast_groups ?? []).reduce(
-        (total, group) => total + group.total_episodes,
-        0
-      ),
-    [showScopedCredits]
-  );
-  const currentShowCrewEpisodeTotal = useMemo(
-    () =>
-      (showScopedCredits?.crew_groups ?? []).reduce(
-        (total, group) => total + group.total_episodes,
-        0
-      ),
-    [showScopedCredits]
-  );
-  const currentShowCastNonEpisodicTotal =
-    showScopedCredits?.cast_non_episodic.length ?? 0;
-  const currentShowCrewNonEpisodicTotal =
-    showScopedCredits?.crew_non_episodic.length ?? 0;
-
-  const renderOtherShowCreditSummaryRow = (
-    credit: TrrPersonCredit,
-    sectionType: "cast" | "crew"
-  ) => {
-    const roleFallback =
-      sectionType === "cast" ? "Unspecified Cast Role" : "Unspecified Crew Role";
-    const roleLabel = normalizeRoleLabel(credit.role) || roleFallback;
-    const rowClassName =
-      "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 transition hover:bg-zinc-100";
-    const content = (
-      <>
-        <div>
-          <p className="font-semibold text-zinc-900">{credit.show_name || "Unknown Show"}</p>
-          <p className="text-sm text-zinc-600">{roleLabel}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-            {credit.credit_category}
-          </span>
-          {!credit.show_id && (
-            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-              IMDb
-            </span>
-          )}
-        </div>
-      </>
-    );
-
-    if (credit.show_id) {
-      const showLinkSlug =
-        showIdParam && showIdForApi && credit.show_id === showIdForApi
-          ? showIdParam
-          : credit.show_id;
-      return (
-        <Link key={credit.id} href={`/admin/trr-shows/${showLinkSlug}`} className={rowClassName}>
-          {content}
-        </Link>
-      );
-    }
-
-    if (credit.external_url) {
-      return (
-        <a
-          key={credit.id}
-          href={credit.external_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={rowClassName}
-        >
-          {content}
-        </a>
-      );
-    }
-
-    return (
-      <div key={credit.id} className={rowClassName}>
-        {content}
-      </div>
-    );
-  };
 
   if (checking) {
     return (
@@ -7713,6 +7895,7 @@ export default function PersonProfilePage() {
               {(
                 [
                   { id: "overview", label: "Overview" },
+                  { id: "settings", label: "Settings" },
                   { id: "gallery", label: `Gallery (${photos.length})` },
                   { id: "videos", label: `Videos (${bravoVideos.length})` },
                   { id: "news", label: `News (${unifiedNews.length})` },
@@ -7747,21 +7930,6 @@ export default function PersonProfilePage() {
                 <NbcumvSeasonBios personName={person.full_name} />
               )}
 
-              {/* External IDs */}
-              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <h3 className="mb-4 text-lg font-bold text-zinc-900">
-                  External IDs
-                </h3>
-                <ExternalLinks
-                  externalIds={person.external_ids}
-                  type="person"
-                  className="bg-zinc-50 rounded-lg p-4"
-                />
-                {Object.keys(person.external_ids || {}).length === 0 && (
-                  <p className="text-sm text-zinc-500">No external IDs available.</p>
-                )}
-              </div>
-
               {/* Recent Photos Preview */}
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between">
@@ -7795,181 +7963,11 @@ export default function PersonProfilePage() {
                 )}
               </div>
 
-              {/* Canonical Profile (multi-source fields on core.people) */}
-              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
-                <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <h3 className="text-lg font-bold text-zinc-900">Canonical Profile</h3>
-                  <div className="w-full rounded-xl border border-zinc-200 bg-zinc-50 p-4 lg:max-w-md">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Source priority
-                    </p>
-                    <div className="mt-3 space-y-2">
-                      {canonicalSourceOrder.map((source, index) => (
-                        <div
-                          key={source}
-                          className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2"
-                        >
-                          <span className="text-sm text-zinc-800">
-                            {index + 1}. {formatCanonicalSourceLabel(source)}
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => moveCanonicalSource(source, "up")}
-                              disabled={index === 0 || canonicalSourceOrderSaving}
-                              className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Up
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moveCanonicalSource(source, "down")}
-                              disabled={index === canonicalSourceOrder.length - 1 || canonicalSourceOrderSaving}
-                              className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Down
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={saveCanonicalSourceOrder}
-                        disabled={!canonicalSourceOrderDirty || canonicalSourceOrderSaving}
-                        className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {canonicalSourceOrderSaving ? "Saving..." : "Save Order"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={resetCanonicalSourceOrder}
-                        disabled={!canonicalSourceOrderDirty || canonicalSourceOrderSaving}
-                        className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Reset
-                      </button>
-                    </div>
-                    {canonicalSourceOrderError && (
-                      <p className="mt-2 text-xs text-red-600">{canonicalSourceOrderError}</p>
-                    )}
-                    {!canonicalSourceOrderError && canonicalSourceOrderNotice && (
-                      <p className="mt-2 text-xs text-emerald-700">{canonicalSourceOrderNotice}</p>
-                    )}
-                  </div>
-                </div>
-
-                {(() => {
-                  const rows: Array<{ label: string; field: ResolvedField; isLink: boolean }> = [
-                    { label: "Birthday", field: canonical.birthday, isLink: false },
-                    { label: "Gender", field: canonical.gender, isLink: false },
-                    { label: "Place of Birth", field: canonical.placeOfBirth, isLink: false },
-                    { label: "Homepage", field: canonical.homepage, isLink: true },
-                    { label: "Profile Image URL", field: canonical.profileImageUrl, isLink: true },
-                  ];
-
-                  const hasAny =
-                    rows.some((r) => Boolean(r.field.value)) ||
-                    Boolean(canonical.biography.value);
-
-                  if (!hasAny) {
-                    return (
-                      <p className="text-sm text-zinc-500">
-                        No canonical fields available yet.
-                      </p>
-                    );
-                  }
-
-                  return (
-                    <div className="space-y-4">
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        {rows.map(({ label, field, isLink }) => (
-                          <div
-                            key={label}
-                            className="rounded-xl border border-zinc-100 bg-zinc-50 p-4"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
-                                  {label}
-                                </p>
-                                {field.value ? (
-                                  isLink ? (
-                                    <a
-                                      href={field.value}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="mt-1 block break-words text-sm font-medium text-blue-700 hover:text-blue-900"
-                                    >
-                                      {field.value}
-                                    </a>
-                                  ) : (
-                                    <p className="mt-1 break-words text-sm text-zinc-900">
-                                      {field.value}
-                                    </p>
-                                  )
-                                ) : (
-                                  <p className="mt-1 text-sm text-zinc-500">—</p>
-                                )}
-                              </div>
-                              {field.source && (
-                                <span className="flex-shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-                                  {field.source}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {canonical.biography.value && (
-                        <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4">
-                          <div className="mb-2 flex items-start justify-between gap-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
-                              Biography
-                            </p>
-                            {canonical.biography.source && (
-                              <span className="flex-shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-                                {canonical.biography.source}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-zinc-800 leading-relaxed whitespace-pre-wrap">
-                            {canonical.biography.value}
-                          </p>
-                        </div>
-                      )}
-
-                      <details className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <summary className="cursor-pointer text-sm font-semibold text-zinc-700">
-                          Raw Sources
-                        </summary>
-                        <pre className="mt-3 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
-                          {JSON.stringify(
-                            {
-                              birthday: person.birthday ?? {},
-                              gender: person.gender ?? {},
-                              biography: person.biography ?? {},
-                              place_of_birth: person.place_of_birth ?? {},
-                              homepage: person.homepage ?? {},
-                              profile_image_url: person.profile_image_url ?? {},
-                            },
-                            null,
-                            2
-                          )}
-                        </pre>
-                      </details>
-                    </div>
-                  );
-                })()}
-              </div>
-
               {/* Credits Preview */}
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-lg font-bold text-zinc-900">Show Credits</h3>
-                  {credits.length > 5 && (
+                  <h3 className="text-lg font-bold text-zinc-900">Credits</h3>
+                  {creditsByShow.length > 5 && (
                     <button
                       onClick={() => setTab("credits")}
                       className="text-sm font-semibold text-zinc-600 hover:text-zinc-900"
@@ -7980,67 +7978,38 @@ export default function PersonProfilePage() {
                 </div>
                 {creditsError && <p className="mb-3 text-sm text-red-600">{creditsError}</p>}
                 <div className="space-y-2">
-                  {credits.slice(0, 5).map((credit) => {
-                    const rowClassName =
-                      "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 transition hover:bg-zinc-100";
-                    const content = (
-                      <>
+                  {creditsByShow.slice(0, 5).map((group) => {
+                    const showLinkSlug =
+                      showIdParam && showIdForApi && group.show_id === showIdForApi
+                        ? showIdParam
+                        : group.show_id;
+                    return (
+                      <Link
+                        key={group.show_id}
+                        href={`/admin/trr-shows/${showLinkSlug}`}
+                        className="flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-3 transition hover:bg-zinc-100"
+                      >
                         <div>
                           <p className="font-semibold text-zinc-900">
-                            {credit.show_name || "Unknown Show"}
+                            {group.show_name || "Unknown Show"}
                           </p>
-                          {credit.role && (
-                            <p className="text-sm text-zinc-600">{credit.role}</p>
-                          )}
+                          <p className="text-sm text-zinc-600">
+                            {formatCreditsGroupSummary(group)}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-                            {credit.credit_category}
+                            {group.cast_groups.length + group.cast_non_episodic.length} cast
                           </span>
-                          {!credit.show_id && (
-                            <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
-                              IMDb
-                            </span>
-                          )}
+                          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                            {group.crew_groups.length + group.crew_non_episodic.length} crew
+                          </span>
                         </div>
-                      </>
-                    );
-                    if (credit.show_id) {
-                      const showLinkSlug =
-                        showIdParam && showIdForApi && credit.show_id === showIdForApi
-                          ? showIdParam
-                          : credit.show_id;
-                      return (
-                        <Link
-                          key={credit.id}
-                          href={`/admin/trr-shows/${showLinkSlug}`}
-                          className={rowClassName}
-                        >
-                          {content}
-                        </Link>
-                      );
-                    }
-                    if (credit.external_url) {
-                      return (
-                        <a
-                          key={credit.id}
-                          href={credit.external_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={rowClassName}
-                        >
-                          {content}
-                        </a>
-                      );
-                    }
-                    return (
-                      <div key={credit.id} className={rowClassName}>
-                        {content}
-                      </div>
+                      </Link>
                     );
                   })}
                 </div>
-                {credits.length === 0 && (
+                {creditsByShow.length === 0 && (
                   <p className="text-sm text-zinc-500">No credits available.</p>
                 )}
               </div>
@@ -8086,33 +8055,262 @@ export default function PersonProfilePage() {
             </div>
           )}
 
+          {activeTab === "settings" && (
+            <div className="space-y-6">
+              <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <div className="mb-4">
+                  <h3 className="text-lg font-bold text-zinc-900">Settings</h3>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Manage external IDs and choose which source TRR should trust first when profile data disagrees.
+                  </p>
+                </div>
+
+                <div className="space-y-6">
+                  <PersonExternalIdsEditor
+                    drafts={externalIdDrafts}
+                    loading={externalIdsLoading}
+                    saving={externalIdsSaving}
+                    error={externalIdsError}
+                    notice={externalIdsNotice}
+                    onChangeDraft={handleChangeExternalIdDraft}
+                    onAddDraft={handleAddExternalIdDraft}
+                    onRemoveDraft={handleRemoveExternalIdDraft}
+                    onSave={() => void saveExternalIds()}
+                  />
+
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                    <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <h3 className="text-lg font-bold text-zinc-900">Canonical Profile</h3>
+                      <div className="w-full rounded-xl border border-zinc-200 bg-zinc-50 p-4 lg:max-w-md">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                          Source priority
+                        </p>
+                        <p className="mt-2 text-xs text-zinc-500">
+                          Choose which source TRR should trust first when multiple sources disagree.
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          {canonicalSourceOrder.map((source, index) => (
+                            <div
+                              key={source}
+                              className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2"
+                            >
+                              <span className="text-sm text-zinc-800">
+                                {index + 1}. {formatCanonicalSourceLabel(source)}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => moveCanonicalSource(source, "up")}
+                                  disabled={index === 0 || canonicalSourceOrderSaving}
+                                  className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Up
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveCanonicalSource(source, "down")}
+                                  disabled={index === canonicalSourceOrder.length - 1 || canonicalSourceOrderSaving}
+                                  className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Down
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={saveCanonicalSourceOrder}
+                            disabled={!canonicalSourceOrderDirty || canonicalSourceOrderSaving}
+                            className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {canonicalSourceOrderSaving ? "Saving..." : "Save Order"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={resetCanonicalSourceOrder}
+                            disabled={!canonicalSourceOrderDirty || canonicalSourceOrderSaving}
+                            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                        {canonicalSourceOrderError && (
+                          <p className="mt-2 text-xs text-red-600">{canonicalSourceOrderError}</p>
+                        )}
+                        {!canonicalSourceOrderError && canonicalSourceOrderNotice && (
+                          <p className="mt-2 text-xs text-emerald-700">{canonicalSourceOrderNotice}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const rows: Array<{ label: string; field: ResolvedField; isLink: boolean }> = [
+                        { label: "Birthday", field: canonical.birthday, isLink: false },
+                        { label: "Gender", field: canonical.gender, isLink: false },
+                        { label: "Place of Birth", field: canonical.placeOfBirth, isLink: false },
+                        { label: "Homepage", field: canonical.homepage, isLink: true },
+                        { label: "Profile Image URL", field: canonical.profileImageUrl, isLink: true },
+                      ];
+
+                      const hasAny =
+                        rows.some((r) => Boolean(r.field.value)) ||
+                        Boolean(canonical.biography.value);
+
+                      if (!hasAny) {
+                        return (
+                          <p className="text-sm text-zinc-500">
+                            No canonical fields available yet.
+                          </p>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-4">
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            {rows.map(({ label, field, isLink }) => (
+                              <div
+                                key={label}
+                                className="rounded-xl border border-zinc-100 bg-zinc-50 p-4"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                                      {label}
+                                    </p>
+                                    {field.value ? (
+                                      isLink ? (
+                                        <div className="mt-1 flex items-start justify-between gap-3">
+                                          <p className="min-w-0 break-all text-sm font-medium text-zinc-900">
+                                            {field.value}
+                                          </p>
+                                          <a
+                                            href={field.value}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-100"
+                                            aria-label={`Open ${label}`}
+                                            title={`Open ${label}`}
+                                          >
+                                            <LinkOutIcon />
+                                          </a>
+                                        </div>
+                                      ) : (
+                                        <p className="mt-1 break-words text-sm text-zinc-900">
+                                          {field.value}
+                                        </p>
+                                      )
+                                    ) : (
+                                      <p className="mt-1 text-sm text-zinc-500">—</p>
+                                    )}
+                                  </div>
+                                  {field.source && (
+                                    <span className="flex-shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                                      {field.source}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {canonical.biography.value && (
+                            <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4">
+                              <div className="mb-2 flex items-start justify-between gap-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                                  Biography
+                                </p>
+                                {canonical.biography.source && (
+                                  <span className="flex-shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                                    {canonical.biography.source}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm text-zinc-800 leading-relaxed whitespace-pre-wrap">
+                                {canonical.biography.value}
+                              </p>
+                            </div>
+                          )}
+
+                          <details className="rounded-xl border border-zinc-200 bg-white p-4">
+                            <summary className="cursor-pointer text-sm font-semibold text-zinc-700">
+                              Raw Sources
+                            </summary>
+                            <pre className="mt-3 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
+                              {JSON.stringify(
+                                {
+                                  birthday: person.birthday ?? {},
+                                  gender: person.gender ?? {},
+                                  biography: person.biography ?? {},
+                                  place_of_birth: person.place_of_birth ?? {},
+                                  homepage: person.homepage ?? {},
+                                  profile_image_url: person.profile_image_url ?? {},
+                                },
+                                null,
+                                2
+                              )}
+                            </pre>
+                          </details>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </section>
+            </div>
+          )}
+
           {/* Gallery Tab */}
           {activeTab === "gallery" && (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex flex-wrap items-center justify-end gap-2">
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
+                <div className="flex flex-wrap items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1">
+                  {GET_IMAGES_SOURCE_OPTIONS.map((option) => {
+                    const isActive = getImagesSourceSelection === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setGetImagesSourceSelection(option.value)}
+                        disabled={refreshingImages || reprocessingImages}
+                        title={option.description}
+                        aria-pressed={isActive}
+                        className={
+                          isActive
+                            ? "rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition disabled:opacity-50"
+                            : "rounded-md border border-transparent px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-white disabled:opacity-50"
+                        }
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => void handleRefreshImages()}
                     disabled={refreshingImages || reprocessingImages}
                     title={
-                      effectiveGalleryImportLabel
-                        ? `Run Get Images for ${effectiveGalleryImportLabel} (source sync + mirror only).`
-                        : "Run Get Images for the current gallery context (source sync + mirror only)."
+                      `${effectiveGalleryImportLabel ? `Run Get Images for ${effectiveGalleryImportLabel}` : "Run Get Images for the current gallery context"} using ${getImagesSourceSelection === "all" ? "Bravo / Getty / NBCUMV, IMDb, and TMDb" : getImagesSelectionLabel(getImagesSourceSelection)} (source sync + mirror only).`
                     }
                     className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4" />
                     </svg>
-                    {refreshingImages ? "Getting..." : "Get Images"}
+                    {refreshingImages
+                      ? "Getting..."
+                      : `Get Images (${getImagesSourceSelection === "all" ? "All" : getImagesSelectionLabel(getImagesSourceSelection)})`}
                   </button>
                     <button
-                      onClick={() => void handleReprocessImages()}
+                      onClick={() => void handleRunPersonPipeline()}
                       disabled={refreshingImages || reprocessingImages}
                       title={
                         effectiveGalleryImportLabel
-                          ? `Run Refresh Details for ${effectiveGalleryImportLabel}.`
-                          : "Run Refresh Details for the current gallery context."
+                          ? `Run the full person pipeline for ${effectiveGalleryImportLabel} (Get Images + tagging + ID Text + Crop + Auto-Crop).`
+                          : "Run the full person pipeline for the current gallery context."
                       }
                       className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                     >
@@ -8120,7 +8318,7 @@ export default function PersonProfilePage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
-                    {reprocessingImages ? "Refreshing..." : "Refresh Details"}
+                    {refreshingImages || reprocessingImages ? "Running..." : "Run Person Pipeline"}
                   </button>
                   <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1">
                     <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-500">
@@ -8145,7 +8343,7 @@ export default function PersonProfilePage() {
                     <button
                       onClick={() => void handleReprocessImages("crop")}
                       disabled={refreshingImages || reprocessingImages}
-                      title="Run crop stage for existing images."
+                      title="Run Crop (save thumbnail framing/focus metadata) for existing images."
                       className="rounded border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
                     >
                       Crop
@@ -8228,7 +8426,7 @@ export default function PersonProfilePage() {
                 {getImagesFollowUpPromptOpen && (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
                     <p className="text-xs font-medium text-emerald-900">
-                      Get Images finished{effectiveGalleryImportSuffix}. Run full Refresh Details now?
+                      Get Images finished{effectiveGalleryImportSuffix}. Run the full person pipeline now?
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
@@ -8241,7 +8439,7 @@ export default function PersonProfilePage() {
                         }
                         className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Run Refresh Details on filtered scope
+                        Run Person Pipeline on filtered scope
                       </button>
                       <button
                         type="button"
@@ -8253,7 +8451,7 @@ export default function PersonProfilePage() {
                         }
                         className="rounded border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Run Refresh Details on full gallery
+                        Run Person Pipeline on full gallery
                       </button>
                     </div>
                   </div>
@@ -8272,6 +8470,19 @@ export default function PersonProfilePage() {
                     Shows
                   </span>
                   <div className="flex items-center gap-2">
+                    {hasNonThisShowMatches && (
+                      <button
+                        type="button"
+                        onClick={() => setGalleryShowFilter("all")}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          galleryShowFilter === "all"
+                            ? "border-zinc-900 bg-zinc-900 text-white"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        All Media
+                      </button>
+                    )}
                     {showIdParam && (
                       <button
                         type="button"
@@ -8347,61 +8558,70 @@ export default function PersonProfilePage() {
                     {hasUnknownShowMatches && (
                       <button
                         type="button"
-                        onClick={() => setGalleryShowFilter("other")}
+                        onClick={() => setGalleryShowFilter("unsorted")}
                         className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                          galleryShowFilter === "other"
+                          galleryShowFilter === "unsorted"
                             ? "border-zinc-900 bg-zinc-900 text-white"
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        Other
-                      </button>
-                    )}
-                    {hasNonThisShowMatches && (
-                      <button
-                        type="button"
-                        onClick={() => setGalleryShowFilter("all")}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                          galleryShowFilter === "all"
-                            ? "border-zinc-900 bg-zinc-900 text-white"
-                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                        }`}
-                      >
-                          All Media
+                        {UNSORTED_LABEL}
                       </button>
                     )}
                   </div>
-                  {galleryShowFilter === "events" && eventOptions.length > 0 && (
+                  {galleryShowFilter === "events" && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setSelectedEventBucketKey("all")}
+                        onClick={() => {
+                          setSelectedEventSubcategoryKey("all");
+                          setSelectedEventBucketKey("all");
+                        }}
                         className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                          selectedEventBucketKey === "all"
+                          selectedEventSubcategoryKey === "all"
                             ? "border-zinc-900 bg-zinc-900 text-white"
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
                         All Events
                       </button>
-                      {eventOptions.map((option) => (
+                      {eventSubcategoryOptions.map((option) => (
                         <button
                           type="button"
                           key={option.key}
                           onClick={() => {
-                            setSelectedEventBucketKey(option.key);
+                            setSelectedEventSubcategoryKey(option.key);
+                            setSelectedEventBucketKey("all");
                             setGalleryShowFilter("events");
                           }}
                           className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                            selectedEventBucketKey === option.key
+                            selectedEventSubcategoryKey === option.key
                               ? "border-zinc-900 bg-zinc-900 text-white"
                               : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                           }`}
                         >
                           {option.label}
-                          {typeof option.count === "number" ? ` (${option.count})` : ""}
                         </button>
                       ))}
+                      {eventOptionsForSelectedSubcategory.length > 0 &&
+                        eventOptionsForSelectedSubcategory.map((option) => (
+                          <button
+                            type="button"
+                            key={option.key}
+                            onClick={() => {
+                              setSelectedEventBucketKey(option.key);
+                              setGalleryShowFilter("events");
+                            }}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                              selectedEventBucketKey === option.key
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                            }`}
+                          >
+                            {option.label}
+                            {typeof option.count === "number" ? ` (${option.count})` : ""}
+                          </button>
+                        ))}
                     </div>
                   )}
                 </div>
@@ -8614,6 +8834,7 @@ export default function PersonProfilePage() {
                 </p>
               )}
             </div>
+            </div>
           )}
 
           {/* Videos Tab */}
@@ -8651,33 +8872,43 @@ export default function PersonProfilePage() {
                 {bravoVideos.map((video, index) => {
                   const thumbnailUrl = resolveBravoVideoThumbnailUrl(video);
                   return (
-                  <article key={`${video.clip_url}-${index}`} className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                    <a href={video.clip_url} target="_blank" rel="noopener noreferrer" className="group block">
-                      <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
-                        {thumbnailUrl ? (
-                          <Image
-                            src={thumbnailUrl}
-                            alt={video.title || "Bravo video"}
-                            fill
-                            className="object-cover transition group-hover:scale-105"
-                            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-zinc-400">No image</div>
+                    <article
+                      key={`${video.clip_url}-${index}`}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 p-3"
+                    >
+                      <a
+                        href={video.clip_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group block"
+                      >
+                        <div className="relative mb-3 aspect-video overflow-hidden rounded-lg bg-zinc-200">
+                          {thumbnailUrl ? (
+                            <Image
+                              src={thumbnailUrl}
+                              alt={video.title || "Bravo video"}
+                              fill
+                              className="object-cover transition group-hover:scale-105"
+                              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-zinc-400">
+                              No image
+                            </div>
+                          )}
+                        </div>
+                        <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
+                          {video.title || "Untitled video"}
+                        </h4>
+                      </a>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
+                        {video.runtime && <span>{video.runtime}</span>}
+                        {video.kicker && <span>{video.kicker}</span>}
+                        {formatBravoPublishedDate(video.published_at) && (
+                          <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
                         )}
                       </div>
-                      <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-blue-700">
-                        {video.title || "Untitled video"}
-                      </h4>
-                    </a>
-                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-500">
-                      {video.runtime && <span>{video.runtime}</span>}
-                      {video.kicker && <span>{video.kicker}</span>}
-                      {formatBravoPublishedDate(video.published_at) && (
-                        <span>Posted {formatBravoPublishedDate(video.published_at)}</span>
-                      )}
-                    </div>
-                  </article>
+                    </article>
                   );
                 })}
               </div>
@@ -8736,7 +8967,7 @@ export default function PersonProfilePage() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6">
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                  Show Credits
+                  Credits
                 </p>
                 <h3 className="text-xl font-bold text-zinc-900">
                   {person.full_name}
@@ -8746,36 +8977,63 @@ export default function PersonProfilePage() {
                 <p className="mb-4 text-sm text-zinc-500">Loading credits...</p>
               )}
               {creditsError && <p className="mb-4 text-sm text-red-600">{creditsError}</p>}
-              {showScopedCredits ? (
-                <div className="space-y-8">
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-base font-semibold text-zinc-900">Cast</h4>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
-                        {showScopedCredits.cast_groups.length} grouped
-                      </span>
-                    </div>
-                    <div className="space-y-3">
-                      <details className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3">
-                        <summary className="cursor-pointer list-none">
-                          <div className="flex items-center justify-between gap-4">
-                            <h5 className="text-sm font-semibold text-zinc-700">{currentScopedShowName}</h5>
+              <div className="space-y-4">
+                {creditsByShow.map((showGroup) => {
+                  const showLinkSlug =
+                    showIdParam && showIdForApi && showGroup.show_id === showIdForApi
+                      ? showIdParam
+                      : showGroup.show_id;
+                  const castEpisodeTotal = showGroup.cast_groups.reduce(
+                    (total, group) => total + group.total_episodes,
+                    0
+                  );
+                  const crewEpisodeTotal = showGroup.crew_groups.reduce(
+                    (total, group) => total + group.total_episodes,
+                    0
+                  );
+                  return (
+                    <details
+                      key={showGroup.show_id}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-4"
+                    >
+                      <summary className="cursor-pointer list-none">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <h4 className="text-base font-semibold text-zinc-900">
+                              {showGroup.show_name || "Unknown Show"}
+                            </h4>
+                            <p className="text-sm text-zinc-500">
+                              {formatCreditsGroupSummary(showGroup)}
+                            </p>
+                          </div>
+                          <Link
+                            href={`/admin/trr-shows/${showLinkSlug}`}
+                            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            Open Show
+                          </Link>
+                        </div>
+                      </summary>
+
+                      <div className="mt-4 grid gap-6 lg:grid-cols-2">
+                        <section className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h5 className="text-sm font-semibold text-zinc-900">Cast</h5>
                             <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
                               {formatEpisodeAndNonEpisodicLabel(
-                                currentShowCastEpisodeTotal,
-                                currentShowCastNonEpisodicTotal
+                                castEpisodeTotal,
+                                showGroup.cast_non_episodic.length
                               )}
                             </span>
                           </div>
-                        </summary>
-                        <div className="mt-3 space-y-2">
-                          {showScopedCredits.cast_groups.length === 0 &&
-                            showScopedCredits.cast_non_episodic.length === 0 && (
+                          {showGroup.cast_groups.length === 0 &&
+                            showGroup.cast_non_episodic.length === 0 && (
                               <p className="text-sm text-zinc-500">No cast credits for this show yet.</p>
                             )}
-                          {showScopedCredits.cast_groups.map((group) => (
+                          {showGroup.cast_groups.map((group) => (
                             <article
-                              key={`cast-group-${group.credit_id}`}
+                              key={`credits-show-${showGroup.show_id}-cast-${group.credit_id}`}
                               className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3"
                             >
                               <div className="flex items-center justify-between gap-4">
@@ -8795,7 +9053,7 @@ export default function PersonProfilePage() {
                                     season.season_number === null ? "Unknown" : String(season.season_number);
                                   return (
                                     <details
-                                      key={`cast-group-${group.credit_id}-season-${seasonLabel}`}
+                                      key={`credits-show-${showGroup.show_id}-cast-${group.credit_id}-season-${seasonLabel}`}
                                       className="rounded-md border border-zinc-200 bg-white p-3"
                                     >
                                       <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-800">
@@ -8825,10 +9083,9 @@ export default function PersonProfilePage() {
                               </div>
                             </article>
                           ))}
-
-                          {showScopedCredits.cast_non_episodic.map((credit) => (
+                          {showGroup.cast_non_episodic.map((credit) => (
                             <div
-                              key={`cast-non-episodic-${credit.id}`}
+                              key={`credits-show-${showGroup.show_id}-cast-non-episodic-${credit.id}`}
                               className="flex items-center justify-between rounded-lg border border-zinc-200 border-dashed bg-white p-3"
                             >
                               <div>
@@ -8844,60 +9101,25 @@ export default function PersonProfilePage() {
                               </span>
                             </div>
                           ))}
-                        </div>
-                      </details>
+                        </section>
 
-                      {otherShowCastGroups.map((showGroup) => (
-                        <details
-                          key={`other-cast-show-${showGroup.showKey}`}
-                          className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3"
-                        >
-                          <summary className="cursor-pointer list-none">
-                            <div className="flex items-center justify-between gap-4">
-                              <h5 className="text-sm font-semibold text-zinc-700">{showGroup.showName}</h5>
-                              <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
-                                {showGroup.credits.length} credit{showGroup.credits.length === 1 ? "" : "s"}
-                              </span>
-                            </div>
-                          </summary>
-                          <div className="mt-3 space-y-2">
-                            {showGroup.credits.map((credit) =>
-                              renderOtherShowCreditSummaryRow(credit, "cast")
-                            )}
-                          </div>
-                        </details>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-base font-semibold text-zinc-900">Crew</h4>
-                      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
-                        {showScopedCredits.crew_groups.length} grouped
-                      </span>
-                    </div>
-                    <div className="space-y-3">
-                      <details className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3">
-                        <summary className="cursor-pointer list-none">
-                          <div className="flex items-center justify-between gap-4">
-                            <h5 className="text-sm font-semibold text-zinc-700">{currentScopedShowName}</h5>
+                        <section className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h5 className="text-sm font-semibold text-zinc-900">Crew</h5>
                             <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
                               {formatEpisodeAndNonEpisodicLabel(
-                                currentShowCrewEpisodeTotal,
-                                currentShowCrewNonEpisodicTotal
+                                crewEpisodeTotal,
+                                showGroup.crew_non_episodic.length
                               )}
                             </span>
                           </div>
-                        </summary>
-                        <div className="mt-3 space-y-2">
-                          {showScopedCredits.crew_groups.length === 0 &&
-                            showScopedCredits.crew_non_episodic.length === 0 && (
+                          {showGroup.crew_groups.length === 0 &&
+                            showGroup.crew_non_episodic.length === 0 && (
                               <p className="text-sm text-zinc-500">No crew credits for this show yet.</p>
                             )}
-                          {showScopedCredits.crew_groups.map((group) => (
+                          {showGroup.crew_groups.map((group) => (
                             <article
-                              key={`crew-group-${group.credit_id}`}
+                              key={`credits-show-${showGroup.show_id}-crew-${group.credit_id}`}
                               className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3"
                             >
                               <div className="flex items-center justify-between gap-4">
@@ -8917,7 +9139,7 @@ export default function PersonProfilePage() {
                                     season.season_number === null ? "Unknown" : String(season.season_number);
                                   return (
                                     <details
-                                      key={`crew-group-${group.credit_id}-season-${seasonLabel}`}
+                                      key={`credits-show-${showGroup.show_id}-crew-${group.credit_id}-season-${seasonLabel}`}
                                       className="rounded-md border border-zinc-200 bg-white p-3"
                                     >
                                       <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-800">
@@ -8947,10 +9169,9 @@ export default function PersonProfilePage() {
                               </div>
                             </article>
                           ))}
-
-                          {showScopedCredits.crew_non_episodic.map((credit) => (
+                          {showGroup.crew_non_episodic.map((credit) => (
                             <div
-                              key={`crew-non-episodic-${credit.id}`}
+                              key={`credits-show-${showGroup.show_id}-crew-non-episodic-${credit.id}`}
                               className="flex items-center justify-between rounded-lg border border-zinc-200 border-dashed bg-white p-3"
                             >
                               <div>
@@ -8966,107 +9187,17 @@ export default function PersonProfilePage() {
                               </span>
                             </div>
                           ))}
-                        </div>
-                      </details>
-
-                      {otherShowCrewGroups.map((showGroup) => (
-                        <details
-                          key={`other-crew-show-${showGroup.showKey}`}
-                          className="rounded-xl border border-zinc-200 bg-zinc-50/40 p-3"
-                        >
-                          <summary className="cursor-pointer list-none">
-                            <div className="flex items-center justify-between gap-4">
-                              <h5 className="text-sm font-semibold text-zinc-700">{showGroup.showName}</h5>
-                              <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-xs text-zinc-600">
-                                {showGroup.credits.length} credit{showGroup.credits.length === 1 ? "" : "s"}
-                              </span>
-                            </div>
-                          </summary>
-                          <div className="mt-3 space-y-2">
-                            {showGroup.credits.map((credit) =>
-                              renderOtherShowCreditSummaryRow(credit, "crew")
-                            )}
-                          </div>
-                        </details>
-                      ))}
-                    </div>
-                  </section>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-3">
-                    {credits.map((credit) => {
-                      const rowClassName =
-                        "flex items-center justify-between rounded-lg border border-zinc-100 bg-zinc-50/50 p-4 transition hover:bg-zinc-100";
-                      const content = (
-                        <>
-                          <div>
-                            <p className="font-semibold text-zinc-900">
-                              {credit.show_name || "Unknown Show"}
-                            </p>
-                            {credit.role && (
-                              <p className="text-sm text-zinc-600">{credit.role}</p>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
-                              {credit.credit_category}
-                            </span>
-                            {!credit.show_id && (
-                              <span className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600">
-                                IMDb
-                              </span>
-                            )}
-                            {credit.billing_order && (
-                              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
-                                #{credit.billing_order}
-                              </span>
-                            )}
-                          </div>
-                        </>
-                      );
-                      if (credit.show_id) {
-                        const showLinkSlug =
-                          showIdParam && showIdForApi && credit.show_id === showIdForApi
-                            ? showIdParam
-                            : credit.show_id;
-                        return (
-                          <Link
-                            key={credit.id}
-                            href={`/admin/trr-shows/${showLinkSlug}`}
-                            className={rowClassName}
-                          >
-                            {content}
-                          </Link>
-                        );
-                      }
-                      if (credit.external_url) {
-                        return (
-                          <a
-                            key={credit.id}
-                            href={credit.external_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={rowClassName}
-                          >
-                            {content}
-                          </a>
-                        );
-                      }
-                      return (
-                        <div key={credit.id} className={rowClassName}>
-                          {content}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {credits.length === 0 && (
-                    <p className="text-sm text-zinc-500">
-                      No credits available for this person.
-                    </p>
-                  )}
-                </>
-              )}
+                        </section>
+                      </div>
+                    </details>
+                  );
+                })}
+                {creditsByShow.length === 0 && (
+                  <p className="text-sm text-zinc-500">
+                    No credits available for this person.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

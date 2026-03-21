@@ -74,6 +74,7 @@ describe("resolveShowSlug", () => {
           id: "11111111-2222-3333-4444-555555555555",
           name: "The Real Housewives of Salt Lake City",
           slug: "the-real-housewives-of-salt-lake-city",
+          canonical_slug: "the-real-housewives-of-salt-lake-city",
           alternative_names: ["RHOSLC"],
         },
       ],
@@ -83,6 +84,36 @@ describe("resolveShowSlug", () => {
 
     expect(queryMock).toHaveBeenCalledTimes(1);
     expect(queryMock.mock.calls[0]?.[1]).toEqual(["the-real-housewives-of-salt-lake-city"]);
+    expect(resolved).toMatchObject({
+      show_id: "11111111-2222-3333-4444-555555555555",
+      slug: "rhoslc",
+      canonical_slug: "rhoslc",
+      show_name: "The Real Housewives of Salt Lake City",
+    });
+  });
+
+  it("resolves friendly admin route slugs from the stored show slug field", async () => {
+    queryMock.mockImplementationOnce(async (sql: string, params: unknown[]) => {
+      expect(sql).toContain("COALESCE(");
+      expect(sql).toContain("COALESCE(s.slug");
+      expect(params).toEqual(["rhoslc"]);
+
+      return {
+        rows: [
+          {
+            id: "11111111-2222-3333-4444-555555555555",
+            name: "The Real Housewives of Salt Lake City",
+            slug: "rhoslc",
+            canonical_slug: "rhoslc",
+            alternative_names: [],
+          },
+        ],
+      };
+    });
+
+    const resolved = await resolveShowSlug("rhoslc");
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
     expect(resolved).toMatchObject({
       show_id: "11111111-2222-3333-4444-555555555555",
       slug: "rhoslc",

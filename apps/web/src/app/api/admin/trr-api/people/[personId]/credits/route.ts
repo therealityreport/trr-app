@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
+  getEpisodeCreditsByPersonId,
   type PersonShowEpisodeCredit,
   type TrrPersonCredit,
   getCreditsByPersonId,
@@ -49,6 +50,8 @@ type ShowScopePayload = {
   crew_non_episodic: TrrPersonCredit[];
   other_show_credits: TrrPersonCredit[];
 };
+
+type CreditsByShowPayload = Omit<ShowScopePayload, "other_show_credits">;
 
 const isCastCategory = (value: string | null | undefined): boolean =>
   (value ?? "").trim().toLowerCase() === "self";
@@ -191,6 +194,65 @@ const buildShowScopePayload = (
   };
 };
 
+const toCreditsByShowPayload = (
+  showScope: ShowScopePayload
+): CreditsByShowPayload => ({
+  show_id: showScope.show_id,
+  show_name: showScope.show_name,
+  cast_groups: showScope.cast_groups,
+  crew_groups: showScope.crew_groups,
+  cast_non_episodic: showScope.cast_non_episodic,
+  crew_non_episodic: showScope.crew_non_episodic,
+});
+
+const buildCreditsByShowPayload = (
+  credits: TrrPersonCredit[],
+  episodeCredits: Array<PersonShowEpisodeCredit & { show_id: string }>,
+  options?: { prioritizedShowId?: string | null }
+): CreditsByShowPayload[] => {
+  const groupedCredits = new Map<string, TrrPersonCredit[]>();
+  for (const credit of credits) {
+    if (!credit.show_id) continue;
+    const existing = groupedCredits.get(credit.show_id);
+    if (existing) {
+      existing.push(credit);
+    } else {
+      groupedCredits.set(credit.show_id, [credit]);
+    }
+  }
+
+  const episodeCreditsByShow = new Map<string, PersonShowEpisodeCredit[]>();
+  for (const row of episodeCredits) {
+    const existing = episodeCreditsByShow.get(row.show_id);
+    if (existing) {
+      existing.push(row);
+    } else {
+      episodeCreditsByShow.set(row.show_id, [row]);
+    }
+  }
+
+  const creditsByShow = Array.from(groupedCredits.entries()).map(([showId, showCredits]) =>
+    toCreditsByShowPayload(
+      buildShowScopePayload(showId, showCredits, episodeCreditsByShow.get(showId) ?? [])
+    )
+  );
+
+  const prioritizedShowId = options?.prioritizedShowId?.trim() || null;
+  creditsByShow.sort((left, right) => {
+    if (prioritizedShowId) {
+      if (left.show_id === prioritizedShowId && right.show_id !== prioritizedShowId) return -1;
+      if (right.show_id === prioritizedShowId && left.show_id !== prioritizedShowId) return 1;
+    }
+    const leftName = (left.show_name ?? "").trim();
+    const rightName = (right.show_name ?? "").trim();
+    const byName = leftName.localeCompare(rightName);
+    if (byName !== 0) return byName;
+    return left.show_id.localeCompare(right.show_id);
+  });
+
+  return creditsByShow;
+};
+
 /**
  * GET /api/admin/trr-api/people/[personId]/credits
  *
@@ -233,6 +295,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const credits = await getCreditsByPersonId(personId, { limit, offset });
+    const episodeCredits = await getEpisodeCreditsByPersonId(personId, {
+      includeArchiveFootage: false,
+    });
     const showScope = showId
       ? buildShowScopePayload(
           showId,
@@ -242,9 +307,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           })
         )
       : null;
+    const creditsByShow = buildCreditsByShowPayload(
+      credits,
+      episodeCredits,
+      { prioritizedShowId: showId }
+    );
 
     return NextResponse.json({
       credits,
+      credits_by_show: creditsByShow,
       ...(showScope ? { show_scope: showScope } : {}),
       pagination: {
         limit,

@@ -162,6 +162,32 @@ describe("ImageLightbox metadata panel", () => {
     );
   });
 
+  it("renders a Google reverse-search link when Getty fallback metadata provides one", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          source: "getty",
+          sourceUrl: "https://www.gettyimages.com/detail/news-photo/example/2264300032",
+          sourcePageTitle: "Getty Example",
+          originalSourceLabel: "GETTY",
+          googleReverseImageSearchUrl:
+            "https://www.google.com/searchbyimage?image_url=https%3A%2F%2Fmedia.gettyimages.com%2Fpreview.jpg",
+        })}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.getByRole("link", { name: "Open Google Image Search" })).toHaveAttribute(
+      "href",
+      "https://www.google.com/searchbyimage?image_url=https%3A%2F%2Fmedia.gettyimages.com%2Fpreview.jpg",
+    );
+  });
+
   it("renders explicit Show field in metadata coverage", () => {
     render(
       <ImageLightbox

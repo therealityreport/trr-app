@@ -7,7 +7,7 @@ export type GalleryShowFilter =
   | "bravocon"
   | "events"
   | "other-shows"
-  | "other";
+  | "unsorted";
 
 export type PersonGalleryOtherShowOption = {
   key: string;
@@ -20,6 +20,11 @@ export type PersonGalleryEventOption = {
   key: string;
   label: string;
   count: number | null;
+};
+
+export type PersonGalleryEventSubcategoryOption = {
+  key: string;
+  label: string;
 };
 
 type PersonGalleryShowOptionAccumulator = {
@@ -42,6 +47,31 @@ export const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
 
 export const WWHL_LABEL = "WWHL";
 export const BRAVOCON_LABEL = "BravoCon";
+export const UNSORTED_LABEL = "UNSORTED";
+
+const EVENT_SUBCATEGORY_LABEL_BY_KEY: Record<string, string> = {
+  celebrity_sightings: "Celebrity Sightings",
+  premieres_red_carpet_screenings: "Premieres / Red Carpet / Screenings",
+  press_upfront_tca_panel: "Press / Upfront / TCA / Panel",
+  tv_radio_podcast_studio: "TV / Radio / Podcast / Studio Appearances",
+  awards_after_party_ceremony: "Awards / After Party / Ceremony",
+  charity_benefit_fundraiser: "Charity / Benefit / Fundraiser",
+  brand_launch_opening_social: "Brand / Launch / Opening / Social Event",
+  reality_tv_bravo_franchise: "Reality TV / Bravo / Franchise Event",
+  other_shows: "Other Shows",
+  unsorted: UNSORTED_LABEL,
+};
+const EVENT_SUBCATEGORY_KEYWORDS: Array<[string, string[]]> = [
+  ["celebrity_sightings", ["celebrity sightings", "celebrities at"]],
+  ["premieres_red_carpet_screenings", ["premiere of", "premiere", "red carpet", "special screening", "opening night"]],
+  ["press_upfront_tca_panel", ["tca", "tour", "press day", "press tour", "upfront", "panel", "portraits", "press line"]],
+  ["tv_radio_podcast_studio", ['on "extra"', "podcast", "hollywood today live", "siriusxm", "build series", "visit", "discussing"]],
+  ["awards_after_party_ceremony", ["academy awards", "golden globe", "golden globes", "grammy", "espys", "after party"]],
+  ["charity_benefit_fundraiser", ["benefitting", "benefiting", "benefit", "foundation", "fundraiser", "auction", "awareness", "luncheon", "guild", "hospital", "susan g. komen", "cedars-sinai", "scholarship", "gala dinner"]],
+  ["brand_launch_opening_social", ["launch party", "grand opening", "pre-opening", "launch", "boutique", "magazine", "party", "presents", "celebrates", "event hosted by", "young hollywood", "hot hollywood", "so sexy", "hollywood in bright pink", "villa azur", "tao"]],
+  ["reality_tv_bravo_franchise", ["bravo", "real housewives", "ultimate girls trip", "my kitchen rules", "marriage boot camp", "love after lockup", "andy cohen", "reality tv", "dragcon", "celebrity apprentice"]],
+  ["other_shows", ["big brother"]],
+];
 
 const TRUSTED_IMDB_SHOW_CONTEXT_SOURCES = new Set([
   "episode_table",
@@ -233,6 +263,15 @@ function normalizedTextIncludesShowName(
   return normalizedText.includes(normalizedShow);
 }
 
+function inferEventSubcategoryKeys(value: string | null | undefined): string[] {
+  const normalized = normalizeShowNameToken(value);
+  if (!normalized) return ["unsorted"];
+  const keys = EVENT_SUBCATEGORY_KEYWORDS
+    .filter(([, keywords]) => keywords.some((keyword) => normalized.includes(keyword)))
+    .map(([key]) => key);
+  return keys.length > 0 ? keys : ["unsorted"];
+}
+
 function readGalleryBucketString(
   photo: TrrPersonPhoto,
   metadata: Record<string, unknown>,
@@ -246,6 +285,26 @@ function readGalleryBucketString(
   if (!nested || typeof nested !== "object") return null;
   const nestedValue = (nested as Record<string, unknown>)[key];
   return typeof nestedValue === "string" && nestedValue.trim() ? nestedValue.trim() : null;
+}
+
+function readGalleryBucketStringArray(
+  photo: TrrPersonPhoto,
+  metadata: Record<string, unknown>,
+  key: string
+): string[] {
+  const readCandidate = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter((entry) => entry.length > 0);
+  };
+  const directValue = readCandidate((photo as unknown as Record<string, unknown>)[key]);
+  if (directValue.length > 0) return directValue;
+  const metadataValue = readCandidate(metadata[key]);
+  if (metadataValue.length > 0) return metadataValue;
+  const nested = metadata.gallery_bucket;
+  if (!nested || typeof nested !== "object") return [];
+  return readCandidate((nested as Record<string, unknown>)[key]);
 }
 
 function readPersonImageCount(
@@ -334,6 +393,7 @@ export type PersonPhotoShowBuckets = {
   matchesUnknownShows: boolean;
   eventBucketKey: string | null;
   eventBucketLabel: string | null;
+  eventSubcategoryKeys: string[];
   personImageCount: number | null;
   sourceQueryScope: string | null;
 };
@@ -408,6 +468,13 @@ export function computePersonPhotoShowBuckets(input: {
   const bucketType = readGalleryBucketString(photo, metadata, "bucket_type")?.toLowerCase() ?? null;
   const bucketKey = readGalleryBucketString(photo, metadata, "bucket_key");
   const bucketLabel = readGalleryBucketString(photo, metadata, "bucket_label");
+  const explicitEventSubcategoryKeys = readGalleryBucketStringArray(photo, metadata, "event_subcategory_keys");
+  const eventSubcategoryKeys =
+    explicitEventSubcategoryKeys.length > 0
+      ? explicitEventSubcategoryKeys
+      : bucketType === "event"
+        ? inferEventSubcategoryKeys(bucketLabel)
+        : [];
   const personImageCount = readPersonImageCount(photo, metadata);
   const sourceQueryScope = readSourceQueryScope(photo, metadata);
   const resolvedBucketShowId = readGalleryBucketString(photo, metadata, "resolved_show_id");
@@ -511,6 +578,10 @@ export function computePersonPhotoShowBuckets(input: {
   const matchesEvents = Boolean(
     (bucketType === "event" && qualifiesAsEvent) || inferredEventSignal
   );
+  const eventRoutesToOtherShows =
+    bucketType === "event" && explicitEventSubcategoryKeys.includes("other_shows");
+  const eventRoutesToUnsorted =
+    bucketType === "event" && explicitEventSubcategoryKeys.includes("unsorted");
   const ignoreMetaShowIdForImdb = sourceNormalized === "imdb" && !trustImdbMetadata;
   const metaShowId = ignoreMetaShowIdForImdb || !trustImdbMetadata ? null : rawMetaShowId;
   const metaShowIdMatches = Boolean(showIdForApi && metaShowId && metaShowId === showIdForApi);
@@ -561,9 +632,12 @@ export function computePersonPhotoShowBuckets(input: {
     matchesThisShow ||
     metadataMatchesKnownShow;
 
-  const matchesOtherShows = matchesAnyKnownShow && !matchesThisShow && !matchesWwhl && !matchesBravocon;
+  const matchesOtherShows =
+    eventRoutesToOtherShows ||
+    (matchesAnyKnownShow && !matchesThisShow && !matchesWwhl && !matchesBravocon);
   const matchesUnknownShows =
-    !matchesThisShow && !matchesWwhl && !matchesBravocon && !matchesEvents && !matchesAnyKnownShow;
+    eventRoutesToUnsorted ||
+    (!matchesThisShow && !matchesWwhl && !matchesBravocon && !matchesEvents && !matchesAnyKnownShow);
 
   let matchesSelectedOtherShow = false;
   if (input.selectedOtherShow) {
@@ -596,6 +670,7 @@ export function computePersonPhotoShowBuckets(input: {
       matchesUnknownShows: false,
       eventBucketKey: null,
       eventBucketLabel: null,
+      eventSubcategoryKeys,
       personImageCount,
       sourceQueryScope,
     };
@@ -611,6 +686,7 @@ export function computePersonPhotoShowBuckets(input: {
       matchesUnknownShows: false,
       eventBucketKey: null,
       eventBucketLabel: null,
+      eventSubcategoryKeys,
       personImageCount,
       sourceQueryScope,
     };
@@ -620,12 +696,15 @@ export function computePersonPhotoShowBuckets(input: {
       matchesThisShow: false,
       matchesWwhl: false,
       matchesBravocon: false,
-      matchesEvents: qualifiesAsEvent,
-      matchesOtherShows: false,
+      matchesEvents: qualifiesAsEvent && !eventRoutesToOtherShows && !eventRoutesToUnsorted,
+      matchesOtherShows: eventRoutesToOtherShows,
       matchesSelectedOtherShow: false,
-      matchesUnknownShows: false,
-      eventBucketKey: qualifiesAsEvent ? bucketKey : null,
-      eventBucketLabel: qualifiesAsEvent ? bucketLabel : null,
+      matchesUnknownShows: eventRoutesToUnsorted,
+      eventBucketKey:
+        qualifiesAsEvent && !eventRoutesToOtherShows && !eventRoutesToUnsorted ? bucketKey : null,
+      eventBucketLabel:
+        qualifiesAsEvent && !eventRoutesToOtherShows && !eventRoutesToUnsorted ? bucketLabel : null,
+      eventSubcategoryKeys,
       personImageCount,
       sourceQueryScope,
     };
@@ -641,6 +720,7 @@ export function computePersonPhotoShowBuckets(input: {
       matchesUnknownShows: false,
       eventBucketKey: null,
       eventBucketLabel: null,
+      eventSubcategoryKeys,
       personImageCount,
       sourceQueryScope,
     };
@@ -656,6 +736,7 @@ export function computePersonPhotoShowBuckets(input: {
     matchesUnknownShows,
     eventBucketKey: bucketType === "event" ? bucketKey : null,
     eventBucketLabel: bucketType === "event" ? bucketLabel : null,
+    eventSubcategoryKeys,
     personImageCount,
     sourceQueryScope,
   };
@@ -675,6 +756,7 @@ export function computePersonGalleryMediaViewAvailability(input: {
   hasWwhlMatches: boolean;
   hasBravoconMatches: boolean;
   hasEventMatches: boolean;
+  eventSubcategoryOptions: PersonGalleryEventSubcategoryOption[];
   eventOptions: PersonGalleryEventOption[];
   hasOtherShowMatches: boolean;
   hasUnknownShowMatches: boolean;
@@ -685,6 +767,7 @@ export function computePersonGalleryMediaViewAvailability(input: {
   let hasEventMatches = false;
   let hasOtherShowMatches = false;
   let hasUnknownShowMatches = false;
+  const eventSubcategoryOptionsByKey = new Map<string, PersonGalleryEventSubcategoryOption>();
   const eventOptionsByKey = new Map<string, PersonGalleryEventOption>();
 
   for (const photo of input.photos) {
@@ -704,6 +787,14 @@ export function computePersonGalleryMediaViewAvailability(input: {
     if (buckets.matchesBravocon) hasBravoconMatches = true;
     if (buckets.matchesEvents) hasEventMatches = true;
     if (buckets.matchesEvents && buckets.eventBucketKey && buckets.eventBucketLabel) {
+      for (const subcategoryKey of buckets.eventSubcategoryKeys) {
+        const normalizedKey = subcategoryKey.trim();
+        if (!normalizedKey || normalizedKey === "other_shows" || normalizedKey === "unsorted") continue;
+        eventSubcategoryOptionsByKey.set(normalizedKey, {
+          key: normalizedKey,
+          label: EVENT_SUBCATEGORY_LABEL_BY_KEY[normalizedKey] ?? normalizedKey,
+        });
+      }
       const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
       const rawCount = readGroupedImageCount(photo, metadata);
       const nextCount = Number.isFinite(rawCount) ? Math.max(0, Number(rawCount)) : null;
@@ -725,6 +816,9 @@ export function computePersonGalleryMediaViewAvailability(input: {
     hasWwhlMatches,
     hasBravoconMatches,
     hasEventMatches,
+    eventSubcategoryOptions: Array.from(eventSubcategoryOptionsByKey.values()).sort((left, right) =>
+      left.label.localeCompare(right.label)
+    ),
     eventOptions: Array.from(eventOptionsByKey.values()).sort((left, right) =>
       left.label.localeCompare(right.label)
     ),
@@ -761,7 +855,7 @@ export function resolveGalleryShowFilterFallback(input: {
   if (input.currentFilter === "other-shows" && !input.hasSelectedOtherShowMatches && !allowStickyOtherShow) {
     return fallback;
   }
-  if (input.currentFilter === "other" && !input.hasUnknownShowMatches) return fallback;
+  if (input.currentFilter === "unsorted" && !input.hasUnknownShowMatches) return fallback;
   if (input.currentFilter === "all" && !input.hasNonThisShowMatches) return fallback;
   return input.currentFilter;
 }

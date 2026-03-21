@@ -60,6 +60,7 @@ export interface PhotoMetadata {
   originalSourceFileUrl?: string | null;
   originalSourcePageUrl?: string | null;
   originalSourceLabel?: string | null;
+  googleReverseImageSearchUrl?: string | null;
   fileType?: string | null;
   createdAt?: Date | null;
   addedAt?: Date | null;
@@ -1178,6 +1179,11 @@ export function mapPhotoToMetadata(
   ) ??
     getMetadataString(gettyMetadata, "title", "headline", "object_name") ??
     getMetadataString(nbcumvMetadata, "lbx_headline", "lbx_filename");
+  const googleReverseImageSearchUrl = getMetadataString(
+    metadata,
+    "google_reverse_image_search_url",
+    "googleReverseImageSearchUrl"
+  );
   const normalizedSourcePageTitle = decodeAndNormalizeText(sourcePageTitle) ?? captionEntities.titles[0] ?? null;
   const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
@@ -1477,6 +1483,7 @@ export function mapPhotoToMetadata(
     originalSourceFileUrl,
     originalSourcePageUrl,
     originalSourceLabel,
+    googleReverseImageSearchUrl,
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
@@ -1642,6 +1649,11 @@ export function mapSeasonAssetToMetadata(
         ? metadata.page_title
         : getMetadataString(gettyMetadata, "title", "headline", "object_name") ??
           getMetadataString(nbcumvMetadata, "lbx_headline", "lbx_filename");
+  const googleReverseImageSearchUrl = getMetadataString(
+    metadata,
+    "google_reverse_image_search_url",
+    "googleReverseImageSearchUrl"
+  );
   const sourceUrl =
     typeof metadata.source_page_url === "string"
       ? metadata.source_page_url
@@ -1853,6 +1865,7 @@ export function mapSeasonAssetToMetadata(
     originalSourceFileUrl,
     originalSourcePageUrl,
     originalSourceLabel,
+    googleReverseImageSearchUrl,
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,

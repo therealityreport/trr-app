@@ -460,6 +460,11 @@ function MetadataPanel({
   const sourceBadgeLabel =
     metadata.originalSourceLabel ||
     formatSourceBadgeLabel(metadata.source, originalSourcePageUrl ?? originalSourceFileUrl);
+  const googleReverseImageSearchUrl =
+    typeof metadata.googleReverseImageSearchUrl === "string" &&
+    metadata.googleReverseImageSearchUrl.trim().length > 0
+      ? metadata.googleReverseImageSearchUrl.trim()
+      : null;
   const galleryStatusNormalized = (metadata.galleryStatus ?? "").trim().toLowerCase();
   const isBrokenUnreachable = galleryStatusNormalized === "broken_unreachable";
   const galleryStatusLabel = metadata.galleryStatus ? metadata.galleryStatus.replace(/_/g, " ") : null;
@@ -1135,6 +1140,24 @@ function MetadataPanel({
           </p>
         )}
       </div>
+
+      {googleReverseImageSearchUrl ? (
+        <div className="mb-4">
+          <span className="tracking-widest text-[10px] uppercase text-white/50">
+            Reverse Search
+          </span>
+          <p className="mt-1 text-sm text-white/90">
+            <a
+              href={googleReverseImageSearchUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sky-300 underline decoration-sky-400/60 underline-offset-2 hover:text-sky-200"
+            >
+              Open Google Image Search
+            </a>
+          </p>
+        </div>
+      ) : null}
 
       {/* Title — hyperlinked to IMDb title when available */}
         <div className="mb-4">

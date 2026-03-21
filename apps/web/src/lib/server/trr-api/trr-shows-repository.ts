@@ -1,5 +1,5 @@
 import "server-only";
-import { query as pgQuery } from "@/lib/server/postgres";
+import { query as pgQuery, withTransaction } from "@/lib/server/postgres";
 import { parseThumbnailCrop } from "@/lib/thumbnail-crop";
 import {
   getPhotoIdsByPersonId,
@@ -13,6 +13,14 @@ import {
   resolveSiblingRelationLabel,
 } from "@/lib/server/trr-api/fandom-ownership";
 import { slugifyToken } from "@/lib/slugify";
+import {
+  buildLegacyExternalIdsFromRecords,
+  isPersonExternalIdSource,
+  normalizePersonExternalIdValue,
+  type PersonExternalIdInput,
+  type PersonExternalIdRecord,
+  type PersonExternalIdSource,
+} from "@/lib/admin/person-external-ids";
 
 // ============================================================================
 // Types
@@ -157,6 +165,14 @@ export interface TrrPerson {
   updated_at: string;
 }
 
+type PersonOverrideHandles = {
+  person_id: string;
+  instagram_handle: string | null;
+  tiktok_handle: string | null;
+  twitter_handle: string | null;
+  youtube_handle: string | null;
+};
+
 const normalizeStringArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
@@ -172,8 +188,32 @@ const normalizeTrrShowRow = (row: TrrShow): TrrShow => ({
   tags: normalizeStringArray(row.tags),
 });
 
-const CANONICAL_PROFILE_SOURCES = ["tmdb", "imdb", "fandom", "manual"] as const;
+const CANONICAL_PROFILE_SOURCES = ["imdb", "tmdb", "fandom", "manual"] as const;
 type CanonicalProfileSource = (typeof CANONICAL_PROFILE_SOURCES)[number];
+const MANAGED_PERSON_EXTERNAL_ID_KEYS = [
+  "imdb",
+  "imdb_id",
+  "tmdb",
+  "tmdb_id",
+  "wikidata",
+  "wikidata_id",
+  "tvdb",
+  "tvdb_id",
+  "tvrage",
+  "tvrage_id",
+  "fandom",
+  "fandom_id",
+  "facebook",
+  "facebook_id",
+  "instagram",
+  "instagram_id",
+  "twitter",
+  "twitter_id",
+  "tiktok",
+  "tiktok_id",
+  "youtube",
+  "youtube_id",
+] as const;
 
 export interface TrrCastFandom {
   id: string;
@@ -433,37 +473,50 @@ export async function resolveShowSlug(slug: string): Promise<ResolvedShowSlug | 
       id: string;
       name: string;
       slug: string;
+      canonical_slug: string;
       alternative_names: string[] | null;
     }>(
-      `SELECT
-         s.id::text AS id,
+      `WITH shows_with_slug AS (
+         SELECT
+           s.id::text AS id,
+           s.name,
+           COALESCE(s.alternative_names, ARRAY[]::text[]) AS alternative_names,
+           ${SHOW_SLUG_SQL} AS computed_slug,
+           COALESCE(
+             NULLIF(
+               lower(
+                 trim(
+                   both '-' FROM regexp_replace(
+                     regexp_replace(COALESCE(s.slug, ''), '&', ' and ', 'gi'),
+                     '[^a-z0-9]+',
+                     '-',
+                     'gi'
+                   )
+                 )
+               ),
+               ''
+             ),
+             ${SHOW_SLUG_SQL}
+           ) AS effective_slug
+         FROM core.shows AS s
+       )
+       SELECT
+         s.id,
          s.name,
-         COALESCE(s.alternative_names, ARRAY[]::text[]) AS alternative_names,
-         lower(
-           trim(
-             both '-' FROM regexp_replace(
-               regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
-               '[^a-z0-9]+',
-               '-',
-               'gi'
-             )
-           )
-         ) AS slug
-       FROM core.shows AS s
+         s.alternative_names,
+         s.effective_slug AS slug,
+         CASE
+           WHEN COUNT(*) OVER (PARTITION BY s.effective_slug) > 1
+             THEN s.effective_slug || '--' || lower(left(s.id, 8))
+           ELSE s.effective_slug
+         END AS canonical_slug
+       FROM shows_with_slug AS s
        WHERE (
-         lower(
-           trim(
-             both '-' FROM regexp_replace(
-               regexp_replace(COALESCE(s.name, ''), '&', ' and ', 'gi'),
-               '[^a-z0-9]+',
-               '-',
-               'gi'
-             )
-           )
-         ) = $1
+         s.effective_slug = $1
+         OR s.computed_slug = $1
          OR EXISTS (
            SELECT 1
-           FROM unnest(COALESCE(s.alternative_names, ARRAY[]::text[])) AS alt(name)
+           FROM unnest(s.alternative_names) AS alt(name)
            WHERE lower(
              trim(
                both '-' FROM regexp_replace(
@@ -1724,6 +1777,290 @@ export async function getPersonById(personId: string): Promise<TrrPerson | null>
   return result.rows[0] ?? null;
 }
 
+export async function listPersonExternalIds(
+  personId: string,
+  options?: { includeInactive?: boolean }
+): Promise<PersonExternalIdRecord[]> {
+  const includeInactive = options?.includeInactive ?? false;
+  const inactiveFilter = includeInactive ? "" : "AND pei.valid_to IS NULL";
+  const result = await pgQuery<PersonExternalIdRecord>(
+    `SELECT
+       pei.id,
+       pei.source_id,
+       pei.external_id,
+       pei.is_primary,
+       pei.valid_from,
+       pei.valid_to,
+       pei.observed_at,
+       pei.created_at,
+       pei.updated_at
+     FROM core.person_external_ids AS pei
+     WHERE pei.person_id = $1::uuid
+       AND pei.is_primary = true
+       ${inactiveFilter}
+     ORDER BY pei.source_id ASC`,
+    [personId]
+  );
+  return result.rows.map((row) => ({
+    id: typeof row.id === "number" ? row.id : Number(row.id ?? 0),
+    source_id: row.source_id,
+    external_id: row.external_id,
+    is_primary: Boolean(row.is_primary),
+    valid_from: row.valid_from,
+    valid_to: row.valid_to,
+    observed_at: row.observed_at,
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
+  }));
+}
+
+const normalizePersonExternalIdInput = (
+  input: PersonExternalIdInput,
+): PersonExternalIdInput | null => {
+  if (!isPersonExternalIdSource(input.source_id)) return null;
+  const externalId = normalizePersonExternalIdValue(input.source_id, input.external_id);
+  if (!externalId) return null;
+  return {
+    source_id: input.source_id,
+    external_id: externalId,
+    is_primary: input.is_primary ?? true,
+    valid_from: input.valid_from ?? null,
+    valid_to: input.valid_to ?? null,
+  };
+};
+
+const buildMirroredPersonExternalIds = (
+  existingExternalIds: Record<string, unknown> | null | undefined,
+  activeRecords: PersonExternalIdRecord[],
+): Record<string, unknown> => {
+  const next: Record<string, unknown> = {
+    ...((existingExternalIds ?? {}) as Record<string, unknown>),
+  };
+  for (const key of MANAGED_PERSON_EXTERNAL_ID_KEYS) {
+    delete next[key];
+  }
+  Object.assign(next, buildLegacyExternalIdsFromRecords(activeRecords));
+  return next;
+};
+
+const buildPersonOverrideHandleValues = (
+  activeRecords: PersonExternalIdRecord[],
+): Pick<
+  PersonOverrideHandles,
+  "instagram_handle" | "tiktok_handle" | "twitter_handle" | "youtube_handle"
+> => {
+  const findSourceValue = (source: PersonExternalIdSource): string | null => {
+    const record = activeRecords.find((candidate) => candidate.source_id === source);
+    return record ? normalizePersonExternalIdValue(source, record.external_id) : null;
+  };
+
+  return {
+    instagram_handle: findSourceValue("instagram"),
+    tiktok_handle: findSourceValue("tiktok"),
+    twitter_handle: findSourceValue("twitter"),
+    youtube_handle: findSourceValue("youtube"),
+  };
+};
+
+const mapPrimaryPersonExternalIdRows = (
+  rows: Array<Record<string, unknown>>,
+): PersonExternalIdRecord[] =>
+  rows.reduce<PersonExternalIdRecord[]>((records, row) => {
+      const sourceId = typeof row.source_id === "string" ? row.source_id : "";
+      if (!isPersonExternalIdSource(sourceId)) return records;
+      const externalId = typeof row.external_id === "string" ? row.external_id.trim() : "";
+      if (!externalId) return records;
+      records.push({
+        id:
+          typeof row.id === "number"
+            ? row.id
+            : typeof row.id === "string"
+              ? Number.parseInt(row.id, 10)
+              : null,
+        source_id: sourceId,
+        external_id: externalId,
+        is_primary: row.is_primary !== false,
+        valid_from: typeof row.valid_from === "string" ? row.valid_from : null,
+        valid_to: typeof row.valid_to === "string" ? row.valid_to : null,
+        observed_at: typeof row.observed_at === "string" ? row.observed_at : null,
+        created_at: typeof row.created_at === "string" ? row.created_at : null,
+        updated_at: typeof row.updated_at === "string" ? row.updated_at : null,
+      } satisfies PersonExternalIdRecord);
+      return records;
+    }, []);
+
+const PERSON_EXTERNAL_ID_UNIQUE_CONFLICT_MESSAGES: Record<string, string> = {
+  person_external_ids_unique_active_handles_uq:
+    "That social handle is already assigned to another person.",
+  person_external_ids_unique_identifiers_uq:
+    "That external ID is already assigned to another person.",
+  person_external_ids_primary_uq:
+    "Only one primary record is allowed per source for a person.",
+};
+
+const coerceRepositoryErrorMessage = (error: unknown): string => {
+  if (error && typeof error === "object") {
+    const candidate = error as { code?: string; constraint?: string; message?: string };
+    if (candidate.code === "23505" && candidate.constraint) {
+      return PERSON_EXTERNAL_ID_UNIQUE_CONFLICT_MESSAGES[candidate.constraint] ?? "External ID conflict";
+    }
+    if (typeof candidate.message === "string" && candidate.message.trim().length > 0) {
+      return candidate.message;
+    }
+  }
+  return "Failed to update person external IDs.";
+};
+
+export async function syncPersonExternalIds(
+  personId: string,
+  inputs: PersonExternalIdInput[],
+): Promise<PersonExternalIdRecord[]> {
+  const normalized = inputs
+    .map(normalizePersonExternalIdInput)
+    .filter((row): row is PersonExternalIdInput => Boolean(row));
+
+  const dedupedBySource = new Map<PersonExternalIdSource, PersonExternalIdInput>();
+  for (const row of normalized) {
+    dedupedBySource.set(row.source_id, { ...row, is_primary: true });
+  }
+
+  try {
+    return await withTransaction(async (client) => {
+      const currentPersonResult = await client.query<{
+        external_ids: Record<string, unknown> | null;
+      }>(
+        `SELECT external_ids
+         FROM core.people
+         WHERE id = $1::uuid
+         LIMIT 1`,
+        [personId]
+      );
+      if (currentPersonResult.rows.length === 0) {
+        throw new Error("Person not found");
+      }
+
+      const desiredRows = Array.from(dedupedBySource.values());
+      for (const row of desiredRows) {
+        await client.query(
+          `INSERT INTO core.person_external_ids (
+             person_id,
+             source_id,
+             external_id,
+             is_primary,
+             valid_from,
+             valid_to,
+             observed_at
+           )
+           VALUES ($1::uuid, $2::text, $3::text, true, $4::date, $5::date, now())
+           ON CONFLICT (person_id, source_id) WHERE (is_primary = true)
+           DO UPDATE
+           SET external_id = EXCLUDED.external_id,
+               valid_from = EXCLUDED.valid_from,
+               valid_to = EXCLUDED.valid_to,
+               observed_at = now(),
+               updated_at = now()`,
+          [personId, row.source_id, row.external_id, row.valid_from ?? null, row.valid_to ?? null]
+        );
+      }
+
+      const desiredSources = desiredRows.map((row) => row.source_id);
+      if (desiredSources.length > 0) {
+        await client.query(
+          `UPDATE core.person_external_ids
+           SET valid_to = COALESCE(valid_to, CURRENT_DATE),
+               updated_at = now()
+           WHERE person_id = $1::uuid
+             AND is_primary = true
+             AND source_id <> ALL($2::text[])`,
+          [personId, desiredSources]
+        );
+      } else {
+        await client.query(
+          `UPDATE core.person_external_ids
+           SET valid_to = COALESCE(valid_to, CURRENT_DATE),
+               updated_at = now()
+           WHERE person_id = $1::uuid
+             AND is_primary = true`,
+          [personId]
+        );
+      }
+
+      const primaryRowsResult = await client.query<Record<string, unknown>>(
+        `SELECT
+           id,
+           source_id,
+           external_id,
+           is_primary,
+           valid_from,
+           valid_to,
+           observed_at,
+           created_at,
+           updated_at
+         FROM core.person_external_ids
+         WHERE person_id = $1::uuid
+           AND is_primary = true
+           AND valid_to IS NULL
+         ORDER BY source_id ASC`,
+        [personId]
+      );
+
+      const activeRecords = mapPrimaryPersonExternalIdRows(primaryRowsResult.rows);
+      const existingExternalIds = currentPersonResult.rows[0]?.external_ids ?? {};
+      const nextExternalIds = buildMirroredPersonExternalIds(existingExternalIds, activeRecords);
+      await client.query(
+        `UPDATE core.people
+         SET external_ids = $2::jsonb,
+             updated_at = now()
+         WHERE id = $1::uuid`,
+        [personId, JSON.stringify(nextExternalIds)]
+      );
+
+      const nextHandles = buildPersonOverrideHandleValues(activeRecords);
+      const hasAnyHandle = Object.values(nextHandles).some((value) => Boolean(value));
+      const overrideRowExists = await client.query<{ person_id: string }>(
+        `SELECT person_id
+         FROM core.people_overrides
+         WHERE person_id = $1::uuid
+         LIMIT 1`,
+        [personId]
+      );
+      if (hasAnyHandle || overrideRowExists.rows.length > 0) {
+        await client.query(
+          `INSERT INTO core.people_overrides (
+             person_id,
+             instagram_handle,
+             tiktok_handle,
+             twitter_handle,
+             youtube_handle
+           )
+           VALUES ($1::uuid, $2::text, $3::text, $4::text, $5::text)
+           ON CONFLICT (person_id)
+           DO UPDATE SET
+             instagram_handle = EXCLUDED.instagram_handle,
+             tiktok_handle = EXCLUDED.tiktok_handle,
+             twitter_handle = EXCLUDED.twitter_handle,
+             youtube_handle = EXCLUDED.youtube_handle,
+             updated_at = now()`,
+          [
+            personId,
+            nextHandles.instagram_handle,
+            nextHandles.tiktok_handle,
+            nextHandles.twitter_handle,
+            nextHandles.youtube_handle,
+          ]
+        );
+      }
+
+      return activeRecords;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Person not found") {
+      throw error;
+    }
+    throw new Error(coerceRepositoryErrorMessage(error));
+  }
+}
+
 export async function updatePersonCanonicalProfileSourceOrder(
   personId: string,
   sourceOrder: string[]
@@ -2154,6 +2491,10 @@ export interface PersonShowEpisodeCredit {
   episode_number: number | null;
   episode_name: string | null;
   appearance_type: string | null;
+}
+
+export interface PersonEpisodeCredit extends PersonShowEpisodeCredit {
+  show_id: string;
 }
 
 interface ImdbNameFilmographyCredit {
@@ -3310,6 +3651,61 @@ export async function getEpisodeCreditsByPersonShowId(
   );
 
   return result.rows.map((row) => ({
+    credit_id: row.credit_id,
+    credit_category: row.credit_category,
+    role: row.role,
+    billing_order: row.billing_order,
+    source_type: row.source_type,
+    episode_id: row.episode_id,
+    season_number: row.season_number,
+    episode_number: row.episode_number,
+    episode_name: row.episode_name,
+    appearance_type: row.appearance_type,
+  }));
+}
+
+/**
+ * Get episode-level credit evidence for a person across all mapped shows.
+ * Reads from core.v_episode_credits and excludes archive footage by default.
+ */
+export async function getEpisodeCreditsByPersonId(
+  personId: string,
+  options?: { includeArchiveFootage?: boolean }
+): Promise<PersonEpisodeCredit[]> {
+  const includeArchiveFootage = options?.includeArchiveFootage ?? false;
+  const archiveFilter = includeArchiveFootage
+    ? ""
+    : "AND COALESCE(vec.appearance_type, 'appears') <> 'archive_footage'";
+
+  const result = await pgQuery<PersonEpisodeCredit>(
+    `SELECT
+       vec.show_id,
+       vec.credit_id,
+       vec.credit_category,
+       vec.role,
+       vec.billing_order,
+       vec.source_type,
+       vec.episode_id,
+       vec.season_number,
+       vec.episode_number,
+       vec.episode_name,
+       vec.appearance_type
+     FROM core.v_episode_credits AS vec
+     WHERE vec.person_id = $1::uuid
+       ${archiveFilter}
+     ORDER BY
+       vec.show_id ASC,
+       vec.billing_order ASC NULLS LAST,
+       vec.role ASC NULLS LAST,
+       vec.season_number DESC NULLS LAST,
+       vec.episode_number ASC NULLS LAST,
+       vec.episode_name ASC NULLS LAST,
+       vec.episode_id ASC`,
+    [personId]
+  );
+
+  return result.rows.map((row) => ({
+    show_id: row.show_id,
     credit_id: row.credit_id,
     credit_category: row.credit_category,
     role: row.role,

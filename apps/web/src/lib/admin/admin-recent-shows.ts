@@ -33,7 +33,7 @@ const normalizeTimestamp = (value: unknown): number => {
   return Date.now();
 };
 
-export const buildAdminShowHref = (slug: string): string => `/shows/${encodeURIComponent(slug)}`;
+export const buildAdminShowHref = (slug: string): string => `/admin/${encodeURIComponent(slug)}`;
 
 const normalizeEntry = (value: unknown): AdminRecentShowEntry | null => {
   if (!isRecord(value)) return null;

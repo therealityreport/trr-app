@@ -1,0 +1,281 @@
+/*
+ * Design Docs — Shared CSS Variables
+ * These scope to the .design-docs container and drive
+ * all specimen rendering in section components.
+ */
+
+.design-docs {
+  /* Ink & Paper */
+  --dd-ink-black: #121212;
+  --dd-ink-dark: #1a1a1a;
+  --dd-ink-medium: #333333;
+  --dd-ink-soft: #555555;
+  --dd-ink-light: #727272;
+  --dd-ink-faint: #999999;
+
+  --dd-paper-white: #FFFFFF;
+  --dd-paper-warm: #F7F5F0;
+  --dd-paper-cool: #F0F0F0;
+  --dd-paper-grey: #E8E5E0;
+  --dd-paper-mid: #D5D2CC;
+
+  --dd-accent-saffron: #F6CB2F;
+  --dd-accent-gold: #DFBD50;
+
+  /* Data Viz */
+  --dd-viz-blue-dark: #326DA8;
+  --dd-viz-blue: #4A90D9;
+  --dd-viz-blue-light: #86C3D6;
+  --dd-viz-blue-pale: #B8D4E3;
+  --dd-viz-blue-wash: #DCE8F0;
+
+  --dd-viz-red-dark: #A03030;
+  --dd-viz-red: #D04040;
+  --dd-viz-red-light: #E87070;
+  --dd-viz-red-pale: #F0A0A0;
+
+  --dd-viz-orange: #E8913A;
+  --dd-viz-orange-light: #F4AE7B;
+  --dd-viz-yellow: #F6CB2F;
+  --dd-viz-green: #5B9E5B;
+  --dd-viz-green-light: #8BC48B;
+  --dd-viz-teal: #2D8C8C;
+  --dd-viz-purple: #7B5EA7;
+  --dd-viz-purple-light: #A98ED4;
+
+  /* Sequential blue */
+  --dd-seq-1: #DCE8F0;
+  --dd-seq-2: #B8D4E3;
+  --dd-seq-3: #86C3D6;
+  --dd-seq-4: #4A90D9;
+  --dd-seq-5: #326DA8;
+  --dd-seq-6: #1D4E7A;
+
+  /* Diverging red-blue */
+  --dd-div-red-3: #A03030;
+  --dd-div-red-2: #D04040;
+  --dd-div-red-1: #E89090;
+  --dd-div-neutral: #E8E5E0;
+  --dd-div-blue-1: #86C3D6;
+  --dd-div-blue-2: #4A90D9;
+  --dd-div-blue-3: #326DA8;
+
+  /* Typography — R2 CDN */
+  --dd-font-headline: "Cheltenham", "Georgia", serif;
+  --dd-font-display: "Gloucester", "Georgia", serif;
+  --dd-font-body: "Gloucester", "Georgia", serif;
+  --dd-font-sans: "Franklin Gothic", "Helvetica Neue", sans-serif;
+  --dd-font-data: "Franklin Gothic", "Helvetica Neue", sans-serif;
+  --dd-font-ui: "Hamburg Serial", "Helvetica Neue", sans-serif;
+  --dd-font-slab: "Stymie", "Rockwell", serif;
+  --dd-font-masthead: "Chomsky", "Georgia", serif;
+  --dd-font-mono: "SF Mono", "Menlo", monospace;
+
+  /* Spacing */
+  --dd-space-xs: 4px;
+  --dd-space-sm: 8px;
+  --dd-space-md: 16px;
+  --dd-space-lg: 24px;
+  --dd-space-xl: 32px;
+  --dd-space-2xl: 48px;
+  --dd-space-3xl: 64px;
+  --dd-space-4xl: 96px;
+
+  /* Border Radius */
+  --dd-radius-none: 0px;
+  --dd-radius-xs: 2px;
+  --dd-radius-sm: 4px;
+  --dd-radius-md: 6px;
+  --dd-radius-lg: 8px;
+  --dd-radius-xl: 12px;
+  --dd-radius-2xl: 16px;
+  --dd-radius-3xl: 24px;
+  --dd-radius-full: 9999px;
+}
+
+/* Specimen building blocks */
+.design-docs .dd-section-label {
+  font-family: var(--dd-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--dd-ink-faint);
+  margin-bottom: var(--dd-space-sm);
+}
+
+.design-docs .dd-section-title {
+  font-family: var(--dd-font-headline);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--dd-ink-black);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  margin-bottom: var(--dd-space-md);
+}
+
+.design-docs .dd-section-desc {
+  font-family: var(--dd-font-body);
+  font-size: 16px;
+  color: var(--dd-ink-soft);
+  max-width: 640px;
+  margin-bottom: var(--dd-space-2xl);
+  line-height: 1.55;
+}
+
+.design-docs .dd-palette-label {
+  font-family: var(--dd-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dd-ink-soft);
+  margin-bottom: var(--dd-space-xs);
+  margin-top: var(--dd-space-md);
+}
+
+.design-docs .dd-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: var(--dd-space-md);
+  margin-bottom: var(--dd-space-2xl);
+}
+
+.design-docs .dd-swatch {
+  border-radius: var(--dd-radius-md);
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.design-docs .dd-swatch:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+.design-docs .dd-swatch-color {
+  height: 72px;
+}
+.design-docs .dd-swatch-info {
+  padding: 8px 10px;
+}
+.design-docs .dd-swatch-name {
+  font-family: var(--dd-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dd-ink-medium);
+  margin-bottom: 1px;
+}
+.design-docs .dd-swatch-hex {
+  font-family: var(--dd-font-mono);
+  font-size: 10px;
+  color: var(--dd-ink-faint);
+  text-transform: uppercase;
+}
+
+.design-docs .dd-palette-row {
+  display: flex;
+  border-radius: var(--dd-radius-lg);
+  overflow: hidden;
+  height: 48px;
+  margin-bottom: var(--dd-space-sm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.design-docs .dd-palette-cell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--dd-font-sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* Chart card */
+.design-docs .dd-chart-card {
+  background: white;
+  border: 1px solid var(--dd-paper-grey);
+  border-radius: var(--dd-radius-sm);
+  padding: var(--dd-space-xl);
+  transition: box-shadow 0.2s;
+}
+.design-docs .dd-chart-card:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+.design-docs .dd-chart-headline {
+  font-family: var(--dd-font-headline);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--dd-ink-black);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--dd-space-xs);
+}
+.design-docs .dd-chart-subhead {
+  font-family: var(--dd-font-sans);
+  font-size: 13px;
+  color: var(--dd-ink-soft);
+  margin-bottom: var(--dd-space-lg);
+  line-height: 1.45;
+}
+.design-docs .dd-chart-source {
+  font-family: var(--dd-font-sans);
+  font-size: 11px;
+  color: var(--dd-ink-faint);
+  margin-top: var(--dd-space-md);
+  padding-top: var(--dd-space-sm);
+  border-top: 1px solid var(--dd-paper-cool);
+}
+
+/* SVG text */
+.design-docs svg text {
+  font-family: var(--dd-font-sans);
+}
+.design-docs .dd-axis-label {
+  font-size: 11px;
+  fill: var(--dd-ink-faint);
+}
+.design-docs .dd-grid-line {
+  stroke: var(--dd-paper-cool);
+  stroke-width: 1;
+}
+.design-docs .dd-data-label {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--dd-ink-medium);
+}
+.design-docs .dd-annotation {
+  font-size: 12px;
+  fill: var(--dd-ink-soft);
+  font-style: italic;
+}
+
+/* Stat cards */
+.design-docs .dd-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--dd-space-md);
+  margin-bottom: var(--dd-space-2xl);
+}
+.design-docs .dd-stat-card {
+  background: white;
+  border: 1px solid var(--dd-paper-grey);
+  border-top: 3px solid var(--dd-ink-black);
+  padding: var(--dd-space-lg);
+}
+.design-docs .dd-stat-number {
+  font-family: var(--dd-font-headline);
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--dd-ink-black);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .design-docs .dd-swatch-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  }
+  .design-docs .dd-section-title {
+    font-size: 22px;
+  }
+}

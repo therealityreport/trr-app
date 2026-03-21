@@ -132,6 +132,30 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
         },
       });
     }
+    if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/external-ids`)) {
+      return jsonResponse({
+        external_ids: [
+          {
+            id: 1,
+            source_id: "tmdb",
+            external_id: "1686599",
+            is_primary: true,
+            valid_from: null,
+            valid_to: null,
+            observed_at: "2026-02-24T00:00:00.000Z",
+          },
+          {
+            id: 2,
+            source_id: "imdb",
+            external_id: "nm4541706",
+            is_primary: true,
+            valid_from: null,
+            valid_to: null,
+            observed_at: "2026-02-24T00:00:00.000Z",
+          },
+        ],
+      });
+    }
     if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/cover-photo`)) {
       return jsonResponse({ coverPhoto: null });
     }
@@ -246,6 +270,23 @@ describe("people page tab runtime behavior", () => {
     await screen.findByText("Andy News Story");
   });
 
+  it("shows External IDs and Canonical Profile in Settings instead of Overview", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+    await screen.findByRole("heading", { name: "Andy Cohen" });
+
+    expect(screen.queryByRole("heading", { name: "External IDs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Canonical Profile" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    await screen.findByRole("heading", { name: "External IDs" });
+    await screen.findByRole("heading", { name: "Canonical Profile" });
+    await screen.findByText(/1\.\s+IMDb/i);
+  });
+
   it("renders fandom error and supports retry from the fandom tab", async () => {
     let fandomAttempt = 0;
     const fetchMock = createFetchMock({
@@ -287,6 +328,39 @@ describe("people page tab runtime behavior", () => {
       credits: () =>
         jsonResponse({
           credits: [],
+          credits_by_show: [
+            {
+              show_id: SHOW_ID,
+              show_name: "The Real Housewives of Salt Lake City",
+              cast_groups: [
+                {
+                  credit_id: "credit-host",
+                  role: "Host",
+                  credit_category: "Self",
+                  billing_order: 1,
+                  source_type: "imdb",
+                  total_episodes: 1,
+                  seasons: [
+                    {
+                      season_number: 1,
+                      episode_count: 1,
+                      episodes: [
+                        {
+                          episode_id: "ep-1",
+                          episode_number: 1,
+                          episode_name: "Pilot",
+                          appearance_type: "appears",
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+              crew_groups: [],
+              cast_non_episodic: [],
+              crew_non_episodic: [],
+            },
+          ],
           show_scope: {
             show_id: SHOW_ID,
             show_name: "The Real Housewives of Salt Lake City",

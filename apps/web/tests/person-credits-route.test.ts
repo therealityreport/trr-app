@@ -5,11 +5,13 @@ const {
   requireAdminMock,
   getCreditsByPersonIdMock,
   getCreditsForPersonShowScopeMock,
+  getEpisodeCreditsByPersonIdMock,
   getEpisodeCreditsByPersonShowIdMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getCreditsByPersonIdMock: vi.fn(),
   getCreditsForPersonShowScopeMock: vi.fn(),
+  getEpisodeCreditsByPersonIdMock: vi.fn(),
   getEpisodeCreditsByPersonShowIdMock: vi.fn(),
 }));
 
@@ -20,6 +22,7 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getCreditsByPersonId: getCreditsByPersonIdMock,
   getCreditsForPersonShowScope: getCreditsForPersonShowScopeMock,
+  getEpisodeCreditsByPersonId: getEpisodeCreditsByPersonIdMock,
   getEpisodeCreditsByPersonShowId: getEpisodeCreditsByPersonShowIdMock,
 }));
 
@@ -30,9 +33,11 @@ describe("person credits route", () => {
     requireAdminMock.mockReset();
     getCreditsByPersonIdMock.mockReset();
     getCreditsForPersonShowScopeMock.mockReset();
+    getEpisodeCreditsByPersonIdMock.mockReset();
     getEpisodeCreditsByPersonShowIdMock.mockReset();
 
     requireAdminMock.mockResolvedValue(undefined);
+    getEpisodeCreditsByPersonIdMock.mockResolvedValue([]);
   });
 
   it("keeps legacy credits shape when showId is not provided", async () => {
@@ -48,6 +53,7 @@ describe("person credits route", () => {
         source_type: "imdb",
       },
     ]);
+    getEpisodeCreditsByPersonIdMock.mockResolvedValue([]);
 
     const request = new NextRequest("http://localhost/api/admin/trr-api/people/person-1/credits?limit=50");
     const response = await GET(request, { params: Promise.resolve({ personId: "person-1" }) });
@@ -55,8 +61,12 @@ describe("person credits route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.credits).toHaveLength(1);
+    expect(payload.credits_by_show).toHaveLength(1);
     expect(payload.show_scope).toBeUndefined();
     expect(getEpisodeCreditsByPersonShowIdMock).not.toHaveBeenCalled();
+    expect(getEpisodeCreditsByPersonIdMock).toHaveBeenCalledWith("person-1", {
+      includeArchiveFootage: false,
+    });
   });
 
   it("returns show_scope with cast/crew grouping and role separation", async () => {
@@ -193,6 +203,8 @@ describe("person credits route", () => {
     expect(payload.show_scope.crew_non_episodic[0].role).toBe("Executive Producer");
     expect(payload.show_scope.other_show_credits).toHaveLength(1);
     expect(payload.show_scope.other_show_credits[0].show_name).toBe("WWHL");
+    expect(payload.credits_by_show).toHaveLength(2);
+    expect(payload.credits_by_show[0].show_id).toBe(showId);
   });
 
   it("places credits with Self episode evidence into cast_groups even when base category differs", async () => {

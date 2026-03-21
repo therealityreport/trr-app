@@ -40,6 +40,7 @@ import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer, type EntityContext } from "@/components/admin/ImageScrapeDrawer";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
+import { BravotvImageRunPanel } from "@/components/admin/BravotvImageRunPanel";
 import { ShowTabsNav } from "@/components/admin/show-tabs/ShowTabsNav";
 import { ShowAssetsImageSections } from "@/components/admin/show-tabs/ShowAssetsImageSections";
 import {
@@ -1325,6 +1326,7 @@ function SocialHandlePill({ pill }: { pill: ShowSocialLinkPill }) {
 function InlineEditableLinkUrl({
   linkId,
   url,
+  openUrl,
   label,
   saving,
   onSubmit,
@@ -1335,6 +1337,7 @@ function InlineEditableLinkUrl({
 }: {
   linkId: string;
   url: string;
+  openUrl?: string | null;
   label?: string;
   saving: boolean;
   onSubmit: (linkId: string, nextUrl: string) => Promise<void>;
@@ -1343,41 +1346,51 @@ function InlineEditableLinkUrl({
   containerClassName?: string;
   canEdit?: boolean;
 }) {
+  const editButton = canEdit ? (
+    <EditableTrigger asChild>
+      <button
+        type="button"
+        disabled={saving}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+        aria-label={label ? `Edit URL for ${label}` : "Edit link URL"}
+        title={label ? `Edit URL for ${label}` : "Edit link URL"}
+      >
+        <EditActionIcon />
+      </button>
+    </EditableTrigger>
+  ) : null;
+  const openButton = openUrl ? (
+    <a
+      href={openUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 transition hover:bg-zinc-50"
+      aria-label={label ? `Open ${label}` : "Open link"}
+      title={label ? `Open ${label}` : "Open link"}
+    >
+      <OpenLinkActionIcon />
+    </a>
+  ) : null;
+
   return (
     <Editable value={url} placeholder="https://example.com" onSubmit={(nextUrl) => onSubmit(linkId, nextUrl)}>
       <div className={containerClassName ? `${containerClassName} space-y-2` : "space-y-2"}>
-        {(children || actions) && (
+        {(children || actions || editButton || openButton) && (
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 flex-1">{children}</div>
             <div className="flex shrink-0 items-center gap-2">
-              {canEdit ? (
-                <EditableTrigger asChild>
-                  <button
-                    type="button"
-                    disabled={saving}
-                    className="rounded border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                    aria-label={label ? `Edit URL for ${label}` : "Edit link URL"}
-                  >
-                    Edit URL
-                  </button>
-                </EditableTrigger>
-              ) : null}
+              {editButton}
+              {openButton}
               {actions}
             </div>
           </div>
         )}
-        {!children && !actions && canEdit && (
+        {!children && !actions && (editButton || openButton) && (
           <div className="flex justify-end">
-            <EditableTrigger asChild>
-              <button
-                type="button"
-                disabled={saving}
-                className="rounded border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                aria-label={label ? `Edit URL for ${label}` : "Edit link URL"}
-              >
-                Edit URL
-              </button>
-            </EditableTrigger>
+            <div className="flex items-center gap-2">
+              {editButton}
+              {openButton}
+            </div>
           </div>
         )}
         <EditableArea className="space-y-1">
@@ -1412,6 +1425,33 @@ function InlineEditableLinkUrl({
         </EditableToolbar>
       </div>
     </Editable>
+  );
+}
+
+function EditActionIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M11.8 2.2a1.7 1.7 0 0 1 2.4 2.4l-7.5 7.5-3 .6.6-3z" />
+      <path d="M10.7 3.3l2 2" />
+    </svg>
+  );
+}
+
+function OpenLinkActionIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 3H3v10h10V9" />
+      <path d="M10 3h3v3" />
+      <path d="M6.5 9.5L13 3" />
+    </svg>
   );
 }
 
@@ -11354,6 +11394,19 @@ export default function TrrShowDetailPage() {
           {/* ASSETS Tab */}
           {activeTab === "assets" && (
             <ShowAssetsTab>
+            {assetsView === "images" && (
+              <div className="mb-6">
+                <BravotvImageRunPanel
+                  mode="show"
+                  targetId={showId}
+                  title={`BRAVOTV Get Images for ${show.name}`}
+                  season={selectedGallerySeason === "all" ? null : selectedGallerySeason}
+                  onCompleted={async () => {
+                    await loadGalleryAssets(selectedGallerySeason);
+                  }}
+                />
+              </div>
+            )}
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               {assetsView === "images" ? (
                 <>
@@ -13001,6 +13054,7 @@ export default function TrrShowDetailPage() {
                                   key={`settings-social-link-${pill.id}`}
                                   linkId={pill.link.id}
                                   url={pill.url}
+                                  openUrl={pill.url}
                                   label={pill.text}
                                   saving={Boolean(savingLinkIds[pill.link.id])}
                                   onSubmit={updateShowLinkUrl}
@@ -13015,16 +13069,10 @@ export default function TrrShowDetailPage() {
                                     </button>
                                   }
                                 >
-                                  <a
-                                    href={pill.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-blue-700 hover:underline"
-                                    title={pill.url}
-                                  >
+                                  <div className="inline-flex min-w-0 flex-1 items-center gap-2" title={pill.url}>
                                     <SourceBadge kind={pill.sourceKind} label={pill.sourceLabel} iconOnly={true} />
                                     <span className="truncate text-zinc-900">{pill.text}</span>
-                                  </a>
+                                  </div>
                                 </InlineEditableLinkUrl>
                               ))}
                             </div>
@@ -13052,6 +13100,7 @@ export default function TrrShowDetailPage() {
                                     key={`settings-link-show-pages-${link.id}`}
                                     linkId={link.id}
                                     url={link.url}
+                                    openUrl={link.url}
                                     label={linkTitle}
                                     saving={Boolean(savingLinkIds[link.id])}
                                     onSubmit={updateShowLinkUrl}
@@ -13066,12 +13115,7 @@ export default function TrrShowDetailPage() {
                                       </button>
                                     }
                                   >
-                                    <a
-                                      href={link.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-blue-700 hover:underline"
-                                    >
+                                    <div className="inline-flex min-w-0 flex-1 items-center gap-2">
                                       <SourceBadge
                                         kind={sourceKind}
                                         label={sourceLabel}
@@ -13080,7 +13124,7 @@ export default function TrrShowDetailPage() {
                                       />
                                       <span className="shrink-0 text-zinc-300">|</span>
                                       <span className="truncate text-zinc-900">{linkTitle}</span>
-                                    </a>
+                                    </div>
                                   </InlineEditableLinkUrl>
                                 );
                               })}
@@ -13132,6 +13176,7 @@ export default function TrrShowDetailPage() {
                                         key={`settings-season-link-editor-${row.seasonNumber}-${link.id}`}
                                         linkId={link.link.id}
                                         url={link.url}
+                                        openUrl={link.url}
                                         label={`${link.sourceLabel} season page`}
                                         saving={Boolean(savingLinkIds[link.link.id])}
                                         onSubmit={updateShowLinkUrl}
@@ -13145,11 +13190,11 @@ export default function TrrShowDetailPage() {
                                             Delete
                                           </button>
                                         }
-                                      >
-                                        <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
-                                          <SourceBadge
-                                            kind={link.sourceKind}
-                                            label={link.sourceLabel}
+                                        >
+                                          <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
+                                            <SourceBadge
+                                              kind={link.sourceKind}
+                                              label={link.sourceLabel}
                                             iconUrl={link.iconUrl}
                                             iconOnly={usesBrandIconOnly(link.sourceKind)}
                                           />
@@ -13203,6 +13248,7 @@ export default function TrrShowDetailPage() {
                                           key={`person-approved-link-${card.personId}-${approvedLink.id}`}
                                           linkId={approvedLink.link.id}
                                           url={approvedLink.url}
+                                          openUrl={approvedLink.url}
                                           label={approvedLink.text}
                                           saving={Boolean(savingLinkIds[approvedLink.link.id])}
                                           onSubmit={updateShowLinkUrl}
@@ -13217,11 +13263,8 @@ export default function TrrShowDetailPage() {
                                             </button>
                                           }
                                         >
-                                          <a
-                                            href={approvedLink.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex min-w-0 max-w-full items-center gap-2 text-xs font-semibold text-zinc-700 hover:text-blue-700"
+                                          <div
+                                            className="inline-flex min-w-0 max-w-full items-center gap-2 text-xs font-semibold text-zinc-700"
                                             title={approvedLink.url}
                                           >
                                             <SourceBadge
@@ -13231,7 +13274,7 @@ export default function TrrShowDetailPage() {
                                               iconOnly={usesBrandIconOnly(approvedLink.sourceKind)}
                                             />
                                             <span className="truncate">{approvedLink.text}</span>
-                                          </a>
+                                          </div>
                                         </InlineEditableLinkUrl>
                                       ))}
                                     </div>
@@ -13248,6 +13291,7 @@ export default function TrrShowDetailPage() {
                                             key={`person-link-source-${card.personId}-${source.key}`}
                                             linkId={source.link?.id ?? `missing-${card.personId}-${source.key}`}
                                             url={source.link?.url ?? source.url ?? ""}
+                                            openUrl={source.link?.url ?? source.url ?? null}
                                             label={source.label}
                                             saving={source.link ? Boolean(savingLinkIds[source.link.id]) : false}
                                             onSubmit={updateShowLinkUrl}
@@ -13277,15 +13321,9 @@ export default function TrrShowDetailPage() {
                                               </div>
                                               <p className="text-xs text-zinc-600">No validated source URL found</p>
                                               {source.url ? (
-                                                <a
-                                                  href={source.url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="inline-flex max-w-full truncate text-xs font-medium text-blue-700 hover:underline"
-                                                  title={source.url}
-                                                >
+                                                <p className="max-w-full truncate text-xs font-medium text-zinc-700" title={source.url}>
                                                   {source.url}
-                                                </a>
+                                                </p>
                                               ) : null}
                                             </div>
                                           </InlineEditableLinkUrl>

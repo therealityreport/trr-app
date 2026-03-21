@@ -12,8 +12,8 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { getAllowedReviewTransitions, getExecutionStatusLabel, getRunOverviewMessage } from "./run-state";
 
 type OwnerScope = "show" | "season" | "episode";
-type VideoClass = "episode" | "promo";
-type PromoSubtype = "trailer" | "episode_teaser";
+type VideoClass = "episode" | "trailer" | "extras";
+type MediaKind = string;
 type ImportMode = "youtube_url" | "external_url" | "social_youtube_row";
 type VideoClassFilter = "all" | VideoClass;
 
@@ -24,8 +24,10 @@ type UploadSessionPayload = {
   expires_at?: string;
   owner_scope?: OwnerScope;
   owner_id?: string;
+  media_type?: VideoClass;
+  media_kind?: string | null;
   video_class?: VideoClass;
-  promo_subtype?: PromoSubtype | null;
+  promo_subtype?: string | null;
 };
 
 type VideoAssetPayload = {
@@ -38,8 +40,10 @@ type VideoAssetPayload = {
   source_url?: string | null;
   source_json?: Record<string, unknown>;
   source_import_type?: string | null;
+  media_type?: VideoClass | null;
+  media_kind?: string | null;
   video_class?: VideoClass | null;
-  promo_subtype?: PromoSubtype | null;
+  promo_subtype?: string | null;
   is_publishable?: boolean;
   publish_block_reason?: string | null;
 };
@@ -56,14 +60,37 @@ type RunPayload = {
   episode_id?: string | null;
   owner_scope?: OwnerScope | null;
   owner_id?: string | null;
+  media_type?: VideoClass | null;
+  media_kind?: string | null;
   video_class?: VideoClass | null;
-  promo_subtype?: PromoSubtype | null;
+  promo_subtype?: string | null;
   source_import_type?: string | null;
   is_publishable?: boolean;
   publish_block_reason?: string | null;
   effective_runtime_seconds?: number | null;
   error_message?: string | null;
   completed_at?: string | null;
+  dispatch_status?: string | null;
+  dispatch_job_id?: string | null;
+  candidate_scope_policy_json?: CandidateScopePolicyPayload | null;
+  cast_coverage_summary_json?: CastCoverageSummaryPayload | null;
+};
+
+type CandidateScopePolicyPayload = {
+  media_type?: string | null;
+  owner_scope?: string | null;
+  primary_scope?: string | null;
+  scope_order?: string[];
+  fallback_scopes_used?: string[];
+  preferred_facebank_coverage?: boolean;
+};
+
+type CastCoverageSummaryPayload = {
+  candidate_count?: number;
+  approved_facebank_coverage_count?: number;
+  fallback_scopes_used?: string[];
+  warning?: string | null;
+  warnings?: string[];
 };
 
 type PublishVersionEntry = {
@@ -249,6 +276,13 @@ type UnknownReviewDecisionEntry = {
   decided_by?: string | null;
 };
 
+type DecisionStatePayload = {
+  suggestion_decisions: SuggestionDecisionEntry[];
+  unknown_review_state: UnknownReviewDecisionEntry[];
+  rerun_required_for_metrics?: boolean;
+  decision_effect_summary?: string | null;
+};
+
 type ExcludedSectionEntry = {
   section_key: string;
   section_type: string;
@@ -260,8 +294,7 @@ type ExcludedSectionEntry = {
 
 const breadcrumbs = buildAdminSectionBreadcrumb("Cast Screen Time", "/admin/cast-screentime");
 const ownerScopeOptions: OwnerScope[] = ["season", "show", "episode"];
-const promoSubtypeOptions: PromoSubtype[] = ["trailer", "episode_teaser"];
-const videoClassFilters: VideoClassFilter[] = ["all", "episode", "promo"];
+const videoClassFilters: VideoClassFilter[] = ["all", "episode", "trailer", "extras"];
 const importModes: ImportMode[] = ["youtube_url", "external_url", "social_youtube_row"];
 const decisionScopes: OwnerScope[] = ["episode", "season", "show"];
 
@@ -270,11 +303,14 @@ function parseOwnerScope(value: string | null): OwnerScope | null {
 }
 
 function parseVideoClass(value: string | null): VideoClass | null {
-  return value === "episode" || value === "promo" ? value : null;
+  if (value === "episode" || value === "trailer" || value === "extras") return value;
+  if (value === "promo") return "trailer";
+  return null;
 }
 
-function parsePromoSubtype(value: string | null): PromoSubtype | null {
-  return value === "trailer" || value === "episode_teaser" ? value : null;
+function parsePromoSubtype(value: string | null): string | null {
+  const normalized = String(value || "").trim();
+  return normalized || null;
 }
 
 function parseImportMode(value: string | null): ImportMode | null {
@@ -282,7 +318,9 @@ function parseImportMode(value: string | null): ImportMode | null {
 }
 
 function parseVideoClassFilter(value: string | null): VideoClassFilter | null {
-  return value === "all" || value === "episode" || value === "promo" ? value : null;
+  if (value === "all" || value === "episode" || value === "trailer" || value === "extras") return value;
+  if (value === "promo") return "trailer";
+  return null;
 }
 
 function formatDurationMs(value: number): string {
@@ -290,12 +328,25 @@ function formatDurationMs(value: number): string {
   return `${(value / 1000).toFixed(value >= 1000 ? 2 : 3)}s`;
 }
 
-function formatVideoClass(videoClass?: string | null, promoSubtype?: string | null): string {
-  if (videoClass === "promo") {
-    if (promoSubtype === "episode_teaser") return "Promo · Episode Teaser";
-    return "Promo · Trailer";
+function resolveMediaType(item?: { media_type?: string | null; video_class?: string | null; promo_subtype?: string | null } | null): VideoClass {
+  if (item?.media_type === "episode" || item?.media_type === "trailer" || item?.media_type === "extras") {
+    return item.media_type;
   }
-  return "Episode";
+  if (item?.video_class === "episode") return "episode";
+  if (item?.promo_subtype === "trailer") return "trailer";
+  return "extras";
+}
+
+function formatVideoClass(mediaType?: string | null, mediaKind?: string | null, legacyVideoClass?: string | null, legacyPromoSubtype?: string | null): string {
+  const resolvedType = resolveMediaType({
+    media_type: mediaType,
+    video_class: legacyVideoClass,
+    promo_subtype: legacyPromoSubtype,
+  });
+  if (resolvedType === "episode") return "Episode";
+  if (resolvedType === "trailer") return "Trailer";
+  if (mediaKind) return `Extras · ${mediaKind.replaceAll("_", " ")}`;
+  return "Extras";
 }
 
 function formatImportType(value?: string | null): string {
@@ -304,9 +355,24 @@ function formatImportType(value?: string | null): string {
   return normalized.replaceAll("_", " ");
 }
 
+function formatMediaFilterLabel(value: VideoClassFilter): string {
+  if (value === "all") return "All";
+  if (value === "episode") return "Episodes";
+  if (value === "trailer") return "Trailers";
+  return "Extras";
+}
+
+function formatCoverageWarning(value: string): string {
+  if (value === "no_candidate_cast_rows_found") return "No candidate cast rows were found for this asset scope.";
+  if (value === "no_approved_facebank_coverage") return "None of the current candidates have approved facebank coverage yet.";
+  if (value === "episode_scope_required_fallback") return "Episode cast was too sparse, so season or show fallback candidates were added.";
+  if (value === "sparse_candidate_cast") return "Candidate cast is still sparse for this run.";
+  return value.replaceAll("_", " ");
+}
+
 function buildShowRunsPath(showId: string, videoClassFilter: VideoClassFilter): string {
   const params = new URLSearchParams({ limit: "10" });
-  if (videoClassFilter !== "all") params.set("video_class", videoClassFilter);
+  if (videoClassFilter !== "all") params.set("media_type", videoClassFilter);
   return `/api/admin/trr-api/cast-screentime/shows/${showId}/runs?${params.toString()}`;
 }
 
@@ -349,12 +415,14 @@ export default function CastScreentimePageClient() {
   const [showId, setShowId] = useState(() => String(searchParams.get("show_id") || "").trim());
   const [ownerScope, setOwnerScope] = useState<OwnerScope>(() => parseOwnerScope(searchParams.get("owner_scope")) ?? "season");
   const [ownerId, setOwnerId] = useState(() => String(searchParams.get("owner_id") || "").trim());
-  const [videoClass, setVideoClass] = useState<VideoClass>(() => parseVideoClass(searchParams.get("video_class")) ?? "promo");
-  const [promoSubtype, setPromoSubtype] = useState<PromoSubtype>(
-    () => parsePromoSubtype(searchParams.get("promo_subtype")) ?? "trailer",
+  const [videoClass, setVideoClass] = useState<VideoClass>(
+    () => parseVideoClass(searchParams.get("media_type") || searchParams.get("video_class")) ?? "trailer",
+  );
+  const [promoSubtype, setPromoSubtype] = useState<MediaKind>(
+    () => parsePromoSubtype(searchParams.get("media_kind") || searchParams.get("promo_subtype")) ?? "",
   );
   const [videoClassFilter, setVideoClassFilter] = useState<VideoClassFilter>(
-    () => parseVideoClassFilter(searchParams.get("video_class_filter")) ?? "promo",
+    () => parseVideoClassFilter(searchParams.get("media_type_filter") || searchParams.get("video_class_filter")) ?? "all",
   );
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importMode, setImportMode] = useState<ImportMode>(() => parseImportMode(searchParams.get("source_mode")) ?? "youtube_url");
@@ -399,8 +467,10 @@ export default function CastScreentimePageClient() {
   const [generatingClipKey, setGeneratingClipKey] = useState<string | null>(null);
   const [actingSuggestionKey, setActingSuggestionKey] = useState<string | null>(null);
   const [actingUnknownQueueKey, setActingUnknownQueueKey] = useState<string | null>(null);
+  const [decisionRerunRequired, setDecisionRerunRequired] = useState(false);
+  const [decisionEffectSummary, setDecisionEffectSummary] = useState<string | null>(null);
 
-  const effectivePromoSubtype = videoClass === "promo" ? promoSubtype : null;
+  const effectivePromoSubtype = videoClass === "episode" ? null : promoSubtype.trim() || null;
 
   const resetRunOutputs = () => {
     setRun(null);
@@ -424,6 +494,8 @@ export default function CastScreentimePageClient() {
     setProgress(null);
     setFlashbackMatches([]);
     setCacheMetrics(null);
+    setDecisionRerunRequired(false);
+    setDecisionEffectSummary(null);
   };
 
   const syncShowContext = (asset?: VideoAssetPayload | null, nextRun?: RunPayload | null) => {
@@ -469,13 +541,13 @@ export default function CastScreentimePageClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            owner_scope: ownerScope,
+            owner_scope: videoClass === "episode" ? "episode" : ownerScope,
             owner_id: ownerId.trim(),
             filename: selectedFile.name,
             content_type: selectedFile.type || "video/mp4",
             expected_size_bytes: selectedFile.size,
-            video_class: videoClass,
-            promo_subtype: effectivePromoSubtype,
+            media_type: videoClass,
+            media_kind: effectivePromoSubtype,
           }),
         }),
       );
@@ -536,19 +608,19 @@ export default function CastScreentimePageClient() {
             source_mode: importMode,
             source_url: importMode === "social_youtube_row" ? undefined : remoteSource.trim(),
             social_youtube_video_id: importMode === "social_youtube_row" ? socialYoutubeVideoId.trim() : undefined,
-            owner_scope: ownerScope,
+            owner_scope: videoClass === "episode" ? "episode" : ownerScope,
             owner_id: ownerId.trim(),
-            video_class: "promo",
-            promo_subtype: promoSubtype,
+            media_type: videoClass,
+            media_kind: effectivePromoSubtype,
           }),
         }),
       );
       setLatestUpload({
         upload_session_id: payload.upload_session_id,
-        owner_scope: ownerScope,
+        owner_scope: videoClass === "episode" ? "episode" : ownerScope,
         owner_id: ownerId.trim(),
-        video_class: "promo",
-        promo_subtype: promoSubtype,
+        media_type: videoClass,
+        media_kind: effectivePromoSubtype,
       });
       setVideoAsset(payload.video_asset);
       syncShowContext(payload.video_asset, null);
@@ -657,10 +729,7 @@ export default function CastScreentimePageClient() {
           fetchArtifactObject<ProgressPayload>("progress.json"),
           fetchArtifactObject<CacheMetricsPayload>("cache_metrics.json"),
           fetchArtifactPayload<FlashbackMatchEntry>("flashback_matches.json"),
-          parseResponse<{
-            suggestion_decisions: SuggestionDecisionEntry[];
-            unknown_review_state: UnknownReviewDecisionEntry[];
-          }>(await fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}/decision-state`)),
+          parseResponse<DecisionStatePayload>(await fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}/decision-state`)),
         ]);
       setShots(shotsPayload);
       setScenes(scenesPayload);
@@ -675,6 +744,8 @@ export default function CastScreentimePageClient() {
       setFlashbackMatches(flashbackPayload);
       setSuggestionDecisions(Array.isArray(decisionStatePayload.suggestion_decisions) ? decisionStatePayload.suggestion_decisions : []);
       setUnknownReviewState(Array.isArray(decisionStatePayload.unknown_review_state) ? decisionStatePayload.unknown_review_state : []);
+      setDecisionRerunRequired(Boolean(decisionStatePayload.rerun_required_for_metrics));
+      setDecisionEffectSummary(String(decisionStatePayload.decision_effect_summary || "").trim() || null);
       if (runPayload.video_asset_id) {
         const publishHistoryResponse = await fetchAdminWithAuth(
           `/api/admin/trr-api/cast-screentime/video-assets/${runPayload.video_asset_id}/publish-history`,
@@ -882,10 +953,10 @@ export default function CastScreentimePageClient() {
 
   const currentPublishVersion = run ? publishHistory.find((entry) => entry.run_id === run.id) ?? null : null;
   const canPublishCurrentRun =
-    run?.video_class !== "promo" && run?.status === "success" && (run?.review_status || "draft") === "approved";
+    resolveMediaType(run) === "episode" && run?.status === "success" && (run?.review_status || "draft") === "approved";
   const availableReviewTransitions = getAllowedReviewTransitions(run);
-  const canonicalRuns = showRuns.filter((item) => item.video_class !== "promo");
-  const independentRuns = showRuns.filter((item) => item.video_class === "promo");
+  const canonicalRuns = showRuns.filter((item) => resolveMediaType(item) === "episode");
+  const independentRuns = showRuns.filter((item) => resolveMediaType(item) !== "episode");
   const latestSuggestionDecisionByPerson = new Map<string, SuggestionDecisionEntry>();
   suggestionDecisions.forEach((entry) => {
     if (!latestSuggestionDecisionByPerson.has(entry.person_id)) {
@@ -907,7 +978,7 @@ export default function CastScreentimePageClient() {
           <AdminBreadcrumbs items={breadcrumbs} className="mb-2" />
           <h1 className="text-2xl font-semibold text-neutral-900">Cast Screen-Time</h1>
           <p className="mt-1 text-sm text-neutral-600">
-            Admin workflow for episode runs and shorter promo/test assets, including official YouTube trailers, external mirrors, and existing social YouTube rows.
+            Admin workflow for episode, trailer, and extras screen-time analysis, including official YouTube trailers, external mirrors, and existing social YouTube rows.
           </p>
           {prefillContext === "social_week_youtube" ? (
             <p className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900">
@@ -951,31 +1022,31 @@ export default function CastScreentimePageClient() {
                   onChange={(event) => setVideoClass(event.target.value as VideoClass)}
                   className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900"
                 >
-                  <option value="promo">Promo/Test Asset</option>
-                  <option value="episode">Episode Asset</option>
+                  <option value="episode">Episode</option>
+                  <option value="trailer">Trailer</option>
+                  <option value="extras">Extras</option>
                 </select>
               </label>
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700">
-                Promo Subtype
-                <select
+                Media Kind
+                <input
                   value={promoSubtype}
-                  onChange={(event) => setPromoSubtype(event.target.value as PromoSubtype)}
-                  disabled={videoClass !== "promo"}
+                  onChange={(event) => setPromoSubtype(event.target.value)}
+                  disabled={videoClass === "episode"}
+                  placeholder={videoClass === "extras" ? "after_show, clip, bonus_scene..." : "optional"}
                   className="rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900 disabled:bg-neutral-100"
-                >
-                  {promoSubtypeOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option === "episode_teaser" ? "Episode Teaser" : "Trailer"}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Badge tone={videoClass === "promo" ? "amber" : "sky"}>{formatVideoClass(videoClass, effectivePromoSubtype)}</Badge>
-            <Badge tone="neutral">Default owner linkage: season</Badge>
-            {videoClass === "promo" ? <Badge tone="amber">Non-publishable</Badge> : <Badge tone="emerald">Publishable lane</Badge>}
+            <Badge tone={videoClass === "episode" ? "sky" : "amber"}>
+              {formatVideoClass(videoClass, effectivePromoSubtype)}
+            </Badge>
+            <Badge tone="neutral">
+              Default owner linkage: {videoClass === "episode" ? "episode required" : ownerScope}
+            </Badge>
+            {videoClass === "episode" ? <Badge tone="emerald">Publishable lane</Badge> : <Badge tone="amber">Standalone analysis only</Badge>}
           </div>
           {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
         </section>
@@ -1005,9 +1076,9 @@ export default function CastScreentimePageClient() {
                 {uploading ? "Uploading…" : "Upload And Verify"}
               </button>
               <span className="text-xs text-neutral-500">
-                {videoClass === "promo"
-                  ? "Promo uploads stay reviewable but non-publishable."
-                  : "Episode uploads use the normal publishable asset class."}
+                {videoClass === "episode"
+                  ? "Episode uploads stay eligible for canonical publish after approval."
+                  : "Trailer and extras uploads stay reviewable but standalone."}
               </span>
             </div>
           </div>
@@ -1080,9 +1151,9 @@ export default function CastScreentimePageClient() {
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold text-neutral-900">Latest Upload Session</h2>
-              {latestUpload?.video_class ? (
-                <Badge tone={latestUpload.video_class === "promo" ? "amber" : "sky"}>
-                  {formatVideoClass(latestUpload.video_class, latestUpload.promo_subtype)}
+              {latestUpload ? (
+                <Badge tone={resolveMediaType(latestUpload) === "episode" ? "sky" : "amber"}>
+                  {formatVideoClass(latestUpload.media_type, latestUpload.media_kind, latestUpload.video_class, latestUpload.promo_subtype)}
                 </Badge>
               ) : null}
             </div>
@@ -1096,8 +1167,8 @@ export default function CastScreentimePageClient() {
               <h2 className="text-base font-semibold text-neutral-900">Current Video Asset</h2>
               {videoAsset ? (
                 <>
-                  <Badge tone={videoAsset.video_class === "promo" ? "amber" : "sky"}>
-                    {formatVideoClass(videoAsset.video_class, videoAsset.promo_subtype)}
+                  <Badge tone={resolveMediaType(videoAsset) === "episode" ? "sky" : "amber"}>
+                    {formatVideoClass(videoAsset.media_type, videoAsset.media_kind, videoAsset.video_class, videoAsset.promo_subtype)}
                   </Badge>
                   <Badge tone="neutral">{formatImportType(videoAsset.source_import_type)}</Badge>
                   {videoAsset.is_publishable === false ? <Badge tone="amber">Non-publishable</Badge> : null}
@@ -1151,7 +1222,7 @@ export default function CastScreentimePageClient() {
             <div>
               <h2 className="text-base font-semibold text-neutral-900">Run History Filter</h2>
               <p className="mt-1 text-sm text-neutral-600">
-                Promo/test runs stay in the main admin area, but can be isolated from normal episode runs.
+                Episode, trailer, and extras runs stay in one admin surface, but you can isolate each media type.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -1176,7 +1247,7 @@ export default function CastScreentimePageClient() {
                         : "border border-neutral-300 text-neutral-900"
                     }`}
                   >
-                    {option === "all" ? "All" : option === "promo" ? "Promo / Test" : "Episodes"}
+                    {formatMediaFilterLabel(option)}
                   </button>
                 ))}
               </div>
@@ -1205,8 +1276,8 @@ export default function CastScreentimePageClient() {
             <h2 className="text-base font-semibold text-neutral-900">Current Run</h2>
             {run ? (
               <>
-                <Badge tone={run.video_class === "promo" ? "amber" : "sky"}>
-                  {formatVideoClass(run.video_class, run.promo_subtype)}
+                <Badge tone={resolveMediaType(run) === "episode" ? "sky" : "amber"}>
+                  {formatVideoClass(run.media_type, run.media_kind, run.video_class, run.promo_subtype)}
                 </Badge>
                 <Badge tone="neutral">{formatImportType(run.source_import_type)}</Badge>
                 {run.is_publishable === false ? <Badge tone="amber">Non-publishable</Badge> : null}
@@ -1228,6 +1299,10 @@ export default function CastScreentimePageClient() {
                 <p className="mt-1 text-sm font-medium text-neutral-900">{getExecutionStatusLabel(run)}</p>
               </div>
               <div className="rounded-xl bg-neutral-50 px-3 py-2">
+                <p className="text-[11px] uppercase tracking-wide text-neutral-500">Dispatch</p>
+                <p className="mt-1 text-sm font-medium text-neutral-900">{run.dispatch_status || "n/a"}</p>
+              </div>
+              <div className="rounded-xl bg-neutral-50 px-3 py-2">
                 <p className="text-[11px] uppercase tracking-wide text-neutral-500">Review</p>
                 <p className="mt-1 text-sm font-medium text-neutral-900">{run.review_status || "draft"}</p>
               </div>
@@ -1241,6 +1316,29 @@ export default function CastScreentimePageClient() {
                   {run.effective_runtime_seconds != null ? `${Number(run.effective_runtime_seconds).toFixed(2)}s` : "n/a"}
                 </p>
               </div>
+            </div>
+          ) : null}
+          {run?.cast_coverage_summary_json ? (
+            <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm text-sky-900">
+              <div className="font-medium">
+                Candidate cast preflight: {run.cast_coverage_summary_json.candidate_count ?? 0} candidates,{" "}
+                {run.cast_coverage_summary_json.approved_facebank_coverage_count ?? 0} with approved facebank coverage.
+              </div>
+              {Array.isArray(run.cast_coverage_summary_json.fallback_scopes_used) &&
+              run.cast_coverage_summary_json.fallback_scopes_used.length > 0 ? (
+                <div className="mt-1 text-xs text-sky-800">
+                  Fallback scopes used: {run.cast_coverage_summary_json.fallback_scopes_used.join(", ")}
+                </div>
+              ) : null}
+              {Array.isArray(run.cast_coverage_summary_json.warnings) && run.cast_coverage_summary_json.warnings.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {run.cast_coverage_summary_json.warnings.map((warning) => (
+                    <Badge key={warning} tone="amber">
+                      {formatCoverageWarning(warning)}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
           {run?.error_message ? <p className="mt-3 text-sm text-red-600">{run.error_message}</p> : null}
@@ -1301,7 +1399,7 @@ export default function CastScreentimePageClient() {
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-neutral-900">Publish History</h2>
             <p className="mt-1 text-sm text-neutral-600">
-              Canonical publish versions exist only for episode assets. Promo/test assets remain independent reports.
+              Canonical publish versions exist only for episode assets. Trailers and extras remain independent reports.
             </p>
             {publishHistory.length === 0 ? (
               <p className="mt-3 text-sm text-neutral-500">No canonical publish history exists for the current asset.</p>
@@ -1454,7 +1552,7 @@ export default function CastScreentimePageClient() {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-neutral-900">Recent Runs For Show</h2>
             <Badge tone="neutral">
-              {videoClassFilter === "all" ? "All assets" : videoClassFilter === "promo" ? "Promo / Test only" : "Episodes only"}
+              {videoClassFilter === "all" ? "All assets" : `${formatMediaFilterLabel(videoClassFilter)} only`}
             </Badge>
           </div>
           {showRuns.length === 0 ? (
@@ -1485,7 +1583,9 @@ export default function CastScreentimePageClient() {
                             <td className="py-2 pr-4">
                               <div className="font-mono text-xs">{showRun.id}</div>
                               <div className="mt-1 flex flex-wrap gap-2">
-                                <Badge tone="sky">{formatVideoClass(showRun.video_class, showRun.promo_subtype)}</Badge>
+                                <Badge tone="sky">
+                                  {formatVideoClass(showRun.media_type, showRun.media_kind, showRun.video_class, showRun.promo_subtype)}
+                                </Badge>
                                 <Badge tone="neutral">{showRun.owner_scope || "n/a"}</Badge>
                               </div>
                             </td>
@@ -1509,11 +1609,11 @@ export default function CastScreentimePageClient() {
               </div>
               <div>
                 <div className="mb-3 flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-neutral-900">Independent Promo/Test Runs</h3>
+                  <h3 className="text-sm font-semibold text-neutral-900">Independent Trailer / Extras Runs</h3>
                   <Badge tone="amber">{independentRuns.length}</Badge>
                 </div>
                 {independentRuns.length === 0 ? (
-                  <p className="text-sm text-neutral-500">No promo/test runs are loaded for this filter.</p>
+                  <p className="text-sm text-neutral-500">No trailer or extras runs are loaded for this filter.</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-left text-sm">
@@ -1531,7 +1631,9 @@ export default function CastScreentimePageClient() {
                             <td className="py-2 pr-4">
                               <div className="font-mono text-xs">{showRun.id}</div>
                               <div className="mt-1 flex flex-wrap gap-2">
-                                <Badge tone="amber">{formatVideoClass(showRun.video_class, showRun.promo_subtype)}</Badge>
+                                <Badge tone="amber">
+                                  {formatVideoClass(showRun.media_type, showRun.media_kind, showRun.video_class, showRun.promo_subtype)}
+                                </Badge>
                                 <Badge tone="neutral">Independent report</Badge>
                               </div>
                             </td>
@@ -1814,6 +1916,11 @@ export default function CastScreentimePageClient() {
         <section className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-neutral-900">Cast Suggestions</h2>
+            {decisionRerunRequired || decisionEffectSummary ? (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {decisionEffectSummary || "Accepted suggestions only affect future reruns. They do not retroactively rewrite this run's official metrics."}
+              </div>
+            ) : null}
             {castSuggestions.length === 0 ? (
               <p className="mt-3 text-sm text-neutral-500">No conservative cast suggestions persisted for this run yet.</p>
             ) : (
@@ -1882,6 +1989,11 @@ export default function CastScreentimePageClient() {
 
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-neutral-900">Unknown Review Queues</h2>
+            {decisionRerunRequired || decisionEffectSummary ? (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {decisionEffectSummary || "Accepted unknown-review decisions only affect future reruns. They do not retroactively rewrite this run's official metrics."}
+              </div>
+            ) : null}
             {unknownReviewQueues.length === 0 ? (
               <p className="mt-3 text-sm text-neutral-500">No unknown review queues persisted for this run yet.</p>
             ) : (
