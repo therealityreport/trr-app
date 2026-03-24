@@ -188,16 +188,16 @@ export default function InteractiveLineChart({ data }: Props) {
                 y1={y}
                 x2={chartW - marginRight}
                 y2={y}
-                stroke={isZero ? "#121212" : "#ededed"}
+                stroke={isZero ? "#333333" : "#e6e6e6"}
                 strokeWidth={isZero ? 1 : 1}
               />
               <text
                 x={marginLeft - 8}
                 y={y + 4}
                 fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-                fontSize={12}
-                fill="#727272"
-                fontWeight={300}
+                fontSize={14}
+                fill="#333333"
+                fontWeight={400}
                 textAnchor="end"
               >
                 {tick}
@@ -292,7 +292,7 @@ export default function InteractiveLineChart({ data }: Props) {
             x={marginLeft + annotationX * plotW}
             y={marginTop + annotationY * plotH + 2}
             fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-            fontSize={13}
+            fontSize={14}
             fill="#121212"
             fontWeight={700}
           >
@@ -306,8 +306,8 @@ export default function InteractiveLineChart({ data }: Props) {
             x={marginLeft + annotationX * plotW}
             y={marginTop + annotationY * plotH + 18}
             fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-            fontSize={12}
-            fill="#999999"
+            fontSize={14}
+            fill="#a8a8a8"
             fontWeight={400}
           >
             {label2}
@@ -324,9 +324,9 @@ export default function InteractiveLineChart({ data }: Props) {
               x={labelX}
               y={chartH + 20}
               fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-              fontSize={13}
-              fill="#121212"
-              fontWeight={700}
+              fontSize={14}
+              fill="#333333"
+              fontWeight={400}
               textAnchor="middle"
             >
               {yr}

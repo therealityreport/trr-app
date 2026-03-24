@@ -93,16 +93,16 @@ export default function InteractiveBarChart({ data }: Props) {
           const isZero = tick === 0;
           return (
             <g key={tick}>
-              <line x1={marginLeft - 4} y1={y} x2={chartW - marginRight} y2={y} stroke={isZero ? "#121212" : "#ededed"} strokeWidth={1} />
+              <line x1={marginLeft - 4} y1={y} x2={chartW - marginRight} y2={y} stroke={isZero ? "#333333" : "#e6e6e6"} strokeWidth={1} />
               {/* Y-axis tick labels (skip the top one — it's the header) */}
               {i < yTicks.length - 1 && (
                 <text
                   x={marginLeft - 8}
                   y={y + 4}
                   fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-                  fontSize={12}
-                  fill="#727272"
-                  fontWeight={300}
+                  fontSize={14}
+                  fill="#333333"
+                  fontWeight={400}
                   textAnchor="end"
                 >
                   {tick}
@@ -176,7 +176,7 @@ export default function InteractiveBarChart({ data }: Props) {
           x={marginLeft + barArea * 0.4}
           y={chartH * 0.55}
           fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-          fontSize={13}
+          fontSize={14}
           fill="#121212"
           fontWeight={700}
         >
@@ -193,9 +193,9 @@ export default function InteractiveBarChart({ data }: Props) {
               x={labelX}
               y={chartH + 20}
               fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-              fontSize={13}
-              fill="#121212"
-              fontWeight={700}
+              fontSize={14}
+              fill="#333333"
+              fontWeight={400}
               textAnchor="middle"
             >
               {yr}

@@ -37,9 +37,9 @@ const FOOD_PRICES_DATA: LineChartData = {
   /** "All items" CPI reference line — approximate year-over-year % change 2015-2025 */
   values2: [-0.1,0.0,0.9,1.1,1.0,0.1,0.2,1.1,0.0,0.2,0.5,0.7,1.0,1.0,2.4,1.1,1.0,1.0,1.7,1.7,1.5,1.5,1.7,2.1,2.5,2.7,2.4,2.5,2.8,2.9,2.9,2.7,2.6,2.3,2.3,1.9,2.1,2.2,2.4,2.0,2.1,1.8,1.7,2.3,2.4,1.8,2.0,2.3,1.5,1.6,1.9,2.3,1.8,1.8,2.0,1.7,1.4,1.0,1.3,1.2,1.4,1.7,1.2,1.4,2.6,4.2,4.2,5.0,5.4,5.4,5.3,6.2,7.0,7.5,6.8,7.0,7.5,8.0,8.5,8.3,8.6,8.3,8.2,7.7,7.1,6.4,6.5,6.0,5.0,4.0,3.2,3.0,3.1,3.2,3.4,3.1,3.2,3.1,3.0,3.7,3.5,3.4,3.2,3.1,3.4,3.1,3.0,2.6,2.4,2.4,2.6,2.7,2.8,3.0,3.5,3.5,3.3,2.4,2.4,2.7,2.9,2.8,2.6,3.0,2.8,2.4,2.3,2.3,2.7,2.5,2.3,2.8],
   label2: "All items",
-  color2: "#bbb",
+  color2: "#cccccc",
   startYear: 2015,
-  lineColor: "#c44127",
+  lineColor: "#bf1d02",
   yAxisLabel: "+12% year-over-year change",
   yTicks: [-2, 0, 2, 4, 6, 8, 10, 12],
   xLabels: ["2015", "2017", "2019", "2021", "2023", "2025"],
@@ -121,7 +121,7 @@ const AUTO_JOBS_DATA: BarChartData = {
     1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,
   ],
   startYear: 1990,
-  barColor: "#c44127",
+  barColor: "#bf1d02",
   yAxisLabel: "1.25 million jobs",
   yTicks: [0, 0.25, 0.5, 0.75, 1.0, 1.25],
   xLabels: ["1990", "1994", "1998", "2002", "2006", "2010", "2014", "2018", "2022"],
@@ -135,9 +135,9 @@ const ELECTRICITY_PRICES_DATA: LineChartData = {
   /** "All items" CPI reference line — approximate year-over-year % change 2015-2025 */
   values2: [-0.1,0.0,0.9,1.1,1.0,0.1,0.2,1.1,0.0,0.2,0.5,0.7,1.0,1.0,2.4,1.1,1.0,1.0,1.7,1.7,1.5,1.5,1.7,2.1,2.5,2.7,2.4,2.5,2.8,2.9,2.9,2.7,2.6,2.3,2.3,1.9,2.1,2.2,2.4,2.0,2.1,1.8,1.7,2.3,2.4,1.8,2.0,2.3,1.5,1.6,1.9,2.3,1.8,1.8,2.0,1.7,1.4,1.0,1.3,1.2,1.4,1.7,1.2,1.4,2.6,4.2,4.2,5.0,5.4,5.4,5.3,6.2,7.0,7.5,6.8,7.0,7.5,8.0,8.5,8.3,8.6,8.3,8.2,7.7,7.1,6.4,6.5,6.0,5.0,4.0,3.2,3.0,3.1,3.2,3.4,3.1,3.2,3.1,3.0,3.7,3.5,3.4,3.2,3.1,3.4,3.1,3.0,2.6,2.4,2.4,2.6,2.7,2.8,3.0,3.5,3.5,3.3,2.4,2.4,2.7,2.9,2.8,2.6,3.0,2.8,2.4,2.3,2.3,2.7,2.5,2.3,2.8],
   label2: "All items",
-  color2: "#bbb",
+  color2: "#cccccc",
   startYear: 2015,
-  lineColor: "#c44127",
+  lineColor: "#bf1d02",
   yAxisLabel: "+14% year-over-year change",
   yTicks: [-2, 0, 2, 4, 6, 8, 10, 12, 14],
   xLabels: ["2015", "2017", "2019", "2021", "2023", "2025"],
@@ -161,7 +161,7 @@ const MANUFACTURING_JOBS_DATA: BarChartData = {
     11.5, 11.7, 12.0,
   ],
   startYear: 1980,
-  barColor: "#c44127",
+  barColor: "#bf1d02",
   yAxisLabel: "20 million jobs",
   yTicks: [0, 5, 10, 15, 20],
   xLabels: ["1980", "1984", "1988", "1992", "1996", "2000", "2004", "2008", "2012"],
@@ -1367,13 +1367,13 @@ export default function ChartsSection() {
 
           {/* Bar chart */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "var(--dd-paper-warm)", borderRadius: "var(--dd-radius-sm)", border: "1px solid var(--dd-paper-cool)" }}>
-            <div style={{ width: 24, height: 24, borderRadius: 4, background: "#c44127", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 24, height: 24, borderRadius: 4, background: "#bf1d02", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><rect x={4} y={10} width={4} height={10}/><rect x={10} y={6} width={4} height={14}/><rect x={16} y={2} width={4} height={18}/></svg>
             </div>
             <div>
               <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 13, fontWeight: 600, color: "var(--dd-ink-black)" }}>Bar Chart</div>
               <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 11, color: "var(--dd-ink-soft)" }}>
-                Brick red <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10 }}>#c44127</span> for jobs data, orange <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10 }}>#fdba58</span> for tariff revenue
+                Brick red <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10 }}>#bf1d02</span> for jobs data, orange <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10 }}>#fdba58</span> for tariff revenue
               </div>
             </div>
           </div>
@@ -1484,16 +1484,16 @@ export default function ChartsSection() {
 
           <svg viewBox="0 0 560 280" width="100%" style={{ overflow: "visible" }}>
             {/* Y-axis label at top */}
-            <text x={30} y={14} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#727272" fontWeight={300} textAnchor="end">$0</text>
+            <text x={30} y={14} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={14} fill="#333333" fontWeight={400} textAnchor="end">$0</text>
 
             {/* Black baseline at Y=0 (top of chart since values are negative) */}
-            <line x1={36} y1={20} x2={550} y2={20} stroke="#121212" strokeWidth={1} />
+            <line x1={36} y1={20} x2={550} y2={20} stroke="#333333" strokeWidth={1} />
 
             {/* Gridlines for -50, -100, -150 */}
             {[80, 140, 200].map((y, i) => (
               <g key={y}>
-                <line x1={36} y1={y} x2={550} y2={y} stroke="#ededed" strokeWidth={1} />
-                <text x={30} y={y + 4} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#727272" fontWeight={300} textAnchor="end">
+                <line x1={36} y1={y} x2={550} y2={y} stroke="#e6e6e6" strokeWidth={1} />
+                <text x={30} y={y + 4} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={14} fill="#333333" fontWeight={400} textAnchor="end">
                   {[-50, -100, -150][i]}
                 </text>
               </g>
@@ -1568,19 +1568,19 @@ export default function ChartsSection() {
                     {/* China — orange, on top (closer to $0 baseline) */}
                     <rect x={x} y={20} width={barW} height={chinaH} fill="#fdba58" />
                     {/* Rest of world — gray, below China */}
-                    <rect x={x} y={20 + chinaH} width={barW} height={restH} fill="#bbb" />
+                    <rect x={x} y={20 + chinaH} width={barW} height={restH} fill="#cccccc" />
                   </g>
                 );
               });
             })()}
 
             {/* Inline labels */}
-            <text x={420} y={60} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#121212" fontWeight={700}>China</text>
-            <text x={380} y={140} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#bbb" fontWeight={700}>Rest of the world</text>
+            <text x={420} y={60} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={14} fill="#121212" fontWeight={700}>China</text>
+            <text x={380} y={140} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={14} fill="#a8a8a8" fontWeight={400}>Rest of the world</text>
 
             {/* X-axis year labels — bold, below chart area */}
             {["2000", "2004", "2008", "2012", "2016", "2020", "2024"].map((yr, i) => (
-              <text key={yr} x={40 + i * (510 / 7)} y={240} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#121212" fontWeight={700} textAnchor="start">{yr}</text>
+              <text key={yr} x={40 + i * (510 / 7)} y={240} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={14} fill="#333333" fontWeight={400} textAnchor="start">{yr}</text>
             ))}
           </svg>
 

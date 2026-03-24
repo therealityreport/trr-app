@@ -7316,7 +7316,7 @@ export default function PersonProfilePage() {
             source: "page_refresh",
             stage: "getty_local_scrape",
             message: `Getty local scrape failed (${gettyResp.status}): ${errBody.error ?? "unknown"}. ${errBody.hint ?? "Pipeline will attempt live Getty search (likely blocked on Modal)."}`,
-            level: "warn",
+            level: "error",
             runId: requestId,
           });
         }
@@ -7329,7 +7329,7 @@ export default function PersonProfilePage() {
           message: isTimeout
             ? "Getty local scrape timed out (10 min). Pipeline will attempt live Getty search (likely blocked on Modal)."
             : `Getty local server unreachable: ${errMsg}. Start it with: make getty-server`,
-          level: "warn",
+          level: "error",
           runId: requestId,
         });
       }
