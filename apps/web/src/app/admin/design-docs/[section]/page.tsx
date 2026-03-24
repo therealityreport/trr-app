@@ -12,6 +12,10 @@ type Props = {
 export default async function DesignDocsSectionPage({ params }: Props) {
   const { section } = await params;
 
+  if (section === "admin-ia") {
+    redirect("/design-system/admin-labels");
+  }
+
   if (!isDesignDocSectionId(section)) {
     redirect("/admin/design-docs/overview");
   }

@@ -10,7 +10,6 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
-  DESIGN_DOC_SECTIONS,
   resolveDesignDocSection,
   type DesignDocSectionId,
 } from "@/lib/admin/design-docs-config";
@@ -21,43 +20,44 @@ const LoadingFallback = () => (
   <div className="py-16 text-center text-sm text-zinc-400">Loading section...</div>
 );
 
+const load = (path: string) =>
+  dynamic(() => import(`./sections/${path}`), { loading: LoadingFallback });
+
 const sectionComponents: Record<DesignDocSectionId, ComponentType> = {
-  overview: dynamic(() => import("./sections/OverviewSection"), {
-    loading: LoadingFallback,
-  }),
-  typography: dynamic(() => import("./sections/TypographySection"), {
-    loading: LoadingFallback,
-  }),
-  colors: dynamic(() => import("./sections/ColorsSection"), {
-    loading: LoadingFallback,
-  }),
-  shapes: dynamic(() => import("./sections/ShapesSection"), {
-    loading: LoadingFallback,
-  }),
-  charts: dynamic(() => import("./sections/ChartsSection"), {
-    loading: LoadingFallback,
-  }),
-  maps: dynamic(() => import("./sections/MapsSection"), {
-    loading: LoadingFallback,
-  }),
-  cards: dynamic(() => import("./sections/CardsSection"), {
-    loading: LoadingFallback,
-  }),
-  components: dynamic(() => import("./sections/ComponentsSection"), {
-    loading: LoadingFallback,
-  }),
-  layout: dynamic(() => import("./sections/LayoutSection"), {
-    loading: LoadingFallback,
-  }),
-  responsive: dynamic(() => import("./sections/ResponsiveSection"), {
-    loading: LoadingFallback,
-  }),
-  newsletters: dynamic(() => import("./sections/NewslettersSection"), {
-    loading: LoadingFallback,
-  }),
-  patterns: dynamic(() => import("./sections/PatternsSection"), {
-    loading: LoadingFallback,
-  }),
+  overview: load("OverviewSection"),
+  "app-styles": load("AppStylesSection"),
+  heroes: load("HeroesSection"),
+  typography: load("TypographySection"),
+  "fonts-showcase": load("FontsShowcaseSection"),
+  colors: load("ColorsSection"),
+  shapes: load("ShapesSection"),
+  icons: load("IconsSection"),
+  illustrations: load("IllustrationsSection"),
+  galleries: load("GalleriesSection"),
+  carousels: load("CarouselsSection"),
+  charts: load("ChartsSection"),
+  maps: load("MapsSection"),
+  cards: load("CardsSection"),
+  "tables-data": load("TablesDataSection"),
+  forms: load("FormsSection"),
+  navigation: load("NavigationSection"),
+  "interactive-elements": load("InteractiveElementsSection"),
+  animations: load("AnimationsSection"),
+  components: load("ComponentsSection"),
+  layout: load("LayoutSection"),
+  "grids-deep": load("GridsDeepSection"),
+  responsive: load("ResponsiveSection"),
+  newsletters: load("NewslettersSection"),
+  patterns: load("PatternsSection"),
+  "brand-nyt-games": load("BrandNYTGamesSection"),
+  "brand-nyt-magazine": load("BrandNYTMagazineSection"),
+  "brand-wirecutter": load("BrandWirecutterSection"),
+  "brand-the-athletic": load("BrandTheAthleticSection"),
+  "brand-nyt-opinion": load("BrandNYTOpinionSection"),
+  "brand-nyt-cooking": load("BrandNYTCookingSection"),
+  "brand-nyt-style": load("BrandNYTStyleSection"),
+  "brand-nyt-store": load("BrandNYTStoreSection"),
+  "nyt-articles": load("NYTArticlesSection"),
 };
 
 interface Props {
@@ -133,7 +133,6 @@ export default function DesignDocsPageClient({ activeSection }: Props) {
         <div className="flex">
           <DesignDocsSidebar
             activeSection={activeSection}
-            sections={DESIGN_DOC_SECTIONS}
             isOpen={sidebarOpen}
             onClose={() => setSidebarOpen(false)}
           />

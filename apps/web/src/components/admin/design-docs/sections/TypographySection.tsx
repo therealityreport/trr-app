@@ -271,8 +271,7 @@ export default function TypographySection() {
           (<span style={{ color: "var(--dd-viz-red)" }}>&quot;blue&quot;</span>, 6);
           <br />
           <span style={{ color: "var(--dd-ink-faint)" }}>
-            // =&gt; [&quot;#DCE8F0&quot;, &quot;#B8D4E3&quot;, &quot;#86C3D6&quot;,
-            &quot;#4A90D9&quot;, &quot;#326DA8&quot;, &quot;#1D4E7A&quot;]
+            {"// => [\"#DCE8F0\", \"#B8D4E3\", \"#86C3D6\", \"#4A90D9\", \"#326DA8\", \"#1D4E7A\"]"}
           </span>
         </div>
         <SpecimenMeta text="SF Mono / Menlo 13px | code blocks, data tables, axis tick labels" />

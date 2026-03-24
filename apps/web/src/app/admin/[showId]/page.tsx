@@ -25,5 +25,5 @@ const buildSearch = async (searchParams?: Promise<Record<string, string | string
 export default async function AdminShowAliasPage({ params, searchParams }: AdminShowAliasPageProps) {
   const { showId } = await params;
   const search = await buildSearch(searchParams);
-  redirect(`/admin/trr-shows/${encodeURIComponent(showId)}${search}`);
+  redirect(`/${encodeURIComponent(showId)}${search}`);
 }

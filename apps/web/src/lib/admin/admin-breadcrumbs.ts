@@ -5,7 +5,8 @@ export type AdminBreadcrumbItem = {
 
 const ADMIN_ROOT_LABEL = "Admin";
 const ADMIN_ROOT_HREF = "/admin";
-const SHOWS_SECTION_HREF = "/shows";
+const SHOWS_SECTION_HREF = "/admin/shows";
+const PEOPLE_SECTION_HREF = "/people";
 const BRANDS_SECTION_HREF = "/brands";
 
 const toSafeDecoded = (value: string): string => {
@@ -159,7 +160,7 @@ export const buildPersonBreadcrumb = (
   const personHref = options.personHref.trim() || SHOWS_SECTION_HREF;
   if (!showName) {
     return [
-      ...buildAdminSectionBreadcrumb("Shows", SHOWS_SECTION_HREF),
+      ...buildAdminSectionBreadcrumb("People", PEOPLE_SECTION_HREF),
       { label: personName, href: personHref },
     ];
   }
@@ -258,7 +259,7 @@ export const buildSurveyDetailBreadcrumb = (
   surveyTitleOrKey: string,
   surveyHref: string,
 ): AdminBreadcrumbItem[] => [
-  ...buildAdminSectionBreadcrumb("Survey Editor", "/admin/surveys"),
+  ...buildAdminSectionBreadcrumb("Surveys", "/surveys"),
   { label: surveyTitleOrKey, href: surveyHref },
 ];
 

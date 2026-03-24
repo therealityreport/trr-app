@@ -307,11 +307,20 @@ const toSocialPlatform = (value: string | null | undefined): SocialPlatformSlug 
   return null;
 };
 
-const normalizeHandleSlug = (value: string | null | undefined): string | null => {
+const SOCIAL_ACCOUNT_HANDLE_ALIASES: Record<string, string> = {
+  wwhlbravo: "bravowwhl",
+};
+
+export const normalizeSocialAccountProfileHandle = (value: string | null | undefined): string | null => {
   const raw = normalizeSegment(value).replace(/^@+/, "");
   if (!raw) return null;
   const sanitized = raw.replace(/[^a-z0-9._-]/g, "");
-  return sanitized || null;
+  if (!sanitized) return null;
+  return SOCIAL_ACCOUNT_HANDLE_ALIASES[sanitized] ?? sanitized;
+};
+
+const normalizeHandleSlug = (value: string | null | undefined): string | null => {
+  return normalizeSocialAccountProfileHandle(value);
 };
 
 const getShowPathContext = (
@@ -907,7 +916,9 @@ export function buildPersonAdminUrl(input: {
   const personSlug = encodeURIComponent(input.personSlug.trim());
   const tab = input.tab ?? "overview";
   const query = buildCanonicalQuery(input.query);
-  query.delete("showId");
+  if (input.showId) {
+    query.set("showId", input.showId.trim());
+  }
   const base = `/people/${personSlug}`;
   const path = tab === "overview" ? base : `${base}/${tab}`;
   return appendQuery(path, query);

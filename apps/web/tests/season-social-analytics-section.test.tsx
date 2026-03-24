@@ -841,6 +841,48 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.getByText("129.5M")).toBeInTheDocument();
   });
 
+  it("renders additive reddit summary cards in the unified overview", async () => {
+    mockSeasonSocialFetch({
+      ...analyticsBase,
+      reddit: {
+        community_id: "community-1",
+        subreddit: "BravoRealHousewives",
+        tracked_post_count: 660,
+        show_match_post_count: 401,
+        comment_count: 18841,
+        freshness: {
+          latest_run_timestamp: "2026-03-22T14:00:00Z",
+          latest_run_status: "partial",
+        },
+        coverage: {
+          recovered_container_count: 18,
+          stale_container_count: 1,
+        },
+        deep_link: {
+          path: "/admin/social/reddit/BravoRealHousewives/rhoslc/s6",
+        },
+      },
+    } as AnalyticsPayload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    expect(await screen.findByTestId("reddit-summary-card")).toBeInTheDocument();
+    expect(screen.getByText(/660/)).toBeInTheDocument();
+    expect(screen.getByTestId("reddit-freshness-card")).toHaveTextContent(/18/i);
+    expect(screen.getByTestId("reddit-freshness-card")).toHaveTextContent(/1 stale/i);
+    expect(screen.getByRole("link", { name: /Open Reddit Manager/i })).toHaveAttribute(
+      "href",
+      "/admin/social/reddit/BravoRealHousewives/rhoslc/s6",
+    );
+  });
+
   it("renders post metadata completeness cards and content type distribution", async () => {
     mockSeasonSocialFetch({
       ...analyticsBase,

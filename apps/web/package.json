@@ -16,6 +16,10 @@
     "typecheck:fandom": "tsc -p tsconfig.typecheck.fandom.json --noEmit",
     "lint": "eslint",
     "clean": "rm -rf .next",
+    "generate:brand-font-artifacts": "node scripts/generate-brand-font-artifacts.mjs",
+    "generate:brand-font-artifacts:with-glyphs": "node scripts/generate-brand-font-artifacts.mjs --with-glyph-comparison",
+    "brand-fonts:visual-similarity": "node scripts/brand-font-visual-similarity.mjs",
+    "brand-fonts:glyph-comparison": "node scripts/brand-font-glyph-comparison.mjs",
     "test": "vitest run -c vitest.config.ts",
     "test:watch": "vitest -c vitest.config.ts",
     "test:ci": "NODE_OPTIONS=--max-old-space-size=4096 vitest run -c vitest.config.ts --pool=forks --poolOptions.forks.singleFork",
@@ -42,7 +46,8 @@
     "next": "16.1.6",
     "pg": "^8.19.0",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "undici": "^7.24.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.4",

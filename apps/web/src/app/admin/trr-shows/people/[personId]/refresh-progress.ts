@@ -1,6 +1,6 @@
 export const PERSON_REFRESH_PHASES = {
   syncing: "SYNCING",
-  mirroring: "MIRRORING",
+  mirroring: "HOSTING",
   tagging: "TAGGING",
   counting: "TAGGING",
   findingText: "FINDING TEXT",
@@ -20,6 +20,7 @@ const SYNC_STAGE_IDS = new Set([
   "metadata_repair",
   "upserting",
   "nbcumv_import",
+  "bravotv_import",
   "pruning",
 ]);
 
@@ -42,6 +43,7 @@ export function mapPersonRefreshStage(rawStage: string | null | undefined): Pers
   if (normalized === "centering_cropping") return PERSON_REFRESH_PHASES.centeringCropping;
   if (normalized === "resizing") return PERSON_REFRESH_PHASES.resizing;
   if (normalized === "nbcumv_import") return PERSON_REFRESH_PHASES.syncing;
+  if (normalized === "bravotv_import") return PERSON_REFRESH_PHASES.syncing;
   if (normalized.startsWith("sync_") || SYNC_STAGE_IDS.has(normalized)) {
     return PERSON_REFRESH_PHASES.syncing;
   }
@@ -68,6 +70,7 @@ const SOURCE_LABEL_BY_ID: Record<string, string> = {
   nbcumv: "NBCUMV",
   getty: "Getty",
   getty_nbcumv: "Getty / NBCUMV",
+  bravotv: "BravoTV",
 };
 
 const EXECUTION_OWNER_LABEL_BY_ID: Record<string, string> = {
@@ -109,6 +112,7 @@ export type PersonRefreshSourceProgressStatus =
   | "pending"
   | "running"
   | "completed"
+  | "warning"
   | "skipped"
   | "failed";
 
@@ -119,10 +123,59 @@ export interface PersonRefreshSourceProgressState {
   discoveredTotal: number | null;
   scrapedCurrent: number;
   savedCurrent: number;
+  coveredExisting: number;
+  upgradedExisting: number;
   failedCurrent: number;
   skippedCurrent: number;
   remaining: number | null;
   message: string | null;
+}
+
+export type PersonGettyProgressStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "warning"
+  | "skipped"
+  | "failed";
+
+export interface PersonGettyProgressSubtaskState {
+  id: string;
+  label: string;
+  status: PersonGettyProgressStatus;
+  query: string | null;
+  candidatesFound: number;
+  current: number;
+  total: number;
+  message: string | null;
+}
+
+export interface PersonGettyProgressBreakdownState {
+  rawGettyCandidates: number;
+  uniqueDiscovered: number;
+  bravoSearchTotal: number;
+  broadSearchTotal: number;
+  matchedViaNbcumv: number;
+  matchedViaBravotvJson: number;
+  matchedViaImageSearch: number;
+  unmatchedGetty: number;
+  gettyOnlyImported: number;
+  nbcumvOnlyImported: number;
+  bravotvOnlyImported: number;
+  coveredExisting: number;
+  upgradedExisting: number;
+  skipped: number;
+  failed: number;
+  mirroredHosted: number;
+  mirroredFailed: number;
+  prefetched: boolean;
+}
+
+export interface PersonGettyProgressState {
+  status: PersonGettyProgressStatus;
+  phase: string | null;
+  subtasks: PersonGettyProgressSubtaskState[];
+  breakdown: PersonGettyProgressBreakdownState;
 }
 
 const SOURCE_PROGRESS_ORDER = [
@@ -131,6 +184,23 @@ const SOURCE_PROGRESS_ORDER = [
   "fandom",
   "fandom_gallery",
   "getty_nbcumv",
+  "bravotv",
+] as const;
+
+const GETTY_PROGRESS_ORDER = [
+  "bravo_person_search",
+  "broad_person_search",
+  "primary_person_search",
+  "fallback_person_search",
+  "bravo_grouped_events",
+  "broad_grouped_events",
+  "wwhl_date_range_fallback",
+  "pair_nbcumv",
+  "pair_bravotv_json",
+  "import_getty_only",
+  "supplement_nbcumv_only",
+  "supplement_bravotv_only",
+  "mirror_imported_assets",
 ] as const;
 
 function normalizeSourceProgressStatus(
@@ -142,6 +212,23 @@ function normalizeSourceProgressStatus(
     normalized === "pending" ||
     normalized === "running" ||
     normalized === "completed" ||
+    normalized === "warning" ||
+    normalized === "skipped" ||
+    normalized === "failed"
+  ) {
+    return normalized;
+  }
+  return "pending";
+}
+
+function normalizeGettyProgressStatus(value: unknown): PersonGettyProgressStatus {
+  if (typeof value !== "string") return "pending";
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "completed" ||
+    normalized === "warning" ||
     normalized === "skipped" ||
     normalized === "failed"
   ) {
@@ -167,6 +254,8 @@ export function normalizePersonRefreshSourceProgress(
         discoveredTotal: toFiniteInt(entry.discovered_total),
         scrapedCurrent: toFiniteInt(entry.scraped_current) ?? 0,
         savedCurrent: toFiniteInt(entry.saved_current) ?? 0,
+        coveredExisting: toFiniteInt(entry.covered_existing) ?? 0,
+        upgradedExisting: toFiniteInt(entry.upgraded_existing) ?? 0,
         failedCurrent: toFiniteInt(entry.failed_current) ?? 0,
         skippedCurrent: toFiniteInt(entry.skipped_current) ?? 0,
         remaining: toFiniteInt(entry.remaining),
@@ -188,6 +277,81 @@ export function normalizePersonRefreshSourceProgress(
   });
 }
 
+export function normalizePersonGettyProgress(value: unknown): PersonGettyProgressState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const subtasksRaw = Array.isArray(record.subtasks)
+    ? record.subtasks
+    : record.subtasks && typeof record.subtasks === "object"
+      ? Object.values(record.subtasks as Record<string, unknown>)
+      : [];
+
+  const subtasks = subtasksRaw
+    .map((rawEntry) => {
+      if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) return null;
+      const entry = rawEntry as Record<string, unknown>;
+      const id = normalizeKey(typeof entry.id === "string" ? entry.id : null);
+      if (!id) return null;
+      return {
+        id,
+        label:
+          typeof entry.label === "string" && entry.label.trim().length > 0
+            ? entry.label.trim()
+            : id.replace(/_/g, " "),
+        status: normalizeGettyProgressStatus(entry.status),
+        query:
+          typeof entry.query === "string" && entry.query.trim().length > 0 ? entry.query.trim() : null,
+        candidatesFound: toFiniteInt(entry.candidates_found) ?? 0,
+        current: toFiniteInt(entry.current) ?? 0,
+        total: toFiniteInt(entry.total) ?? 0,
+        message:
+          typeof entry.message === "string" && entry.message.trim().length > 0
+            ? entry.message.trim()
+            : null,
+      } satisfies PersonGettyProgressSubtaskState;
+    })
+    .filter((entry): entry is PersonGettyProgressSubtaskState => entry !== null)
+    .sort((left, right) => {
+      const leftIndex = GETTY_PROGRESS_ORDER.indexOf(left.id as (typeof GETTY_PROGRESS_ORDER)[number]);
+      const rightIndex = GETTY_PROGRESS_ORDER.indexOf(right.id as (typeof GETTY_PROGRESS_ORDER)[number]);
+      const safeLeftIndex = leftIndex === -1 ? GETTY_PROGRESS_ORDER.length : leftIndex;
+      const safeRightIndex = rightIndex === -1 ? GETTY_PROGRESS_ORDER.length : rightIndex;
+      if (safeLeftIndex !== safeRightIndex) return safeLeftIndex - safeRightIndex;
+      return left.label.localeCompare(right.label);
+    });
+
+  const breakdownRecord =
+    record.breakdown && typeof record.breakdown === "object" && !Array.isArray(record.breakdown)
+      ? (record.breakdown as Record<string, unknown>)
+      : {};
+
+  return {
+    status: normalizeGettyProgressStatus(record.status),
+    phase: typeof record.phase === "string" && record.phase.trim().length > 0 ? record.phase.trim() : null,
+    subtasks,
+    breakdown: {
+      rawGettyCandidates: toFiniteInt(breakdownRecord.raw_getty_candidates) ?? 0,
+      uniqueDiscovered: toFiniteInt(breakdownRecord.unique_discovered) ?? 0,
+      bravoSearchTotal: toFiniteInt(breakdownRecord.bravo_search_total) ?? 0,
+      broadSearchTotal: toFiniteInt(breakdownRecord.broad_search_total) ?? 0,
+      matchedViaNbcumv: toFiniteInt(breakdownRecord.matched_via_nbcumv) ?? 0,
+      matchedViaBravotvJson: toFiniteInt(breakdownRecord.matched_via_bravotv_json) ?? 0,
+      matchedViaImageSearch: toFiniteInt(breakdownRecord.matched_via_image_search) ?? 0,
+      unmatchedGetty: toFiniteInt(breakdownRecord.unmatched_getty) ?? 0,
+      gettyOnlyImported: toFiniteInt(breakdownRecord.getty_only_imported) ?? 0,
+      nbcumvOnlyImported: toFiniteInt(breakdownRecord.nbcumv_only_imported) ?? 0,
+      bravotvOnlyImported: toFiniteInt(breakdownRecord.bravotv_only_imported) ?? 0,
+      coveredExisting: toFiniteInt(breakdownRecord.covered_existing) ?? 0,
+      upgradedExisting: toFiniteInt(breakdownRecord.upgraded_existing) ?? 0,
+      skipped: toFiniteInt(breakdownRecord.skipped) ?? 0,
+      failed: toFiniteInt(breakdownRecord.failed) ?? 0,
+      mirroredHosted: toFiniteInt(breakdownRecord.mirrored_hosted) ?? 0,
+      mirroredFailed: toFiniteInt(breakdownRecord.mirrored_failed) ?? 0,
+      prefetched: breakdownRecord.prefetched === true,
+    },
+  };
+}
+
 export function summarizePersonRefreshSourceProgress(
   sourceProgress: PersonRefreshSourceProgressState[] | null | undefined,
 ): { current: number; total: number } | null {
@@ -195,19 +359,20 @@ export function summarizePersonRefreshSourceProgress(
   const completedCount = sourceProgress.filter(
     (entry) =>
       entry.status === "completed" ||
+      entry.status === "warning" ||
       entry.status === "skipped" ||
       entry.status === "failed",
   ).length;
   return { current: completedCount, total: sourceProgress.length };
 }
 
-function formatExecutionOwnerLabel(owner: string | null | undefined): string | null {
+export function formatRefreshExecutionOwnerLabel(owner: string | null | undefined): string | null {
   const normalized = normalizeKey(owner);
   if (!normalized) return null;
   return EXECUTION_OWNER_LABEL_BY_ID[normalized] ?? normalized.replace(/_/g, " ");
 }
 
-function formatExecutionBackendLabel(backend: string | null | undefined): string | null {
+export function formatRefreshExecutionBackendLabel(backend: string | null | undefined): string | null {
   const normalized = normalizeKey(backend);
   if (!normalized) return null;
   return EXECUTION_BACKEND_LABEL_BY_ID[normalized] ?? normalized.replace(/_/g, " ");
@@ -224,8 +389,8 @@ export function buildOperationDispatchDetailMessage(input: {
   const eventType = normalizeKey(input.eventType);
   if (eventType !== "operation" && eventType !== "dispatched_to_modal") return null;
 
-  const executionOwner = formatExecutionOwnerLabel(input.executionOwner);
-  const executionBackend = formatExecutionBackendLabel(input.executionBackendCanonical);
+  const executionOwner = formatRefreshExecutionOwnerLabel(input.executionOwner);
+  const executionBackend = formatRefreshExecutionBackendLabel(input.executionBackendCanonical);
   const executionMode = normalizeKey(input.executionModeCanonical);
   const rawStatus = normalizeKey(input.status);
   const attached = input.attached === true;
@@ -297,9 +462,9 @@ export function buildPersonRefreshDetailMessage(input: {
   if (
     mirroredCount !== null &&
     sourceTotal !== null &&
-    !/mirrored\s+\d+\s*\/\s*\d+/i.test(baseMessage)
+    !/\b(mirrored|hosted)\s+\d+\s*\/\s*\d+/i.test(baseMessage)
   ) {
-    suffixParts.push(`mirrored ${mirroredCount}/${sourceTotal}`);
+    suffixParts.push(`hosted ${mirroredCount}/${sourceTotal}`);
   }
   if (
     current !== null &&
@@ -553,6 +718,7 @@ export type PersonRefreshPipelineStepStatus =
   | "pending"
   | "running"
   | "completed"
+  | "warning"
   | "skipped"
   | "failed";
 
@@ -578,7 +744,7 @@ const REFRESH_PIPELINE_STEPS: PersonRefreshPipelineStepDefinition[] = [
   { id: "metadata_enrichment", label: "Metadata", modes: new Set(["ingest", "refresh"]) },
   { id: "upserting", label: "Saving Photos", modes: new Set(["ingest", "refresh"]) },
   { id: "metadata_repair", label: "Fixing IMDb Details", modes: new Set(["ingest", "refresh", "reprocess"]) },
-  { id: "mirroring", label: "S3 Mirroring", modes: new Set(["ingest", "refresh"]) },
+  { id: "mirroring", label: "Hosting", modes: new Set(["ingest", "refresh"]) },
   { id: "pruning", label: "Pruning", modes: new Set(["refresh"]) },
   { id: "auto_count", label: "Tagging (Face Boxes + Identity)", modes: new Set(["refresh", "reprocess"]) },
   { id: "word_id", label: "Text Overlay", modes: new Set(["refresh", "reprocess"]) },
@@ -615,11 +781,14 @@ function messageIndicatesFailure(message: string): boolean {
     .replace(/\(\s*failed\s+0\s*\)/gi, "")
     .replace(/\bfailed\s+0\b/gi, "")
     .replace(/\b0\s+failed\b/gi, "");
+  if (/^\s*Hosted\b/i.test(cleaned) && /\(\s*\d+\s+failed\s*\)/i.test(cleaned)) {
+    return false;
+  }
   return /\b(fail(ed|ure)?|error|paused|unavailable)\b/i.test(cleaned);
 }
 
 function messageIndicatesCompletion(message: string): boolean {
-  return /\b(complete|completed|done|synced|fetched|saved|pruned|repaired|mirrored|counted|centered|generated)\b/i.test(
+  return /\b(complete|completed|done|synced|fetched|saved|pruned|repaired|mirrored|hosted|counted|centered|generated)\b/i.test(
     message,
   );
 }
@@ -636,6 +805,7 @@ function mapStageToPipelineStep(rawStage: string | null | undefined): PersonRefr
   if (stage === "metadata_repair") return "metadata_repair";
   if (stage === "mirroring") return "mirroring";
   if (stage === "nbcumv_import") return "source_sync";
+  if (stage === "bravotv_import") return "source_sync";
   if (stage === "pruning") return "pruning";
   if (stage === "auto_count") return "auto_count";
   if (stage === "word_id") return "word_id";
@@ -677,7 +847,12 @@ function determineStepStatus(input: {
     return "failed";
   }
   if (!input.heartbeat && (isCountComplete || messageIndicatesCompletion(message))) return "completed";
-  if (input.previousStatus === "completed" || input.previousStatus === "skipped" || input.previousStatus === "failed") {
+  if (
+    input.previousStatus === "completed" ||
+    input.previousStatus === "warning" ||
+    input.previousStatus === "skipped" ||
+    input.previousStatus === "failed"
+  ) {
     return input.previousStatus;
   }
   return "running";
@@ -737,7 +912,7 @@ export function updatePersonRefreshPipelineSteps(
   step.current = current;
   step.total = total;
   step.message = message ?? null;
-  if (status === "completed" || status === "skipped" || status === "failed") {
+  if (status === "completed" || status === "warning" || status === "skipped" || status === "failed") {
     step.result = message ?? step.result;
   } else {
     step.result = null;
@@ -774,7 +949,10 @@ export function finalizePersonRefreshPipelineSteps(
   const photosFetched = toSummaryNumber(summaryRecord, "photos_fetched");
   const photosUpserted = toSummaryNumber(summaryRecord, "photos_upserted");
   const photosMirrored = toSummaryNumber(summaryRecord, "photos_mirrored");
-  const photosMirrorFailed = toSummaryNumber(summaryRecord, "photos_failed");
+  const hostingHostedTotal =
+    toSummaryNumber(summaryRecord, "hosting_hosted_total") || photosMirrored;
+  const hostingFailedTotal = toSummaryNumber(summaryRecord, "hosting_failed_total");
+  const hostingSkippedTotal = toSummaryNumber(summaryRecord, "hosting_skipped_total");
   const photosPruned = toSummaryNumber(summaryRecord, "photos_pruned");
   const autoCountsAttempted = toSummaryNumber(summaryRecord, "auto_counts_attempted");
   const autoCountsSucceeded = toSummaryNumber(summaryRecord, "auto_counts_succeeded");
@@ -828,10 +1006,17 @@ export function finalizePersonRefreshPipelineSteps(
       result: `Repaired ${metadataRepair.toLocaleString()} IMDb rows`,
     });
     updateStep("mirroring", {
-      status: photosMirrorFailed > 0 ? "failed" : "completed",
+      status:
+        hostingFailedTotal > 0
+          ? hostingHostedTotal > 0 || hostingSkippedTotal > 0
+            ? "warning"
+            : "failed"
+          : hostingHostedTotal > 0
+            ? "completed"
+            : "skipped",
       result:
-        photosMirrored > 0 || photosMirrorFailed > 0
-          ? `Hosted ${photosMirrored.toLocaleString()} assets (${photosMirrorFailed.toLocaleString()} failed)`
+        hostingHostedTotal > 0 || hostingFailedTotal > 0 || hostingSkippedTotal > 0
+          ? `Hosted ${hostingHostedTotal.toLocaleString()} assets (${hostingFailedTotal.toLocaleString()} failed)`
           : "Not run",
     });
     if (mode === "refresh") {

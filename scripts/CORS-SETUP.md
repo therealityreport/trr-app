@@ -43,7 +43,7 @@ After applying both S3 CORS and the CloudFront config, test with:
 
 ```bash
 curl -I -H "Origin: https://therealityreport.com" \
-  "https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/hamburg-serial/HamburgSerial-Bold.woff2"
+  "https://d1fmdyqfafwim3.cloudfront.net/fonts/trr/hamburg-serial/HamburgSerial-Bold.woff2"
 ```
 
 The response should include:

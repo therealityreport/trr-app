@@ -45,14 +45,16 @@ describe("AdminGlobalHeader", () => {
     for (const label of [
       "Dev Dashboard",
       "Shows",
+      "Screenalytics",
       "People",
       "Games",
-      "Survey Editor",
+      "Surveys",
       "Social Media",
       "Brands",
       "Users",
       "Groups",
       "UI Design System",
+      "Design Docs",
       "Settings",
     ]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();

@@ -374,6 +374,13 @@ interface DiscoveryFetchResult {
   partial_failures?: Array<Record<string, unknown>>;
 }
 
+type RefreshFailureReasonCode =
+  | "reddit_http_403"
+  | "worker_unavailable"
+  | "stale_queue"
+  | "stalled_heartbeat"
+  | "coverage_incomplete";
+
 interface RefreshRunStatus {
   run_id: string;
   operation_id?: string | null;
@@ -439,15 +446,121 @@ interface RefreshRunStatus {
   queue_position?: number | null;
   active_jobs?: number | null;
   updated_at?: string | null;
+  created_at?: string | null;
+  heartbeat_at?: string | null;
+  claimed_by_worker_id?: string | null;
+  attempt_count?: number | null;
   phase?: string | null;
   partial_failures?: Array<Record<string, unknown>>;
   stalled?: boolean;
+  failure_reason_code?: RefreshFailureReasonCode | null;
+  operator_hint?: string | null;
 }
 
 interface ContainerRefreshProgress {
   runId: string;
   status: RefreshRunStatus["status"];
   message: string;
+}
+
+interface RedditAnalyticsContainerStatus {
+  container_key: string;
+  latest_run_id?: string | null;
+  latest_run_status?: RefreshRunStatus["status"] | null;
+  latest_run_timestamp?: string | null;
+  failure_reason_code?: RefreshFailureReasonCode | null;
+  operator_hint?: string | null;
+  stale?: boolean;
+  stale_reason_code?: string | null;
+  tracked_post_count?: number;
+  matched_post_count?: number;
+  show_match_post_count?: number;
+  detail_scraped_post_count?: number;
+  comment_saved_post_count?: number;
+  media_post_count?: number;
+  mirrored_media_post_count?: number;
+  detail_coverage_pct?: number | null;
+  comment_coverage_pct?: number | null;
+  media_coverage_pct?: number | null;
+  mirrored_media_coverage_pct?: number | null;
+}
+
+interface RedditAnalyticsSummaryResponse {
+  totals?: {
+    tracked_flair_post_count?: number;
+    show_match_post_count?: number;
+    comment_count?: number;
+  };
+  freshness?: {
+    latest_data_timestamp?: string | null;
+    latest_run_timestamp?: string | null;
+    latest_run_status?: string | null;
+  };
+  coverage?: {
+    tracked_post_count?: number;
+    detail_scraped_post_count?: number;
+    comment_saved_post_count?: number;
+    media_post_count?: number;
+    mirrored_media_post_count?: number;
+    detail_coverage_pct?: number | null;
+    comment_coverage_pct?: number | null;
+    media_coverage_pct?: number | null;
+    mirrored_media_coverage_pct?: number | null;
+    stale_container_count?: number;
+    recovered_container_count?: number;
+    container_count?: number;
+  };
+  container_statuses?: RedditAnalyticsContainerStatus[];
+}
+
+type AdminOperationStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "cancelling";
+
+interface RedditBackfillStartedEntry {
+  container_key?: string;
+  latest_run_id?: string | null;
+  latest_run_status?: RefreshRunStatus["status"] | null;
+  stale?: boolean;
+  stale_reason_code?: string | null;
+  reused?: boolean;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  execution_backend_canonical?: string | null;
+  run?: RefreshRunStatus | null;
+}
+
+interface RedditBackfillOperationPayload {
+  stage?: string;
+  message?: string;
+  detail_refresh?: boolean;
+  current_index?: number;
+  target_count?: number;
+  current_target?: {
+    container_key?: string;
+    run?: RefreshRunStatus | null;
+  } | null;
+  started?: RedditBackfillStartedEntry[];
+  skipped?: Array<Record<string, unknown>>;
+  failures?: Array<Record<string, unknown>>;
+    summary?: {
+      requested_container_count?: number;
+      target_count?: number;
+      stale_container_count?: number;
+      enrichment_target_count?: number;
+      started_count?: number;
+      skipped_count?: number;
+      completed_count?: number;
+    failed_count?: number;
+  };
+  cancel_requested?: boolean;
+}
+
+interface AdminOperationState {
+  id?: string;
+  status?: AdminOperationStatus;
+  progress_payload?: RedditBackfillOperationPayload | null;
+  result_payload?: RedditBackfillOperationPayload | null;
+  error_payload?: Record<string, unknown> | null;
+  attached?: boolean;
 }
 
 export interface RedditSourcesManagerProps {
@@ -477,6 +590,23 @@ const fmtNum = (value: number): string => {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return value.toLocaleString();
+};
+
+const isCanonicalRedditContainerKey = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "period-preseason" || normalized === "period-postseason" || /^episode-\d+$/.test(normalized);
+};
+
+const isAdminOperationStatus = (value: unknown): value is AdminOperationStatus => {
+  return (
+    value === "pending" ||
+    value === "running" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancelled" ||
+    value === "cancelling"
+  );
 };
 
 const buildExhaustiveWindowIncompleteWarning = (discovery: DiscoveryPayload): string => {
@@ -794,6 +924,19 @@ const isRecoverableEpisodeDiscussionRefreshError = (message: string): boolean =>
 const isNoCacheYetWarning = (message: string | null | undefined): boolean =>
   typeof message === "string" && /no cached posts found yet/i.test(message);
 
+const isReddit403PartialRun = (run: RefreshRunStatus | null | undefined): boolean =>
+  Boolean(run && run.status === "partial" && run.failure_reason_code === "reddit_http_403");
+
+const getRefreshRunOperatorHint = (
+  run: RefreshRunStatus | null | undefined,
+  fallback: string | null = null,
+): string | null => {
+  if (run?.operator_hint && run.operator_hint.trim().length > 0) {
+    return run.operator_hint.trim();
+  }
+  return fallback;
+};
+
 const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus): string => {
   const liveProgress = run.diagnostics?.progress;
   const listingPages = liveProgress?.listing_pages_fetched ?? run.diagnostics?.listing_pages_fetched;
@@ -858,6 +1001,18 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
   }
   const queuedHintText = queuedHintParts.length > 0 ? ` · ${queuedHintParts.join(" · ")}` : "";
   if (run.status === "queued") {
+    if (
+      run.failure_reason_code === "worker_unavailable" ||
+      (run.stalled &&
+        (run.attempt_count ?? 0) <= 0 &&
+        !run.claimed_by_worker_id &&
+        !run.heartbeat_at)
+    ) {
+      return `${label}: backend queue unavailable / no healthy worker detected (run ${run.run_id.slice(0, 8)})`;
+    }
+    if (run.stalled) {
+      return `${label}: queued run appears stranded in backend (run ${run.run_id.slice(0, 8)})${queuedHintText}`;
+    }
     const queuePositionText =
       typeof run.queue_position === "number" && run.queue_position > 0
         ? ` · queue #${fmtNum(run.queue_position)}`
@@ -874,6 +1029,9 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
       typeof otherRunning === "number" && otherRunning > 0
         ? ` · ${fmtNum(otherRunning)} other running`
         : "";
+    if (run.stalled) {
+      return `${label}: sync appears stalled in backend (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}`;
+    }
     const stalledText = run.stalled ? " · stalled heartbeat" : "";
     return `${label}: ${stageText} (run ${run.run_id.slice(0, 8)})${runningHintText}${listingText}${searchText}${rowText}${commentTargetText}${commentsUpsertedText}${detailPostsText}${detailCommentsText}${mediaText}${stalledText}`;
   }
@@ -906,6 +1064,12 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
         ? ` · ${run.partial_failures.length} partial failure${run.partial_failures.length === 1 ? "" : "s"}`
         : "";
     if (run.status === "partial") {
+      if (run.failure_reason_code === "reddit_http_403") {
+        return `${label}: live scrape blocked by Reddit (403); showing cached posts when available${totalsText}${partialFailuresText}`;
+      }
+      if (run.failure_reason_code === "coverage_incomplete") {
+        return `${label}: analytics usable but coverage incomplete${passText}${completenessText}${totalsText}${partialFailuresText}`;
+      }
       return `${label}: sync completed with partial coverage${passText}${completenessText}${totalsText}${partialFailuresText}`;
     }
     return `${label}: sync completed${passText}${totalsText}`;
@@ -914,6 +1078,35 @@ const buildContainerRunProgressMessage = (label: string, run: RefreshRunStatus):
     return `${label}: sync failed${run.error ? ` · ${run.error}` : ""}`;
   }
   return `${label}: sync cancelled${run.error ? ` · ${run.error}` : ""}`;
+};
+
+export const buildContainerRefreshTimeoutMessage = (
+  label: string,
+  run: RefreshRunStatus | null | undefined,
+): string => {
+  if (!run) {
+    return `Refresh is still running for ${label}. Keep this page open or check again shortly.`;
+  }
+  if (
+    run.status === "queued" &&
+    (run.failure_reason_code === "worker_unavailable" ||
+      (run.stalled &&
+        (run.attempt_count ?? 0) <= 0 &&
+        !run.claimed_by_worker_id &&
+        !run.heartbeat_at))
+  ) {
+    return `${label}: backend queue unavailable / no healthy worker detected. Retry after worker health is restored.`;
+  }
+  if (run.status === "queued" && run.stalled) {
+    return `${label}: queued run appears stranded in backend. Retry this window sync.`;
+  }
+  if (run.status === "running" && run.stalled) {
+    return `${label}: sync appears stalled in backend. Keep this page open or retry this window sync shortly.`;
+  }
+  if (run.operator_hint && run.operator_hint.trim().length > 0) {
+    return `${label}: ${run.operator_hint.trim()}`;
+  }
+  return `Refresh is still running for ${label}. Keep this page open or check again shortly.`;
 };
 
 const mergeDiscoveryPayloads = (input: {
@@ -1462,6 +1655,7 @@ const renderEpisodeMatrixCards = (
     pendingPostsByContainer?: Map<string, EpisodeWindowPostItem[]>;
     pendingFlairGroupsByContainer?: Map<string, PendingFlairGroup[]>;
     pendingPrimaryFlairKey?: string | null;
+    analyticsStatusByContainer?: Map<string, RedditAnalyticsContainerStatus>;
     refreshProgressByContainer?: Record<string, ContainerRefreshProgress | undefined>;
     onOpenContainerPosts?: (containerKey: string) => void;
     onViewAllContainerPosts?: (containerKey: string) => void;
@@ -1520,6 +1714,7 @@ const renderEpisodeMatrixCards = (
     const pendingPosts = options?.pendingPostsByContainer?.get(containerKey) ?? [];
     const pendingFlairGroups =
       options?.pendingFlairGroupsByContainer?.get(containerKey) ?? buildPendingFlairGroups(pendingPosts);
+    const analyticsStatus = options?.analyticsStatusByContainer?.get(containerKey);
     const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
     const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
     const viewAllCount =
@@ -1579,6 +1774,15 @@ const renderEpisodeMatrixCards = (
         {progress?.message && (
           <p className="mt-1 text-[11px] text-blue-700">{progress.message}</p>
         )}
+        {!isContainerRefreshActive(progress) && analyticsStatus && (
+          <p className={`mt-1 text-[11px] ${analyticsStatus.stale ? "text-amber-700" : "text-emerald-700"}`}>
+            {analyticsStatus.stale
+              ? `Stale window · ${analyticsStatus.failure_reason_code ?? analyticsStatus.stale_reason_code ?? "needs rerun"}`
+              : analyticsStatus.failure_reason_code === "coverage_incomplete"
+                ? "Recovered with coverage incomplete"
+                : "Recovered analytics window"}
+          </p>
+        )}
         {pendingFlairGroups.length > 0 && (
           <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">
@@ -1615,6 +1819,7 @@ const renderEpisodeMatrixCards = (
       const pendingPosts = options?.pendingPostsByContainer?.get(containerKey) ?? [];
       const pendingFlairGroups =
         options?.pendingFlairGroupsByContainer?.get(containerKey) ?? buildPendingFlairGroups(pendingPosts);
+      const analyticsStatus = options?.analyticsStatusByContainer?.get(containerKey);
       const episodeWindow = options?.episodeWindowByContainer?.get(containerKey) ?? null;
       const totalTrackedCount = options?.totalTrackedFlairCountByContainer?.get(containerKey);
       const unassignedTrackedCount = options?.unassignedFlairCountByContainer?.get(containerKey);
@@ -1686,7 +1891,11 @@ const renderEpisodeMatrixCards = (
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
             {visibleCells.length === 0 ? (
-              <p className="text-xs text-zinc-500">No linked discussion posts found.</p>
+              <p className="text-xs text-zinc-500">
+                {typeof totalTrackedCount === "number" && totalTrackedCount > 0
+                  ? "No linked discussion posts found yet. Tracked flair posts are still available through View All Posts."
+                  : "No linked discussion posts found."}
+              </p>
             ) : (
               visibleCells.map(([cellKey, cell]) => {
               const slotDate = resolveDiscussionSlotDate(episodeAirDate, cellKey);
@@ -1734,6 +1943,15 @@ const renderEpisodeMatrixCards = (
           )}
           {progress?.message && (
             <p className="mt-2 text-[11px] text-blue-700">{progress.message}</p>
+          )}
+          {!isContainerRefreshActive(progress) && analyticsStatus && (
+            <p className={`mt-2 text-[11px] ${analyticsStatus.stale ? "text-amber-700" : "text-emerald-700"}`}>
+              {analyticsStatus.stale
+                ? `Stale window · ${analyticsStatus.failure_reason_code ?? analyticsStatus.stale_reason_code ?? "needs rerun"}`
+                : analyticsStatus.failure_reason_code === "coverage_incomplete"
+                  ? "Recovered with coverage incomplete"
+                  : "Recovered analytics window"}
+            </p>
           )}
           {pendingFlairGroups.length > 0 && (
             <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2">
@@ -2231,6 +2449,13 @@ export default function RedditSourcesManager({
   const [storedPendingTrackedFlairCounts, setStoredPendingTrackedFlairCounts] = useState<
     StoredSupabasePendingTrackedFlairCount[]
   >([]);
+  const [redditAnalyticsSummary, setRedditAnalyticsSummary] = useState<RedditAnalyticsSummaryResponse | null>(null);
+  const [redditAnalyticsLoading, setRedditAnalyticsLoading] = useState(false);
+  const [backfillRunning, setBackfillRunning] = useState(false);
+  const [backfillOperationId, setBackfillOperationId] = useState<string | null>(null);
+  const [backfillOperationPayload, setBackfillOperationPayload] = useState<RedditBackfillOperationPayload | null>(
+    null,
+  );
   const [storedCountsRefreshNonce, setStoredCountsRefreshNonce] = useState(0);
   const [selectedSupabaseFlairKeys, setSelectedSupabaseFlairKeys] = useState<Set<string>>(new Set());
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
@@ -2249,7 +2474,7 @@ export default function RedditSourcesManager({
   const [episodeSelectedPostIds, setEpisodeSelectedPostIds] = useState<string[]>([]);
   const [episodeRefreshing, setEpisodeRefreshing] = useState(false);
   const [refreshingContainerKeys, setRefreshingContainerKeys] = useState<Set<string>>(new Set());
-  const MAX_CONCURRENT_CONTAINER_SYNCS = 3;
+  const MAX_CONCURRENT_CONTAINER_SYNCS = 1;
   // Backwards-compatible alias: returns first active key for legacy single-key checks
   const refreshingContainerKey = refreshingContainerKeys.size > 0 ? [...refreshingContainerKeys][0] : null;
   const [containerRefreshProgressByKey, setContainerRefreshProgressByKey] = useState<
@@ -2272,6 +2497,15 @@ export default function RedditSourcesManager({
     if (typeof document === "undefined") return true;
     return document.visibilityState === "visible";
   });
+  const appendEpisodeContextWarning = useCallback((message: string | null | undefined) => {
+    const normalized = typeof message === "string" ? message.trim() : "";
+    if (!normalized) return;
+    setEpisodeContextWarning((current) => {
+      if (!current) return normalized;
+      if (current.includes(normalized)) return current;
+      return `${current} | ${normalized}`;
+    });
+  }, []);
   const isBusy = busyAction !== null;
   const discovery = seasonDiscovery;
   const [communitiesIncludeAssignedThreads, setCommunitiesIncludeAssignedThreads] = useState(false);
@@ -2735,6 +2969,7 @@ export default function RedditSourcesManager({
       setStoredSupabaseFlairCounts([]);
       setStoredPendingTrackedFlairCounts([]);
       setSelectedSupabaseFlairKeys(new Set());
+      setRedditAnalyticsSummary(null);
       return;
     }
     setStoredSupabasePostTotal(null);
@@ -2842,6 +3077,45 @@ export default function RedditSourcesManager({
       controller.abort();
     };
   }, [storedCountsCommunityId, episodeSeasonId, storedCountsRefreshNonce]);
+
+  useEffect(() => {
+    if (!storedCountsCommunityId || !episodeSeasonId) {
+      setRedditAnalyticsSummary(null);
+      setRedditAnalyticsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setRedditAnalyticsLoading(true);
+    void (async () => {
+      try {
+        const response = await fetchWithTimeout(
+          `/api/admin/reddit/analytics/community/${storedCountsCommunityId}/summary?scope=season&season_id=${episodeSeasonId}`,
+          {
+            signal: controller.signal,
+            timeoutMs: REQUEST_TIMEOUT_MS.default,
+          },
+        );
+        if (controller.signal.aborted) return;
+        if (!response.ok) {
+          throw new Error("Failed to fetch reddit analytics summary");
+        }
+        const data = (await response.json()) as RedditAnalyticsSummaryResponse;
+        if (!controller.signal.aborted) {
+          setRedditAnalyticsSummary(data);
+        }
+      } catch {
+        if (controller.signal.aborted) return;
+        setRedditAnalyticsSummary(null);
+      } finally {
+        if (!controller.signal.aborted) {
+          setRedditAnalyticsLoading(false);
+        }
+      }
+    })();
+    return () => {
+      controller.abort();
+    };
+  }, [episodeSeasonId, fetchWithTimeout, storedCountsCommunityId, storedCountsRefreshNonce]);
 
   const selectedRelevantPostFlairs = useMemo(
     () => (selectedCommunity ? getRelevantPostFlairs(selectedCommunity) : []),
@@ -2966,6 +3240,111 @@ export default function RedditSourcesManager({
     storedSupabasePostTotal,
     supabaseFlairPills,
     toggleSupabaseFlairKey,
+  ]);
+
+  const redditContainerStatusByKey = useMemo(() => {
+    const map = new Map<string, RedditAnalyticsContainerStatus>();
+    for (const item of redditAnalyticsSummary?.container_statuses ?? []) {
+      if (!item?.container_key || !isCanonicalRedditContainerKey(item.container_key)) continue;
+      map.set(item.container_key, item);
+    }
+    return map;
+  }, [redditAnalyticsSummary]);
+
+  const staleRedditContainers = useMemo(
+    () =>
+      (redditAnalyticsSummary?.container_statuses ?? []).filter(
+        (item) => item?.stale && isCanonicalRedditContainerKey(item.container_key),
+      ),
+    [redditAnalyticsSummary],
+  );
+
+  const backfillActionLabel = useMemo(() => {
+    const detailRefreshRunning = backfillOperationPayload?.detail_refresh === true;
+    if (!backfillRunning) {
+      return `Rerun Stale Windows (${staleRedditContainers.length})`;
+    }
+    const summary = backfillOperationPayload?.summary;
+    if (summary?.target_count) {
+      return `${detailRefreshRunning ? "Detail Enrichment" : "Recovery"} Running (${fmtNum(summary.completed_count ?? 0)}/${fmtNum(summary.target_count)})`;
+    }
+    return detailRefreshRunning ? "Detail Enrichment Running…" : "Recovery Running…";
+  }, [backfillOperationPayload, backfillRunning, staleRedditContainers.length]);
+
+  const renderRedditAnalyticsSummary = useCallback(() => {
+    if (!redditAnalyticsLoading && !redditAnalyticsSummary) return null;
+
+    const coverage = redditAnalyticsSummary?.coverage;
+    const freshness = redditAnalyticsSummary?.freshness;
+    const trackedCount = coverage?.tracked_post_count ?? redditAnalyticsSummary?.totals?.tracked_flair_post_count ?? 0;
+    const detailCount = coverage?.detail_scraped_post_count ?? 0;
+    const commentCount = coverage?.comment_saved_post_count ?? 0;
+    const mediaCount = coverage?.media_post_count ?? 0;
+    const staleCount = coverage?.stale_container_count ?? staleRedditContainers.length;
+    const recoveredCount =
+      coverage?.recovered_container_count ??
+      Math.max(0, (coverage?.container_count ?? redditAnalyticsSummary?.container_statuses?.length ?? 0) - staleCount);
+    const activeBackfillSummary = backfillRunning ? backfillOperationPayload?.summary : null;
+    const detailRefreshRunning = backfillRunning && backfillOperationPayload?.detail_refresh === true;
+    const activeBackfillText =
+      backfillRunning && activeBackfillSummary
+        ? detailRefreshRunning
+          ? `${fmtNum(activeBackfillSummary.completed_count ?? 0)}/${fmtNum(activeBackfillSummary.target_count ?? trackedCount)} windows enriched in session`
+          : `${fmtNum(activeBackfillSummary.completed_count ?? 0)}/${fmtNum(activeBackfillSummary.target_count ?? staleCount)} recovered in session`
+        : null;
+    const recoverySubtext =
+      backfillRunning && backfillOperationPayload?.message
+        ? backfillOperationPayload.message
+        : `Latest run ${freshness?.latest_run_status ?? "n/a"} · ${fmtDateTime(freshness?.latest_run_timestamp ?? null)}`;
+
+    return (
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4" data-testid="reddit-analytics-summary">
+        <article className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Window Recovery</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">
+            {redditAnalyticsLoading
+              ? "Loading..."
+              : activeBackfillText ?? `${fmtNum(recoveredCount)} recovered · ${fmtNum(staleCount)} stale`}
+          </p>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            {recoverySubtext}
+          </p>
+        </article>
+        <article className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Tracked Coverage</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">
+            {redditAnalyticsLoading ? "Loading..." : `${fmtNum(detailCount)}/${fmtNum(trackedCount)} detail`}
+          </p>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            {coverage?.detail_coverage_pct != null ? `${coverage.detail_coverage_pct.toFixed(1)}% detail scraped` : "Detail coverage pending"}
+          </p>
+        </article>
+        <article className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Comment Coverage</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">
+            {redditAnalyticsLoading ? "Loading..." : `${fmtNum(commentCount)}/${fmtNum(trackedCount)} posts with comments`}
+          </p>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            {coverage?.comment_coverage_pct != null ? `${coverage.comment_coverage_pct.toFixed(1)}% tracked posts enriched` : "Comment coverage pending"}
+          </p>
+        </article>
+        <article className="rounded-xl border border-zinc-200 bg-white px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Media Coverage</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-900">
+            {redditAnalyticsLoading ? "Loading..." : `${fmtNum(mediaCount)}/${fmtNum(trackedCount)} posts with media`}
+          </p>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            {coverage?.media_coverage_pct != null ? `${coverage.media_coverage_pct.toFixed(1)}% media detected` : "Media coverage pending"}
+          </p>
+        </article>
+      </div>
+    );
+  }, [
+    backfillOperationPayload,
+    backfillRunning,
+    redditAnalyticsLoading,
+    redditAnalyticsSummary,
+    staleRedditContainers.length,
   ]);
 
   useEffect(() => {
@@ -5165,6 +5544,22 @@ export default function RedditSourcesManager({
                       ? runPayload.active_jobs
                       : null,
                   updated_at: typeof runPayload.updated_at === "string" ? runPayload.updated_at : null,
+                  created_at: typeof runPayload.created_at === "string" ? runPayload.created_at : null,
+                  heartbeat_at: typeof runPayload.heartbeat_at === "string" ? runPayload.heartbeat_at : null,
+                  claimed_by_worker_id:
+                    typeof runPayload.claimed_by_worker_id === "string"
+                      ? runPayload.claimed_by_worker_id
+                      : null,
+                  attempt_count:
+                    typeof runPayload.attempt_count === "number"
+                      ? runPayload.attempt_count
+                      : null,
+                  failure_reason_code:
+                    typeof runPayload.failure_reason_code === "string"
+                      ? (runPayload.failure_reason_code as RefreshFailureReasonCode)
+                      : null,
+                  operator_hint:
+                    typeof runPayload.operator_hint === "string" ? runPayload.operator_hint : null,
                 }
               : null,
         };
@@ -5240,15 +5635,157 @@ export default function RedditSourcesManager({
         queue_position: typeof payload.queue_position === "number" ? payload.queue_position : null,
         active_jobs: typeof payload.active_jobs === "number" ? payload.active_jobs : null,
         updated_at: typeof payload.updated_at === "string" ? payload.updated_at : null,
+        created_at: typeof payload.created_at === "string" ? payload.created_at : null,
+        heartbeat_at: typeof payload.heartbeat_at === "string" ? payload.heartbeat_at : null,
+        claimed_by_worker_id:
+          typeof payload.claimed_by_worker_id === "string" ? payload.claimed_by_worker_id : null,
+        attempt_count: typeof payload.attempt_count === "number" ? payload.attempt_count : null,
         phase: typeof payload.phase === "string" ? payload.phase : null,
         partial_failures: Array.isArray(payload.partial_failures)
           ? (payload.partial_failures as Array<Record<string, unknown>>)
           : undefined,
         stalled: typeof payload.stalled === "boolean" ? payload.stalled : false,
+        failure_reason_code:
+          typeof payload.failure_reason_code === "string"
+            ? (payload.failure_reason_code as RefreshFailureReasonCode)
+            : null,
+        operator_hint: typeof payload.operator_hint === "string" ? payload.operator_hint : null,
       };
     },
     [fetchWithTimeout, getAuthHeaders],
   );
+
+  const resolveBackfillContainerLabel = useCallback(
+    (containerKey: string): string => {
+      const bounds = episodeWindowBoundsByContainer.get(containerKey);
+      const boundaryPeriod = seasonalBoundaryPeriods.find((item) => `period-${item.key}` === containerKey);
+      return (
+        bounds?.label ??
+        boundaryPeriod?.label ??
+        containerKey.replace(/^episode-/, "Episode ").replace(/^period-/, "")
+      );
+    },
+    [episodeWindowBoundsByContainer, seasonalBoundaryPeriods],
+  );
+
+  const applyBackfillOperationPayload = useCallback(
+    (payload: RedditBackfillOperationPayload | null | undefined) => {
+      if (!payload) return;
+      setBackfillOperationPayload(payload);
+      const startedEntries = Array.isArray(payload.started) ? payload.started : [];
+      for (const entry of startedEntries) {
+        if (!entry?.container_key || !entry.run || !isRefreshRunStatus(entry.run.status)) continue;
+        const label = resolveBackfillContainerLabel(entry.container_key);
+        setContainerRefreshProgress(entry.container_key, {
+          runId: entry.run.run_id,
+          status: entry.run.status,
+          message: buildContainerRunProgressMessage(label, entry.run),
+        });
+      }
+      const currentTarget = payload.current_target;
+      if (
+        currentTarget?.container_key &&
+        currentTarget.run &&
+        isRefreshRunStatus(currentTarget.run.status)
+      ) {
+        const label = resolveBackfillContainerLabel(currentTarget.container_key);
+        setContainerRefreshProgress(currentTarget.container_key, {
+          runId: currentTarget.run.run_id,
+          status: currentTarget.run.status,
+          message: buildContainerRunProgressMessage(label, currentTarget.run),
+        });
+      }
+    },
+    [resolveBackfillContainerLabel, setContainerRefreshProgress],
+  );
+
+  const fetchBackfillOperation = useCallback(
+    async (operationId: string): Promise<AdminOperationState> => {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithTimeout(`/api/admin/trr-api/operations/${operationId}`, {
+        headers,
+        cache: "no-store",
+        timeoutMs: REQUEST_TIMEOUT_MS.runStatus,
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Failed to fetch reddit backfill operation");
+      }
+      const payload = (await response.json().catch(() => ({}))) as {
+        operation?: Record<string, unknown>;
+      };
+      const operation = payload.operation ?? {};
+      const status = operation.status;
+      if (!isAdminOperationStatus(status)) {
+        throw new Error("Invalid reddit backfill operation payload");
+      }
+      return {
+        id: typeof operation.id === "string" ? operation.id : operationId,
+        status,
+        progress_payload:
+          operation.progress_payload && typeof operation.progress_payload === "object"
+            ? (operation.progress_payload as RedditBackfillOperationPayload)
+            : null,
+        result_payload:
+          operation.result_payload && typeof operation.result_payload === "object"
+            ? (operation.result_payload as RedditBackfillOperationPayload)
+            : null,
+        error_payload:
+          operation.error_payload && typeof operation.error_payload === "object"
+            ? (operation.error_payload as Record<string, unknown>)
+            : null,
+        attached: typeof operation.attached === "boolean" ? operation.attached : undefined,
+      };
+    },
+    [fetchWithTimeout, getAuthHeaders],
+  );
+
+  useEffect(() => {
+    if (!backfillOperationId || !backfillRunning) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const operation = await fetchBackfillOperation(backfillOperationId);
+        if (cancelled) return;
+        applyBackfillOperationPayload(operation.result_payload ?? operation.progress_payload ?? null);
+        if (
+          operation.status === "completed" ||
+          operation.status === "failed" ||
+          operation.status === "cancelled"
+        ) {
+          setBackfillRunning(false);
+          setStoredCountsRefreshNonce((current) => current + 1);
+          if (operation.status === "failed") {
+            const errorMessage =
+              typeof operation.error_payload?.message === "string"
+                ? operation.error_payload.message
+                : "Reddit stale-window recovery failed";
+            setError(errorMessage);
+          }
+          return;
+        }
+        timer = setTimeout(() => {
+          void poll();
+        }, CONTAINER_RUN_POLL_INTERVAL_MS);
+      } catch (error) {
+        if (cancelled) return;
+        setBackfillRunning(false);
+        setError(error instanceof Error ? error.message : "Failed to poll reddit backfill operation");
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [applyBackfillOperationPayload, backfillOperationId, backfillRunning, fetchBackfillOperation]);
 
   const pollContainerRefreshRun = useCallback(
     async (input: {
@@ -5262,6 +5799,7 @@ export default function RedditSourcesManager({
       const nextToken = (containerRefreshPollTokenRef.current[input.containerKey] ?? 0) + 1;
       containerRefreshPollTokenRef.current[input.containerKey] = nextToken;
       let transientErrors = 0;
+      let lastRun: RefreshRunStatus | null = null;
 
       for (let attempt = 0; attempt < CONTAINER_RUN_POLL_MAX_ATTEMPTS; attempt += 1) {
         let run: RefreshRunStatus;
@@ -5288,6 +5826,7 @@ export default function RedditSourcesManager({
         if (containerRefreshPollTokenRef.current[input.containerKey] !== nextToken) {
           throw new Error("Refresh polling superseded by newer request");
         }
+        lastRun = run;
         setContainerRefreshProgress(input.containerKey, {
           runId: run.run_id,
           status: run.status,
@@ -5325,9 +5864,7 @@ export default function RedditSourcesManager({
         };
       }
 
-      throw new Error(
-        `Refresh is still running for ${input.label}. Keep this page open or check again shortly.`,
-      );
+      throw new Error(buildContainerRefreshTimeoutMessage(input.label, lastRun));
     },
     [fetchDiscoveryForCommunity, fetchRefreshRunStatus, setContainerRefreshProgress],
   );
@@ -5694,7 +6231,14 @@ export default function RedditSourcesManager({
               void mergeDiscoveredFlairsIntoCommunity(selectedCommunity.id, polled.run.discovered_flairs);
             }
             shouldRefreshStoredCounts = true;
-            if (polled.warning && !discovered) {
+            if (isReddit403PartialRun(polled.run)) {
+              appendEpisodeContextWarning(
+                getRefreshRunOperatorHint(
+                  polled.run,
+                  `${bounds.label}: live scrape blocked by Reddit (403); showing cached posts when available.`,
+                ),
+              );
+            } else if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
             } else if (!discovered) {
               setEpisodeContextWarning(
@@ -5735,7 +6279,14 @@ export default function RedditSourcesManager({
               void mergeDiscoveredFlairsIntoCommunity(selectedCommunity.id, polled.run.discovered_flairs);
             }
             shouldRefreshStoredCounts = true;
-            if (polled.warning && !discovered) {
+            if (isReddit403PartialRun(polled.run)) {
+              appendEpisodeContextWarning(
+                getRefreshRunOperatorHint(
+                  polled.run,
+                  `${bounds.label}: live scrape blocked by Reddit (403); showing cached posts when available.`,
+                ),
+              );
+            } else if (polled.warning && !discovered) {
               setEpisodeContextWarning(polled.warning);
             } else if (!discovered) {
               setEpisodeContextWarning(
@@ -5746,13 +6297,37 @@ export default function RedditSourcesManager({
             }
             return;
           }
+          if (isReddit403PartialRun(discoveryResult.run)) {
+            appendEpisodeContextWarning(
+              getRefreshRunOperatorHint(
+                discoveryResult.run,
+                `${bounds.label}: live scrape blocked by Reddit (403); showing cached posts when available.`,
+              ),
+            );
+          }
           if (discoveryResult.warning) {
-            setEpisodeContextWarning(discoveryResult.warning);
+            if (isReddit403PartialRun(discoveryResult.run)) {
+              appendEpisodeContextWarning(discoveryResult.warning);
+            } else {
+              setEpisodeContextWarning(discoveryResult.warning);
+            }
           }
         } else {
           setContainerRefreshProgress(containerKey, null);
+          if (isReddit403PartialRun(discoveryResult.run)) {
+            appendEpisodeContextWarning(
+              getRefreshRunOperatorHint(
+                discoveryResult.run,
+                `${bounds.label}: live scrape blocked by Reddit (403); showing cached posts when available.`,
+              ),
+            );
+          }
           if (discoveryResult.warning) {
-            setEpisodeContextWarning(discoveryResult.warning);
+            if (isReddit403PartialRun(discoveryResult.run)) {
+              appendEpisodeContextWarning(discoveryResult.warning);
+            } else {
+              setEpisodeContextWarning(discoveryResult.warning);
+            }
           }
         }
       } catch (err) {
@@ -5827,6 +6402,7 @@ export default function RedditSourcesManager({
       }
     },
     [
+      appendEpisodeContextWarning,
       episodeSeasonId,
       fetchDiscoveryForCommunity,
       mergeDiscoveredFlairsIntoCommunity,
@@ -5844,6 +6420,79 @@ export default function RedditSourcesManager({
       await refreshPostsForContainerWithBounds(containerKey, bounds);
     },
     [episodeWindowBoundsByContainer, refreshPostsForContainerWithBounds],
+  );
+
+  const handleBackfillStaleWindows = useCallback(
+    async (options?: { detailRefresh?: boolean }) => {
+      const isDetailRefresh = options?.detailRefresh === true;
+      if (!selectedCommunity || !episodeSeasonId) return;
+      if (!isDetailRefresh && staleRedditContainers.length === 0) return;
+      setBackfillRunning(true);
+      setError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const containerKeys = isDetailRefresh
+          ? (redditAnalyticsSummary?.container_statuses ?? [])
+              .map((item) => item.container_key)
+              .filter((value): value is string => typeof value === "string" && value.length > 0)
+          : staleRedditContainers.map((item) => item.container_key);
+        const flowKey = `reddit-backfill:${selectedCommunity.id}:${episodeSeasonId}:${isDetailRefresh ? "detail" : "stale"}`;
+        const response = await fetchWithTimeout("/api/admin/reddit/runs/backfill", {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json", "x-trr-flow-key": flowKey },
+          body: JSON.stringify({
+            community_id: selectedCommunity.id,
+            season_id: episodeSeasonId,
+            container_keys: containerKeys,
+            mode: isDetailRefresh ? "sync_details" : "sync_full",
+            detail_refresh: isDetailRefresh,
+          }),
+          timeoutMs: REQUEST_TIMEOUT_MS.discoverRefresh,
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          operation_id?: string | null;
+          operation?: {
+            id?: string;
+            status?: AdminOperationStatus;
+            progress_payload?: RedditBackfillOperationPayload | null;
+            result_payload?: RedditBackfillOperationPayload | null;
+          } | null;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? (isDetailRefresh ? "Failed to enrich missing reddit detail" : "Failed to backfill stale reddit windows"));
+        }
+        const operationId =
+          (typeof payload.operation_id === "string" && payload.operation_id.trim()) ||
+          (typeof payload.operation?.id === "string" && payload.operation.id.trim()) ||
+          null;
+        if (!operationId) {
+          throw new Error("Reddit backfill started without an operation id");
+        }
+        setBackfillOperationId(operationId);
+        applyBackfillOperationPayload(payload.operation?.result_payload ?? payload.operation?.progress_payload ?? null);
+      } catch (error) {
+        setBackfillRunning(false);
+        setBackfillOperationId(null);
+        setBackfillOperationPayload(null);
+        setError(
+          error instanceof Error
+            ? error.message
+            : isDetailRefresh
+              ? "Failed to enrich missing reddit detail"
+              : "Failed to backfill stale reddit windows",
+        );
+      }
+    },
+    [
+      applyBackfillOperationPayload,
+      episodeSeasonId,
+      fetchWithTimeout,
+      getAuthHeaders,
+      redditAnalyticsSummary?.container_statuses,
+      selectedCommunity,
+      staleRedditContainers,
+    ],
   );
 
   const saveDiscoveredThread = async (thread: DiscoveryThread) => {
@@ -6715,6 +7364,7 @@ export default function RedditSourcesManager({
               linkedPostsByContainer: linkedDiscussionPostsByContainer,
               pendingFlairGroupsByContainer: pendingTrackedFlairGroupsByContainerWindow,
               pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
+              analyticsStatusByContainer: redditContainerStatusByKey,
               refreshProgressByContainer: containerRefreshProgressByKey,
               onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
               refreshingContainerKey,
@@ -7005,6 +7655,7 @@ export default function RedditSourcesManager({
                   {selectedRelevantPostFlairs.length} relevant flairs
                 </p>
                 {renderSupabaseSummary()}
+                {renderRedditAnalyticsSummary()}
               </>
             ) : (
               <h3 className="text-xl font-bold text-zinc-900">Community</h3>
@@ -7077,6 +7728,27 @@ export default function RedditSourcesManager({
                 >
                   {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
                 </button>
+                {staleRedditContainers.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={isBusy || episodeRefreshing || backfillRunning}
+                    onClick={() => void handleBackfillStaleWindows()}
+                    className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {backfillActionLabel}
+                  </button>
+                )}
+                {redditAnalyticsSummary?.coverage?.tracked_post_count &&
+                  (redditAnalyticsSummary.coverage.detail_coverage_pct ?? 0) < 100 && (
+                    <button
+                      type="button"
+                      disabled={isBusy || backfillRunning}
+                      onClick={() => void handleBackfillStaleWindows({ detailRefresh: true })}
+                      className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Enrich Missing Detail
+                    </button>
+                  )}
               </>
             )}
           </div>
@@ -7093,6 +7765,27 @@ export default function RedditSourcesManager({
             >
               {episodeRefreshing ? "Syncing… 🕷️" : "Sync Posts 🕷️"}
             </button>
+            {staleRedditContainers.length > 0 && (
+              <button
+                type="button"
+                disabled={isBusy || episodeRefreshing || backfillRunning}
+                onClick={() => void handleBackfillStaleWindows()}
+                className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {backfillActionLabel}
+              </button>
+            )}
+            {redditAnalyticsSummary?.coverage?.tracked_post_count &&
+              (redditAnalyticsSummary.coverage.detail_coverage_pct ?? 0) < 100 && (
+                <button
+                  type="button"
+                  disabled={isBusy || backfillRunning}
+                  onClick={() => void handleBackfillStaleWindows({ detailRefresh: true })}
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Enrich Missing Detail
+                </button>
+              )}
             <button
               type="button"
               disabled={isBusy}
@@ -7709,6 +8402,7 @@ export default function RedditSourcesManager({
                       {selectedRelevantPostFlairs.length} relevant flairs
                     </p>
                     {renderSupabaseSummary()}
+                    {renderRedditAnalyticsSummary()}
                     {selectedCommunity.notes && (
                       <p className="mt-2 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                         {selectedCommunity.notes}
@@ -8286,6 +8980,7 @@ export default function RedditSourcesManager({
                           linkedPostsByContainer: linkedDiscussionPostsByContainer,
                           pendingFlairGroupsByContainer: pendingTrackedFlairGroupsByContainerWindow,
                           pendingPrimaryFlairKey: trackedUnassignedFlairLabel,
+                          analyticsStatusByContainer: redditContainerStatusByKey,
                           refreshProgressByContainer: containerRefreshProgressByKey,
                           onRefreshContainerPosts: (containerKey) => void handleRefreshPostsForContainer(containerKey),
                           refreshingContainerKey,

@@ -137,13 +137,40 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill History" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
     expect(screen.getByText("Catalog Posts")).toBeInTheDocument();
     expect(screen.getByText("Pending Review")).toBeInTheDocument();
     expect(screen.queryByText("Catalog Actions Unavailable In V1")).not.toBeInTheDocument();
+  });
+
+  it("queues a full-history catalog backfill from the primary CTA", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ backfill_scope: "full_history" }));
+        return jsonResponse({ run_id: "catalog-run-12345678", status: "queued" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
+    });
   });
 
   it("renders TikTok catalog actions and skips the Instagram-only hashtag timeline fetch", async () => {
@@ -176,7 +203,7 @@ describe("SocialAccountProfilePage", () => {
     const { rerender } = render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill History" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -221,7 +248,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill History" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -229,6 +256,161 @@ describe("SocialAccountProfilePage", () => {
       "href",
       "https://x.com/bravotv",
     );
+  });
+
+  it("expands caption search without switching tabs and shows backend search results", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "instagram",
+        });
+      }
+      if (url.includes("/posts?page=1&page_size=25&search=%23BravoCon")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "post-1",
+              source_id: "source-1",
+              platform: "instagram",
+              account_handle: "bravotv",
+              title: "BravoCon backstage",
+              content: "Catch @andycohen and the cast live from #BravoCon.",
+              posted_at: "2026-03-18T12:00:00.000Z",
+              show_name: "Watch What Happens Live",
+              season_number: 21,
+              hashtags: ["BravoCon"],
+              mentions: ["andycohen"],
+              collaborators: ["andycohen"],
+              tags: ["bravotv"],
+              metrics: {},
+            },
+          ],
+          pagination: {
+            page: 1,
+            page_size: 100,
+            total: 1,
+            total_pages: 1,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Stats" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open caption search" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("searchbox", { name: "Search captions" })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search captions" }), {
+      target: { value: "#BravoCon" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Caption Search", level: 2 })).toBeInTheDocument();
+      expect(screen.getByText("BravoCon backstage")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText((content) => content.includes("1 matching caption") && content.includes("#BravoCon")),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("RHOSLC reunion")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Collaborators / Tags", level: 2 })).not.toBeInTheDocument();
+  });
+
+  it("shows the caption search control beside the tab pills before any tab change", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Collaborators / Tags" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: "Open caption search" })).toBeInTheDocument();
+    expect(screen.getByText("Search Posts")).toBeInTheDocument();
+  });
+
+  it("renders separate collaborator, tagged account, and mention columns", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+        });
+      }
+      if (url.includes("/collaborators-tags")) {
+        return jsonResponse({
+          collaborators: [
+            {
+              handle: "bravochatroom",
+              platform: "tiktok",
+              usage_count: 4,
+              post_count: 4,
+              latest_seen_at: "2026-03-22T12:00:00.000Z",
+              shows: [],
+              seasons: [],
+            },
+          ],
+          tags: [
+            {
+              handle: "staciarusch",
+              platform: "tiktok",
+              usage_count: 2,
+              post_count: 2,
+              latest_seen_at: "2026-03-21T12:00:00.000Z",
+              shows: [],
+              seasons: [],
+            },
+          ],
+          mentions: [
+            {
+              handle: "peacock",
+              platform: "tiktok",
+              usage_count: 12,
+              post_count: 12,
+              latest_seen_at: "2026-03-22T12:00:00.000Z",
+              shows: [],
+              seasons: [],
+            },
+          ],
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="collaborators-tags" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Collaborators / Tagged Accounts / Mentions", level: 2 })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("heading", { name: "Collaborators", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tagged Accounts", level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Mentions", level: 2 })).toBeInTheDocument();
+    expect(screen.getByText("@bravochatroom")).toBeInTheDocument();
+    expect(screen.getByText("@staciarusch")).toBeInTheDocument();
+    expect(screen.getByText("@peacock")).toBeInTheDocument();
   });
 
   it("renders YouTube catalog actions and skips the Instagram-only hashtag timeline fetch", async () => {
@@ -262,7 +444,7 @@ describe("SocialAccountProfilePage", () => {
     const { rerender } = render(<SocialAccountProfilePage platform="youtube" handle="bravo" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill History" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -509,7 +691,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill History" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
@@ -566,7 +748,7 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText((content) => content.includes("Run run-acti") && content.includes("Running")),
+        screen.getByText("Run run-acti is Running. Start buttons unlock after it finishes or you cancel it."),
       ).toBeInTheDocument();
     });
   });
@@ -640,7 +822,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill History" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
     });
 
     const failedRunCard = screen.getByText("Run run-fail").closest(".rounded-xl");
@@ -654,7 +836,7 @@ describe("SocialAccountProfilePage", () => {
         ),
       ).toBe(true);
     });
-    expect(screen.getByRole("button", { name: "Backfill History" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
   });
 
@@ -758,6 +940,711 @@ describe("SocialAccountProfilePage", () => {
     expect(cancelCalls[0]).not.toContain("/catalog/runs/run-old-history/cancel");
   });
 
+  it("uses live progress status in the action banner when summary status is stale", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-live-1",
+              status: "queued",
+              created_at: "2026-03-22T07:45:33.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-live-1/progress")) {
+        return jsonResponse({
+          run_id: "run-live-1",
+          run_status: "running",
+          source_scope: "bravo",
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          summary: {
+            total_jobs: 2,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 2,
+            items_found_total: 24,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Run run-live is Running\./)).toBeInTheDocument();
+    });
+  });
+
+  it("shows waiting for Modal capacity when a queued catalog job is pending inside Modal", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravotv",
+          profile_url: "https://www.tiktok.com/@bravotv",
+          catalog_recent_runs: [
+            {
+              run_id: "run-modal-wait-1",
+              status: "queued",
+              created_at: "2026-03-22T09:45:33.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-modal-wait-1/progress")) {
+        return jsonResponse({
+          run_id: "run-modal-wait-1",
+          run_status: "queued",
+          source_scope: "bravo",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 0,
+              jobs_waiting: 1,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 0,
+            modal_pending_jobs: 1,
+            modal_running_unclaimed_jobs: 0,
+            retrying_dispatch_jobs: 0,
+            stale_dispatch_failed_jobs: 0,
+            latest_dispatch_requested_at: "2026-03-22T09:45:33.000Z",
+            remote_invocation_checked_at: "2026-03-22T09:46:03.000Z",
+            max_stale_dispatch_retries: 3,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Waiting for Modal capacity")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/already dispatched to Modal and waiting for capacity/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+  });
+
+  it("keeps waiting for Modal worker when the backend has no live remote invocation yet", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravotv",
+          profile_url: "https://www.tiktok.com/@bravotv",
+          catalog_recent_runs: [
+            {
+              run_id: "run-modal-worker-1",
+              status: "queued",
+              created_at: "2026-03-22T09:45:33.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-modal-worker-1/progress")) {
+        return jsonResponse({
+          run_id: "run-modal-worker-1",
+          run_status: "queued",
+          source_scope: "bravo",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 0,
+              jobs_waiting: 1,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 1,
+            modal_pending_jobs: 0,
+            modal_running_unclaimed_jobs: 0,
+            retrying_dispatch_jobs: 0,
+            stale_dispatch_failed_jobs: 0,
+            latest_dispatch_requested_at: "2026-03-22T09:45:33.000Z",
+            max_stale_dispatch_retries: 3,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Waiting for Modal worker")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/waiting for a Modal worker claim/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows retrying remote dispatch when the backend is recovering stale unclaimed Modal dispatches", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-retry-1",
+              status: "queued",
+              created_at: "2026-03-22T09:45:33.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-retry-1/progress")) {
+        return jsonResponse({
+          run_id: "run-retry-1",
+          run_status: "queued",
+          source_scope: "bravo",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 0,
+              jobs_waiting: 1,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 0,
+            retrying_dispatch_jobs: 1,
+            stale_dispatch_failed_jobs: 0,
+            max_stale_dispatch_retries: 3,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Retrying remote dispatch")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/retrying remote dispatch after an unclaimed Modal lease expired/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders single-runner fallback shared-account posts as catalog fetch with checked counts", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravotv",
+          profile_url: "https://www.tiktok.com/@bravotv",
+          total_posts: 10_100,
+          catalog_recent_runs: [
+            {
+              run_id: "run-fallback-fetch-1",
+              status: "running",
+              created_at: "2026-03-22T10:31:06.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-fallback-fetch-1/progress")) {
+        return jsonResponse({
+          run_id: "run-fallback-fetch-1",
+          run_status: "running",
+          source_scope: "bravo",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+            shared_account_posts: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 1,
+              jobs_waiting: 0,
+              scraped_count: 42,
+              saved_count: 18,
+            },
+          },
+          per_handle: [
+            {
+              platform: "tiktok",
+              account_handle: "bravotv",
+              stage: "shared_account_discovery",
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+              has_started: true,
+              next_stage: "shared_account_posts",
+            },
+            {
+              platform: "tiktok",
+              account_handle: "bravotv",
+              stage: "shared_account_posts",
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 1,
+              jobs_waiting: 0,
+              scraped_count: 42,
+              saved_count: 18,
+              has_started: true,
+            },
+          ],
+          recent_log: [
+            {
+              id: "log-1",
+              timestamp: "2026-03-22T10:35:01.000Z",
+              platform: "tiktok",
+              account_handle: "bravotv",
+              stage: "shared_account_posts",
+              status: "running",
+              line: "Importing TikTok posts",
+            },
+          ],
+          worker_runtime: {
+            runner_strategy: "single_runner_fallback",
+            partition_strategy: "cursor_breakpoints",
+            runner_count: 1,
+          },
+          summary: {
+            total_jobs: 2,
+            completed_jobs: 1,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 42,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Fetching catalog posts")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("Catalog Fetch").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Shard Workers")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/42 checked · 18 saved/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Next Catalog Fetch/)).toBeInTheDocument();
+  });
+
+  it("shows an explicit stale-dispatch failure message instead of leaving the page in a fake active state", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-stale-fail-1",
+              status: "queued",
+              created_at: "2026-03-22T09:45:33.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-stale-fail-1/progress")) {
+        return jsonResponse({
+          run_id: "run-stale-fail-1",
+          run_status: "failed",
+          source_scope: "bravo",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 1,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 0,
+            retrying_dispatch_jobs: 0,
+            stale_dispatch_failed_jobs: 1,
+            max_stale_dispatch_retries: 3,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 1,
+            active_jobs: 0,
+            items_found_total: 0,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Cancel this run before retrying/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
+  });
+
+  it("keeps cancel success visible when the follow-up summary refresh times out", async () => {
+    const cancelCalls: string[] = [];
+    let summaryCalls = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        summaryCalls += 1;
+        if (summaryCalls === 1) {
+          return jsonResponse({
+            ...baseSummary,
+            catalog_recent_runs: [
+              {
+                run_id: "cancelok1-run",
+                status: "running",
+                created_at: "2026-03-22T07:45:33.000Z",
+              },
+            ],
+          });
+        }
+        return jsonResponse({ error: "TRR-Backend request timed out." }, 504);
+      }
+      if (url.includes("/catalog/runs/cancelok1-run/progress")) {
+        return jsonResponse({
+          run_id: "cancelok1-run",
+          run_status: "running",
+          source_scope: "bravo",
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 10,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      if (url.includes("/cancel")) {
+        expect(init?.method).toBe("POST");
+        cancelCalls.push(url);
+        return jsonResponse({ ok: true });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Cancelled run cancelok.")).toBeInTheDocument();
+    });
+    expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/cancelok1-run/cancel")]);
+    expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
+    expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
+  });
+
+  it("reconciles a cancel attempt when the first cancel request fails but the run is already cancelled upstream", async () => {
+    const cancelCalls: string[] = [];
+    let progressCalls = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "cancel-race-1",
+              status: "running",
+              created_at: "2026-03-22T10:05:20.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/cancel-race-1/progress")) {
+        progressCalls += 1;
+        return jsonResponse({
+          run_id: "cancel-race-1",
+          run_status: progressCalls === 1 ? "running" : "cancelled",
+          source_scope: "bravo",
+          completed_at: progressCalls === 1 ? null : "2026-03-22T10:14:53.000Z",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 33,
+              saved_count: 33,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          summary: {
+            total_jobs: 2,
+            completed_jobs: progressCalls === 1 ? 1 : 2,
+            failed_jobs: 0,
+            active_jobs: progressCalls === 1 ? 1 : 0,
+            items_found_total: 33,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      if (url.includes("/cancel")) {
+        expect(init?.method).toBe("POST");
+        cancelCalls.push(url);
+        return jsonResponse(
+          { error: "Could not reach TRR-Backend. Confirm TRR-Backend is running and TRR_API_URL is correct." },
+          502,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Cancelled run cancel-r.")).toBeInTheDocument();
+    });
+    expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/cancel-race-1/cancel")]);
+    expect(progressCalls).toBeGreaterThan(1);
+    expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
+  });
+
+  it("cancels a queued run and unlocks catalog actions immediately", async () => {
+    const cancelCalls: string[] = [];
+    let cancelled = false;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: cancelled
+            ? []
+            : [
+                {
+                  run_id: "queued-run-1",
+                  status: "queued",
+                  created_at: "2026-03-22T09:45:33.000Z",
+                },
+              ],
+        });
+      }
+      if (url.includes("/catalog/runs/queued-run-1/progress")) {
+        return jsonResponse({
+          run_id: "queued-run-1",
+          run_status: "queued",
+          source_scope: "bravo",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 0,
+              jobs_waiting: 1,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 1,
+            retrying_dispatch_jobs: 0,
+            stale_dispatch_failed_jobs: 0,
+            latest_dispatch_requested_at: "2026-03-22T09:45:33.000Z",
+            max_stale_dispatch_retries: 3,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      if (url.includes("/cancel")) {
+        expect(init?.method).toBe("POST");
+        cancelled = true;
+        cancelCalls.push(url);
+        return jsonResponse({ ok: true });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Run" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Cancelled run queued-r.")).toBeInTheDocument();
+    });
+    expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/queued-run-1/cancel")]);
+    expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
+  });
+
   it("shows restart backfill after a terminal catalog run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -796,7 +1683,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill History" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Restart Backfill" })).not.toBeInTheDocument();
     expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
@@ -1002,6 +1889,97 @@ describe("SocialAccountProfilePage", () => {
     12_000,
   );
 
+  it(
+    "keeps the last good summary visible when a live refresh times out during an active run",
+    async () => {
+      let summaryCalls = 0;
+
+      mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/summary")) {
+          summaryCalls += 1;
+          if (summaryCalls === 1) {
+            return jsonResponse({
+              ...baseSummary,
+              catalog_recent_runs: [
+                {
+                  run_id: "run-timeout-1",
+                  status: "running",
+                  created_at: "2026-03-20T15:14:42.000Z",
+                },
+              ],
+            });
+          }
+          return jsonResponse({ error: "TRR-Backend request timed out." }, 504);
+        }
+        if (url.includes("/catalog/runs/run-timeout-1/progress")) {
+          return jsonResponse({
+            run_id: "run-timeout-1",
+            run_status: "running",
+            source_scope: "bravo",
+            stages: {},
+            per_handle: [],
+            recent_log: [],
+            summary: {
+              total_jobs: 2,
+              completed_jobs: 0,
+              failed_jobs: 0,
+              active_jobs: 2,
+              items_found_total: 24,
+            },
+          });
+        }
+        throw new Error(`Unhandled request: ${url}`);
+      });
+
+      render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: "Distribution" })).toBeInTheDocument();
+      });
+
+      await waitFor(
+        () => {
+          expect(summaryCalls).toBeGreaterThan(1);
+        },
+        { timeout: 7_000 },
+      );
+      expect(screen.getByRole("heading", { name: "Distribution" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
+    },
+    12_000,
+  );
+
+  it("clears stale summary content when switching to a different handle", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        if (url.includes("/bravotv/summary")) {
+          return jsonResponse(baseSummary);
+        }
+        if (url.includes("/bravowwhl/summary")) {
+          return jsonResponse({ error: "TRR-Backend request timed out." }, 504);
+        }
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    const { rerender } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Distribution" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("The Real Housewives of Salt Lake City")).toBeInTheDocument();
+
+    rerender(<SocialAccountProfilePage platform="instagram" handle="bravowwhl" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("TRR-Backend request timed out.")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("heading", { name: "Distribution" })).not.toBeInTheDocument();
+    expect(screen.queryByText("The Real Housewives of Salt Lake City")).not.toBeInTheDocument();
+  });
+
   it("treats scrape-complete classify backlog as completed for actions and status copy", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1095,7 +2073,7 @@ describe("SocialAccountProfilePage", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Backfill History" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     expect(screen.getByText("Background")).toBeInTheDocument();
   });
 
@@ -1396,7 +2374,7 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Dismissed run run-fail.")).toBeInTheDocument();
   });
 
-  it("hides catalog actions for unsupported platforms", async () => {
+  it("renders Facebook catalog actions with the shared profile UI", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -1404,19 +2382,35 @@ describe("SocialAccountProfilePage", () => {
           ...baseSummary,
           platform: "facebook",
           account_handle: "bravotv",
+          profile_url: "https://www.facebook.com/bravotv",
+          avatar_url: "https://images.test/facebook-avatar.jpg",
+          display_name: "Bravo TV",
+          is_verified: true,
+          total_posts: 320,
+          catalog_total_posts: 320,
+          live_catalog_total_posts: 320,
         });
+      }
+      if (url.endsWith("/hashtags")) {
+        return jsonResponse({ items: [] });
+      }
+      if (url.endsWith("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="facebook" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="facebook" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Catalog Actions Unavailable In V1")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole("button", { name: "Backfill History" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Sync Recent" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open public profile" })).toHaveAttribute(
+      "href",
+      "https://www.facebook.com/bravotv",
+    );
   });
 
   it("renders the catalog tab empty state", async () => {

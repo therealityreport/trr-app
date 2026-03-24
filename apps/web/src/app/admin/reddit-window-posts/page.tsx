@@ -68,6 +68,14 @@ interface DiscoveryPayload {
   threads: DiscoveryThread[];
 }
 
+interface AnalyticsPostsPayload {
+  pagination?: {
+    total_count?: number;
+  };
+  posts?: DiscoveryThread[];
+  error?: string;
+}
+
 interface RedditCommunityListItem {
   id: string;
   trr_show_id: string;
@@ -129,6 +137,29 @@ interface WindowContext {
   isShowFocused: boolean;
   analysisAllFlairs: string[];
 }
+
+const toDiscoveryPayloadFromAnalytics = (
+  payload: AnalyticsPostsPayload | null | undefined,
+  context: WindowContext,
+): DiscoveryPayload | null => {
+  const posts = Array.isArray(payload?.posts) ? payload.posts : [];
+  const totalCount =
+    typeof payload?.pagination?.total_count === "number" && Number.isFinite(payload.pagination.total_count)
+      ? payload.pagination.total_count
+      : posts.length;
+  if (totalCount <= 0 && posts.length === 0) return null;
+  return {
+    fetched_at: new Date().toISOString(),
+    window_start: context.periodStart,
+    window_end: context.periodEnd,
+    totals: {
+      fetched_rows: totalCount,
+      matched_rows: totalCount,
+      tracked_flair_rows: totalCount,
+    },
+    threads: posts,
+  };
+};
 
 type ResolverStage =
   | "init"
@@ -1233,6 +1264,67 @@ function AdminRedditWindowPostsPageContent() {
         setResolverStage("loading_cache");
       }
       try {
+        if (!refresh) {
+          const cacheParams = new URLSearchParams({
+            scope: "season",
+            season_id: context.seasonId,
+            container_key: context.containerKey,
+            page: "1",
+            per_page: "200",
+          });
+          let cacheFallbackWarning: string | null = null;
+
+          const storedResponse = await fetchAdminJsonWithTimeout<AnalyticsPostsPayload>({
+            url: `/api/admin/reddit/communities/${context.communityId}/stored-posts?${cacheParams.toString()}`,
+            timeoutMs: 12_000,
+            preferredUser: user,
+            signal: loadController.signal,
+          });
+          if (!loadController.signal.aborted && storedResponse.ok) {
+            const storedDiscovery = toDiscoveryPayloadFromAnalytics(storedResponse.payload, context);
+            if (storedDiscovery) {
+              effectiveDiscoveryRef.current = storedDiscovery;
+              setDiscovery(storedDiscovery);
+              setLoading(false);
+              return;
+            }
+          } else if (!storedResponse.ok) {
+            cacheFallbackWarning =
+              storedResponse.payload.error?.trim() ||
+              "Stored window posts were unavailable; falling back to analytics cache.";
+          }
+
+          const analyticsResponse = await fetchAdminJsonWithTimeout<AnalyticsPostsPayload>({
+            url: `/api/admin/reddit/analytics/community/${context.communityId}/posts?${cacheParams.toString()}`,
+            timeoutMs: 12_000,
+            preferredUser: user,
+            signal: loadController.signal,
+          });
+          if (!loadController.signal.aborted && analyticsResponse.ok) {
+            const storedDiscovery = toDiscoveryPayloadFromAnalytics(analyticsResponse.payload, context);
+            if (storedDiscovery) {
+              effectiveDiscoveryRef.current = storedDiscovery;
+              setDiscovery(storedDiscovery);
+              if (cacheFallbackWarning) {
+                setWarning(cacheFallbackWarning);
+              }
+              setLoading(false);
+              return;
+            }
+          } else if (!analyticsResponse.ok) {
+            const analyticsError =
+              analyticsResponse.payload.error?.trim() ||
+              "Analytics cache was unavailable; falling back to live discovery.";
+            cacheFallbackWarning = cacheFallbackWarning
+              ? `${cacheFallbackWarning} ${analyticsError}`
+              : analyticsError;
+          }
+
+          if (cacheFallbackWarning) {
+            setWarning(cacheFallbackWarning);
+          }
+        }
+
         const paramsObj = new URLSearchParams({
           season_id: context.seasonId,
           container_key: context.containerKey,

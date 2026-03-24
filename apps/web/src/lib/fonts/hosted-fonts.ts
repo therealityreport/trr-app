@@ -13,11 +13,11 @@ export interface HostedFontPreload {
 
 export const HOSTED_FONT_PRELOADS: HostedFontPreload[] = [
   {
-    assetPath: "/fonts/monotype/Hamburg%20Serial/HamburgSerial-930108065.otf",
+    assetPath: "/fonts/trr/Hamburg%20Serial/HamburgSerial-930108065.otf",
     type: "font/otf",
   },
   {
-    assetPath: "/fonts/monotype/Gloucester/GloucesterOldStyle-5735713.ttf",
+    assetPath: "/fonts/trr/Gloucester/GloucesterOldStyle-5735713.ttf",
     type: "font/ttf",
   },
 ] as const;

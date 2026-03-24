@@ -1,3 +1,5 @@
+import { Agent } from "undici";
+
 export type SseProxyErrorCode = "TIMEOUT" | "ABORTED" | "NETWORK" | "UNKNOWN";
 
 const RETRYABLE_NETWORK_ERROR_CODES = new Set([
@@ -11,7 +13,19 @@ const RETRYABLE_NETWORK_ERROR_CODES = new Set([
   "ENOTFOUND",
   "UND_ERR_CONNECT_TIMEOUT",
   "UND_ERR_SOCKET",
+  "UND_ERR_BODY_TIMEOUT",
 ]);
+
+const SSE_STREAM_DISPATCHER = new Agent({
+  bodyTimeout: 0,
+  headersTimeout: 0,
+});
+
+export const withStreamingSseFetch = <T extends RequestInit>(init: T): T & { dispatcher: unknown } =>
+  ({
+    ...init,
+    dispatcher: SSE_STREAM_DISPATCHER,
+  }) as T & { dispatcher: unknown };
 
 export const isRetryableSseNetworkError = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false;

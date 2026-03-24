@@ -19,6 +19,7 @@ describe("design system routing", () => {
 
   it("builds canonical hrefs for tabs and subtabs", () => {
     expect(buildDesignSystemHref("fonts")).toBe("/design-system/fonts");
+    expect(buildDesignSystemHref("admin-labels")).toBe("/design-system/admin-labels");
     expect(buildDesignSystemHref("colors")).toBe("/design-system/colors");
     expect(buildDesignSystemHref("buttons")).toBe("/design-system/buttons");
     expect(buildDesignSystemHref("questions-forms")).toBe("/design-system/questions-forms");
@@ -37,6 +38,13 @@ describe("design system routing", () => {
       subtab: null,
       isCanonical: true,
       canonicalHref: "/design-system/fonts",
+    });
+
+    expect(resolveDesignSystemRoute("admin-labels", null)).toEqual({
+      tab: "admin-labels",
+      subtab: null,
+      isCanonical: true,
+      canonicalHref: "/design-system/admin-labels",
     });
 
     expect(resolveDesignSystemRoute("questions-forms", ["admin"])).toEqual({

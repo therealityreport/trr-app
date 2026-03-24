@@ -5,6 +5,7 @@ import {
   isRetryableSseNetworkError,
   normalizeSseProxyError,
   runBackendHealthPreflight,
+  withStreamingSseFetch,
 } from "@/lib/server/sse-proxy";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ const RETRYABLE_FETCH_ERROR_CODES = new Set([
   "EHOSTUNREACH",
   "ENOTFOUND",
   "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
 ]);
 
 interface RouteParams {
@@ -333,19 +335,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           const requestController = new AbortController();
           const attemptStartedAt = Date.now();
           const timeout = setTimeout(() => requestController.abort(), proxyConfig.connectAttemptTimeoutMs);
-          const fetchPromise = fetch(backendUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${serviceRoleKey}`,
-              ...(requestId ? { "x-trr-request-id": requestId } : {}),
-              ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
-              ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
-            },
-            body: JSON.stringify(body ?? {}),
-            signal: requestController.signal,
-            cache: "no-store",
-          });
+          const fetchPromise = fetch(
+            backendUrl,
+            withStreamingSseFetch({
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${serviceRoleKey}`,
+                ...(requestId ? { "x-trr-request-id": requestId } : {}),
+                ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+                ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
+              },
+              body: JSON.stringify(body ?? {}),
+              signal: requestController.signal,
+              cache: "no-store",
+            })
+          );
 
           let fetchSettled = false;
           fetchPromise.then(

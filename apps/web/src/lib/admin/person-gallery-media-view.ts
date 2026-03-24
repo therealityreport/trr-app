@@ -34,7 +34,7 @@ type PersonGalleryShowOptionAccumulator = {
   acronym: string | null;
 };
 
-export type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery" | "getty" | "nbcumv";
+export type CanonicalScopedSource = "imdb" | "tmdb" | "fandom" | "fandom-gallery" | "getty" | "nbcumv" | "bravotv";
 
 export const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
   "fandom",
@@ -42,6 +42,7 @@ export const CANONICAL_SCOPED_SOURCE_ORDER: CanonicalScopedSource[] = [
   "getty",
   "imdb",
   "nbcumv",
+  "bravotv",
   "tmdb",
 ];
 
@@ -97,6 +98,7 @@ export function toCanonicalScopedSource(value: string | null | undefined): Canon
   if (normalized === "fandom-gallery") return "fandom-gallery";
   if (normalized === "getty") return "getty";
   if (normalized === "nbcumv") return "nbcumv";
+  if (normalized === "bravotv") return "bravotv";
   return null;
 }
 

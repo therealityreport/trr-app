@@ -188,6 +188,47 @@ type QueueStatus = {
   };
 };
 
+type AdminOperationHealthEntry = {
+  id: string;
+  operation_type: string;
+  status: string;
+  claimed_by_worker_id?: string | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  execution_backend_canonical?: string | null;
+  latest_phase?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  heartbeat_at?: string | null;
+  cancel_requested_at?: string | null;
+  age_seconds?: number | null;
+  last_update_age_seconds?: number | null;
+  cancel_requested_age_seconds?: number | null;
+  is_stale?: boolean;
+  stale_reason?: string | null;
+};
+
+type AdminOperationsHealth = {
+  summary: {
+    active_total: number;
+    stale_total: number;
+    cancelling_total: number;
+    by_status: Record<string, number>;
+    by_type: Record<string, number>;
+    runtime_split: {
+      modal: number;
+      local: number;
+      other: number;
+      unknown: number;
+    };
+    stale_after_seconds: number;
+    cancelling_grace_seconds: number;
+  };
+  active_operations: AdminOperationHealthEntry[];
+  stale_operations: AdminOperationHealthEntry[];
+  updated_at?: string;
+};
+
 type HealthDotStatus = {
   queue_enabled: boolean;
   workers: {
@@ -236,6 +277,9 @@ const DISMISS_RECENT_FAILURES_URL = "/api/admin/trr-api/social/ingest/recent-fai
 const PURGE_INACTIVE_WORKERS_URL = "/api/admin/trr-api/social/ingest/workers/purge-inactive";
 const WORKER_DETAIL_URL_BASE = "/api/admin/trr-api/social/ingest/workers";
 const DEBUG_JOB_URL_BASE = "/api/admin/trr-api/social/ingest/jobs";
+const ADMIN_OPERATIONS_HEALTH_URL = "/api/admin/trr-api/operations/health";
+const CANCEL_STALE_ADMIN_OPERATIONS_URL = "/api/admin/trr-api/operations/stale/cancel";
+const ADMIN_OPERATIONS_HEALTH_LIMIT = 100;
 
 const LEASE_STORAGE_KEY = "trr:admin:health-dot:leader:v1";
 const SNAPSHOT_STORAGE_KEY = "trr:admin:health-dot:snapshot:v1";
@@ -435,6 +479,17 @@ function formatStageLabel(stage: string): string {
     default:
       return titleCaseWords(normalized || "Unknown stage");
   }
+}
+
+function formatAdminOperationTypeLabel(operationType: string | null | undefined): string {
+  const normalized = String(operationType ?? "").trim().toLowerCase();
+  if (!normalized) return "Unknown operation";
+  return normalized
+    .replace(/^admin_/, "")
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function formatWorkerRoleLabel(stage: string): string {
@@ -702,7 +757,7 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
   } else if (likelyStuckCount > 0) {
     statusSummary = "Workers are online, but some jobs likely need intervention.";
   } else if (recentFailureCount > 0) {
-    statusSummary = "Workers are available, but there are recent failures to review.";
+    statusSummary = "Workers are available. Recent failures are historical, but they are still worth reviewing.";
   } else if (jobRunning > 0 || runStatuses.running > 0) {
     statusSummary = "Workers are online and jobs are moving.";
   }
@@ -1308,6 +1363,83 @@ function useQueueStatusModal(options: { isOpen: boolean }) {
   };
 }
 
+function useAdminOperationsHealthModal(options: { isOpen: boolean }) {
+  const [data, setData] = useState<AdminOperationsHealth | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastFetched, setLastFetched] = useState<Date | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightRef = useRef(false);
+
+  const fetchStatus = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new DOMException("Request timed out", "AbortError")),
+      QUEUE_STATUS_FETCH_TIMEOUT_MS,
+    );
+
+    try {
+      const response = await fetchAdminWithAuth(
+        `${ADMIN_OPERATIONS_HEALTH_URL}?limit=${ADMIN_OPERATIONS_HEALTH_LIMIT}`,
+        { cache: "no-store", signal: controller.signal },
+        { allowDevAdminBypass: true },
+      );
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        setError(typeof body.error === "string" ? body.error : `HTTP ${response.status}`);
+        return;
+      }
+      const json = (await response.json()) as AdminOperationsHealth;
+      setData(json);
+      setError(null);
+      setLastFetched(new Date());
+    } catch (err) {
+      setError(normalizeFetchErrorMessage(err));
+    } finally {
+      clearTimeout(timeout);
+      inFlightRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!options.isOpen) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) return;
+      await fetchStatus();
+      if (cancelled) return;
+      timeoutRef.current = setTimeout(() => {
+        void poll();
+      }, QUEUE_STATUS_POLL_INTERVAL_MS);
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [fetchStatus, options.isOpen]);
+
+  return {
+    data,
+    error,
+    lastFetched,
+    refetch: fetchStatus,
+  };
+}
+
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     running: "bg-blue-100 text-blue-800",
@@ -1671,6 +1803,63 @@ function RunningJobs({ jobs }: { jobs: RunningJobEntry[] }) {
   );
 }
 
+function AdminOperationsTable({
+  operations,
+  emptyMessage,
+}: {
+  operations: AdminOperationHealthEntry[];
+  emptyMessage: string;
+}) {
+  if (operations.length === 0) {
+    return <p className="text-sm text-zinc-400">{emptyMessage}</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {operations.map((operation) => (
+        <div key={operation.id} className="rounded-xl border border-zinc-200 bg-white px-3 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-zinc-900">
+              {formatAdminOperationTypeLabel(operation.operation_type)}
+            </span>
+            <StatusBadge status={operation.status} />
+            {operation.is_stale ? (
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+                {formatStuckReasonLabel(operation.stale_reason)}
+              </span>
+            ) : null}
+            <span className="ml-auto text-[11px] text-zinc-400">
+              age {formatAgeSeconds(operation.age_seconds)} · last update {formatAgeSeconds(operation.last_update_age_seconds)}
+            </span>
+          </div>
+          <div className="mt-2 grid gap-2 text-xs text-zinc-500 md:grid-cols-4">
+            <p>
+              Operation: <span className="font-mono text-zinc-700">{truncate(operation.id, 8)}</span>
+            </p>
+            <p>
+              Runtime:{" "}
+              <span className="text-zinc-700">
+                {formatExecutionBackendLabel(operation.execution_backend_canonical)} · {formatExecutionOwnerLabel(operation.execution_owner)}
+              </span>
+            </p>
+            <p>
+              Phase: <span className="text-zinc-700">{formatPhaseLabel(operation.latest_phase)}</span>
+            </p>
+            <p>
+              Worker: <span className="font-mono text-zinc-700">{truncate(operation.claimed_by_worker_id ?? "-", 24)}</span>
+            </p>
+          </div>
+          {typeof operation.cancel_requested_age_seconds === "number" ? (
+            <p className="mt-2 text-[11px] text-zinc-400">
+              Cancel requested {formatAgeSeconds(operation.cancel_requested_age_seconds)} ago
+            </p>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function RecentFailures({
   failures,
   dismissingFailureIds,
@@ -1968,9 +2157,11 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
 
   const healthDot = useSharedHealthDot({ isOpen, isSocialRoute: socialRoute });
   const queueStatus = useQueueStatusModal({ isOpen });
+  const adminOperations = useAdminOperationsHealthModal({ isOpen });
   const [cancelingJobIds, setCancelingJobIds] = useState<Set<string>>(new Set());
   const [dismissingFailureIds, setDismissingFailureIds] = useState<Set<string>>(new Set());
   const [clearingAll, setClearingAll] = useState(false);
+  const [clearingStaleAdminOperations, setClearingStaleAdminOperations] = useState(false);
   const [cancelingActiveJobs, setCancelingActiveJobs] = useState(false);
   const [resettingHealth, setResettingHealth] = useState(false);
   const [clearingOlderWorkerCheckins, setClearingOlderWorkerCheckins] = useState(false);
@@ -1998,10 +2189,17 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     : healthDot.data;
 
   const state = healthState(statusData, queueStatus.error ?? healthDot.error);
-  const lastFetched = queueStatus.lastFetched ?? healthDot.lastFetched;
+  const lastFetched = adminOperations.lastFetched ?? queueStatus.lastFetched ?? healthDot.lastFetched;
   const modalState = useMemo(
-    () => (queueStatus.data ? modalQueueHealthState(queueStatus.data) : state),
-    [queueStatus.data, state],
+    () => {
+      const socialState = queueStatus.data ? modalQueueHealthState(queueStatus.data) : state;
+      if (socialState === "error" || socialState === "down") return socialState;
+      if (adminOperations.error) return "error";
+      if ((adminOperations.data?.summary.stale_total ?? 0) > 0) return "degraded";
+      if ((adminOperations.data?.summary.active_total ?? 0) > 0 && socialState === "healthy") return "healthy";
+      return socialState;
+    },
+    [adminOperations.data, adminOperations.error, queueStatus.data, state],
   );
   const viewModel = useMemo(
     () => (queueStatus.data ? buildSystemHealthViewModel(queueStatus.data, modalState) : null),
@@ -2150,6 +2348,44 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       setClearingAll(false);
     }
   }, [cancelStuckJobs]);
+
+  const clearStaleAdminOperations = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setClearingStaleAdminOperations(true);
+    try {
+      const response = await fetchAdminWithAuth(
+        CANCEL_STALE_ADMIN_OPERATIONS_URL,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        cancelled_operations?: number;
+        stale_operations_remaining?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      await Promise.all([adminOperations.refetch(), queueStatus.refetch(), healthDot.refetch()]);
+      const cancelledOperations = Number(payload.cancelled_operations ?? 0);
+      const remaining = Number(payload.stale_operations_remaining ?? 0);
+      setActionNotice(
+        cancelledOperations > 0
+          ? `Cancelled ${cancelledOperations} stale admin operation${cancelledOperations === 1 ? "" : "s"}.${remaining > 0 ? ` ${remaining} still stale.` : ""}`
+          : "No stale admin operations needed cleanup.",
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to clear stale admin operations");
+    } finally {
+      setClearingStaleAdminOperations(false);
+    }
+  }, [adminOperations, healthDot, queueStatus]);
 
   const dismissRecentFailure = useCallback(
     async (jobId: string) => {
@@ -2323,7 +2559,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     <AdminModal
       isOpen={isOpen}
       onClose={onClose}
-      title="Social Sync Health"
+      title="System Jobs Health"
       panelClassName="relative w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl"
     >
       <div className="mb-5 flex items-start gap-3">
@@ -2336,8 +2572,8 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
             )}
           </div>
           <p className="mt-1 text-sm text-zinc-600">
-            Shows whether the remote executor is available, whether jobs are moving, and whether anything needs
-            intervention.
+            Shows whether workers are available, whether gallery and social jobs are moving, and whether anything needs
+            intervention across both queues.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-3">
@@ -2347,6 +2583,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           <button
             type="button"
             onClick={() => {
+              adminOperations.refetch();
               queueStatus.refetch();
               healthDot.refetch();
             }}
@@ -2357,9 +2594,9 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         </div>
       </div>
       <div className="max-h-[calc(90vh-8.5rem)] overflow-y-auto pr-1">
-        {(queueStatus.error || healthDot.error) && (
+        {(queueStatus.error || healthDot.error || adminOperations.error) && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {queueStatus.error ?? healthDot.error}
+            {adminOperations.error ?? queueStatus.error ?? healthDot.error}
           </div>
         )}
 
@@ -2374,7 +2611,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           </div>
         )}
 
-        {!queueStatus.data && (
+        {!queueStatus.data && !adminOperations.data && (
           <p className="text-sm text-zinc-500">Loading detailed queue and worker diagnostics...</p>
         )}
 
@@ -2397,6 +2634,90 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               <SectionHeader>Queue Health</SectionHeader>
               <QueueHealthSection viewModel={viewModel} />
             </section>
+
+            {adminOperations.data && (
+              <>
+                <hr className="border-zinc-100" />
+
+                <section>
+                  <SectionHeader>Admin Operations</SectionHeader>
+                  <p className="mb-3 text-sm text-zinc-600">
+                    Gallery, person, and show jobs running through the shared admin operation plane.
+                  </p>
+                  <SummaryCards
+                    columns={4}
+                    cards={[
+                      {
+                        title: "Active admin jobs",
+                        value: String(adminOperations.data.summary.active_total),
+                        detail: "Non-terminal admin operations",
+                        tone: adminOperations.data.summary.active_total > 0 ? "neutral" : "good",
+                      },
+                      {
+                        title: "Stale admin jobs",
+                        value: String(adminOperations.data.summary.stale_total),
+                        detail: "Need cleanup or operator review",
+                        tone: adminOperations.data.summary.stale_total > 0 ? "bad" : "good",
+                      },
+                      {
+                        title: "Cancelling",
+                        value: String(adminOperations.data.summary.cancelling_total),
+                        detail: "Waiting for workers to stop",
+                        tone: adminOperations.data.summary.cancelling_total > 0 ? "warn" : "neutral",
+                      },
+                      {
+                        title: "Runtime split",
+                        value: `${adminOperations.data.summary.runtime_split.modal}/${adminOperations.data.summary.runtime_split.local}`,
+                        detail: "Modal vs Local active operations",
+                        tone:
+                          adminOperations.data.summary.runtime_split.local > 0 &&
+                          adminOperations.data.summary.runtime_split.modal === 0
+                            ? "warn"
+                            : "neutral",
+                      },
+                    ]}
+                  />
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium text-zinc-900">Stale admin operations</p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            These jobs have dead heartbeats or have been cancelling past the grace window.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void clearStaleAdminOperations();
+                          }}
+                          disabled={clearingStaleAdminOperations || (adminOperations.data.summary.stale_total ?? 0) <= 0}
+                          className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {clearingStaleAdminOperations ? "Clearing..." : "Force cancel stale admin operations"}
+                        </button>
+                      </div>
+                      <AdminOperationsTable
+                        operations={adminOperations.data.stale_operations}
+                        emptyMessage="No stale admin operations detected."
+                      />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-zinc-900">Active admin operations</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        The newest non-terminal gallery and admin jobs, including runtime ownership and last update age.
+                      </p>
+                      <div className="mt-3">
+                        <AdminOperationsTable
+                          operations={adminOperations.data.active_operations}
+                          emptyMessage="No active admin operations right now."
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </>
+            )}
 
             <hr className="border-zinc-100" />
 
@@ -2487,10 +2808,23 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           </div>
         )}
       </div>
-      {queueStatus.data && (
+      {(queueStatus.data || adminOperations.data) && (
         <div className="mt-4 border-t border-zinc-100 pt-4">
           <SectionHeader>Admin Actions</SectionHeader>
           <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => {
+                void clearStaleAdminOperations();
+              }}
+              disabled={clearingStaleAdminOperations || (adminOperations.data?.summary.stale_total ?? 0) <= 0}
+              className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {clearingStaleAdminOperations ? "Clearing stale admin operations..." : "Force cancel stale admin operations"}
+            </button>
+            <p className="text-xs text-zinc-500">
+              Use this when gallery or admin jobs are stuck in pending, running, or cancelling after heartbeats stop.
+            </p>
             <button
               type="button"
               onClick={() => {
@@ -2504,19 +2838,19 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
             <p className="text-xs text-zinc-500">
               Cancels active work and hides failed job/run history from this health surface without deleting saved posts.
             </p>
-          <button
-            type="button"
-            onClick={() => {
-              void cancelAllActiveJobs();
-            }}
-            disabled={resettingHealth || cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
-            className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel all active jobs"}
-          </button>
-          <p className="mt-1 text-xs text-zinc-500">
-            Use only if the queue is wedged or you need to stop every active social sync job.
-          </p>
+            <button
+              type="button"
+              onClick={() => {
+                void cancelAllActiveJobs();
+              }}
+              disabled={resettingHealth || cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
+              className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel all active jobs"}
+            </button>
+            <p className="mt-1 text-xs text-zinc-500">
+              Use only if the queue is wedged or you need to stop every active social sync job.
+            </p>
           </div>
         </div>
       )}

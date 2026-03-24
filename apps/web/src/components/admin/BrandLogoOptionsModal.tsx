@@ -1472,9 +1472,11 @@ export default function BrandLogoOptionsModal({
       if (!selectedAsset) {
         throw new Error("Assigned logo response did not include a selected asset");
       }
+      const latestSavedAssets = savedAssetsRef.current;
+      const latestFeaturedByRole = featuredByRoleRef.current;
       const nextState = applyFeaturedSelectionState(
-        previousSavedAssets,
-        previousFeaturedByRole,
+        latestSavedAssets,
+        latestFeaturedByRole,
         selectedAsset,
         role,
       );

@@ -33,7 +33,24 @@ const normalizeTimestamp = (value: unknown): number => {
   return Date.now();
 };
 
-export const buildAdminShowHref = (slug: string): string => `/admin/${encodeURIComponent(slug)}`;
+export const buildAdminShowHref = (slug: string): string => `/${encodeURIComponent(slug)}`;
+
+const normalizeShowHref = (value: unknown, slug: string): string => {
+  const normalized = normalizeLabel(value);
+  if (!normalized) return buildAdminShowHref(slug);
+
+  const canonical = buildAdminShowHref(slug);
+  const encodedSlug = encodeURIComponent(slug);
+  if (
+    normalized === canonical ||
+    normalized === `/admin/${encodedSlug}` ||
+    normalized === `/shows/${encodedSlug}`
+  ) {
+    return canonical;
+  }
+
+  return normalized;
+};
 
 const normalizeEntry = (value: unknown): AdminRecentShowEntry | null => {
   if (!isRecord(value)) return null;
@@ -41,7 +58,7 @@ const normalizeEntry = (value: unknown): AdminRecentShowEntry | null => {
   if (!slug) return null;
 
   const label = normalizeLabel(value.label) ?? slug;
-  const href = normalizeLabel(value.href) ?? buildAdminShowHref(slug);
+  const href = normalizeShowHref(value.href, slug);
 
   return {
     slug,
@@ -103,7 +120,7 @@ export const recordAdminRecentShow = (input: { slug: string; label: string; href
   const entry: AdminRecentShowEntry = {
     slug,
     label,
-    href: normalizeLabel(input.href) ?? buildAdminShowHref(slug),
+    href: normalizeShowHref(input.href, slug),
     touchedAt: Date.now(),
   };
 

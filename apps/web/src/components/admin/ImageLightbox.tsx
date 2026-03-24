@@ -1903,6 +1903,12 @@ export function ImageLightbox({
     setShowEditTools(false);
   }, [retryCandidates, src]);
 
+  useEffect(() => {
+    if (!showMetadata) {
+      setShowEditTools(false);
+    }
+  }, [showMetadata]);
+
   const handlePrimaryMediaError = () => {
     const nextCandidate = retryCandidates[retryIndex] ?? null;
     if (nextCandidate && nextCandidate !== currentSrc) {
@@ -1989,7 +1995,9 @@ export function ImageLightbox({
         }
       : null);
   const faceBoxes = metadata?.faceBoxes ?? [];
+  const isEditMode = showMetadata && showEditTools;
   const shouldShowFaceBoxes =
+    isEditMode &&
     !isVideoMedia &&
     !isEmbedMedia &&
     (faceBoxes.length > 1 ||
@@ -2010,8 +2018,8 @@ export function ImageLightbox({
       : previewCenter?.xPct ?? 50;
   const canAdjustThumbnailCrop = Boolean(
     !isVideoMedia &&
-      !isEmbedMedia &&
-      showMetadata &&
+    !isEmbedMedia &&
+      isEditMode &&
       onThumbnailCropPreviewAdjust &&
       thumbnailCropPreview &&
       effectivePreviewRect &&
@@ -2319,7 +2327,7 @@ export function ImageLightbox({
                   })}
                 </div>
               )}
-              {!isVideoMedia && !isEmbedMedia && effectivePreviewRect && (
+              {isEditMode && !isVideoMedia && !isEmbedMedia && effectivePreviewRect && (
                 <div className="pointer-events-none absolute inset-0">
                   <div
                     className="absolute bottom-0 top-0 w-px bg-white/45"

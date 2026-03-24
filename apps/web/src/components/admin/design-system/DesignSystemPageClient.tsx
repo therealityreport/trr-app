@@ -10,6 +10,7 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import ImagePaletteLab from "@/components/admin/color-lab/ImagePaletteLab";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { ADDITIONAL_MONOTYPE_FONTS } from "@/lib/fonts/additional-monotype-fonts";
+import { GENERATED_ADDITIONAL_TRR_FONT_CATALOG } from "@/lib/fonts/generated/additional-trr-font-catalog";
 import {
   DESIGN_SYSTEM_TAB_DEFINITIONS,
   buildDesignSystemHref,
@@ -27,7 +28,22 @@ import {
   buildHostedFontUrl,
   extractHostedFontAssetLinks,
 } from "@/lib/fonts/hosted-fonts";
+import {
+  normalizeHostedFamilyKey,
+  parseHostedFontCatalogStylesheet,
+  type HostedFontCatalogFamily,
+  type HostedFontCatalogStyle,
+} from "@/lib/fonts/hosted-font-catalog";
 import type { TypographyArea, TypographyState } from "@/lib/typography/types";
+import BrandFontMatchesPanel from "./BrandFontMatchesPanel";
+
+const FontPairAudit = dynamic(() => import("./FontPairAudit"), {
+  loading: () => (
+    <div className="py-12 text-center text-sm text-zinc-500">
+      Loading font pair audit...
+    </div>
+  ),
+});
 
 const QuestionsTab = dynamic(() => import("@/app/admin/fonts/_components/QuestionsTab"), {
   loading: () => (
@@ -68,6 +84,13 @@ const TypographyTab = dynamic(() => import("./TypographyTab"), {
   loading: () => (
     <div className="py-12 text-center text-sm text-zinc-500">
       Loading typography editor...
+    </div>
+  ),
+});
+const AdminLabelsTab = dynamic(() => import("@/components/admin/design-docs/sections/AdminIASection"), {
+  loading: () => (
+    <div className="py-12 text-center text-sm text-zinc-500">
+      Loading admin route audit...
     </div>
   ),
 });
@@ -168,7 +191,8 @@ interface FontFamily {
 }
 
 type FontCatalogSort = "az" | "most-used" | "most-styles" | "recently-touched";
-type FontCatalogSourceFilter = "all" | "hosted" | "google" | "stacks" | "realitease";
+type FontCatalogSourceFilter = "all" | "hosted" | "google" | "stacks" | "reference";
+type FontLibraryMode = "catalog" | "brand-matches";
 
 type TypographySetLink = {
   id: string;
@@ -214,6 +238,23 @@ const WEIGHT_LABELS: Record<number, string> = {
 
 function w(weight: number, hasItalic = false): FontWeight {
   return { weight, label: WEIGHT_LABELS[weight] ?? `${weight}`, hasItalic };
+}
+
+function stretchLabel(stretch?: string): string {
+  if (stretch === "extra-condensed") return "Extra Condensed";
+  if (stretch === "condensed") return "Condensed";
+  if (stretch === "expanded") return "Expanded";
+  return "";
+}
+
+function buildCatalogWeightKey(weight: number, stretch?: string): string {
+  return `${weight}::${stretch ?? "normal"}`;
+}
+
+function buildWeightLabel(weight: number, stretch?: string): string {
+  const baseLabel = WEIGHT_LABELS[weight] ?? `${weight}`;
+  const widthLabel = stretchLabel(stretch);
+  return widthLabel ? `${baseLabel} ${widthLabel}` : baseLabel;
 }
 
 function isActiveUsedOnEntry(entry: UsedOnEntry): boolean {
@@ -268,6 +309,52 @@ function normalizeFontLabel(value: string): string {
   };
 
   return aliases[normalized] ?? normalized;
+}
+
+function normalizeRealiteaseFontKey(value: string): string {
+  const primaryFamily = value.split(",")[0]?.replace(/^['"]+|['"]+$/g, "").trim() ?? value;
+  return normalizeHostedFamilyKey(primaryFamily);
+}
+
+function buildFontWeightsFromCatalog(
+  styles: readonly HostedFontCatalogStyle[],
+  overrideWeights: readonly FontWeight[] = [],
+): FontWeight[] {
+  const overrideByKey = new Map(
+    overrideWeights.map((weight) => [buildCatalogWeightKey(weight.weight, weight.stretch), weight]),
+  );
+  const grouped = new Map<
+    string,
+    { weight: number; stretch?: string; hasItalic: boolean; usedOn?: UsedOnEntry[] }
+  >();
+
+  for (const style of styles) {
+    const key = buildCatalogWeightKey(style.weight, style.stretch);
+    const current = grouped.get(key) ?? {
+      weight: style.weight,
+      stretch: style.stretch,
+      hasItalic: false,
+      usedOn: overrideByKey.get(key)?.usedOn,
+    };
+    current.hasItalic = current.hasItalic || style.style === "italic";
+    grouped.set(key, current);
+  }
+
+  return [...grouped.values()]
+    .map((entry) => {
+      const override = overrideByKey.get(buildCatalogWeightKey(entry.weight, entry.stretch));
+      return {
+        weight: entry.weight,
+        label: override?.label ?? buildWeightLabel(entry.weight, entry.stretch),
+        hasItalic: entry.hasItalic || Boolean(override?.hasItalic),
+        stretch: entry.stretch,
+        usedOn: override?.usedOn,
+      };
+    })
+    .sort((left, right) => {
+      if (left.weight !== right.weight) return left.weight - right.weight;
+      return (left.stretch ?? "normal").localeCompare(right.stretch ?? "normal");
+    });
 }
 
 const FONT_PAGE_ROUTE_MAP: Record<string, string> = {
@@ -346,7 +433,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300), w(600), w(700), w(800)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Beton/`,
+    cdnPath: `${CDN_BASE}/trr/Beton/`,
     description: "Geometric slab serif by Heinrich Jost. Light through ExtraBold plus condensed/compressed cuts.",
     fontFamilyValue: '"Beton"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -356,7 +443,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(200, true), w(300, true), w(400, true), w(500, true), w(600, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Biotif%20Pro/`,
+    cdnPath: `${CDN_BASE}/trr/Biotif%20Pro/`,
     description: "Geometric sans-serif with humanist touches. 8 weights with italics.",
     fontFamilyValue: '"Biotif Pro"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -366,7 +453,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(700, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Cheltenham/`,
+    cdnPath: `${CDN_BASE}/trr/Cheltenham/`,
     description: "Classic Bertram Goodhue serif. Light through Ultra weights.",
     fontFamilyValue: '"Cheltenham"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -376,7 +463,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(400)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Cheltenham%20Old%20Style%20Pro/`,
+    cdnPath: `${CDN_BASE}/trr/Cheltenham%20Old%20Style%20Pro/`,
     description: "Classic editorial serif from the Cheltenham family.",
     fontFamilyValue: '"Cheltenham Old Style Pro"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -386,7 +473,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(400)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Chomsky/`,
+    cdnPath: `${CDN_BASE}/trr/Chomsky/`,
     description: "Blackletter display typeface inspired by the New York Times masthead.",
     fontFamilyValue: '"Chomsky"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -396,7 +483,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(400, true), w(500, true), w(600, true), w(800, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Franklin%20Gothic/`,
+    cdnPath: `${CDN_BASE}/trr/Franklin%20Gothic/`,
     description: "Classic American grotesque sans-serif. ITC version.",
     fontFamilyValue: '"Franklin Gothic"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -406,7 +493,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(500), w(600, true), w(800), w(900)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Franklin%20Gothic%20Raw/`,
+    cdnPath: `${CDN_BASE}/trr/Franklin%20Gothic%20Raw/`,
     description: "Rough-textured Franklin Gothic variant by Wiescher Design.",
     fontFamilyValue: '"Franklin Gothic Raw"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -416,7 +503,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(500, true), w(600, true), w(700, true), w(800, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
+    cdnPath: `${CDN_BASE}/trr/Futura%20Now/`,
     description: "Geometric sans-serif by Paul Renner (Futura PT variant). 6 weights with obliques. See also: Futura Now Display, Headline, Text.",
     fontFamilyValue: '"Futura Now"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -426,7 +513,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100, true), w(300, true), w(400, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
+    cdnPath: `${CDN_BASE}/trr/Futura%20Now/`,
     description: "Futura Now Display sub-family. 6 weights with italics. Optimized for large sizes.",
     fontFamilyValue: '"Futura Now Display"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -436,7 +523,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100, true), w(200, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
+    cdnPath: `${CDN_BASE}/trr/Futura%20Now/`,
     description: "Futura Now Headline sub-family. 8 weights with italics, plus full condensed range.",
     fontFamilyValue: '"Futura Now Headline"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -446,7 +533,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100, true), w(200, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Futura%20Now/`,
+    cdnPath: `${CDN_BASE}/trr/Futura%20Now/`,
     description: "Futura Now Text sub-family. 8 weights with italics, plus full condensed range. Optimized for body text.",
     fontFamilyValue: '"Futura Now Text"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -456,7 +543,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(700, true), w(800, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Geometric%20Slabserif%20703/`,
+    cdnPath: `${CDN_BASE}/trr/Geometric%20Slabserif%20703/`,
     description: "Bitstream geometric slab serif with condensed cuts.",
     fontFamilyValue: '"Geometric Slabserif 703"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -466,7 +553,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(700), w(800)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Geometric%20Slabserif%20712/`,
+    cdnPath: `${CDN_BASE}/trr/Geometric%20Slabserif%20712/`,
     description: "Bitstream geometric slab serif. Light through Extra Bold.",
     fontFamilyValue: '"Geometric Slabserif 712"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -498,7 +585,7 @@ const CDN_FONTS: FontFamily[] = [
     ],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Gloucester/`,
+    cdnPath: `${CDN_BASE}/trr/Gloucester/`,
     description: "Monotype serif family. 5 styles: Old Style, Bold, Bold Condensed, Bold Extra Condensed, Bold Extended.",
     fontFamilyValue: '"Gloucester"',
     usedOn: [],
@@ -509,7 +596,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(400, true), w(500, true), w(600, true), w(700, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Goodall/`,
+    cdnPath: `${CDN_BASE}/trr/Goodall/`,
     description: "Elegant serif with italic variants.",
     fontFamilyValue: '"Goodall"',
     usedOn: [{ page: "Not yet used", path: "Available via CSS var --font-goodall" }],
@@ -555,7 +642,7 @@ const CDN_FONTS: FontFamily[] = [
     ],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Hamburg%20Serial/`,
+    cdnPath: `${CDN_BASE}/trr/Hamburg%20Serial/`,
     description: "Primary brand font. Sans-serif display face used across most pages.",
     fontFamilyValue: '"Hamburg Serial"',
     usedOn: [],
@@ -565,7 +652,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/ITC%20Cheltenham/`,
+    cdnPath: `${CDN_BASE}/trr/ITC%20Cheltenham/`,
     description: "ITC standard version of Cheltenham. Light through Ultra with condensed cuts.",
     fontFamilyValue: '"ITC Cheltenham"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -575,7 +662,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(400, true), w(500, true), w(600, true), w(800, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/ITC%20Franklin%20Gothic%20LT/`,
+    cdnPath: `${CDN_BASE}/trr/ITC%20Franklin%20Gothic%20LT/`,
     description: "Workhorse grotesque sans-serif. ITC Linotype version.",
     fontFamilyValue: '"ITC Franklin Gothic LT"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -585,7 +672,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(700)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Magnus/`,
+    cdnPath: `${CDN_BASE}/trr/Magnus/`,
     description: "Display face. Single bold weight.",
     fontFamilyValue: '"Magnus"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -595,7 +682,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Malden%20Sans/`,
+    cdnPath: `${CDN_BASE}/trr/Malden%20Sans/`,
     description: "Contemporary grotesque sans-serif. 7 weights with italics. See also: Malden Sans Condensed.",
     fontFamilyValue: '"Malden Sans"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -605,7 +692,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Malden%20Sans/`,
+    cdnPath: `${CDN_BASE}/trr/Malden%20Sans/`,
     description: "Condensed variant of Malden Sans. 6 weights with italics.",
     fontFamilyValue: '"Malden Sans Condensed"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -615,7 +702,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300), w(400, true), w(500), w(600), w(700, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/News%20Gothic/`,
+    cdnPath: `${CDN_BASE}/trr/News%20Gothic/`,
     description: "Classic grotesque sans-serif by Morris Fuller Benton. Light through Bold.",
     fontFamilyValue: '"News Gothic"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -625,7 +712,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100, true), w(300, true), w(400, true), w(500, true), w(700, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/News%20Gothic%20No.%202/`,
+    cdnPath: `${CDN_BASE}/trr/News%20Gothic%20No.%202/`,
     description: "Updated News Gothic with expanded weight range. Thin through Black with italics.",
     fontFamilyValue: '"News Gothic No. 2"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -635,7 +722,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(400, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Newspaper%20Publisher%20JNL/`,
+    cdnPath: `${CDN_BASE}/trr/Newspaper%20Publisher%20JNL/`,
     description: "Vintage newspaper masthead display face by Jeff Levine.",
     fontFamilyValue: '"Newspaper Publisher JNL"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -645,7 +732,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(400)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Newston/`,
+    cdnPath: `${CDN_BASE}/trr/Newston/`,
     description: "Contemporary serif. Normal, inline, and outline variants.",
     fontFamilyValue: '"Newston"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -656,7 +743,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Plymouth%20Serial/`,
+    cdnPath: `${CDN_BASE}/trr/Plymouth%20Serial/`,
     description: "Decorative serif used in game covers and surveys. 6 weights with italics.",
     fontFamilyValue: '"Plymouth Serial"',
     usedOn: [
@@ -671,7 +758,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(700, true), w(800)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Rockwell/`,
+    cdnPath: `${CDN_BASE}/trr/Rockwell/`,
     description: "Classic geometric slab serif. Light through ExtraBold with italics and condensed cuts.",
     fontFamilyValue: '"Rockwell"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -681,7 +768,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(700, true), w(800, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Rockwell%20Nova/`,
+    cdnPath: `${CDN_BASE}/trr/Rockwell%20Nova/`,
     description: "Updated Rockwell. 4 weights with italics. See also: Rockwell Nova Condensed.",
     fontFamilyValue: '"Rockwell Nova"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -691,7 +778,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(400, true), w(700, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Rockwell%20Nova/`,
+    cdnPath: `${CDN_BASE}/trr/Rockwell%20Nova/`,
     description: "Condensed variant of Rockwell Nova. Light, Regular, Bold with italics.",
     fontFamilyValue: '"Rockwell Nova Condensed"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -702,7 +789,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(200, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Rude%20Slab%20Condensed/`,
+    cdnPath: `${CDN_BASE}/trr/Rude%20Slab%20Condensed/`,
     description: "Condensed slab serif with italic variants. Primary heading font for games and surveys (replaced NYTKarnak Condensed).",
     fontFamilyValue: '"Rude Slab Condensed"',
     usedOn: [
@@ -725,7 +812,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100, true), w(200, true), w(300, true), w(400, true), w(500, true), w(600, true), w(700, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Sofia%20Pro/`,
+    cdnPath: `${CDN_BASE}/trr/Sofia%20Pro/`,
     description: "Geometric sans-serif with soft terminals. 8 weights with italics.",
     fontFamilyValue: '"Sofia Pro"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -735,7 +822,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(200, true), w(300, true), w(400, true), w(500, true), w(700, true), w(800, true), w(900, true)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Stafford%20Serial/`,
+    cdnPath: `${CDN_BASE}/trr/Stafford%20Serial/`,
     description: "Transitional serif family by SoftMaker. 7 weights with italics.",
     fontFamilyValue: '"Stafford Serial"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -745,7 +832,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(300, true), w(500, true), w(700, true), w(900)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Stymie/`,
+    cdnPath: `${CDN_BASE}/trr/Stymie/`,
     description: "Classic geometric slab serif. Light through Black with condensed cuts.",
     fontFamilyValue: '"Stymie"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -755,7 +842,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(800)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Stymie%20Extra%20Bold/`,
+    cdnPath: `${CDN_BASE}/trr/Stymie%20Extra%20Bold/`,
     description: "Classic geometric slab serif. ExtraBold plus condensed cut.",
     fontFamilyValue: '"Stymie Extra Bold"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -765,7 +852,7 @@ const CDN_FONTS: FontFamily[] = [
     weights: [w(100), w(300), w(400), w(500), w(700), w(900)],
     type: "CDN Font",
     source: "CloudFront CDN",
-    cdnPath: `${CDN_BASE}/monotype/Velino%20Compressed%20Text/`,
+    cdnPath: `${CDN_BASE}/trr/Velino%20Compressed%20Text/`,
     description: "Compressed text serif. 6 weights from Thin to Black.",
     fontFamilyValue: '"Velino Compressed Text"',
     usedOn: [{ page: "Not yet used", path: "Available on CDN" }],
@@ -782,17 +869,24 @@ function inferFontFormat(assetPath: string): string {
 
 const COMPLETE_CDN_FONTS: FontFamily[] = [
   ...CDN_FONTS,
-  ...ADDITIONAL_MONOTYPE_FONTS.map((font) => ({
-    name: font.name,
-    weights: [w(400)],
-    type: "CDN Font" as const,
-    source: "CloudFront CDN" as const,
-    cdnPath: `${CDN_BASE}/monotype/${encodeURIComponent(font.name)}/`,
-    previewAssetPath: font.previewAssetPath,
-    description: font.description,
-    fontFamilyValue: `"${font.name}"`,
-    usedOn: [{ page: "Not yet used", path: "Available in hosted font library" }],
-  })),
+  ...ADDITIONAL_MONOTYPE_FONTS.map((font) => {
+    const generatedCatalogEntry = GENERATED_ADDITIONAL_TRR_FONT_CATALOG.find(
+      (entry) => normalizeHostedFamilyKey(entry.familyName) === normalizeHostedFamilyKey(font.name),
+    );
+    return {
+      name: font.name,
+      weights: generatedCatalogEntry
+        ? buildFontWeightsFromCatalog(generatedCatalogEntry.styles)
+        : [w(400)],
+      type: "CDN Font" as const,
+      source: "CloudFront CDN" as const,
+      cdnPath: generatedCatalogEntry?.cdnPath ?? `${CDN_BASE}/trr/${encodeURIComponent(font.name)}/`,
+      previewAssetPath: font.previewAssetPath,
+      description: font.description,
+      fontFamilyValue: `"${font.name}"`,
+      usedOn: [{ page: "Not yet used", path: "Available in hosted font library" }],
+    };
+  }),
 ].sort((left, right) => left.name.localeCompare(right.name));
 
 /* ------------------------------------------------------------------ */
@@ -871,7 +965,7 @@ const FONT_STACKS: FontFamily[] = [
 ];
 
 /* ------------------------------------------------------------------ */
-/*  Realitease Fonts                                                  */
+/*  Reference Fonts                                                   */
 /* ------------------------------------------------------------------ */
 interface RealiteaseFontEntry {
   name: string;
@@ -886,7 +980,7 @@ const REALITEASE_FONTS: RealiteaseFontEntry[] = [
   {
     name: "NYTKarnak Condensed",
     fontFamily: "'NYTKarnak_Condensed'",
-    cdnUrl: `${CDN_BASE}/realitease/NYTKarnak_Condensed`,
+    cdnUrl: `${CDN_BASE}/reference%20fonts/NYTimes/NYTKarnak_Condensed`,
     weights: [400, 700],
     description: "Legacy condensed serif. Replaced by Rude Slab Condensed Bold for all headings.",
     usedOn: [
@@ -896,7 +990,7 @@ const REALITEASE_FONTS: RealiteaseFontEntry[] = [
   {
     name: "KarnakPro Condensed",
     fontFamily: "'KarnakPro-CondensedBlack'",
-    cdnUrl: `${CDN_BASE}/realitease/NYTKarnak Medium`,
+    cdnUrl: `${CDN_BASE}/reference%20fonts/NYTimes/NYTKarnak Medium`,
     weights: [400, 900],
     description: "Condensed serif variant. Defined in CSS but not currently referenced in components.",
     usedOn: [
@@ -906,7 +1000,7 @@ const REALITEASE_FONTS: RealiteaseFontEntry[] = [
   {
     name: "NYTFranklin",
     fontFamily: "'NYTFranklin'",
-    cdnUrl: `${CDN_BASE}/realitease/NYTFranklin`,
+    cdnUrl: `${CDN_BASE}/reference%20fonts/NYTimes/NYTFranklin`,
     weights: [400, 500, 700],
     description: "Sans-serif. Defined in CSS but not currently referenced directly in components.",
     usedOn: [
@@ -916,7 +1010,7 @@ const REALITEASE_FONTS: RealiteaseFontEntry[] = [
   {
     name: "NYTFranklin Medium",
     fontFamily: "'nyt-franklin'",
-    cdnUrl: `${CDN_BASE}/realitease/NYTFranklin Medium`,
+    cdnUrl: `${CDN_BASE}/reference%20fonts/NYTimes/NYTFranklin Medium`,
     weights: [500],
     description: "Medium-weight sans-serif. Defined in CSS but not currently referenced directly in components.",
     usedOn: [
@@ -926,7 +1020,7 @@ const REALITEASE_FONTS: RealiteaseFontEntry[] = [
   {
     name: "TN Web Use Only",
     fontFamily: "'TN_Web_Use_Only'",
-    cdnUrl: `${CDN_BASE}/realitease/TN_Web_Use_Only`,
+    cdnUrl: `${CDN_BASE}/reference%20fonts/NYTimes/TN_Web_Use_Only`,
     weights: [400],
     description: "Sans-serif used for instructional text, tab labels, dates, and stat values in games and surveys.",
     usedOn: [
@@ -943,7 +1037,7 @@ const REALITEASE_FONTS: RealiteaseFontEntry[] = [
   {
     name: "Helvetica Neue (Tee Franklin)",
     fontFamily: "'Helvetica Neue', 'Tee Franklin W01 Medium'",
-    cdnUrl: `${CDN_BASE}/realitease/Tee Franklin W01 Medium`,
+    cdnUrl: `${CDN_BASE}/reference%20fonts/NYTimes/Tee Franklin W01 Medium`,
     weights: [400, 500],
     description: "Sans-serif used for puzzle metadata on game cover pages.",
     usedOn: [
@@ -1166,33 +1260,33 @@ function FontCard({
       className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden transition-shadow hover:shadow-md"
       data-testid={`font-card-${family.name}`}
     >
-      <div className="flex items-stretch gap-3 px-5 py-4">
+      <div className="flex items-stretch gap-2 px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex min-w-0 flex-1 items-center gap-4 text-left transition-colors hover:bg-zinc-50/60"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left transition-colors hover:bg-zinc-50/60"
         >
           <div className="min-w-0 flex-1">
             <div className="min-w-0">
               <h3
-                className="truncate text-lg font-semibold text-zinc-900"
+                className="truncate text-[15px] font-semibold text-zinc-900"
                 style={{ fontFamily: family.fontFamilyValue }}
               >
                 {family.name}
               </h3>
               <p
-                className="mt-2 truncate text-sm text-zinc-500"
+                className="mt-1 truncate text-sm text-zinc-500"
                 style={{ fontFamily: family.fontFamilyValue, fontWeight: 400 }}
               >
                 {previewText}
               </p>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <TypeBadge type={family.type} source={family.source} />
-              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+              <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-zinc-600">
                 {displayUsedOn.length} used
               </span>
-              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
+              <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-zinc-600">
                 {totalStyles} style{totalStyles > 1 ? "s" : ""}
               </span>
             </div>
@@ -1203,10 +1297,10 @@ function FontCard({
         <button
           type="button"
           onClick={onTogglePin}
-          className={`self-start rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+          className={`self-start rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
             isPinned
               ? "bg-zinc-950 text-white"
-              : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+              : "text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-50"
           }`}
         >
           {isPinned ? "Pinned" : "Compare"}
@@ -1215,7 +1309,7 @@ function FontCard({
 
       {open && (
         <div className="border-t border-zinc-100">
-          <div className="px-5 py-3 bg-zinc-50/40 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-500">
+          <div className="px-4 py-2 bg-zinc-50/40 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500">
             {family.cssVar && (
               <span>
                 CSS: <code className="font-mono text-zinc-700">{family.cssVar}</code>
@@ -1234,22 +1328,22 @@ function FontCard({
             )}
           </div>
 
-          <div className="px-5 py-2">
+          <div className="px-4 py-1.5">
             <p className="text-xs text-zinc-500">{family.description}</p>
           </div>
 
           {linkedSets.length > 0 ? (
-            <div className="px-5 py-2 border-b border-zinc-100">
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            <div className="px-4 py-2 border-b border-zinc-100">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                 In Typography Sets
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1">
                 {linkedSets.map((set) => (
                   <button
                     key={set.id}
                     type="button"
                     onClick={() => onOpenTypographySet(set.id)}
-                    className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-200"
+                    className="inline-flex items-center rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700 transition hover:bg-zinc-200"
                   >
                     {set.name}
                   </button>
@@ -1259,8 +1353,8 @@ function FontCard({
           ) : null}
 
           {displayUsedOn.length > 0 && (
-            <div className="px-5 py-2 border-b border-zinc-100">
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            <div className="px-4 py-2 border-b border-zinc-100">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                 Used On
               </p>
               <UsedOnChips
@@ -1271,29 +1365,29 @@ function FontCard({
             </div>
           )}
 
-          <div className="px-5 py-4">
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          <div className="px-4 py-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Weights
             </p>
-            <div className="mb-2 hidden grid-cols-[9rem_minmax(0,1fr)_15rem] gap-3 px-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 md:grid">
+            <div className="mb-1.5 hidden grid-cols-[8rem_minmax(0,1fr)_14rem] gap-2 px-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 md:grid">
               <span>Style</span>
               <span>Preview</span>
               <span>Pages</span>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {family.weights.map((wt, idx) => (
-                <div key={`${wt.weight}-${wt.stretch ?? "normal"}-${idx}`} className="border-b border-zinc-50 pb-3 last:border-0 last:pb-0">
+                <div key={`${wt.weight}-${wt.stretch ?? "normal"}-${idx}`} className="border-b border-zinc-50 pb-2 last:border-0 last:pb-0">
                   {(() => {
                     const activeWeightUsedOn = getWeightUsedOnEntries(wt, true);
                     const displayWeightUsedOn = activeWeightUsedOn.length > 0 ? activeWeightUsedOn : getWeightUsedOnEntries(wt);
                     return (
                       <>
-                        <div className="grid gap-1.5 md:grid-cols-[9rem_minmax(0,1fr)_15rem] md:items-start md:gap-3">
+                        <div className="grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)_14rem] md:items-start md:gap-2">
                           <span className="text-[11px] font-medium text-zinc-400 tabular-nums">
                             {wt.weight} {wt.label}
                           </span>
                           <p
-                            className="text-xl text-zinc-900 leading-snug truncate"
+                            className="text-lg text-zinc-900 leading-snug truncate"
                             style={{
                               fontFamily: family.fontFamilyValue,
                               fontWeight: wt.weight,
@@ -1302,7 +1396,7 @@ function FontCard({
                           >
                             {previewText}
                           </p>
-                          <div className="min-h-7 md:pt-1">
+                          <div className="min-h-6 md:pt-0.5">
                             {displayWeightUsedOn.length > 0 ? (
                               <UsedOnChips
                                 entries={displayWeightUsedOn}
@@ -1315,12 +1409,12 @@ function FontCard({
                           </div>
                         </div>
                         {wt.hasItalic && (
-                          <div className="mt-2 grid gap-1.5 md:grid-cols-[9rem_minmax(0,1fr)_15rem] md:items-start md:gap-3">
+                          <div className="mt-1.5 grid gap-1 md:grid-cols-[8rem_minmax(0,1fr)_14rem] md:items-start md:gap-2">
                             <span className="text-[11px] font-medium text-zinc-400 tabular-nums">
                               {wt.weight} Italic
                             </span>
                             <p
-                              className="text-xl text-zinc-900 leading-snug truncate"
+                              className="text-lg text-zinc-900 leading-snug truncate"
                               style={{
                                 fontFamily: family.fontFamilyValue,
                                 fontWeight: wt.weight,
@@ -1330,7 +1424,7 @@ function FontCard({
                             >
                               {previewText}
                             </p>
-                            <div className="min-h-7 md:pt-1">
+                            <div className="min-h-6 md:pt-0.5">
                               {displayWeightUsedOn.length > 0 ? (
                                 <UsedOnChips
                                   entries={displayWeightUsedOn}
@@ -1357,7 +1451,7 @@ function FontCard({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Realitease Font Card                                              */
+/*  Reference Font Card                                               */
 /* ------------------------------------------------------------------ */
 
 function RealiteaseFontCard({
@@ -1409,7 +1503,7 @@ function RealiteaseFontCard({
               <span className="inline-flex items-center rounded-full bg-purple-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-purple-700 ring-1 ring-inset ring-purple-200">
                 CDN Font
               </span>
-              <span className="text-[10px] text-zinc-400">Realitease</span>
+              <span className="text-[10px] text-zinc-400">Reference</span>
               <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
                 {font.usedOn.length} used
               </span>
@@ -1513,58 +1607,49 @@ function FontComparisonTray({
   if (entries.length === 0) return null;
 
   return (
-    <section className="sticky top-0 z-20 mb-6 rounded-[24px] border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-            Comparison Tray
-          </div>
-          <h2 className="mt-1 text-lg font-bold tracking-[-0.02em] text-zinc-950">
-            Compare pinned fonts
+    <section className="sticky top-0 z-20 mb-5 rounded-2xl border border-zinc-200 bg-white px-5 py-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h2 className="text-[15px] font-bold tracking-tight text-zinc-950">
+            Comparison tray
           </h2>
-          <p className="mt-1 text-sm leading-6 text-zinc-600">
-            The same preview text is rendered across your pinned families so you can compare fit quickly.
-          </p>
+          <span className="text-xs tabular-nums text-zinc-400">
+            {entries.length}/3 pinned
+          </span>
         </div>
-        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-700">
-          {entries.length} of 3 pinned
-        </span>
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+      <div className="mt-3 grid gap-2.5 lg:grid-cols-3">
         {entries.map((entry) => (
-          <article key={entry.id} className="rounded-[20px] border border-zinc-200 bg-zinc-50 p-4">
-            <div className="flex items-start justify-between gap-3">
+          <article key={entry.id} className="rounded-xl border border-zinc-200 bg-zinc-50/60 px-4 py-3">
+            <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-zinc-950">{entry.name}</div>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
-                    {entry.usageCount} used
-                  </span>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">
-                    {entry.styles} styles
-                  </span>
+                <div className="text-[13px] font-semibold text-zinc-950">{entry.name}</div>
+                <div className="mt-0.5 flex items-center gap-2 text-[11px] tabular-nums text-zinc-500">
+                  <span>{entry.usageCount} used</span>
+                  <span className="text-zinc-300">·</span>
+                  <span>{entry.styles} styles</span>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => onRemove(entry.id)}
-                className="rounded-full border border-zinc-200 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600"
+                className="rounded-md px-2 py-1 text-[11px] font-medium text-zinc-500 transition hover:bg-zinc-200 hover:text-zinc-700"
               >
                 Remove
               </button>
             </div>
             <div
-              className="mt-4 rounded-[18px] border border-zinc-200 bg-white px-4 py-4 text-[1.45rem] leading-tight tracking-[-0.03em] text-zinc-950"
+              className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-3 text-xl leading-snug tracking-tight text-zinc-950"
               style={{ fontFamily: entry.fontFamily }}
             >
               {previewText}
             </div>
             {entry.sets.length > 0 ? (
-              <div className="mt-4 flex flex-wrap gap-1.5">
+              <div className="mt-2.5 flex flex-wrap gap-1">
                 {entry.sets.map((set) => (
                   <span
                     key={`${entry.id}-${set.id}`}
-                    className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600"
+                    className="rounded-md bg-white px-2 py-0.5 text-[10px] font-medium text-zinc-500 ring-1 ring-inset ring-zinc-200"
                   >
                     {set.name}
                   </span>
@@ -1701,10 +1786,14 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
   const [fontSearch, setFontSearch] = useState("");
   const [fontSort, setFontSort] = useState<FontCatalogSort>("az");
   const [fontSourceFilter, setFontSourceFilter] = useState<FontCatalogSourceFilter>("all");
+  const [fontLibraryMode, setFontLibraryMode] = useState<FontLibraryMode>("catalog");
+  const [brandMatchesRefreshToken, setBrandMatchesRefreshToken] = useState(0);
+  const [brandMatchesRefreshing, setBrandMatchesRefreshing] = useState(false);
   const [comparisonIds, setComparisonIds] = useState<string[]>([]);
   const [typographyState, setTypographyState] = useState<TypographyState | null>(null);
   const [activeFontPreview, setActiveFontPreview] = useState<ActiveFontPreview | null>(null);
   const [hostedFontAssetLinks, setHostedFontAssetLinks] = useState<Record<string, string>>({});
+  const [hostedFontCatalogEntries, setHostedFontCatalogEntries] = useState<HostedFontCatalogFamily[]>([]);
   const [designSystemColors, setDesignSystemColors] = useState<string[]>(() => [...DESIGN_SYSTEM_BASE_COLORS]);
   const [newBaseColor, setNewBaseColor] = useState("#5C0F4F");
   const [newBaseColorError, setNewBaseColorError] = useState<string | null>(null);
@@ -1720,10 +1809,12 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
       .then((stylesheet) => {
         if (!stylesheet || cancelled) return;
         setHostedFontAssetLinks(extractHostedFontAssetLinks(stylesheet));
+        setHostedFontCatalogEntries(parseHostedFontCatalogStylesheet(stylesheet));
       })
       .catch(() => {
         if (cancelled) return;
         setHostedFontAssetLinks({});
+        setHostedFontCatalogEntries([]);
       });
 
     return () => {
@@ -1779,6 +1870,73 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
       // Ignore persistence failures.
     }
   }, [designSystemColors]);
+
+  const authoritativeCdnFonts = useMemo(() => {
+    if (hostedFontCatalogEntries.length === 0) return COMPLETE_CDN_FONTS;
+
+    const overridesByKey = new Map(
+      COMPLETE_CDN_FONTS.map((font) => [normalizeHostedFamilyKey(font.name), font]),
+    );
+    const parsedHosted = hostedFontCatalogEntries
+      .filter((entry) => entry.bucket === "trr")
+      .map((entry) => {
+        const override = overridesByKey.get(normalizeHostedFamilyKey(entry.familyName));
+        const primarySourceUrl = entry.styles[0]?.sourceUrl ?? "";
+        return {
+          name: override?.name ?? entry.familyName,
+          cssVar: override?.cssVar,
+          weights: buildFontWeightsFromCatalog(entry.styles, override?.weights ?? []),
+          type: "CDN Font" as const,
+          source: "CloudFront CDN" as const,
+          cdnPath: entry.cdnPath ?? override?.cdnPath,
+          previewAssetPath:
+            override?.previewAssetPath ??
+            (primarySourceUrl.startsWith("/fonts/") ? primarySourceUrl : undefined),
+          description:
+            override?.description ??
+            `Hosted font family served from Cloudflare R2. ${entry.styles.length} font file${entry.styles.length === 1 ? "" : "s"} discovered in /hosted-fonts.css.`,
+          usedOn: override?.usedOn ?? [{ page: "Not yet used", path: "Available in hosted font library" }],
+          fontFamilyValue: override?.fontFamilyValue ?? `"${entry.familyName}"`,
+        };
+      });
+    const parsedKeys = new Set(parsedHosted.map((font) => normalizeHostedFamilyKey(font.name)));
+    const extras = COMPLETE_CDN_FONTS.filter((font) => !parsedKeys.has(normalizeHostedFamilyKey(font.name)));
+
+    return [...parsedHosted, ...extras].sort((left, right) => left.name.localeCompare(right.name));
+  }, [hostedFontCatalogEntries]);
+
+  const authoritativeRealiteaseFonts = useMemo(() => {
+    if (hostedFontCatalogEntries.length === 0) return REALITEASE_FONTS;
+
+    const overridesByKey = new Map<string, RealiteaseFontEntry>();
+    for (const font of REALITEASE_FONTS) {
+      overridesByKey.set(normalizeHostedFamilyKey(font.name), font);
+      overridesByKey.set(normalizeRealiteaseFontKey(font.fontFamily), font);
+    }
+
+    const parsedRealitease = hostedFontCatalogEntries
+      .filter((entry) => entry.bucket === "reference")
+      .map((entry) => {
+        const override = overridesByKey.get(normalizeHostedFamilyKey(entry.familyName));
+        const primarySourceUrl = entry.styles[0]?.sourceUrl ?? "";
+        const displayName = override?.name ?? entry.familyName.replace(/_/g, " ");
+        const uniqueWeights = [...new Set(entry.styles.map((style) => style.weight))].sort((left, right) => left - right);
+        return {
+          name: displayName,
+          fontFamily: override?.fontFamily ?? `"${entry.familyName}"`,
+          cdnUrl: primarySourceUrl || entry.cdnPath || "",
+          weights: uniqueWeights,
+          description:
+            override?.description ??
+            `Reference font family discovered in /hosted-fonts.css. ${entry.styles.length} font file${entry.styles.length === 1 ? "" : "s"} available from Cloudflare R2.`,
+          usedOn: override?.usedOn ?? [{ page: "Not actively used", path: "Available on CDN" }],
+        };
+      });
+    const parsedKeys = new Set(parsedRealitease.map((font) => normalizeHostedFamilyKey(font.name)));
+    const extras = REALITEASE_FONTS.filter((font) => !parsedKeys.has(normalizeHostedFamilyKey(font.name)));
+
+    return [...parsedRealitease, ...extras].sort((left, right) => left.name.localeCompare(right.name));
+  }, [hostedFontCatalogEntries]);
 
   const handleAddBaseColor = useCallback(() => {
     const normalized = normalizeHexColor(newBaseColor);
@@ -1867,14 +2025,14 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
   );
 
   const filteredCDN = useMemo(() => {
-    const filtered = COMPLETE_CDN_FONTS.filter((family) => {
+    const filtered = authoritativeCdnFonts.filter((family) => {
       if (fontSourceFilter !== "all" && fontSourceFilter !== "hosted") return false;
       const entries = getFontUsedOnEntries(family);
       if (showUsedOnly && !isUsed(family)) return false;
       return matchesSearch([family.name, family.cssVar ?? "", family.description, ...entries.map((entry) => `${entry.page} ${entry.path}`)]);
     });
     return sortFamilies(filtered, (item) => getFontUsedOnEntries(item, true), (item) => countFontStyles(item.weights), (item) => item.name);
-  }, [fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
+  }, [authoritativeCdnFonts, fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
 
   const filteredGoogle = useMemo(() => {
     const filtered = GOOGLE_FONTS.filter((family) => {
@@ -1897,26 +2055,26 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
   }, [fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
 
   const filteredRealitease = useMemo(() => {
-    const filtered = REALITEASE_FONTS.filter((font) => {
-      if (fontSourceFilter !== "all" && fontSourceFilter !== "realitease") return false;
+    const filtered = authoritativeRealiteaseFonts.filter((font) => {
+      if (fontSourceFilter !== "all" && fontSourceFilter !== "reference") return false;
       if (showUsedOnly && !isUsed({ usedOn: font.usedOn })) return false;
       return matchesSearch([font.name, font.description, ...font.usedOn.map((entry) => `${entry.page} ${entry.path}`)]);
     });
     return sortFamilies(filtered, (item) => item.usedOn.filter(isActiveUsedOnEntry), (item) => item.weights.length, (item) => item.name);
-  }, [fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
+  }, [authoritativeRealiteaseFonts, fontSourceFilter, matchesSearch, showUsedOnly, sortFamilies]);
 
   const catalogTotalFamilies =
-    COMPLETE_CDN_FONTS.length + GOOGLE_FONTS.length + FONT_STACKS.length + REALITEASE_FONTS.length;
+    authoritativeCdnFonts.length + GOOGLE_FONTS.length + FONT_STACKS.length + authoritativeRealiteaseFonts.length;
   const activeInAppFamilies = [
-    ...COMPLETE_CDN_FONTS.filter((family) => isUsed(family)),
+    ...authoritativeCdnFonts.filter((family) => isUsed(family)),
     ...GOOGLE_FONTS.filter((family) => isUsed(family)),
     ...FONT_STACKS.filter((family) => isUsed(family)),
-    ...REALITEASE_FONTS.filter((font) => isUsed({ usedOn: font.usedOn })),
+    ...authoritativeRealiteaseFonts.filter((font) => isUsed({ usedOn: font.usedOn })),
   ].length;
 
   const comparisonEntries = useMemo(() => {
     const allEntries = [
-      ...COMPLETE_CDN_FONTS.map((family) => ({
+      ...authoritativeCdnFonts.map((family) => ({
         id: family.name,
         name: family.name,
         fontFamily: family.fontFamilyValue,
@@ -1940,7 +2098,7 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
         usageCount: getFontUsedOnEntries(family, true).length,
         sets: typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? [],
       })),
-      ...REALITEASE_FONTS.map((font) => ({
+      ...authoritativeRealiteaseFonts.map((font) => ({
         id: font.name,
         name: font.name,
         fontFamily: font.fontFamily,
@@ -1950,7 +2108,7 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
       })),
     ];
     return comparisonIds.map((id) => allEntries.find((entry) => entry.id === id)).filter(Boolean) as NonNullable<typeof allEntries[number]>[];
-  }, [comparisonIds, typographySetLinksByFont]);
+  }, [authoritativeCdnFonts, authoritativeRealiteaseFonts, comparisonIds, typographySetLinksByFont]);
 
   const cdnFontCount = filteredCDN.length;
   const googleFontCount = filteredGoogle.length;
@@ -1975,6 +2133,9 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
   const openTypographySet = (setId: string) => {
     router.push(`/design-system/fonts/typography?set=${encodeURIComponent(setId)}`);
   };
+  const triggerBrandMatchesRefresh = useCallback(() => {
+    setBrandMatchesRefreshToken((current) => current + 1);
+  }, []);
 
   if (checking) {
     return (
@@ -2001,20 +2162,36 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
               <div>
                 <AdminBreadcrumbs
                   items={buildAdminSectionBreadcrumb(
-                    activeTab === "fonts" ? "Fonts" : "UI Design System",
-                    "/design-system/fonts",
+                    activeTab === "fonts"
+                      ? "Fonts"
+                      : activeTab === "admin-labels"
+                        ? "Admin Labels & Routes"
+                        : "UI Design System",
+                    activeTab === "admin-labels" ? "/design-system/admin-labels" : "/design-system/fonts",
                   )}
                   className="mb-1"
                 />
                 <h1 className="text-2xl font-bold text-zinc-900">
-                  {activeTab === "fonts" ? (activeSubtab === "typography" ? "Typography Sets" : "Fonts Library") : "UI Design System"}
+                  {activeTab === "fonts"
+                    ? activeSubtab === "typography"
+                      ? "Typography Sets"
+                      : fontLibraryMode === "brand-matches"
+                        ? "Brand Font Matches"
+                        : "Fonts Library"
+                    : activeTab === "admin-labels"
+                      ? "Admin Labels & Routes"
+                      : "UI Design System"}
                 </h1>
                 <p className="mt-1 text-sm text-zinc-500">
                   {activeTab === "fonts"
                     ? activeSubtab === "typography"
                       ? "Reusable typography defaults, page assignments, and live preview specimens."
-                      : "Browse hosted, Google, stack, and Realitease families used across the app."
-                    : "Fonts, colors, buttons, question components, and form patterns used across the app."}
+                      : fontLibraryMode === "brand-matches"
+                        ? "Audit source-brand typography, evidence, and the strongest hosted matches without leaving the Fonts Library."
+                        : "Browse hosted, Google, stack, and reference families used across the app."
+                    : activeTab === "admin-labels"
+                      ? "Canonical admin labels, ideal paths, and legacy route forwarders that still need cleanup."
+                      : "Fonts, colors, buttons, question components, and form patterns used across the app."}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -2057,15 +2234,15 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
               ))}
             </nav>
             {activeTabSubtabs.length > 0 ? (
-              <nav className="flex flex-wrap gap-2 border-t border-zinc-100 py-3" aria-label={`${activeTab} sections`}>
+              <nav className="flex flex-wrap gap-1.5 border-t border-zinc-100 py-2.5" aria-label={`${activeTab} sections`}>
                 {activeTab === "fonts" ? (
                   <button
                     type="button"
                     onClick={() => router.push(buildDesignSystemHref("fonts"))}
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition ${
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                       activeSubtab === null
                         ? "bg-zinc-900 text-white"
-                        : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                        : "text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-50"
                     }`}
                   >
                     Catalog
@@ -2078,10 +2255,10 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
                       type="button"
                       key={subtab.id}
                       onClick={() => router.push(buildDesignSystemHref(activeTab, subtab.id))}
-                      className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition ${
+                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                         isActiveSubtab
                           ? "bg-zinc-900 text-white"
-                          : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                          : "text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-50"
                       }`}
                     >
                       {subtab.label}
@@ -2097,6 +2274,9 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
 
         {/* Questions & Forms Tab */}
         {activeTab === "questions-forms" && <QuestionsTab baseColors={designSystemColors} sectionFilter={activeSubtab} />}
+
+        {/* Admin Labels & Routes Tab */}
+        {activeTab === "admin-labels" && <AdminLabelsTab />}
 
         {/* Buttons Tab */}
         {activeTab === "buttons" && <ButtonsTab />}
@@ -2262,45 +2442,71 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
             <>
               <style>{additionalHostedFontPreviewCss}</style>
 
-              <section className="mb-6 rounded-[24px] border border-zinc-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="max-w-3xl">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                      Fonts
-                    </div>
-                    <h2 className="mt-1 text-[1.9rem] font-bold tracking-[-0.03em] text-zinc-950">
-                      Browse every family used by the app
+              <section className="mb-5 rounded-2xl border border-zinc-200 bg-white px-5 py-4 shadow-sm">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-bold tracking-tight text-zinc-950">
+                      {fontLibraryMode === "brand-matches"
+                        ? "Brand font matches"
+                        : "Font library"}
                     </h2>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600">
-                      Compare families, jump into live page previews, and cross-link directly into typography sets when a font powers shared defaults.
+                    <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-zinc-500">
+                      {fontLibraryMode === "brand-matches"
+                        ? "Regenerate brand-to-hosted suggestions, audit evidence, and pin matches into the compare tray."
+                        : "Compare families, preview live usage, and cross-link into typography sets."}
                     </p>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
-                        {catalogTotalFamilies} total families
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
-                        {activeInAppFamilies} active in app
-                      </span>
-                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
-                        {totalStyles} hosted styles
-                      </span>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-zinc-500">
+                      <span>{catalogTotalFamilies} families</span>
+                      <span className="text-zinc-300">·</span>
+                      <span>{activeInAppFamilies} active</span>
+                      <span className="text-zinc-300">·</span>
+                      <span>{totalStyles} hosted styles</span>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-shrink-0 flex-wrap gap-1.5">
                     <button
                       type="button"
-                      onClick={() => router.push("/design-system/fonts")}
-                      className="rounded-full bg-zinc-950 px-4 py-2 text-sm font-semibold text-white"
+                      onClick={() => setFontLibraryMode("catalog")}
+                      className={`rounded-lg px-3 py-1.5 text-[13px] font-semibold transition ${
+                        fontLibraryMode === "catalog"
+                          ? "bg-zinc-950 text-white"
+                          : "text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-50"
+                      }`}
                     >
                       Catalog
                     </button>
                     <button
                       type="button"
+                      onClick={() => setFontLibraryMode("brand-matches")}
+                      className={`rounded-lg px-3 py-1.5 text-[13px] font-semibold transition ${
+                        fontLibraryMode === "brand-matches"
+                          ? "bg-zinc-950 text-white"
+                          : "text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-50"
+                      }`}
+                    >
+                      Brand Matches
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => router.push("/design-system/fonts/typography")}
-                      className="rounded-full border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                      className="rounded-lg px-3 py-1.5 text-[13px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200 transition hover:bg-zinc-50"
                     >
                       Typography Sets
                     </button>
+                    {fontLibraryMode === "brand-matches" ? (
+                      <button
+                        type="button"
+                        onClick={triggerBrandMatchesRefresh}
+                        disabled={brandMatchesRefreshing}
+                        className={`rounded-lg px-3 py-1.5 text-[13px] font-semibold transition ${
+                          brandMatchesRefreshing
+                            ? "cursor-wait bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200"
+                            : "bg-zinc-900 text-white hover:bg-zinc-800"
+                        }`}
+                      >
+                        {brandMatchesRefreshing ? "Running..." : "Rebuild Rankings"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </section>
@@ -2311,195 +2517,215 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
                 onRemove={(id) => setComparisonIds((current) => current.filter((entry) => entry !== id))}
               />
 
-              <div className="sticky top-0 z-10 -mx-6 bg-zinc-50 px-6 pb-4">
-                <div className="rounded-[24px] border border-zinc-200 bg-white p-4 shadow-sm">
-                  <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
-                    <div className="space-y-3">
-                      <div>
-                        <label
-                          htmlFor="font-search"
-                          className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400"
-                        >
-                          Search fonts
-                        </label>
-                        <input
-                          id="font-search"
-                          type="text"
-                          value={fontSearch}
-                          onChange={(event) => setFontSearch(event.target.value)}
-                          placeholder="Search family, CSS var, page, or usage..."
-                          className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition"
-                        />
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          { value: "all", label: "All" },
-                          { value: "hosted", label: "Hosted" },
-                          { value: "google", label: "Google" },
-                          { value: "stacks", label: "Stacks" },
-                          { value: "realitease", label: "Realitease" },
-                        ].map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => setFontSourceFilter(option.value as FontCatalogSourceFilter)}
-                            className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] ${
-                              fontSourceFilter === option.value
-                                ? "bg-zinc-950 text-white"
-                                : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-                            }`}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => setShowUsedOnly((value) => !value)}
-                          className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] ${
-                            showUsedOnly
-                              ? "bg-violet-600 text-white"
-                              : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-                          }`}
-                        >
-                          Currently Used
-                        </button>
-                      </div>
-                    </div>
+              {fontLibraryMode === "catalog" ? (
+                <>
+                  <div className="sticky top-0 z-10 -mx-6 bg-zinc-50 px-6 pb-3">
+                    <div className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
+                      <div className="grid gap-3 lg:grid-cols-[1.3fr_0.9fr]">
+                        <div className="space-y-2.5">
+                          <div>
+                            <label
+                              htmlFor="font-search"
+                              className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400"
+                            >
+                              Search fonts
+                            </label>
+                            <input
+                              id="font-search"
+                              type="text"
+                              value={fontSearch}
+                              onChange={(event) => setFontSearch(event.target.value)}
+                              placeholder="Search family, CSS var, page, or usage..."
+                              className="w-full rounded-lg border border-zinc-200 bg-zinc-50/50 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-200"
+                            />
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              { value: "all", label: "All" },
+                              { value: "hosted", label: "Hosted" },
+                              { value: "google", label: "Google" },
+                              { value: "stacks", label: "Stacks" },
+                              { value: "reference", label: "Reference" },
+                            ].map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setFontSourceFilter(option.value as FontCatalogSourceFilter)}
+                                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                                  fontSourceFilter === option.value
+                                    ? "bg-zinc-950 text-white"
+                                    : "text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-50"
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setShowUsedOnly((value) => !value)}
+                              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                                showUsedOnly
+                                  ? "bg-violet-600 text-white"
+                                  : "text-zinc-600 ring-1 ring-inset ring-zinc-200 hover:bg-zinc-50"
+                              }`}
+                            >
+                              Currently Used
+                            </button>
+                          </div>
+                        </div>
 
-                    <div className="space-y-3">
-                      <div>
-                        <label
-                          htmlFor="preview-text"
-                          className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400"
-                        >
-                          Preview Text
-                        </label>
-                        <input
-                          id="preview-text"
-                          type="text"
-                          value={previewText}
-                          onChange={(e) => setPreviewText(e.target.value)}
-                          placeholder="Type preview text..."
-                          className="w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-base text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-200 transition"
-                        />
+                        <div className="space-y-2.5">
+                          <div>
+                            <label
+                              htmlFor="preview-text"
+                              className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-zinc-400"
+                            >
+                              Preview Text
+                            </label>
+                            <input
+                              id="preview-text"
+                              type="text"
+                              value={previewText}
+                              onChange={(e) => setPreviewText(e.target.value)}
+                              placeholder="Type preview text..."
+                              className="w-full rounded-lg border border-zinc-200 bg-zinc-50/50 px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 transition focus:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-200"
+                            />
+                          </div>
+                          <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                            Sort
+                            <select
+                              aria-label="Font sort"
+                              value={fontSort}
+                              onChange={(event) => setFontSort(event.target.value as FontCatalogSort)}
+                              className="mt-1 w-full rounded-lg border border-zinc-200 bg-zinc-50/50 px-2.5 py-1.5 text-sm font-medium normal-case tracking-normal text-zinc-900 transition focus:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-200"
+                            >
+                              <option value="az">A-Z</option>
+                              <option value="most-used">Most Used</option>
+                              <option value="most-styles">Most Styles</option>
+                              <option value="recently-touched">Recently Touched in App</option>
+                            </select>
+                          </label>
+                        </div>
                       </div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                        Sort
-                        <select
-                          aria-label="Font sort"
-                          value={fontSort}
-                          onChange={(event) => setFontSort(event.target.value as FontCatalogSort)}
-                          className="mt-1 w-full rounded-lg border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-sm font-medium normal-case tracking-normal text-zinc-900"
-                        >
-                          <option value="az">A-Z</option>
-                          <option value="most-used">Most Used</option>
-                          <option value="most-styles">Most Styles</option>
-                          <option value="recently-touched">Recently Touched in App</option>
-                        </select>
-                      </label>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              <p className="mb-4 text-sm text-zinc-500">
-                {cdnFontCount} hosted fonts ({totalStyles} styles) · {googleFontCount} Google · {stackCount} stacks · {realiteaseCount} Realitease
-              </p>
+                  <p className="mb-3 text-xs tabular-nums text-zinc-400">
+                    {cdnFontCount} hosted ({totalStyles} styles) · {googleFontCount} Google · {stackCount} stacks · {realiteaseCount} reference
+                  </p>
 
-              <section className="mb-10">
-                <div className="mb-4 flex items-center gap-3">
-                  <h2 className="text-lg font-bold text-zinc-900">Hosted Fonts</h2>
-                  <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-800">
-                    {cdnFontCount}
-                  </span>
-                  <span className="text-xs text-zinc-400">Cloudflare R2</span>
-                </div>
-                <div className="space-y-3">
-                  {filteredCDN.map((family) => (
-                    <FontCard
-                      key={family.name}
-                      family={family}
-                      fontAssetHref={hostedFontAssetLinks[family.name]}
-                      previewText={previewText}
-                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
-                      isPinned={comparisonIds.includes(family.name)}
-                      onTogglePin={() => toggleComparison(family.name)}
-                      onOpenPreview={setActiveFontPreview}
-                      onOpenTypographySet={openTypographySet}
-                    />
-                  ))}
-                </div>
-              </section>
+                  <section className="mb-8">
+                    <div className="mb-3 flex items-center gap-2">
+                      <h2 className="text-[15px] font-bold text-zinc-900">Hosted Fonts</h2>
+                      <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-blue-700">
+                        {cdnFontCount}
+                      </span>
+                      <span className="text-[11px] text-zinc-400">Cloudflare R2</span>
+                    </div>
+                    <div className="space-y-3">
+                      {filteredCDN.map((family) => (
+                        <FontCard
+                          key={family.name}
+                          family={family}
+                          fontAssetHref={hostedFontAssetLinks[family.name]}
+                          previewText={previewText}
+                          linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
+                          isPinned={comparisonIds.includes(family.name)}
+                          onTogglePin={() => toggleComparison(family.name)}
+                          onOpenPreview={setActiveFontPreview}
+                          onOpenTypographySet={openTypographySet}
+                        />
+                      ))}
+                    </div>
+                  </section>
 
-              <section className="mb-10">
-                <div className="mb-3 flex items-center gap-3">
-                  <h2 className="text-lg font-bold text-zinc-900">Realitease Fonts</h2>
-                  <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800">
-                    {realiteaseCount}
-                  </span>
-                  <span className="text-xs text-zinc-400">Game-specific</span>
-                </div>
-                <div className="space-y-3">
-                  {filteredRealitease.map((font) => (
-                    <RealiteaseFontCard
-                      key={font.name}
-                      font={font}
-                      previewText={previewText}
-                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(font.fontFamily)) ?? []}
-                      isPinned={comparisonIds.includes(font.name)}
-                      onTogglePin={() => toggleComparison(font.name)}
-                      onOpenPreview={setActiveFontPreview}
-                      onOpenTypographySet={openTypographySet}
-                    />
-                  ))}
-                </div>
-              </section>
+                  <section className="mb-8">
+                    <div className="mb-3 flex items-center gap-2">
+                      <h2 className="text-[15px] font-bold text-zinc-900">Reference Fonts</h2>
+                      <span className="rounded-md bg-violet-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-violet-700">
+                        {realiteaseCount}
+                      </span>
+                      <span className="text-[11px] text-zinc-400">NYTimes reference</span>
+                    </div>
+                    <div className="space-y-3">
+                      {filteredRealitease.map((font) => (
+                        <RealiteaseFontCard
+                          key={font.name}
+                          font={font}
+                          previewText={previewText}
+                          linkedSets={typographySetLinksByFont.get(normalizeFontLabel(font.fontFamily)) ?? []}
+                          isPinned={comparisonIds.includes(font.name)}
+                          onTogglePin={() => toggleComparison(font.name)}
+                          onOpenPreview={setActiveFontPreview}
+                          onOpenTypographySet={openTypographySet}
+                        />
+                      ))}
+                    </div>
+                  </section>
 
-              <section className="mb-10">
-                <div className="mb-4 flex items-center gap-3">
-                  <h2 className="text-lg font-bold text-zinc-900">Google Fonts</h2>
-                  <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800">
-                    {googleFontCount}
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {filteredGoogle.map((family) => (
-                    <FontCard
-                      key={family.name}
-                      family={family}
-                      previewText={previewText}
-                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
-                      isPinned={comparisonIds.includes(family.name)}
-                      onTogglePin={() => toggleComparison(family.name)}
-                      onOpenPreview={setActiveFontPreview}
-                      onOpenTypographySet={openTypographySet}
-                    />
-                  ))}
-                </div>
-              </section>
+                  <section className="mb-8">
+                    <div className="mb-3 flex items-center gap-2">
+                      <h2 className="text-[15px] font-bold text-zinc-900">Google Fonts</h2>
+                      <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-emerald-700">
+                        {googleFontCount}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {filteredGoogle.map((family) => (
+                        <FontCard
+                          key={family.name}
+                          family={family}
+                          previewText={previewText}
+                          linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
+                          isPinned={comparisonIds.includes(family.name)}
+                          onTogglePin={() => toggleComparison(family.name)}
+                          onOpenPreview={setActiveFontPreview}
+                          onOpenTypographySet={openTypographySet}
+                        />
+                      ))}
+                    </div>
+                  </section>
 
-              <section className="mb-10">
-                <div className="mb-4 flex items-center gap-3">
-                  <h2 className="text-lg font-bold text-zinc-900">Font Stacks</h2>
-                  <span className="rounded-full bg-zinc-200 px-2.5 py-0.5 text-xs font-semibold text-zinc-700">
-                    {stackCount}
-                  </span>
-                </div>
-                <div className="space-y-3">
-                  {filteredStacks.map((family) => (
-                    <FontCard
-                      key={family.name}
-                      family={family}
-                      previewText={previewText}
-                      linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
-                      isPinned={comparisonIds.includes(family.name)}
-                      onTogglePin={() => toggleComparison(family.name)}
-                      onOpenPreview={setActiveFontPreview}
-                      onOpenTypographySet={openTypographySet}
-                    />
-                  ))}
-                </div>
-              </section>
+                  <section className="mb-8">
+                    <div className="mb-3 flex items-center gap-2">
+                      <h2 className="text-[15px] font-bold text-zinc-900">Font Stacks</h2>
+                      <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-zinc-600">
+                        {stackCount}
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {filteredStacks.map((family) => (
+                        <FontCard
+                          key={family.name}
+                          family={family}
+                          previewText={previewText}
+                          linkedSets={typographySetLinksByFont.get(normalizeFontLabel(family.fontFamilyValue)) ?? []}
+                          isPinned={comparisonIds.includes(family.name)}
+                          onTogglePin={() => toggleComparison(family.name)}
+                          onOpenPreview={setActiveFontPreview}
+                          onOpenTypographySet={openTypographySet}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <FontPairAudit />
+                  <BrandFontMatchesPanel
+                    comparisonIds={comparisonIds}
+                    onToggleComparison={toggleComparison}
+                    refreshToken={brandMatchesRefreshToken}
+                    onRefreshStateChange={setBrandMatchesRefreshing}
+                    onViewCatalog={(familyName) => {
+                      setFontLibraryMode("catalog");
+                      setFontSearch(familyName);
+                      setFontSourceFilter("hosted");
+                      setShowUsedOnly(false);
+                    }}
+                  />
+                </>
+              )}
 
               <FontUsagePreviewModal activePreview={activeFontPreview} onClose={() => setActiveFontPreview(null)} />
             </>

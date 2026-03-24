@@ -202,7 +202,7 @@ upload_fonts() {
   $PYTHON3 "$UPLOAD_SCRIPT" \
     --source "$DEST_BASE" \
     --bucket "$S3_BUCKET" \
-    --prefix "fonts/monotype" \
+    --prefix "fonts/trr" \
     $DRY_RUN
 }
 
@@ -211,13 +211,13 @@ upload_fonts() {
 # ============================================================================
 echo ""
 echo "╔══════════════════════════════════════════════╗"
-echo "║  Monotype Font Collector & CDN Uploader      ║"
+echo "║  Monotype Font Collector & TRR Uploader      ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 echo "  Source:  $FONT_SOURCE"
 echo "  Staging: $DEST_BASE"
-echo "  Bucket:  $S3_BUCKET/fonts/monotype/"
-echo "  CDN:     https://d1fmdyqfafwim3.cloudfront.net/fonts/monotype/"
+echo "  Bucket:  $S3_BUCKET/fonts/trr/"
+echo "  CDN:     https://d1fmdyqfafwim3.cloudfront.net/fonts/trr/"
 echo ""
 
 if $DO_COLLECT; then

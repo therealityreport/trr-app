@@ -1,0 +1,1326 @@
+{
+  "schemaVersion": "2026-03-23.v2",
+  "inputHash": "cf742cb0bba31a68ffd0f12278388e0707d43f559df67da12489d97a97cd6383",
+  "generatedAt": "2026-03-23T23:00:37.249Z",
+  "scoringConfigVersion": "2026-03-23.score.v3",
+  "data": [
+    {
+      "familyName": "Bernhard Modern",
+      "weightsNormalized": [
+        400,
+        700
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "display",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Bernhard%20Modern/BernhardModernItalic-1082687.ttf"
+    },
+    {
+      "familyName": "Best Bet JNL",
+      "weightsNormalized": [
+        400
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "unknown",
+      "traitTokens": [
+        "display",
+        "news"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Best%20Bet%20JNL/BestBetJNL-5864320.otf"
+    },
+    {
+      "familyName": "Beton",
+      "weightsNormalized": [
+        300,
+        600,
+        700,
+        800
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "slab",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Beton/Beton%20T%20Extended%20Bold.ttf"
+    },
+    {
+      "familyName": "Biotif Pro",
+      "weightsNormalized": [
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "humanist",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Biotif%20Pro/BiotifProExtraLight-930829387.otf"
+    },
+    {
+      "familyName": "Cheltenham",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Cheltenham/Cheltenham%20Light.ttf"
+    },
+    {
+      "familyName": "Cheltenham Old Style Pro",
+      "weightsNormalized": [
+        400
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Cheltenham%20Old%20Style%20Pro/CheltenhamOldStylePro-930124398.otf"
+    },
+    {
+      "familyName": "Chomsky",
+      "weightsNormalized": [
+        400
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "blackletter",
+      "traitTokens": [
+        "display",
+        "masthead"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Chomsky/Chomsky-8MOa2.otf"
+    },
+    {
+      "familyName": "Franklin Gothic",
+      "weightsNormalized": [
+        400,
+        500,
+        600,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Franklin%20Gothic/FranklinGothicBook-5515841.TTF"
+    },
+    {
+      "familyName": "Franklin Gothic Raw",
+      "weightsNormalized": [
+        300,
+        400,
+        500,
+        600,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "display",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Franklin%20Gothic%20Raw/FranklinGothicRawLight-1230518.otf"
+    },
+    {
+      "familyName": "Futura Now",
+      "weightsNormalized": [
+        300,
+        400,
+        500,
+        600,
+        700,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "geometric",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/futura-pt-light-589a6e187563a.otf"
+    },
+    {
+      "familyName": "Futura Now Display",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "display",
+        "geometric",
+        "text"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/FuturaNowDisplayThin-6060309.ttf"
+    },
+    {
+      "familyName": "Futura Now Headline",
+      "weightsNormalized": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "geometric",
+        "text"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/FuturaNowHeadlineThin-6078050.ttf"
+    },
+    {
+      "familyName": "Futura Now Text",
+      "weightsNormalized": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "geometric",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Futura%20Now/FuturaNowTextThin-6078180.ttf"
+    },
+    {
+      "familyName": "Geometric Slabserif 703",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "geometric",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Geometric%20Slabserif%20703/GeometricSlabserif703Light-1084320.ttf"
+    },
+    {
+      "familyName": "Geometric Slabserif 712",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "geometric",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Geometric%20Slabserif%20712/geometric-slabserif-712-medium.otf"
+    },
+    {
+      "familyName": "Gloucester",
+      "weightsNormalized": [
+        400,
+        700
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Gloucester/GloucesterOldStyle-5735713.ttf"
+    },
+    {
+      "familyName": "Goodall",
+      "weightsNormalized": [
+        400,
+        500,
+        600,
+        700,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Goodall/GoodallRegular-930826308.otf"
+    },
+    {
+      "familyName": "Hamburg Serial",
+      "weightsNormalized": [
+        200,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "grotesque",
+        "headline",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Hamburg%20Serial/HamburgSerialExtraLight-930108095.otf"
+    },
+    {
+      "familyName": "Hefring Slab",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "condensed"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "/fonts/trr/Hefring%20Slab/HefringSlabCondensedThinItalic-930865733.otf"
+    },
+    {
+      "familyName": "ITC Cheltenham",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/ITC%20Cheltenham/CheltenhamStdLight.otf"
+    },
+    {
+      "familyName": "ITC Franklin Gothic LT",
+      "weightsNormalized": [
+        400,
+        500,
+        600,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/ITC%20Franklin%20Gothic%20LT/ITCFranklinGothicLTBook-5739946.ttf"
+    },
+    {
+      "familyName": "Madriz",
+      "weightsNormalized": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "expanded"
+      ],
+      "classification": "display",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "expanded"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "/fonts/trr/Madriz/MadrizThin-930751391.otf"
+    },
+    {
+      "familyName": "Magnus",
+      "weightsNormalized": [
+        700
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "display",
+      "traitTokens": [
+        "display"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Magnus/MagnusBold-5438313.ttf"
+    },
+    {
+      "familyName": "Malden Sans",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "grotesque",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Malden%20Sans/MaldenSansThin-5698440.otf"
+    },
+    {
+      "familyName": "Malden Sans Condensed",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "condensed"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "grotesque",
+        "text"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Malden%20Sans/MaldenSansCondensedThin-5698416.otf"
+    },
+    {
+      "familyName": "News Gothic",
+      "weightsNormalized": [
+        300,
+        400,
+        500,
+        600,
+        700
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/News%20Gothic/NewsGothicStd.otf"
+    },
+    {
+      "familyName": "News Gothic No. 2",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/News%20Gothic%20No.%202/News%20Gothic%20No2%20W02%20Light.ttf"
+    },
+    {
+      "familyName": "Newspaper Publisher JNL",
+      "weightsNormalized": [
+        400
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "display",
+      "traitTokens": [
+        "display",
+        "masthead",
+        "news"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Newspaper%20Publisher%20JNL/NewspaperPublisherJNLRegular-7696168.otf"
+    },
+    {
+      "familyName": "Newston",
+      "weightsNormalized": [
+        400
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "news",
+        "text",
+        "traditional"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Newston/NewstonNormal-6509907.otf"
+    },
+    {
+      "familyName": "Novecento Slab",
+      "weightsNormalized": [
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "condensed"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "/fonts/trr/Novecento%20Slab/NovecentoSlabCondensedUltraLight-1277792.otf"
+    },
+    {
+      "familyName": "Palo Slab",
+      "weightsNormalized": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        900
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "condensed"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "/fonts/trr/Palo%20Slab/PaloSlabCondensedThinItalic-6656031.otf"
+    },
+    {
+      "familyName": "Plymouth Serial",
+      "weightsNormalized": [
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "display",
+      "traitTokens": [
+        "display",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Plymouth%20Serial/PlymouthSerialLight-10035287.otf"
+    },
+    {
+      "familyName": "Publica Slab",
+      "weightsNormalized": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Publica%20Slab/PublicaSlabThinItalic-5581587.otf"
+    },
+    {
+      "familyName": "Rockwell",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "body-safe",
+        "slab",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rockwell/rockwell-extra-bold.otf"
+    },
+    {
+      "familyName": "Rockwell Nova",
+      "weightsNormalized": [
+        300,
+        400,
+        700,
+        800
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "body-safe",
+        "slab",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "medium",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rockwell%20Nova/RockwellNovaLight-5368892.ttf"
+    },
+    {
+      "familyName": "Rockwell Nova Condensed",
+      "weightsNormalized": [
+        300,
+        400,
+        700
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "condensed"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rockwell%20Nova/RockwellNovaCondensedLight-5368880.ttf"
+    },
+    {
+      "familyName": "Rude Icons",
+      "weightsNormalized": [
+        400,
+        900
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "unknown",
+      "traitTokens": [],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Rude%20Icons/RudeIconsMediaWhite-930861857.otf"
+    },
+    {
+      "familyName": "Rude Slab",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        900
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "expanded"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "expanded",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Rude%20Slab/RudeSlabWideWideThinItalic-930861886.otf"
+    },
+    {
+      "familyName": "Rude Slab Condensed",
+      "weightsNormalized": [
+        200,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "condensed"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Rude%20Slab%20Condensed/RudeSlabCondensedCondensedThin-930861873.otf"
+    },
+    {
+      "familyName": "Rude Slab ExtraCondensed",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "condensed",
+        "extra-condensed"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "/fonts/trr/Rude%20Slab%20ExtraCondensed/RudeSlabExtraCondensedThinItalic-6131030.otf"
+    },
+    {
+      "familyName": "Rude Slab SemiWide",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "expanded"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "expanded",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Rude%20Slab%20SemiWide/RudeSlabSemiWideThinItalic-6131185.otf"
+    },
+    {
+      "familyName": "Sharp Slab",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Sharp%20Slab/SharpSlabThinItalic-930845649.otf"
+    },
+    {
+      "familyName": "Sofia Pro",
+      "weightsNormalized": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "unknown",
+      "traitTokens": [
+        "body-safe",
+        "humanist",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Sofia%20Pro/SofiaProUltraLight-930940326.otf"
+    },
+    {
+      "familyName": "Stafford Serial",
+      "weightsNormalized": [
+        200,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "body-safe",
+        "text",
+        "traditional"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stafford%20Serial/StaffordSerialExtraLight-930109019.otf"
+    },
+    {
+      "familyName": "Stint Pro",
+      "weightsNormalized": [
+        400,
+        500,
+        700,
+        900
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "condensed",
+        "expanded"
+      ],
+      "classification": "unknown",
+      "traitTokens": [
+        "body-safe",
+        "condensed",
+        "expanded",
+        "text",
+        "traditional"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "high",
+      "sourceUrl": "/fonts/trr/Stint%20Pro/StintProStintCondensedPro-930231592.otf"
+    },
+    {
+      "familyName": "Stymie",
+      "weightsNormalized": [
+        300,
+        500,
+        700,
+        900
+      ],
+      "styles": [
+        "normal",
+        "italic"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stymie/Stymie%20Medium.otf"
+    },
+    {
+      "familyName": "Stymie Extra Bold",
+      "weightsNormalized": [
+        800
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stymie%20Extra%20Bold/StymieExtraBold-5907011.otf"
+    },
+    {
+      "familyName": "Tabac Big Slab",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        600,
+        700,
+        900
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "slab",
+      "traitTokens": [
+        "display",
+        "slab"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "medium",
+      "sourceUrl": "/fonts/trr/Tabac%20Big%20Slab/TabacBigSlabThinItalic-930309509.otf"
+    },
+    {
+      "familyName": "TT Rationalist",
+      "weightsNormalized": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "italic",
+        "normal"
+      ],
+      "widthsNormalized": [
+        "normal"
+      ],
+      "classification": "unknown",
+      "traitTokens": [
+        "body-safe",
+        "geometric",
+        "text"
+      ],
+      "displayRisk": "medium",
+      "bodyRisk": "low",
+      "sourceUrl": "/fonts/trr/TT%20Rationalist/TTRationalistThinItalic-7910691.ttf"
+    },
+    {
+      "familyName": "Velino Compressed Text",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        900
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "extra-condensed"
+      ],
+      "classification": "serif",
+      "traitTokens": [
+        "body-safe",
+        "condensed",
+        "display",
+        "text",
+        "traditional"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Velino%20Compressed%20Text/VelinoCompressedTextCompThin-930862136.otf"
+    },
+    {
+      "familyName": "Winner Sans",
+      "weightsNormalized": [
+        100,
+        300,
+        400,
+        500,
+        700,
+        800,
+        900
+      ],
+      "styles": [
+        "normal"
+      ],
+      "widthsNormalized": [
+        "condensed",
+        "expanded"
+      ],
+      "classification": "sans",
+      "traitTokens": [
+        "condensed",
+        "display",
+        "expanded",
+        "grotesque",
+        "text"
+      ],
+      "displayRisk": "low",
+      "bodyRisk": "high",
+      "sourceUrl": "/fonts/trr/Winner%20Sans/WinnerSansCondensedThin-930818564.otf"
+    }
+  ]
+}

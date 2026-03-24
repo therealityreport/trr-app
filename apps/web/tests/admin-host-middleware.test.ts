@@ -430,7 +430,9 @@ describe("admin host proxy", () => {
     const response = proxy(request);
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/people/mary-cosby/gallery");
+    expect(response.headers.get("location")).toBe(
+      "http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc",
+    );
   });
 
   it("rewrites person gallery routes without show context to the admin person workspace on admin host", () => {

@@ -11,7 +11,6 @@ import type { SeasonAdminTab, SocialAnalyticsViewSlug } from "@/lib/admin/show-a
 import {
   buildAdminRedditCommunityUrl,
   buildSeasonAdminUrl,
-  buildShowAdminUrl,
   buildShowRedditCommunityUrl,
   buildShowRedditUrl,
 } from "@/lib/admin/show-admin-routes";
@@ -180,13 +179,10 @@ export default function RedditCommunityViewPage() {
   const showName = communityContext?.showFullName ?? communityContext?.showLabel ?? "Show";
   const hasSeasonContext =
     Boolean(showSlug) && typeof seasonNumber === "number" && Number.isFinite(seasonNumber);
-  const showHref = showSlug ? buildShowAdminUrl({ showSlug }) : "/shows";
+  const showHref = showSlug ? `/${encodeURIComponent(showSlug)}` : "/shows";
   const seasonHref =
     hasSeasonContext && showSlug
-      ? buildSeasonAdminUrl({
-          showSlug,
-          seasonNumber,
-        })
+      ? `/${encodeURIComponent(showSlug)}/s${seasonNumber}`
       : showHref;
   const redditHref = showSlug
     ? buildShowRedditUrl({
@@ -247,13 +243,18 @@ export default function RedditCommunityViewPage() {
     router.replace(nextHref as Route);
   }, [canonicalCommunityHref, canonicalSeasonNumber, communitySlug, pathname, router, searchParams, showSlug]);
   const breadcrumbItems = useMemo(() => {
-    return buildSeasonSocialBreadcrumb(showName, seasonNumber ?? "", {
+    const items = buildSeasonSocialBreadcrumb(showName, seasonNumber ?? "", {
       showHref,
       seasonHref,
       socialHref: redditHref,
       subTabLabel: "Reddit Analytics",
       subTabHref: redditHref,
     });
+    return items.map((item) =>
+      item.label === "Shows"
+        ? { ...item, href: "/shows" }
+        : item,
+    );
   }, [redditHref, seasonHref, seasonNumber, showHref, showName]);
   const pageTitle = (() => {
     const communityLabel =

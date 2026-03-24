@@ -32,7 +32,7 @@ export default function AdminGamesPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Games", "/admin/games")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Games", "/games")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Games</h1>
               <p className="text-sm text-zinc-500">Game content, configuration, and publishing tools.</p>
             </div>

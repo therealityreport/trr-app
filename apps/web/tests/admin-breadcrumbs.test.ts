@@ -32,7 +32,7 @@ describe("admin-breadcrumb helpers", () => {
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/shows" },
+      { label: "Shows", href: "/admin/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
       { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Week 2", href: "/shows/rhoslc/s5/social/week/2" },
@@ -49,7 +49,7 @@ describe("admin-breadcrumb helpers", () => {
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/shows" },
+      { label: "Shows", href: "/admin/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
       { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
@@ -69,7 +69,7 @@ describe("admin-breadcrumb helpers", () => {
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/shows" },
+      { label: "Shows", href: "/admin/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
       { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
@@ -86,7 +86,7 @@ describe("admin-breadcrumb helpers", () => {
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/shows" },
+      { label: "Shows", href: "/admin/shows" },
       {
         label: "The Real Housewives of Salt Lake City",
         href: "/shows/the-real-housewives-of-salt-lake-city",
@@ -96,19 +96,19 @@ describe("admin-breadcrumb helpers", () => {
 
     expect(
       buildPersonBreadcrumb("Meredith Marks", {
-        personHref: "/shows/people/meredith-marks",
+        personHref: "/people/meredith-marks",
       }),
     ).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Shows", href: "/shows" },
-      { label: "Meredith Marks", href: "/shows/people/meredith-marks" },
+      { label: "People", href: "/people" },
+      { label: "Meredith Marks", href: "/people/meredith-marks" },
     ]);
   });
 
   it("builds survey detail breadcrumbs", () => {
     expect(buildSurveyDetailBreadcrumb("Rhoslc S5 E1", "/admin/surveys/rhoslc-s5-e1")).toEqual([
       { label: "Admin", href: "/admin" },
-      { label: "Survey Editor", href: "/admin/surveys" },
+      { label: "Surveys", href: "/surveys" },
       { label: "Rhoslc S5 E1", href: "/admin/surveys/rhoslc-s5-e1" },
     ]);
 

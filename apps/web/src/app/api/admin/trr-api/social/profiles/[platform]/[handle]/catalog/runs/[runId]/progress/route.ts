@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   fetchSocialBackendJson,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
@@ -21,8 +22,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }`;
     const data = await fetchSocialBackendJson(path, {
       fallbackError: "Failed to fetch social account catalog run progress",
-      retries: 0,
-      timeoutMs: 30_000,
+      retries: 1,
+      timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
     });
     return NextResponse.json(data);
   } catch (error) {

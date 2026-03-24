@@ -11,6 +11,7 @@ import {
   formatRefreshSourceLabel,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
+  normalizePersonGettyProgress,
   normalizePersonRefreshSourceProgress,
   PERSON_REFRESH_PHASES,
   summarizePersonRefreshSourceProgress,
@@ -123,6 +124,79 @@ describe("person refresh progress mapping", () => {
     expect(summarizePersonRefreshSourceProgress(sourceProgress)).toEqual({ current: 1, total: 2 });
   });
 
+  it("counts warning source rows as completed progress", () => {
+    const sourceProgress = normalizePersonRefreshSourceProgress({
+      getty_nbcumv: {
+        status: "warning",
+        discovered_total: 96,
+        scraped_current: 96,
+        saved_current: 0,
+        covered_existing: 95,
+        failed_current: 1,
+        skipped_current: 95,
+        remaining: 0,
+        message: "Imported 0 NBCUMV-only supplemental assets.",
+      },
+    });
+
+    expect(sourceProgress[0]?.status).toBe("warning");
+    expect(summarizePersonRefreshSourceProgress(sourceProgress)).toEqual({ current: 1, total: 1 });
+  });
+
+  it("normalizes structured getty progress rows and preserves task ordering", () => {
+    const gettyProgress = normalizePersonGettyProgress({
+      status: "running",
+      phase: "pairing",
+      subtasks: [
+        {
+          id: "mirror_imported_assets",
+          label: "Host Imported Assets",
+          status: "warning",
+          current: 16,
+          total: 17,
+        },
+        {
+          id: "primary_person_search",
+          label: "Primary Person Search",
+          status: "completed",
+          query: "Brandi Glanville Bravo",
+          candidates_found: 24,
+          current: 24,
+          total: 24,
+          message: "Found 24 direct Getty candidates.",
+        },
+      ],
+      breakdown: {
+        raw_getty_candidates: 24,
+        matched_via_nbcumv: 10,
+        matched_via_bravotv_json: 0,
+        matched_via_image_search: 2,
+        unmatched_getty: 14,
+        getty_only_imported: 3,
+        nbcumv_only_imported: 2,
+        bravotv_only_imported: 1,
+        skipped: 0,
+        failed: 1,
+        mirrored_hosted: 16,
+        mirrored_failed: 1,
+      },
+    });
+
+    expect(gettyProgress).not.toBeNull();
+    expect(gettyProgress?.subtasks.map((entry) => entry.id)).toEqual([
+      "primary_person_search",
+      "mirror_imported_assets",
+    ]);
+    expect(gettyProgress?.breakdown).toMatchObject({
+      rawGettyCandidates: 24,
+      matchedViaNbcumv: 10,
+      matchedViaImageSearch: 2,
+      nbcumvOnlyImported: 2,
+      mirroredHosted: 16,
+      failed: 1,
+    });
+  });
+
   it("builds detailed heartbeat messages with source + elapsed context", () => {
     expect(
       buildPersonRefreshDetailMessage({
@@ -136,7 +210,7 @@ describe("person refresh progress mapping", () => {
         current: 0,
         total: 4,
       }),
-    ).toBe("Syncing IMDb... · mirrored 24/50 · step 0/4 · 6s elapsed");
+    ).toBe("Syncing IMDb... · hosted 24/50 · step 0/4 · 6s elapsed");
   });
 
   it("builds fallback detail when backend emits no message", () => {
@@ -305,7 +379,8 @@ describe("person refresh progress mapping", () => {
       photos_fetched: 12,
       photos_upserted: 10,
       photos_mirrored: 8,
-      photos_failed: 1,
+      hosting_hosted_total: 8,
+      hosting_failed_total: 1,
       auto_counts_attempted: 9,
       auto_counts_succeeded: 7,
       auto_counts_failed: 2,
@@ -331,7 +406,8 @@ describe("person refresh progress mapping", () => {
 
     expect(sourceSync?.result).toContain("Fetched 12 photos");
     expect(autoCount?.result).toContain("Saved tagging for 7/9 images");
-    expect(mirroring?.status).toBe("failed");
+    expect(mirroring?.status).toBe("warning");
+    expect(mirroring?.result).toContain("Hosted 8 assets (1 failed)");
   });
 
   it("finalizes ingest summaries without downstream reprocess stages", () => {
@@ -340,7 +416,8 @@ describe("person refresh progress mapping", () => {
       photos_fetched: 89,
       photos_upserted: 46,
       photos_mirrored: 12,
-      photos_failed: 0,
+      hosting_hosted_total: 12,
+      hosting_failed_total: 0,
       existing_imdb_rows_repaired: 7,
       metadata_enrichment_failed: 0,
       episode_metadata_tagged: 27,
@@ -352,6 +429,23 @@ describe("person refresh progress mapping", () => {
     expect(finalized.find((step) => step.id === "metadata_repair")?.result).toContain("Repaired 7 IMDb rows");
     expect(finalized.some((step) => step.id === "auto_count")).toBe(false);
     expect(finalized.some((step) => step.id === "resizing")).toBe(false);
+  });
+
+  it("does not mark hosting failed from global photos_failed when hosting summary is clean", () => {
+    const initial = createPersonRefreshPipelineSteps("ingest");
+    const finalized = finalizePersonRefreshPipelineSteps(initial, "ingest", {
+      photos_fetched: 1096,
+      photos_upserted: 35,
+      photos_mirrored: 35,
+      photos_failed: 2,
+      hosting_hosted_total: 35,
+      hosting_failed_total: 0,
+      hosting_skipped_total: 95,
+    });
+
+    const mirroring = finalized.find((step) => step.id === "mirroring");
+    expect(mirroring?.status).toBe("completed");
+    expect(mirroring?.result).toBe("Hosted 35 assets (0 failed)");
   });
 
   it("finalizes reprocess metadata repair summary", () => {

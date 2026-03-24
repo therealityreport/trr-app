@@ -16,6 +16,7 @@ export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatf
   "tiktok",
   "twitter",
   "youtube",
+  "facebook",
   "threads",
 ];
 
@@ -164,6 +165,17 @@ export type SocialAccountCatalogRunProgressSummary = {
   items_found_total?: number;
 };
 
+export type SocialAccountCatalogRunDispatchHealth = {
+  queued_unclaimed_jobs?: number;
+  modal_pending_jobs?: number;
+  modal_running_unclaimed_jobs?: number;
+  retrying_dispatch_jobs?: number;
+  stale_dispatch_failed_jobs?: number;
+  latest_dispatch_requested_at?: string | null;
+  remote_invocation_checked_at?: string | null;
+  max_stale_dispatch_retries?: number;
+};
+
 export type SocialAccountCatalogVerification = {
   platform: SocialPlatformSlug;
   account_handle: string;
@@ -235,6 +247,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   completion_gap_reason?: string | null;
   scrape_complete?: boolean;
   classify_incomplete?: boolean;
+  dispatch_health?: SocialAccountCatalogRunDispatchHealth;
   summary?: SocialAccountCatalogRunProgressSummary;
   updated_at?: string | null;
 };

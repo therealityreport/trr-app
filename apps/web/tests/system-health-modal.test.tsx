@@ -191,6 +191,23 @@ describe("SystemHealthModal polling", () => {
       if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
         return jsonResponse(queueStatusPayload);
       }
+      if (url.includes("/api/admin/trr-api/operations/health")) {
+        return jsonResponse({
+          summary: {
+            active_total: 0,
+            stale_total: 0,
+            cancelling_total: 0,
+            by_status: {},
+            by_type: {},
+            runtime_split: { modal: 0, local: 0, other: 0, unknown: 0 },
+            stale_after_seconds: 300,
+            cancelling_grace_seconds: 60,
+          },
+          active_operations: [],
+          stale_operations: [],
+          updated_at: "2026-03-02T12:05:00.000Z",
+        });
+      }
       if (url.includes("/api/admin/trr-api/social/ingest/stuck-jobs/cancel")) {
         queueStatusPayload = {
           ...queueStatusPayload,
@@ -427,6 +444,23 @@ describe("SystemHealthModal polling", () => {
       if (url.includes("/api/admin/trr-api/social/ingest/queue-status")) {
         throw new Error("signal is aborted without reason");
       }
+      if (url.includes("/api/admin/trr-api/operations/health")) {
+        return jsonResponse({
+          summary: {
+            active_total: 0,
+            stale_total: 0,
+            cancelling_total: 0,
+            by_status: {},
+            by_type: {},
+            runtime_split: { modal: 0, local: 0, other: 0, unknown: 0 },
+            stale_after_seconds: 300,
+            cancelling_grace_seconds: 60,
+          },
+          active_operations: [],
+          stale_operations: [],
+          updated_at: "2026-03-02T12:05:00.000Z",
+        });
+      }
       throw new Error(`Unexpected URL: ${url}`);
     });
 
@@ -465,7 +499,7 @@ describe("SystemHealthModal polling", () => {
     render(<SystemHealthModal isOpen onClose={() => undefined} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Social Sync Health")).toBeInTheDocument();
+      expect(screen.getByText("How This Sync Runs")).toBeInTheDocument();
     });
 
     expect(screen.getByText("How This Sync Runs")).toBeInTheDocument();
@@ -475,7 +509,7 @@ describe("SystemHealthModal polling", () => {
     expect(screen.getByText("Local execution is disabled")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Shows whether the remote executor is available, whether jobs are moving, and whether anything needs intervention.",
+        "Shows whether workers are available, whether gallery and social jobs are moving, and whether anything needs intervention across both queues.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Queue Health")).toBeInTheDocument();
@@ -568,7 +602,9 @@ describe("SystemHealthModal polling", () => {
       expect(screen.getAllByText("Needs Attention").length).toBeGreaterThan(0);
     });
 
-    expect(screen.getByText("Workers are available, but there are recent failures to review.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Workers are available. Recent failures are historical, but they are still worth reviewing."),
+    ).toBeInTheDocument();
     expect(screen.getByText("1 recent failures")).toBeInTheDocument();
   });
 

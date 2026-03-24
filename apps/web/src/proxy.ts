@@ -262,7 +262,6 @@ function appendSearch(pathname: string, searchParams?: URLSearchParams): string 
 
 function appendCanonicalPersonSearch(pathname: string, searchParams?: URLSearchParams): string {
   const next = new URLSearchParams(searchParams?.toString() ?? "");
-  next.delete("showId");
   next.delete("tab");
   return appendSearch(pathname, next);
 }

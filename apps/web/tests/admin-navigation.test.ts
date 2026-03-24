@@ -6,21 +6,24 @@ describe("admin navigation config", () => {
     expect(ADMIN_NAV_ITEMS.map((item) => item.title)).toEqual([
       "Dev Dashboard",
       "Shows",
+      "Screenalytics",
       "People",
       "Games",
-      "Survey Editor",
+      "Surveys",
       "Social Media",
       "Brands",
       "Users",
       "Groups",
       "Docs",
       "UI Design System",
+      "Design Docs",
       "Settings",
     ]);
 
     expect(ADMIN_NAV_ITEMS.map((item) => item.href)).toEqual([
       "/dev-dashboard",
       "/admin/shows",
+      "/screenalytics",
       "/people",
       "/games",
       "/surveys",
@@ -30,6 +33,7 @@ describe("admin navigation config", () => {
       "/groups",
       "/docs",
       "/design-system/fonts",
+      "/admin/design-docs",
       "/settings",
     ]);
   });

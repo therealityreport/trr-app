@@ -735,6 +735,55 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getAllByRole("button", { name: "Star/Flag" }).length).toBeGreaterThan(0);
   });
 
+  it("keeps crop and guide overlays hidden until edit mode is enabled", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          peopleCount: 2,
+          faceBoxes: [
+            {
+              index: 1,
+              kind: "face",
+              x: 0.12,
+              y: 0.1,
+              width: 0.2,
+              height: 0.2,
+              person_name: "Brandi Glanville",
+            },
+          ],
+        })}
+        metadataExtras={<div>edit tools</div>}
+        canManage
+        thumbnailCropPreview={{
+          focusX: 50,
+          focusY: 50,
+          zoom: 1.2,
+          imageWidth: 1200,
+          imageHeight: 1800,
+          aspectRatio: 3 / 4,
+        }}
+        onThumbnailCropPreviewAdjust={vi.fn()}
+      />
+    );
+
+    openMetadataPanel();
+
+    expect(screen.queryByText("Thumbnail Crop + Subject Focus")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Resize crop from top-left corner"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+
+    expect(screen.getByText("Thumbnail Crop + Subject Focus")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resize crop from top-left corner")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Close Edit" }).length).toBeGreaterThan(0);
+  });
+
   it("supports setting featured poster through management actions", async () => {
     const onSetFeaturedPoster = vi.fn(async () => {});
 

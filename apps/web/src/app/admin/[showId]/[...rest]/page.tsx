@@ -29,5 +29,5 @@ export default async function AdminShowAliasCatchallPage({
   const { showId, rest = [] } = await params;
   const restPath = rest.length > 0 ? `/${rest.map((segment) => encodeURIComponent(segment)).join("/")}` : "";
   const search = await buildSearch(searchParams);
-  redirect(`/admin/trr-shows/${encodeURIComponent(showId)}${restPath}${search}`);
+  redirect(`/${encodeURIComponent(showId)}${restPath}${search}`);
 }

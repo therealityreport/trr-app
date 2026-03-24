@@ -374,6 +374,45 @@ type AnalyticsResponse = {
     }>;
   };
   jobs: SocialJob[];
+  reddit?: {
+    community_id?: string;
+    subreddit?: string;
+    tracked_post_count?: number;
+    show_match_post_count?: number;
+    comment_count?: number;
+    flair_mix?: Array<{
+      flair_key?: string;
+      flair_label?: string;
+      tracked_flair_post_count?: number;
+      post_count?: number;
+    }>;
+    freshness?: {
+      latest_data_timestamp?: string | null;
+      latest_run_timestamp?: string | null;
+      latest_run_status?: string | null;
+    };
+    coverage?: {
+      tracked_post_count?: number;
+      detail_scraped_post_count?: number;
+      comment_saved_post_count?: number;
+      detail_coverage_pct?: number | null;
+      comment_coverage_pct?: number | null;
+      stale_container_count?: number;
+      recovered_container_count?: number;
+    };
+    container_statuses?: Array<{
+      container_key?: string;
+      latest_run_status?: string | null;
+      stale?: boolean;
+      failure_reason_code?: string | null;
+    }>;
+    deep_link?: {
+      label?: string | null;
+      path?: string | null;
+      show_slug?: string | null;
+      season_number?: number | null;
+    };
+  } | null;
 };
 
 type IngestProxyErrorPayload = {
@@ -7030,6 +7069,40 @@ export default function SeasonSocialAnalyticsSection({
               </p>
               <p className="mt-1 text-xs text-zinc-500">Cross-platform interactions</p>
             </article>
+            {analytics?.reddit && (
+              <article className="rounded-2xl border border-orange-200 bg-orange-50/40 p-5 shadow-sm" data-testid="reddit-summary-card">
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-600">Reddit Coverage</p>
+                <p className="mt-2 text-3xl font-bold text-zinc-900">
+                  {formatCompactInteger(Number(analytics.reddit.tracked_post_count ?? 0))}
+                </p>
+                <p className="mt-1 text-xs text-zinc-600">
+                  tracked posts · {formatCompactInteger(Number(analytics.reddit.show_match_post_count ?? 0))} show-match ·{" "}
+                  {formatCompactInteger(Number(analytics.reddit.comment_count ?? 0))} comments
+                </p>
+                {analytics.reddit.deep_link?.path && (
+                  <Link
+                    href={analytics.reddit.deep_link.path as Route}
+                    className="mt-2 inline-flex text-xs font-semibold text-orange-700 underline-offset-4 hover:underline"
+                  >
+                    Open Reddit Manager
+                  </Link>
+                )}
+              </article>
+            )}
+            {analytics?.reddit && (
+              <article className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm" data-testid="reddit-freshness-card">
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-600">Reddit Freshness</p>
+                <p className="mt-2 text-3xl font-bold text-zinc-900">
+                  {formatCompactInteger(Number(analytics.reddit.coverage?.recovered_container_count ?? 0))}
+                </p>
+                <p className="mt-1 text-xs text-zinc-600">
+                  recovered windows · {formatCompactInteger(Number(analytics.reddit.coverage?.stale_container_count ?? 0))} stale
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  Latest Reddit run {formatDateTime(analytics.reddit.freshness?.latest_run_timestamp ?? null)}
+                </p>
+              </article>
+            )}
             <article
               className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
               data-testid="metric-comments-saved-pct-card"

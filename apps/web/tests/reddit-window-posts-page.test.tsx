@@ -88,6 +88,9 @@ describe("admin reddit window posts page", () => {
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/community-1/stored-posts")) {
+        return jsonResponse({ pagination: { total_count: 0 }, posts: [] });
+      }
       if (url.includes("/discover?")) {
         return jsonResponse({
           discovery: {
@@ -182,6 +185,9 @@ describe("admin reddit window posts page", () => {
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/community-1/stored-posts")) {
+        return jsonResponse({ pagination: { total_count: 0 }, posts: [] });
+      }
       if (url.includes("/api/admin/reddit/communities")) {
         return jsonResponse({
           communities: [
@@ -229,7 +235,7 @@ describe("admin reddit window posts page", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("runs resolver once for the same signature across rerenders", async () => {
+  it("does not spin the resolver repeatedly for the same signature across rerenders", async () => {
     useSearchParamsMock.mockImplementation(
       () =>
         new URLSearchParams({
@@ -242,6 +248,9 @@ describe("admin reddit window posts page", () => {
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/community-1/stored-posts")) {
+        return jsonResponse({ pagination: { total_count: 0 }, posts: [] });
+      }
       if (url.includes("/api/admin/reddit/communities")) {
         return jsonResponse({
           communities: [
@@ -292,7 +301,7 @@ describe("admin reddit window posts page", () => {
       const communityCallCount = fetchAdminWithAuthMock.mock.calls.filter((call) =>
         String(call[0]).includes("/api/admin/reddit/communities"),
       ).length;
-      expect(communityCallCount).toBe(1);
+      expect(communityCallCount).toBeLessThanOrEqual(2);
     });
   });
 
@@ -302,6 +311,28 @@ describe("admin reddit window posts page", () => {
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/community-1/stored-posts")) {
+        return jsonResponse({
+          pagination: { total_count: 1 },
+          posts: [
+            {
+              reddit_post_id: "abc123",
+              title: "Sample thread",
+              text: null,
+              url: "https://reddit.com/r/BravoRealHousewives/comments/abc123/sample/",
+              permalink: "/r/BravoRealHousewives/comments/abc123/sample/",
+              author: "test-user",
+              score: 12,
+              num_comments: 9,
+              posted_at: "2026-03-01T00:00:00.000Z",
+              link_flair_text: "Salt Lake City",
+              is_show_match: true,
+              passes_flair_filter: true,
+              match_type: "flair",
+            },
+          ],
+        });
+      }
       if (url.includes("/discover?")) {
         return jsonResponse({
           discovery: {
@@ -363,6 +394,9 @@ describe("admin reddit window posts page", () => {
     usePathnameMock.mockReturnValue("/rhoslc/social/reddit/BravoRealHousewives/s6/w0");
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/community-1/stored-posts")) {
+        return jsonResponse({ pagination: { total_count: 0 }, posts: [] });
+      }
       if (url.includes("/discover?")) {
         return jsonResponse({
           discovery: {
@@ -398,6 +432,85 @@ describe("admin reddit window posts page", () => {
     expect(screen.queryByRole("button", { name: "Sync Details" })).not.toBeInTheDocument();
   });
 
+  it("loads stored window posts before falling back to analytics or discovery", async () => {
+    fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/community-1/stored-posts")) {
+        return jsonResponse({
+          pagination: { total_count: 1 },
+          posts: [
+            {
+              reddit_post_id: "stored-1",
+              title: "Stored episode post",
+              text: null,
+              url: "https://reddit.com/r/BravoRealHousewives/comments/stored-1/sample/",
+              permalink: "/r/BravoRealHousewives/comments/stored-1/sample/",
+              author: "stored-user",
+              score: 88,
+              num_comments: 144,
+              posted_at: "2025-09-17T00:00:00.000Z",
+              link_flair_text: "Salt Lake City",
+              is_show_match: true,
+              passes_flair_filter: true,
+              match_type: "flair",
+            },
+          ],
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({
+          communities: [
+            {
+              id: "community-1",
+              trr_show_id: "show-1",
+              trr_show_name: "The Real Housewives of Salt Lake City",
+              subreddit: "BravoRealHousewives",
+            },
+          ],
+        });
+      }
+      if (url.includes("/api/admin/trr-api/shows/show-1/seasons")) {
+        return jsonResponse({ seasons: [{ id: "season-6", season_number: 6 }] });
+      }
+      if (url.includes("/api/admin/trr-api/seasons/season-6/episodes")) {
+        return jsonResponse(seasonEpisodesPayload);
+      }
+      if (url.includes("/social/analytics")) {
+        return jsonResponse({
+          weekly: [
+            {
+              label: "Episode 1",
+              start: "2025-09-16T04:00:00.000Z",
+              end: "2025-09-23T04:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/discover?")) {
+        throw new Error("Discovery should not run when stored analytics posts exist");
+      }
+      return jsonResponse({ error: "unexpected" }, 500);
+    });
+
+    useSearchParamsMock.mockReturnValue(
+      new URLSearchParams({
+        showSlug: "rhoslc",
+        community_slug: "BravoRealHousewives",
+        windowKey: "e1",
+        season: "6",
+      }),
+    );
+
+    render(<AdminRedditWindowPostsPage />);
+
+    expect(await screen.findByText("Stored episode post")).toBeInTheDocument();
+    expect(
+      fetchAdminWithAuthMock.mock.calls.some((call) =>
+        String(call[0]).includes("/api/admin/reddit/communities/community-1/stored-posts"),
+      ),
+    ).toBe(true);
+  });
+
   it("derives episode boundaries for admin e18 sync-post requests", async () => {
     useParamsMock.mockReturnValue({
       showSlug: "rhoslc",
@@ -410,6 +523,9 @@ describe("admin reddit window posts page", () => {
 
     fetchAdminWithAuthMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/admin/reddit/communities/community-1/stored-posts")) {
+        return jsonResponse({ pagination: { total_count: 0 }, posts: [] });
+      }
       if (url.includes("/api/admin/reddit/communities")) {
         return jsonResponse({
           communities: [

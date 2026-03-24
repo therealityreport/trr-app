@@ -180,6 +180,12 @@ import {
   resolveShowPageDisplayTitle,
 } from "@/lib/admin/show-page/link-display";
 import {
+  buildCanonicalShowAlternativeNames,
+  deriveShowDetailsAlternativeNames,
+  deriveShowDetailsNickname,
+  deriveShowDetailsSlugPreview,
+} from "@/lib/admin/show-page/details-form";
+import {
 } from "@/lib/admin/show-page/link-discovery-progress";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -1541,6 +1547,47 @@ const readShowExternalId = (
   return String(value);
 };
 
+const buildShowDetailsFormValue = (show: TrrShow | null) => {
+  if (!show) {
+    return {
+      displayName: "",
+      nickname: "",
+      altNamesText: "",
+      description: "",
+      premiereDate: "",
+      imdbId: "",
+      tmdbId: "",
+      tvdbId: "",
+      wikidataId: "",
+      tvRageId: "",
+      genresText: "",
+      networksText: "",
+      streamingProvidersText: "",
+      tagsText: "",
+    };
+  }
+
+  return {
+    displayName: show.name ?? "",
+    nickname: deriveShowDetailsNickname(show),
+    altNamesText: deriveShowDetailsAlternativeNames(show).join("\n"),
+    description: show.description ?? "",
+    premiereDate: show.premiere_date ?? "",
+    imdbId: readShowExternalId(show, "imdb_id"),
+    tmdbId: readShowExternalId(show, "tmdb_id"),
+    tvdbId: readShowExternalId(show, "tvdb_id"),
+    wikidataId: readShowExternalId(show, "wikidata_id"),
+    tvRageId: readShowExternalId(show, "tv_rage_id"),
+    genresText: toDelimitedEditorText(show.genres),
+    networksText: toDelimitedEditorText(show.networks),
+    streamingProvidersText: toDelimitedEditorText(
+      (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
+        (Array.isArray(show.watch_providers) ? show.watch_providers : []),
+    ),
+    tagsText: toDelimitedEditorText(show.tags),
+  };
+};
+
 const inferBravoShowUrl = (showName: string | null | undefined): string | null => {
   if (typeof showName !== "string") return null;
   const slug = showName
@@ -2254,49 +2301,7 @@ export default function TrrShowDetailPage() {
   const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsEditing, setDetailsEditing] = useState(false);
-  const detailsBaseline = useMemo(() => {
-    if (!show) {
-      return {
-        displayName: "",
-        nickname: "",
-        altNamesText: "",
-        description: "",
-        premiereDate: "",
-        imdbId: "",
-        tmdbId: "",
-        tvdbId: "",
-        wikidataId: "",
-        tvRageId: "",
-        genresText: "",
-        networksText: "",
-        streamingProvidersText: "",
-        tagsText: "",
-      };
-    }
-    const alternatives = Array.isArray(show.alternative_names)
-      ? show.alternative_names.filter((name) => typeof name === "string" && name.trim().length > 0)
-      : [];
-    const [nickname = "", ...restAlt] = alternatives;
-      return {
-        displayName: show.name ?? "",
-        nickname,
-        altNamesText: restAlt.join("\n"),
-        description: show.description ?? "",
-        premiereDate: show.premiere_date ?? "",
-        imdbId: readShowExternalId(show, "imdb_id"),
-        tmdbId: readShowExternalId(show, "tmdb_id"),
-        tvdbId: readShowExternalId(show, "tvdb_id"),
-        wikidataId: readShowExternalId(show, "wikidata_id"),
-        tvRageId: readShowExternalId(show, "tv_rage_id"),
-        genresText: toDelimitedEditorText(show.genres),
-        networksText: toDelimitedEditorText(show.networks),
-        streamingProvidersText: toDelimitedEditorText(
-          (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
-            (Array.isArray(show.watch_providers) ? show.watch_providers : []),
-        ),
-        tagsText: toDelimitedEditorText(show.tags),
-      };
-  }, [show]);
+  const detailsBaseline = useMemo(() => buildShowDetailsFormValue(show), [show]);
   const hasUnsavedDetailsChanges = useMemo(() => {
     if (!detailsEditing) return false;
     return (
@@ -3881,15 +3886,21 @@ export default function TrrShowDetailPage() {
     }
 
     const nickname = detailsForm.nickname.trim();
+    const canonicalNickname = deriveShowDetailsSlugPreview(nickname);
+    if (!canonicalNickname) {
+      setDetailsError("Nickname must produce a valid slug.");
+      return;
+    }
     const altNames = parseAltNamesText(detailsForm.altNamesText);
     const genres = parseAltNamesText(detailsForm.genresText);
     const networks = parseAltNamesText(detailsForm.networksText);
     const streamingProviders = parseAltNamesText(detailsForm.streamingProvidersText);
     const tags = parseAltNamesText(detailsForm.tagsText);
-    const allAltNames = [
-      ...(nickname ? [nickname] : []),
-      ...altNames.filter((name) => name.toLowerCase() !== nickname.toLowerCase()),
-    ].filter((name) => name.toLowerCase() !== displayName.toLowerCase());
+    const allAltNames = buildCanonicalShowAlternativeNames({
+      displayName,
+      nickname,
+      alternativeNames: altNames,
+    });
 
     setDetailsSaving(true);
     setDetailsError(null);
@@ -3903,7 +3914,7 @@ export default function TrrShowDetailPage() {
           headers: { ...headers, "Content-Type": "application/json" },
           body: JSON.stringify({
             name: displayName,
-            nickname: nickname || "",
+            nickname: canonicalNickname,
             alternative_names: allAltNames,
             description: detailsForm.description.trim() || "",
             premiere_date: detailsForm.premiereDate || "",
@@ -3942,29 +3953,7 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (!show) return;
-    const alternatives = Array.isArray(show.alternative_names)
-      ? show.alternative_names.filter((name) => typeof name === "string" && name.trim().length > 0)
-      : [];
-    const [nickname = "", ...restAlt] = alternatives;
-    setDetailsForm({
-      displayName: show.name ?? "",
-      nickname,
-      altNamesText: restAlt.join("\n"),
-      description: show.description ?? "",
-      premiereDate: show.premiere_date ?? "",
-      imdbId: readShowExternalId(show, "imdb_id"),
-      tmdbId: readShowExternalId(show, "tmdb_id"),
-      tvdbId: readShowExternalId(show, "tvdb_id"),
-      wikidataId: readShowExternalId(show, "wikidata_id"),
-      tvRageId: readShowExternalId(show, "tv_rage_id"),
-      genresText: toDelimitedEditorText(show.genres),
-      networksText: toDelimitedEditorText(show.networks),
-      streamingProvidersText: toDelimitedEditorText(
-        (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
-          (Array.isArray(show.watch_providers) ? show.watch_providers : []),
-      ),
-      tagsText: toDelimitedEditorText(show.tags),
-    });
+    setDetailsForm(buildShowDetailsFormValue(show));
   }, [show]);
 
   const startDetailsEdit = useCallback(() => {
@@ -3975,29 +3964,7 @@ export default function TrrShowDetailPage() {
 
   const cancelDetailsEdit = useCallback(() => {
     if (show) {
-      const alternatives = Array.isArray(show.alternative_names)
-        ? show.alternative_names.filter((name) => typeof name === "string" && name.trim().length > 0)
-        : [];
-      const [nickname = "", ...restAlt] = alternatives;
-      setDetailsForm({
-        displayName: show.name ?? "",
-        nickname,
-        altNamesText: restAlt.join("\n"),
-        description: show.description ?? "",
-        premiereDate: show.premiere_date ?? "",
-        imdbId: readShowExternalId(show, "imdb_id"),
-        tmdbId: readShowExternalId(show, "tmdb_id"),
-        tvdbId: readShowExternalId(show, "tvdb_id"),
-        wikidataId: readShowExternalId(show, "wikidata_id"),
-        tvRageId: readShowExternalId(show, "tv_rage_id"),
-        genresText: toDelimitedEditorText(show.genres),
-        networksText: toDelimitedEditorText(show.networks),
-        streamingProvidersText: toDelimitedEditorText(
-          (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
-            (Array.isArray(show.watch_providers) ? show.watch_providers : []),
-        ),
-        tagsText: toDelimitedEditorText(show.tags),
-      });
+      setDetailsForm(buildShowDetailsFormValue(show));
     }
     setDetailsNotice(null);
     setDetailsError(null);
@@ -12780,7 +12747,7 @@ export default function TrrShowDetailPage() {
                       </label>
                       <label className="block">
                         <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                          Nickname
+                          Nickname / Slug
                         </span>
                         <input
                           type="text"
@@ -12789,19 +12756,38 @@ export default function TrrShowDetailPage() {
                           disabled={!detailsEditing}
                           className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
                         />
+                        {detailsForm.nickname.trim() && (
+                          <span className="mt-1 block text-xs text-zinc-400">
+                            Canonical slug: <span className="font-mono">{deriveShowDetailsSlugPreview(detailsForm.nickname)}</span>
+                            {" · "}
+                            Hashtag: <span className="font-mono">#{detailsForm.nickname.trim().replace(/\s+/g, "")}</span>
+                          </span>
+                        )}
                       </label>
-                      <label className="block">
+                      <div className="block">
                         <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Premiere Date
                         </span>
-                        <input
-                          type="date"
-                          value={detailsForm.premiereDate}
-                          onChange={(e) => setDetailsForm((prev) => ({ ...prev, premiereDate: e.target.value }))}
-                          disabled={!detailsEditing}
-                          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                        />
-                      </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={detailsForm.premiereDate}
+                            onChange={(e) => setDetailsForm((prev) => ({ ...prev, premiereDate: e.target.value }))}
+                            disabled={!detailsEditing}
+                            className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                          />
+                          {detailsEditing && detailsForm.premiereDate && (
+                            <button
+                              type="button"
+                              onClick={() => setDetailsForm((prev) => ({ ...prev, premiereDate: "" }))}
+                              className="rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs text-zinc-500 hover:bg-zinc-50"
+                              title="Clear premiere date"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       <label className="block md:col-span-2">
                         <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                           Alt Names

@@ -64,6 +64,7 @@ export interface TrrShow {
 
 export interface UpdateTrrShowInput {
   name?: string;
+  slug?: string | null;
   description?: string | null;
   premiereDate?: string | null;
   alternativeNames?: string[];
@@ -161,6 +162,13 @@ export interface TrrPerson {
   full_name: string;
   known_for: string | null;
   external_ids: Record<string, unknown>;
+  birthday?: Record<string, unknown> | null;
+  gender?: Record<string, unknown> | null;
+  biography?: Record<string, unknown> | null;
+  place_of_birth?: Record<string, unknown> | null;
+  homepage?: Record<string, unknown> | null;
+  profile_image_url?: Record<string, unknown> | null;
+  alternative_names?: Record<string, string[]> | null;
   created_at: string;
   updated_at: string;
 }
@@ -403,6 +411,26 @@ export async function getShowById(id: string): Promise<TrrShow | null> {
   );
   const row = result.rows[0];
   return row ? normalizeTrrShowRow(row) : null;
+}
+
+export interface ShowSlugRecord {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export async function getShowByExactSlug(slug: string): Promise<ShowSlugRecord | null> {
+  const normalizedSlug = slugifyToken(slug);
+  if (!normalizedSlug) return null;
+
+  const result = await pgQuery<ShowSlugRecord>(
+    `SELECT id::text AS id, name, slug
+     FROM core.shows
+     WHERE lower(slug) = $1
+     LIMIT 1`,
+    [normalizedSlug]
+  );
+  return result.rows[0] ?? null;
 }
 
 export const toShowSlug = (value: string): string => {
@@ -732,6 +760,10 @@ export async function updateShowById(
   if (input.name !== undefined) {
     updates.push(`name = $${paramIndex++}::text`);
     values.push(input.name);
+  }
+  if (input.slug !== undefined) {
+    updates.push(`slug = $${paramIndex++}::text`);
+    values.push(input.slug);
   }
   if (input.description !== undefined) {
     updates.push(`description = $${paramIndex++}::text`);
@@ -2154,6 +2186,9 @@ const readMetadataOriginalUrl = (
   metadata: Record<string, unknown> | null | undefined
 ): string | null =>
   pickUrlCandidate(
+    getMetadataString(metadata, "original_source_file_url"),
+    getMetadataString(metadata, "getty_original_image_url"),
+    getMetadataString(metadata, "source_image_url"),
     getMetadataString(metadata, "original_url"),
     getMetadataString(metadata, "url_original")
   );

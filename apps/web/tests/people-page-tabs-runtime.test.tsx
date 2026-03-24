@@ -11,8 +11,8 @@ const mocks = vi.hoisted(() => {
     personId,
     showId,
     params: { personId },
-    pathname: `/people/${personId}`,
-    searchParams: new URLSearchParams(`showId=${showId}`),
+    pathname: `/people/${personId}/overview`,
+    searchParams: new URLSearchParams(`showId=${showId}&tab=overview`),
     router: { replace },
     replace,
     guardState: {
@@ -127,6 +127,10 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
           full_name: "Andy Cohen",
           known_for: null,
           external_ids: {},
+          alternative_names: {
+            tmdb: ["Andrew Cohen"],
+            imdb: ["Andy C."],
+          },
           created_at: "2026-02-24T00:00:00.000Z",
           updated_at: "2026-02-24T00:00:00.000Z",
         },
@@ -191,8 +195,8 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
 describe("people page tab runtime behavior", () => {
   beforeEach(() => {
     mocks.params.personId = PERSON_ID;
-    mocks.pathname = `/people/${PERSON_ID}`;
-    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}`);
+    mocks.pathname = `/people/${PERSON_ID}/overview`;
+    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=overview`);
     mocks.replace.mockReset();
     mocks.guardState.checking = false;
     mocks.guardState.hasAccess = true;
@@ -232,6 +236,19 @@ describe("people page tab runtime behavior", () => {
       );
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/news`))).toBe(true);
     });
+  });
+
+  it("renders profile refresh controls and alternative names on the overview tab", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+
+    await screen.findByRole("heading", { name: "Andy Cohen" });
+    expect(screen.getByRole("button", { name: "Refresh Info & Credits" })).toBeInTheDocument();
+    expect(screen.getByText("Alternative Names")).toBeInTheDocument();
+    expect(screen.getByText("Andrew Cohen")).toBeInTheDocument();
+    expect(screen.getByText("Andy C.")).toBeInTheDocument();
   });
 
   it("keeps news data available even when videos fetch fails", async () => {

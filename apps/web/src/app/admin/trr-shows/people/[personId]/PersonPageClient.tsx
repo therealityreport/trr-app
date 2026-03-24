@@ -18,9 +18,18 @@ import {
   isCanonicalTerminalStatus,
   monitorKickoffHandle,
   normalizeKickoffHandle,
+  waitForOperationTerminalState,
   type CanonicalOperationStatus,
 } from "@/lib/admin/async-handles";
-import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
+import {
+  clearAdminOperationSession,
+  getAutoResumableAdminOperationSession,
+  getAdminOperationSession,
+  getOrCreateAdminFlowKey,
+  markAdminOperationSessionStatus,
+  upsertAdminOperationSession,
+  type AdminOperationSessionRecord,
+} from "@/lib/admin/operation-session";
 import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
@@ -124,17 +133,22 @@ import {
   applyThumbnailCropUpdateToPhotos,
 } from "./thumbnail-crop-state";
 import {
+  buildOperationDispatchDetailMessage,
   buildProxyConnectDetailMessage,
   buildProxyTerminalErrorMessage,
   buildPersonRefreshDetailMessage,
   createPersonRefreshPipelineSteps,
   createSyncProgressTracker,
   finalizePersonRefreshPipelineSteps,
+  formatRefreshExecutionBackendLabel,
+  formatRefreshExecutionOwnerLabel,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
+  normalizePersonGettyProgress,
   normalizePersonRefreshSourceProgress,
   PERSON_REFRESH_PHASES,
   summarizePersonRefreshSourceProgress,
+  type PersonGettyProgressState,
   type PersonRefreshPipelineMode,
   type PersonRefreshPipelineStepState,
   type PersonRefreshSourceProgressState,
@@ -155,6 +169,7 @@ interface TrrPerson {
   place_of_birth?: Record<string, unknown>;
   homepage?: Record<string, unknown>;
   profile_image_url?: Record<string, unknown>;
+  alternative_names?: Record<string, string[]>;
   created_at: string;
   updated_at: string;
 }
@@ -169,12 +184,32 @@ type ResolvedField = {
 const DEFAULT_CANONICAL_SOURCE_ORDER = ["imdb", "tmdb", "fandom", "manual"] as const;
 type CanonicalSource = (typeof DEFAULT_CANONICAL_SOURCE_ORDER)[number];
 type CanonicalSourceOrder = CanonicalSource[];
+type BackendGetImagesSource = "nbcumv" | "bravotv" | "imdb" | "tmdb";
 type GetImagesSourceSelection = "all" | "getty" | "imdb" | "tmdb";
-type BackendGetImagesSource = "nbcumv" | "imdb" | "tmdb";
+type PersonPipelineOperationType = "admin_person_refresh_images" | "admin_person_reprocess_images";
+type AdminOperationHealthEntry = {
+  id: string;
+  operation_type?: string | null;
+  status?: string | null;
+  request_payload?: Record<string, unknown> | null;
+  progress_payload?: Record<string, unknown> | null;
+  execution_owner?: string | null;
+  execution_mode_canonical?: string | null;
+  execution_backend_canonical?: string | null;
+  latest_phase?: string | null;
+  age_seconds?: number | null;
+  last_update_age_seconds?: number | null;
+  is_stale?: boolean;
+};
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const looksLikeUuid = (value: string): boolean => UUID_RE.test(value);
+const PERSON_PIPELINE_STALE_SESSION_MS = 5 * 60 * 1000;
+const PERSON_PIPELINE_OPERATION_TYPES: readonly PersonPipelineOperationType[] = [
+  "admin_person_refresh_images",
+  "admin_person_reprocess_images",
+];
 
 const readRouteParamValue = (value: unknown): string | null => {
   if (typeof value === "string" && value.trim().length > 0) {
@@ -214,6 +249,144 @@ const normalizeCanonicalSourceOrder = (value: unknown): CanonicalSourceOrder => 
   return collected;
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+const normalizeStringListMap = (value: unknown): Record<string, string[]> => {
+  const record = asRecord(value);
+  if (!record) return {};
+  const normalized: Record<string, string[]> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (!Array.isArray(entry)) continue;
+    const values = entry
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    if (values.length > 0) {
+      normalized[key] = values;
+    }
+  }
+  return normalized;
+};
+
+const flattenAlternativeNames = (value: unknown): string[] => {
+  const grouped = normalizeStringListMap(value);
+  const orderedSources = ["tmdb", "imdb", "wikipedia", "fandom", "bravo", "manual"];
+  const seen = new Set<string>();
+  const flattened: string[] = [];
+
+  const appendValues = (entries: string[] | undefined) => {
+    for (const entry of entries ?? []) {
+      const key = entry.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      flattened.push(entry);
+    }
+  };
+
+  for (const source of orderedSources) {
+    appendValues(grouped[source]);
+  }
+  for (const [source, entries] of Object.entries(grouped)) {
+    if (orderedSources.includes(source)) continue;
+    appendValues(entries);
+  }
+  return flattened;
+};
+
+const formatAlternativeNameSourceLabel = (source: string): string => {
+  const normalized = source.trim().toLowerCase();
+  if (normalized === "tmdb") return "TMDb";
+  if (normalized === "imdb") return "IMDb";
+  if (normalized === "wikipedia") return "Wikipedia";
+  if (normalized === "fandom") return "Fandom";
+  if (normalized === "bravo") return "Bravo";
+  if (normalized === "manual") return "Manual";
+  return source;
+};
+
+const parseOptionalNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const isPersonPipelineOperationType = (value: unknown): value is PersonPipelineOperationType =>
+  typeof value === "string" && PERSON_PIPELINE_OPERATION_TYPES.includes(value as PersonPipelineOperationType);
+
+const getPersonPipelineFlowScopeForOperationType = (
+  personId: string | null,
+  operationType: PersonPipelineOperationType | null,
+): string | null => {
+  if (!personId || !operationType) return null;
+  return operationType === "admin_person_refresh_images"
+    ? `person:${personId}:refresh-images`
+    : `person:${personId}:reprocess-images`;
+};
+
+const extractPersonIdFromOperationHealthEntry = (entry: AdminOperationHealthEntry | null): string | null => {
+  const requestPayload = asRecord(entry?.request_payload);
+  const personId = requestPayload?.person_id;
+  return typeof personId === "string" && personId.trim().length > 0 ? personId.trim() : null;
+};
+
+const countNonPendingSourceProgressEntries = (value: unknown): number => {
+  const sourceProgress = asRecord(value);
+  if (!sourceProgress) return 0;
+  return Object.values(sourceProgress).reduce<number>((count, entry) => {
+    const record = asRecord(entry);
+    const status = typeof record?.status === "string" ? record.status.trim().toLowerCase() : "";
+    return status && status !== "pending" ? count + 1 : count;
+  }, 0);
+};
+
+const countNonPendingGettySubtasks = (value: unknown): number => {
+  const gettyProgress = asRecord(value);
+  const subtasks = Array.isArray(gettyProgress?.subtasks) ? gettyProgress.subtasks : [];
+  return subtasks.reduce<number>((count, entry) => {
+    const record = asRecord(entry);
+    const status = typeof record?.status === "string" ? record.status.trim().toLowerCase() : "";
+    return status && status !== "pending" ? count + 1 : count;
+  }, 0);
+};
+
+const scorePersonPipelineOperationCandidate = (entry: AdminOperationHealthEntry): number => {
+  const progress = asRecord(entry.progress_payload);
+  const normalizedStatus = String(entry.status || "").trim().toLowerCase();
+  const nonPendingSources = countNonPendingSourceProgressEntries(progress?.source_progress);
+  const nonPendingGettySubtasks = countNonPendingGettySubtasks(progress?.getty_progress);
+  const current = parseOptionalNumber(progress?.current);
+  const total = parseOptionalNumber(progress?.total);
+  const mirroringTotal = parseOptionalNumber(progress?.mirroring_total);
+  const stage = typeof progress?.stage === "string" ? progress.stage.trim().toLowerCase() : "";
+  let score = 0;
+
+  if (normalizedStatus === "running") score += 200;
+  else if (normalizedStatus === "pending") score += 120;
+  else if (normalizedStatus === "cancelling") score += 40;
+
+  if (entry.is_stale === true) score -= 300;
+  score += nonPendingSources * 80;
+  score += nonPendingGettySubtasks * 40;
+  if ((current ?? 0) > 0) score += 90;
+  if ((total ?? 0) > 0) score += 30;
+  if (typeof entry.latest_phase === "string" && entry.latest_phase.trim().length > 0) score += 20;
+  if (
+    stage === "mirroring" &&
+    (mirroringTotal ?? 0) <= 0 &&
+    nonPendingSources === 0 &&
+    nonPendingGettySubtasks === 0 &&
+    (current ?? 0) <= 1
+  ) {
+    score -= 500;
+  }
+  score -= Math.min(300, Math.max(0, Number(entry.last_update_age_seconds ?? 0)));
+  return score;
+};
+
 const readCanonicalSourceOrderFromExternalIds = (
   externalIds: Record<string, unknown> | null | undefined
 ): CanonicalSourceOrder => {
@@ -228,28 +401,63 @@ const GET_IMAGES_SOURCE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "all", label: "Run All", description: "Run Bravo / Getty / NBCUMV, IMDb, and TMDb." },
+  {
+    value: "all",
+    label: "Run All",
+    description: "Runs Getty, IMDb, and TMDb.",
+  },
   {
     value: "getty",
-    label: "Bravo / Getty / NBCUMV",
-    description: "Run the shared Bravo / Getty / NBCUMV path, including Getty image replacements.",
+    label: "Getty / NBCUMV",
+    description: "Runs the fused Getty / NBCUMV path.",
   },
-  { value: "imdb", label: "IMDb", description: "Run IMDb image refresh only." },
-  { value: "tmdb", label: "TMDb", description: "Run TMDb image refresh only." },
+  { value: "imdb", label: "IMDb", description: "Runs IMDb only." },
+  { value: "tmdb", label: "TMDb", description: "Runs TMDb only." },
 ];
 
-const GET_IMAGES_SELECTION_BACKEND_SOURCES: Record<GetImagesSourceSelection, BackendGetImagesSource[]> = {
+const GET_IMAGES_SOURCE_SELECTION_MAP: Record<GetImagesSourceSelection, BackendGetImagesSource[]> = {
   all: ["nbcumv", "imdb", "tmdb"],
   getty: ["nbcumv"],
   imdb: ["imdb"],
   tmdb: ["tmdb"],
 };
 
-const getImagesSourcesForSelection = (selection: GetImagesSourceSelection): BackendGetImagesSource[] =>
-  [...GET_IMAGES_SELECTION_BACKEND_SOURCES[selection]];
+const getImagesSourcesForSelection = (
+  selection: GetImagesSourceSelection,
+): BackendGetImagesSource[] => {
+  return [...GET_IMAGES_SOURCE_SELECTION_MAP[selection]];
+};
 
-const getImagesSelectionLabel = (selection: GetImagesSourceSelection): string =>
-  GET_IMAGES_SOURCE_OPTIONS.find((option) => option.value === selection)?.label ?? selection.toUpperCase();
+const getReprocessSourcesForGetImagesSelection = (
+  selection: GetImagesSourceSelection,
+): CanonicalScopedSource[] | undefined => {
+  const requested = getImagesSourcesForSelection(selection);
+  const expanded = new Set<CanonicalScopedSource>();
+  for (const source of requested) {
+    if (source === "nbcumv") {
+      expanded.add("getty");
+      expanded.add("nbcumv");
+      expanded.add("bravotv");
+      continue;
+    }
+    if (source === "bravotv") {
+      expanded.add("bravotv");
+      continue;
+    }
+    expanded.add(source);
+  }
+  return Array.from(expanded).sort(
+    (left, right) => CANONICAL_SCOPED_SOURCE_ORDER.indexOf(left) - CANONICAL_SCOPED_SOURCE_ORDER.indexOf(right),
+  );
+};
+
+const getImagesSelectionLabel = (selection: GetImagesSourceSelection): string => {
+  return GET_IMAGES_SOURCE_OPTIONS.find((option) => option.value === selection)?.label ?? "Run All";
+};
+
+const getImagesSelectionDetail = (selection: GetImagesSourceSelection): string => {
+  return GET_IMAGES_SOURCE_OPTIONS.find((option) => option.value === selection)?.description ?? "Runs Getty, IMDb, and TMDb.";
+};
 
 const formatCanonicalSourceLabel = (source: CanonicalSource): string =>
   source === "tmdb"
@@ -855,6 +1063,7 @@ const normalizeFaceCrops = (value: unknown): FaceCropTag[] => {
 const PERSON_PAGE_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_PAGE_STREAM_MAX_DURATION_MS = 45 * 60 * 1000;
 const PERSON_PAGE_STREAM_START_DEADLINE_MS = 120_000;
+const PERSON_PIPELINE_SWITCH_TO_OPERATION_MONITOR_PREFIX = "__person_pipeline_switch_to_operation_monitor__:";
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
 const BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
@@ -862,6 +1071,14 @@ const NEWS_LOAD_TIMEOUT_MS = 45_000;
 const NEWS_SYNC_TIMEOUT_MS = 60_000;
 const NEWS_SYNC_POLL_INTERVAL_MS = 1_500;
 const NEWS_SYNC_POLL_TIMEOUT_MS = 90_000;
+
+const parsePersonPipelineMonitorSwitchOperationId = (message: string | null | undefined): string | null => {
+  if (!message || !message.startsWith(PERSON_PIPELINE_SWITCH_TO_OPERATION_MONITOR_PREFIX)) {
+    return null;
+  }
+  const operationId = message.slice(PERSON_PIPELINE_SWITCH_TO_OPERATION_MONITOR_PREFIX.length).trim();
+  return operationId || null;
+};
 const NEWS_OPERATION_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000, 15_000] as const;
 const NEWS_PAGE_SIZE = 50;
 const MAX_PHOTO_FETCH_PAGES = 30;
@@ -1130,6 +1347,7 @@ function RefreshProgressBar({
   lastEventAt,
   steps,
   sourceProgress,
+  gettyProgress,
 }: {
   show: boolean;
   phase?: string | null;
@@ -1139,6 +1357,7 @@ function RefreshProgressBar({
   lastEventAt?: number | null;
   steps?: PersonRefreshPipelineStepState[] | null;
   sourceProgress?: PersonRefreshSourceProgressState[] | null;
+  gettyProgress?: PersonGettyProgressState | null;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -1173,11 +1392,20 @@ function RefreshProgressBar({
   const completedStepCount = stepStates.filter(
     (step) => step.status === "completed" || step.status === "skipped",
   ).length;
+  const warningStepCount = stepStates.filter((step) => step.status === "warning").length;
   const failedStepCount = stepStates.filter((step) => step.status === "failed").length;
   const runningStep = stepStates.find((step) => step.status === "running") ?? null;
   const hasStepProgress = stepStates.length > 0;
   const sourceStates = Array.isArray(sourceProgress) ? sourceProgress : [];
-  const stepPercent = hasStepProgress ? Math.round((completedStepCount / stepStates.length) * 100) : 0;
+  const gettyState = gettyProgress ?? null;
+  const processedStepCount = stepStates.filter(
+    (step) =>
+      step.status === "completed" ||
+      step.status === "warning" ||
+      step.status === "skipped" ||
+      step.status === "failed",
+  ).length;
+  const stepPercent = hasStepProgress ? Math.round((processedStepCount / stepStates.length) * 100) : 0;
   const percent = hasProgressBar
     ? Math.min(100, Math.round((safeCurrent / safeTotal) * 100))
     : hasStepProgress
@@ -1211,6 +1439,7 @@ function RefreshProgressBar({
       return "In progress";
     }
     if (step.status === "completed") return "Done";
+    if (step.status === "warning") return "Warning";
     if (step.status === "skipped") return "Skipped";
     if (step.status === "failed") return "Failed";
     return "Pending";
@@ -1219,6 +1448,7 @@ function RefreshProgressBar({
   const stepToneClass = (status: PersonRefreshPipelineStepState["status"]): string => {
     if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-800";
     if (status === "running") return "border-blue-200 bg-blue-50 text-blue-800";
+    if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-800";
     if (status === "failed") return "border-red-200 bg-red-50 text-red-800";
     if (status === "skipped") return "border-zinc-200 bg-zinc-100 text-zinc-600";
     return "border-zinc-200 bg-white text-zinc-500";
@@ -1227,6 +1457,7 @@ function RefreshProgressBar({
   const sourceToneClass = (status: PersonRefreshSourceProgressState["status"]): string => {
     if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-800";
     if (status === "running") return "border-blue-200 bg-blue-50 text-blue-800";
+    if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-800";
     if (status === "failed") return "border-red-200 bg-red-50 text-red-800";
     if (status === "skipped") return "border-zinc-200 bg-zinc-100 text-zinc-600";
     return "border-zinc-200 bg-white text-zinc-500";
@@ -1235,36 +1466,101 @@ function RefreshProgressBar({
   const renderSourceStatus = (source: PersonRefreshSourceProgressState): string => {
     if (source.status === "running") return "In progress";
     if (source.status === "completed") return "Done";
+    if (source.status === "warning") return "Warning";
     if (source.status === "skipped") return "Skipped";
     if (source.status === "failed") return "Failed";
     return "Pending";
   };
+
+  const gettyToneClass = (status: PersonGettyProgressState["status"] | PersonGettyProgressState["subtasks"][number]["status"]): string => {
+    if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    if (status === "running") return "border-blue-200 bg-blue-50 text-blue-800";
+    if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-800";
+    if (status === "failed") return "border-red-200 bg-red-50 text-red-800";
+    if (status === "skipped") return "border-zinc-200 bg-zinc-100 text-zinc-600";
+    return "border-zinc-200 bg-white text-zinc-500";
+  };
+
+  const renderGettyStatus = (
+    status: PersonGettyProgressState["status"] | PersonGettyProgressState["subtasks"][number]["status"],
+  ): string => {
+    if (status === "running") return "In progress";
+    if (status === "completed") return "Done";
+    if (status === "warning") return "Warning";
+    if (status === "skipped") return "Skipped";
+    if (status === "failed") return "Failed";
+    return "Pending";
+  };
+
+  const formatGettyCounts = (subtask: PersonGettyProgressState["subtasks"][number]): string | null => {
+    if (subtask.total > 0) {
+      return `${subtask.current.toLocaleString()}/${subtask.total.toLocaleString()}`;
+    }
+    if (subtask.candidatesFound > 0) {
+      return `${subtask.candidatesFound.toLocaleString()} found`;
+    }
+    return null;
+  };
+
+  const gettyBreakdownEntries = gettyState
+    ? ([
+        ["Bravo Search", Number(gettyState.breakdown.bravoSearchTotal)],
+        ["Broad Search", Number(gettyState.breakdown.broadSearchTotal)],
+        ["Unique Merged", Number(gettyState.breakdown.uniqueDiscovered)],
+        ["Via NBCUMV", Number(gettyState.breakdown.matchedViaNbcumv)],
+        ["Via BravoTV", Number(gettyState.breakdown.matchedViaBravotvJson)],
+        ["Via Image Search", Number(gettyState.breakdown.matchedViaImageSearch)],
+        ["Unmatched Getty", Number(gettyState.breakdown.unmatchedGetty)],
+        ["Getty-only", Number(gettyState.breakdown.gettyOnlyImported)],
+        ["NBCUMV-only", Number(gettyState.breakdown.nbcumvOnlyImported)],
+        ["BravoTV-only", Number(gettyState.breakdown.bravotvOnlyImported)],
+        ["Covered Existing", Number(gettyState.breakdown.coveredExisting)],
+        ["Upgraded Existing", Number(gettyState.breakdown.upgradedExisting)],
+        ["Hosted", Number(gettyState.breakdown.mirroredHosted)],
+        ["Hosting Failed", Number(gettyState.breakdown.mirroredFailed)],
+        ["Skipped", Number(gettyState.breakdown.skipped)],
+        ["Failed", Number(gettyState.breakdown.failed)],
+      ] as Array<[string, number]>).filter(([, value]) => value > 0)
+    : [];
+  const gettyIsPrefetched = gettyState?.breakdown.prefetched ?? false;
 
   const formatSourceCounts = (source: PersonRefreshSourceProgressState): string => {
     const discoveredTotal =
       typeof source.discoveredTotal === "number" ? source.discoveredTotal.toLocaleString() : "?";
     const remaining =
       typeof source.remaining === "number" ? source.remaining.toLocaleString() : "?";
-    return `scraped ${source.scrapedCurrent.toLocaleString()}/${discoveredTotal} · saved ${source.savedCurrent.toLocaleString()} · remaining ${remaining}`;
+    const parts = [
+      `scraped ${source.scrapedCurrent.toLocaleString()}/${discoveredTotal}`,
+      `saved ${source.savedCurrent.toLocaleString()}`,
+    ];
+    if (source.coveredExisting > 0) {
+      parts.push(`covered ${source.coveredExisting.toLocaleString()}`);
+    }
+    if (source.upgradedExisting > 0) {
+      parts.push(`upgraded ${source.upgradedExisting.toLocaleString()}`);
+    }
+    parts.push(`remaining ${remaining}`);
+    return parts.join(" · ");
   };
 
   return (
     <div className="w-full">
       {(phaseLabel || message || hasCounts || hasStepProgress) && (
         <div className="mb-1 flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-400">
             {countLabel
               ? `${phaseLabel || runningStep?.label?.toUpperCase() || "WORKING"} ${countLabel}`
               : phaseLabel || runningStep?.label?.toUpperCase() || "WORKING"}
           </p>
           {hasProgressBar && safeCurrent !== null && safeTotal !== null && (
-            <p className="text-[11px] tabular-nums text-zinc-500">
+            <p className="text-[11px] font-bold tabular-nums text-zinc-400">
               {safeCurrent.toLocaleString()}/{safeTotal.toLocaleString()} ({percent}%)
             </p>
           )}
           {!hasProgressBar && stepLabel && (
             <p className="text-[11px] tabular-nums text-zinc-500">
               {stepLabel}
+              {warningStepCount > 0 ? ` · ${warningStepCount.toLocaleString()} warning${warningStepCount === 1 ? "" : "s"}` : ""}
               {failedStepCount > 0 ? ` · ${failedStepCount.toLocaleString()} failed` : ""}
             </p>
           )}
@@ -1276,80 +1572,308 @@ function RefreshProgressBar({
       {detailMessage && (
         <p className="mb-1 text-[11px] text-zinc-500">{detailMessage}</p>
       )}
-      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
+      <div className="relative h-1 w-full overflow-hidden rounded-full bg-zinc-800">
         {hasProgressBar || hasStepProgress ? (
           <div
-            className="h-full rounded-full bg-zinc-700 transition-all"
+            className="h-full rounded-full bg-gradient-to-r from-sky-600 to-emerald-500 transition-all"
             style={{ width: `${percent}%` }}
           />
         ) : safeTotal === 0 ? null : (
-          <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-zinc-700/70" />
+          <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-sky-600/50" />
         )}
       </div>
       {hasStepProgress && (
-        <div className="mt-2 grid gap-1 sm:grid-cols-2">
-          {stepStates.map((step) => {
-            const detail = step.result || step.message;
-            return (
-              <div
-                key={step.id}
-                className={`rounded-md border px-2 py-1.5 ${stepToneClass(step.status)}`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em]">
-                    {step.label}
-                  </p>
-                  <p className="text-[11px] font-semibold tabular-nums">
-                    {renderStepStatus(step)}
-                  </p>
+        <div className="mt-2 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 shadow-sm">
+          <div className="grid gap-px bg-zinc-800 sm:grid-cols-2">
+            {stepStates.map((step) => {
+              const detail = step.result || step.message;
+              return (
+                <div
+                  key={step.id}
+                  className={`px-3 py-2 ${
+                    step.status === "completed"
+                      ? "bg-zinc-900"
+                      : step.status === "running"
+                        ? "bg-zinc-900/90"
+                        : step.status === "failed"
+                          ? "bg-red-950/30"
+                          : step.status === "skipped"
+                            ? "bg-zinc-900/70"
+                            : step.status === "warning"
+                              ? "bg-amber-950/20"
+                              : "bg-zinc-900/50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className={`mt-px h-1 w-1 shrink-0 rounded-full ${
+                          step.status === "completed"
+                            ? "bg-emerald-500"
+                            : step.status === "running"
+                              ? "animate-pulse bg-sky-400"
+                              : step.status === "failed"
+                                ? "bg-red-500"
+                                : step.status === "skipped"
+                                  ? "bg-zinc-600"
+                                  : step.status === "warning"
+                                    ? "bg-amber-500"
+                                    : "bg-zinc-700"
+                        }`}
+                      />
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-400">
+                        {step.label}
+                      </p>
+                    </div>
+                    <p
+                      className={`text-[11px] font-bold tabular-nums ${
+                        step.status === "completed"
+                          ? "text-emerald-400"
+                          : step.status === "running"
+                            ? "text-sky-400"
+                            : step.status === "failed"
+                              ? "text-red-400"
+                              : step.status === "warning"
+                                ? "text-amber-400"
+                                : "text-zinc-500"
+                      }`}
+                    >
+                      {renderStepStatus(step)}
+                    </p>
+                  </div>
+                  {detail && (
+                    <p className="mt-0.5 pl-2.5 text-[10px] leading-tight text-zinc-500">
+                      {detail}
+                    </p>
+                  )}
                 </div>
-                {detail && (
-                  <p className="mt-0.5 text-[11px] leading-tight">
-                    {detail}
-                  </p>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
       {sourceStates.length > 0 && (
-        <div className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 p-2">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+        <div className="mt-2 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 shadow-sm">
+          <div className="flex items-center justify-between border-b border-zinc-700/60 bg-zinc-800/80 px-3 py-1.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-zinc-300">
               Image Sources
             </p>
-            <p className="text-[11px] tabular-nums text-zinc-500">
+            <p className="text-[11px] font-bold tabular-nums text-zinc-400">
               {sourceStates.filter((source) => source.status !== "pending").length.toLocaleString()}/
               {sourceStates.length.toLocaleString()}
             </p>
           </div>
-          <div className="grid gap-1 sm:grid-cols-2">
+          <div className="grid gap-px bg-zinc-800 sm:grid-cols-2">
             {sourceStates.map((source) => (
               <div
                 key={source.key}
-                className={`rounded-md border px-2 py-1.5 ${sourceToneClass(source.status)}`}
+                className={`px-3 py-2 ${
+                  source.status === "completed"
+                    ? "bg-zinc-900"
+                    : source.status === "running"
+                      ? "bg-zinc-900/90"
+                      : source.status === "failed"
+                        ? "bg-red-950/30"
+                        : source.status === "skipped"
+                          ? "bg-zinc-900/70"
+                          : "bg-zinc-900/50"
+                }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em]">
-                    {source.label}
-                  </p>
-                  <p className="text-[11px] font-semibold tabular-nums">
+                  <div className="flex items-center gap-1.5">
+                    <div
+                      className={`mt-px h-1 w-1 shrink-0 rounded-full ${
+                        source.status === "completed"
+                          ? "bg-emerald-500"
+                          : source.status === "running"
+                            ? "animate-pulse bg-sky-400"
+                            : source.status === "failed"
+                              ? "bg-red-500"
+                              : source.status === "skipped"
+                                ? "bg-zinc-600"
+                                : source.status === "warning"
+                                  ? "bg-amber-500"
+                                  : "bg-zinc-700"
+                      }`}
+                    />
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-400">
+                      {source.label}
+                    </p>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold uppercase ${
+                      source.status === "completed"
+                        ? "text-emerald-400"
+                        : source.status === "running"
+                          ? "text-sky-400"
+                          : source.status === "failed"
+                            ? "text-red-400"
+                            : source.status === "warning"
+                              ? "text-amber-400"
+                              : "text-zinc-500"
+                    }`}
+                  >
                     {renderSourceStatus(source)}
-                  </p>
+                  </span>
                 </div>
-                <p className="mt-0.5 text-[11px] leading-tight">{formatSourceCounts(source)}</p>
+                <p className="mt-0.5 pl-2.5 text-[10px] tabular-nums leading-tight text-zinc-500">
+                  {formatSourceCounts(source)}
+                </p>
                 {source.failedCurrent > 0 && (
-                  <p className="mt-0.5 text-[11px] leading-tight">
+                  <p className="mt-0.5 pl-2.5 text-[10px] leading-tight text-red-400/80">
                     failed {source.failedCurrent.toLocaleString()}
                   </p>
                 )}
                 {source.message && (
-                  <p className="mt-0.5 text-[11px] leading-tight">{source.message}</p>
+                  <p className="mt-0.5 pl-2.5 text-[10px] leading-tight text-zinc-600">
+                    {source.message}
+                  </p>
                 )}
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {gettyState && (
+        <div className="mt-2 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 shadow-sm">
+          {/* Header bar */}
+          <div className="flex items-center justify-between border-b border-zinc-700/60 bg-zinc-800/80 px-3 py-1.5">
+            <div className="flex items-center gap-2">
+              <div
+                className={`h-1.5 w-1.5 rounded-full ${
+                  gettyState.status === "running"
+                    ? "animate-pulse bg-sky-400"
+                    : gettyState.status === "completed"
+                      ? "bg-emerald-400"
+                      : gettyState.status === "failed"
+                        ? "bg-red-400"
+                        : gettyState.status === "warning"
+                          ? "bg-amber-400"
+                          : "bg-zinc-500"
+                }`}
+              />
+              <p className="text-[11px] font-semibold uppercase tracking-[0.25em] text-zinc-300">
+                Getty / NBCUMV
+              </p>
+              {gettyIsPrefetched && (
+                <span className="rounded bg-sky-900/50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-sky-300">
+                  Hybrid
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {gettyState.phase && (
+                <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                  {gettyState.phase.replace(/_/g, " ")}
+                </p>
+              )}
+              <span
+                className={`rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  gettyState.status === "completed"
+                    ? "bg-emerald-900/40 text-emerald-400"
+                    : gettyState.status === "running"
+                      ? "bg-sky-900/40 text-sky-400"
+                      : gettyState.status === "failed"
+                        ? "bg-red-900/40 text-red-400"
+                        : gettyState.status === "warning"
+                          ? "bg-amber-900/40 text-amber-400"
+                          : "bg-zinc-700/40 text-zinc-500"
+                }`}
+              >
+                {renderGettyStatus(gettyState.status)}
+              </span>
+            </div>
+          </div>
+
+          {/* Subtask grid */}
+          {gettyState.subtasks.length > 0 && (
+            <div className="grid gap-px bg-zinc-800 sm:grid-cols-2">
+              {gettyState.subtasks.map((subtask) => (
+                <div
+                  key={subtask.id}
+                  className={`px-3 py-2 ${
+                    subtask.status === "completed"
+                      ? "bg-zinc-900"
+                      : subtask.status === "running"
+                        ? "bg-zinc-900/90"
+                        : subtask.status === "failed"
+                          ? "bg-red-950/30"
+                          : subtask.status === "skipped"
+                            ? "bg-zinc-900/70"
+                            : "bg-zinc-900/50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className={`mt-px h-1 w-1 shrink-0 rounded-full ${
+                          subtask.status === "completed"
+                            ? "bg-emerald-500"
+                            : subtask.status === "running"
+                              ? "animate-pulse bg-sky-400"
+                              : subtask.status === "failed"
+                                ? "bg-red-500"
+                                : subtask.status === "skipped"
+                                  ? "bg-zinc-600"
+                                  : "bg-zinc-700"
+                        }`}
+                      />
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-400">
+                        {subtask.label}
+                      </p>
+                    </div>
+                    <p
+                      className={`text-[11px] font-bold tabular-nums ${
+                        subtask.status === "completed"
+                          ? "text-emerald-400"
+                          : subtask.status === "running"
+                            ? "text-sky-400"
+                            : "text-zinc-500"
+                      }`}
+                    >
+                      {formatGettyCounts(subtask) ?? renderGettyStatus(subtask.status)}
+                    </p>
+                  </div>
+                  {subtask.query && (
+                    <p className="mt-0.5 pl-2.5 text-[10px] leading-tight text-zinc-600">
+                      &ldquo;{subtask.query}&rdquo;
+                    </p>
+                  )}
+                  {subtask.message && (
+                    <p className="mt-0.5 pl-2.5 text-[10px] leading-tight text-zinc-500">
+                      {subtask.message}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Breakdown stats */}
+          {gettyBreakdownEntries.length > 0 && (
+            <div className="border-t border-zinc-700/60 px-3 py-2">
+              <div className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2 lg:grid-cols-3">
+                {gettyBreakdownEntries.map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+                      {label}
+                    </span>
+                    <span
+                      className={`text-[11px] font-bold tabular-nums ${
+                        label === "Failed" || label === "Hosting Failed"
+                          ? "text-red-400"
+                          : label === "Skipped"
+                            ? "text-zinc-500"
+                            : "text-zinc-300"
+                      }`}
+                    >
+                      {value.toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2910,8 +3434,7 @@ export default function PersonProfilePage() {
   // Refresh images state
   const [refreshingImages, setRefreshingImages] = useState(false);
   const [reprocessingImages, setReprocessingImages] = useState(false);
-  const [getImagesSourceSelection, setGetImagesSourceSelection] =
-    useState<GetImagesSourceSelection>("all");
+  const [getImagesSourceSelection, setGetImagesSourceSelection] = useState<GetImagesSourceSelection>("all");
   const [refreshProgress, setRefreshProgress] = useState<{
     current?: number | null;
     total?: number | null;
@@ -2928,6 +3451,11 @@ export default function PersonProfilePage() {
     attemptTimeoutMs?: number | null;
     backendHost?: string | null;
     sourceProgress?: PersonRefreshSourceProgressState[] | null;
+    gettyProgress?: PersonGettyProgressState | null;
+    executionOwner?: string | null;
+    executionModeCanonical?: string | null;
+    executionBackendCanonical?: string | null;
+    operationStatus?: CanonicalOperationStatus | null;
   } | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -2937,8 +3465,14 @@ export default function PersonProfilePage() {
   const [refreshLogOpen, setRefreshLogOpen] = useState(false);
   const [refreshLogEntries, setRefreshLogEntries] = useState<RefreshLogEntry[]>([]);
   const [getImagesFollowUpPromptOpen, setGetImagesFollowUpPromptOpen] = useState(false);
+  const [refreshingProfile, setRefreshingProfile] = useState(false);
+  const [profileRefreshMessage, setProfileRefreshMessage] = useState<string | null>(null);
+  const [profileRefreshError, setProfileRefreshError] = useState<string | null>(null);
+  const [profileRefreshSummary, setProfileRefreshSummary] = useState<Record<string, unknown> | null>(null);
   const refreshLogCounterRef = useRef(0);
   const personRefreshRequestCounterRef = useRef(0);
+  const resumedPersonPipelineRef = useRef(false);
+  const resumedProfileRefreshRef = useRef(false);
   const textOverlayDetectControllerRef = useRef<AbortController | null>(null);
   const showBrokenRowsRef = useRef(showBrokenRows);
   const recentViewRequestKeyRef = useRef<string | null>(null);
@@ -2968,6 +3502,804 @@ export default function PersonProfilePage() {
       .slice(0, 32);
     return `person-refresh-${showToken}-p${personToken}-${timestampToken}-${counter}`;
   }, [personId, showIdForApi]);
+
+  const refreshStreamPath = personId
+    ? `/api/admin/trr-api/people/${personId}/refresh-images/stream`
+    : null;
+  const profileRefreshStreamPath = personId
+    ? `/api/admin/trr-api/people/${personId}/refresh-profile/stream`
+    : null;
+  const reprocessStreamPath = personId
+    ? `/api/admin/trr-api/people/${personId}/reprocess-images/stream`
+    : null;
+  const refreshOperationFlowScope = personId ? `person:${personId}:refresh-images` : null;
+  const reprocessOperationFlowScope = personId ? `person:${personId}:reprocess-images` : null;
+  const profileRefreshAutoResumeScope = profileRefreshStreamPath
+    ? `POST:${profileRefreshStreamPath}:${JSON.stringify({ refresh_links: true, refresh_credits: true }).length}`
+    : null;
+  const [cancellingPersonPipeline, setCancellingPersonPipeline] = useState(false);
+
+  const isLikelyStalePersonPipelineSession = useCallback((session: AdminOperationSessionRecord | null) => {
+    if (!session || session.status !== "active") return false;
+    return Date.now() - (session.updatedAtMs ?? 0) >= PERSON_PIPELINE_STALE_SESSION_MS;
+  }, []);
+
+  const getLatestPersonPipelineOperationSession = useCallback(() => {
+    const refreshSession = refreshOperationFlowScope ? getAdminOperationSession(refreshOperationFlowScope) : null;
+    const reprocessSession = reprocessOperationFlowScope ? getAdminOperationSession(reprocessOperationFlowScope) : null;
+    return [refreshSession, reprocessSession]
+      .filter((session): session is NonNullable<typeof refreshSession> => Boolean(session?.operationId))
+      .sort((left, right) => (right.updatedAtMs ?? 0) - (left.updatedAtMs ?? 0))[0] ?? null;
+  }, [refreshOperationFlowScope, reprocessOperationFlowScope]);
+
+  const getCurrentPersonPipelineOperationSession = useCallback(() => {
+    const latestSession = getLatestPersonPipelineOperationSession();
+    if (!latestSession || latestSession.status !== "active" || !latestSession.operationId) return null;
+    if (isLikelyStalePersonPipelineSession(latestSession)) return null;
+    return latestSession;
+  }, [getLatestPersonPipelineOperationSession, isLikelyStalePersonPipelineSession]);
+
+  const latestPersonPipelineSession = getLatestPersonPipelineOperationSession();
+  const activePersonPipelineSession = getCurrentPersonPipelineOperationSession();
+  const stalePersonPipelineSession =
+    latestPersonPipelineSession && isLikelyStalePersonPipelineSession(latestPersonPipelineSession)
+      ? latestPersonPipelineSession
+      : null;
+  const effectiveRuntimeBackend =
+    refreshProgress?.executionBackendCanonical ??
+    activePersonPipelineSession?.executionBackendCanonical ??
+    latestPersonPipelineSession?.executionBackendCanonical ??
+    null;
+  const effectiveRuntimeOwner =
+    refreshProgress?.executionOwner ??
+    activePersonPipelineSession?.executionOwner ??
+    latestPersonPipelineSession?.executionOwner ??
+    null;
+  const effectiveRuntimeMode =
+    refreshProgress?.executionModeCanonical ??
+    activePersonPipelineSession?.executionModeCanonical ??
+    latestPersonPipelineSession?.executionModeCanonical ??
+    null;
+  const runtimePillLabel =
+    effectiveRuntimeBackend === "modal"
+      ? "Runtime: Modal"
+      : effectiveRuntimeBackend === "local"
+        ? "Runtime: Local"
+        : refreshingImages || reprocessingImages || Boolean(activePersonPipelineSession)
+          ? "Runtime: Detecting..."
+          : "Runtime: Unknown";
+  const runtimePillClass =
+    effectiveRuntimeBackend === "modal"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      : effectiveRuntimeBackend === "local"
+        ? "border-amber-200 bg-amber-50 text-amber-800"
+        : "border-zinc-200 bg-zinc-50 text-zinc-600";
+  const runtimeTooltipParts = [
+    formatRefreshExecutionBackendLabel(effectiveRuntimeBackend),
+    formatRefreshExecutionOwnerLabel(effectiveRuntimeOwner),
+    effectiveRuntimeMode ? effectiveRuntimeMode.replace(/_/g, " ") : null,
+  ].filter(Boolean);
+  const effectiveOperationStatus =
+    cancellingPersonPipeline
+      ? "cancelling"
+      : refreshProgress?.operationStatus ??
+        activePersonPipelineSession?.canonicalStatus ??
+        (stalePersonPipelineSession ? "cancelling" : null);
+  const statusPillLabel =
+    stalePersonPipelineSession && !activePersonPipelineSession
+      ? "Status: Stale"
+      : effectiveOperationStatus === "cancelling"
+        ? "Status: Cancelling"
+        : effectiveOperationStatus === "running"
+          ? "Status: Running"
+          : effectiveOperationStatus === "queued"
+            ? "Status: Queued"
+            : "Status: Ready";
+  const statusPillClass =
+    stalePersonPipelineSession && !activePersonPipelineSession
+      ? "border-red-200 bg-red-50 text-red-700"
+      : effectiveOperationStatus === "cancelling"
+        ? "border-amber-200 bg-amber-50 text-amber-800"
+        : effectiveOperationStatus === "running"
+          ? "border-blue-200 bg-blue-50 text-blue-800"
+          : effectiveOperationStatus === "queued"
+            ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+            : "border-zinc-200 bg-zinc-50 text-zinc-600";
+  const latestPipelineSummary = useMemo(() => {
+    const operationId = latestPersonPipelineSession?.operationId ?? refreshProgress?.runId ?? null;
+    if (!operationId) return null;
+    const phase = refreshProgress?.rawStage ?? refreshProgress?.phase ?? latestPersonPipelineSession?.latestPhase ?? null;
+    const lastUpdatedMs = refreshProgress?.lastEventAt ?? latestPersonPipelineSession?.updatedAtMs ?? null;
+    return {
+      operationId,
+      phase,
+      lastUpdatedMs,
+      runtimeLabel: runtimePillLabel.replace(/^Runtime:\s*/, ""),
+    };
+  }, [latestPersonPipelineSession, refreshProgress, runtimePillLabel]);
+
+  const parseOperationEventSeq = useCallback((payload: unknown): number => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return 0;
+    const rawValue = (payload as { event_seq?: unknown }).event_seq;
+    if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+      return Math.max(0, Math.floor(rawValue));
+    }
+    if (typeof rawValue === "string" && rawValue.trim().length > 0) {
+      const parsed = Number.parseInt(rawValue, 10);
+      return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+    }
+    return 0;
+  }, []);
+
+  const parseOptionalProgressNumber = useCallback((value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }, []);
+
+  const persistPersonOperationSessionEvent = useCallback(
+    (input: {
+      flowScope: string | null;
+      flowKey: string;
+      requestPath: string | null;
+      method: string;
+      eventType: string;
+      payload: unknown;
+    }) => {
+      if (!input.flowScope || !input.requestPath) return;
+      const payloadRecord =
+        input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)
+          ? (input.payload as Record<string, unknown>)
+          : null;
+      const operationId =
+        payloadRecord && typeof payloadRecord.operation_id === "string" && payloadRecord.operation_id.trim().length > 0
+          ? payloadRecord.operation_id.trim()
+          : null;
+      const eventSeq = parseOperationEventSeq(input.payload);
+      const statusRaw =
+        payloadRecord && typeof payloadRecord.status === "string" ? payloadRecord.status.trim().toLowerCase() : "";
+      const canonicalStatus =
+        statusRaw.length > 0 ? canonicalizeOperationStatus(statusRaw, "running") : undefined;
+      const executionOwner =
+        payloadRecord && typeof payloadRecord.execution_owner === "string"
+          ? payloadRecord.execution_owner.trim() || null
+          : null;
+      const executionModeCanonical =
+        payloadRecord && typeof payloadRecord.execution_mode_canonical === "string"
+          ? payloadRecord.execution_mode_canonical.trim() || null
+          : null;
+      const executionBackendCanonical =
+        payloadRecord && typeof payloadRecord.execution_backend_canonical === "string"
+          ? payloadRecord.execution_backend_canonical.trim() || null
+          : null;
+      const latestPhase =
+        payloadRecord && typeof payloadRecord.phase === "string"
+          ? payloadRecord.phase.trim() || null
+          : payloadRecord && typeof payloadRecord.stage === "string"
+            ? payloadRecord.stage.trim() || null
+            : null;
+
+      upsertAdminOperationSession(input.flowScope, {
+        flowKey: input.flowKey,
+        input: input.requestPath,
+        method: input.method,
+        ...(operationId ? { operationId } : {}),
+        ...(canonicalStatus ? { canonicalStatus } : {}),
+        ...(executionOwner ? { executionOwner } : {}),
+        ...(executionModeCanonical ? { executionModeCanonical } : {}),
+        ...(executionBackendCanonical ? { executionBackendCanonical } : {}),
+        ...(latestPhase ? { latestPhase } : {}),
+        ...(eventSeq > 0 ? { lastEventSeq: eventSeq } : {}),
+        status: "active",
+      });
+
+      if (input.eventType === "complete") {
+        markAdminOperationSessionStatus(input.flowScope, "completed");
+      } else if (input.eventType === "error") {
+        markAdminOperationSessionStatus(
+          input.flowScope,
+          statusRaw === "cancelled" || statusRaw === "canceled" ? "cancelled" : "failed",
+        );
+      }
+    },
+    [parseOperationEventSeq]
+  );
+
+  const formatPipelineStreamError = useCallback(
+    (error: unknown, fallbackMessage: string) => {
+      const baseErrorMessage = error instanceof Error ? error.message : fallbackMessage;
+      const checkpoint = refreshProgress?.checkpoint;
+      const streamState = refreshProgress?.streamState;
+      const backendHost = refreshProgress?.backendHost;
+      const normalizedBackendHost = backendHost?.trim().toLowerCase() ?? "";
+      const isLocalBackendHost =
+        normalizedBackendHost === "127.0.0.1:8000" ||
+        normalizedBackendHost === "localhost:8000" ||
+        normalizedBackendHost === "[::1]:8000" ||
+        normalizedBackendHost === "::1:8000";
+      const isSocketDisconnect =
+        /UND_ERR_SOCKET|ECONNRESET|EPIPE/i.test(baseErrorMessage) ||
+        /terminated/i.test(baseErrorMessage);
+
+      if (isLocalBackendHost && isSocketDisconnect) {
+        return "Local TRR-Backend restarted while the pipeline stream was open. This usually happens in dev when backend reload is enabled. Restart with TRR_BACKEND_RELOAD=0 make dev, wait for /health to come back, then run the pipeline again.";
+      }
+
+      const contextualErrorMessage =
+        (/^failed to fetch$/i.test(baseErrorMessage) || /fetch failed/i.test(baseErrorMessage)) &&
+        checkpoint
+          ? `Refresh stream failed during ${checkpoint}${backendHost ? ` (${backendHost})` : ""}. ${baseErrorMessage}`
+          : baseErrorMessage;
+
+      if (streamState === "failed" && checkpoint && contextualErrorMessage === fallbackMessage) {
+        return `Refresh stream failed during ${checkpoint}.`;
+      }
+
+      return contextualErrorMessage;
+    },
+    [refreshProgress]
+  );
+
+  const applyPipelineOperationEnvelope = useCallback(
+    (input: {
+      eventType: string;
+      payload: unknown;
+      fallbackPhase: string;
+      fallbackMessage: string;
+      logStage: string;
+      runId: string;
+    }) => {
+      if (!input.payload || typeof input.payload !== "object" || Array.isArray(input.payload)) return;
+      const payload = input.payload as Record<string, unknown>;
+      const detailMessage = buildOperationDispatchDetailMessage({
+        eventType: input.eventType,
+        status: typeof payload.status === "string" ? payload.status : null,
+        attached: payload.attached === true,
+        executionOwner: typeof payload.execution_owner === "string" ? payload.execution_owner : null,
+        executionBackendCanonical:
+          typeof payload.execution_backend_canonical === "string" ? payload.execution_backend_canonical : null,
+        executionModeCanonical:
+          typeof payload.execution_mode_canonical === "string" ? payload.execution_mode_canonical : null,
+      });
+      if (!detailMessage) return;
+      const operationStatus =
+        input.eventType === "dispatched_to_modal"
+          ? ("queued" satisfies CanonicalOperationStatus)
+          : canonicalizeOperationStatus(
+              typeof payload.status === "string" ? payload.status : null,
+              "queued",
+            );
+      setRefreshProgress((prev) => ({
+        current: prev?.current ?? null,
+        total: prev?.total ?? null,
+        phase: prev?.phase ?? input.fallbackPhase,
+        rawStage: prev?.rawStage ?? input.logStage,
+        message: detailMessage,
+        detailMessage,
+        runId: input.runId,
+        lastEventAt: Date.now(),
+        checkpoint: prev?.checkpoint ?? null,
+        streamState: prev?.streamState ?? "connecting",
+        errorCode: prev?.errorCode ?? null,
+        attemptElapsedMs: prev?.attemptElapsedMs ?? null,
+        attemptTimeoutMs: prev?.attemptTimeoutMs ?? null,
+        backendHost: prev?.backendHost ?? null,
+        sourceProgress: prev?.sourceProgress ?? null,
+        gettyProgress: prev?.gettyProgress ?? null,
+        executionOwner: typeof payload.execution_owner === "string" ? payload.execution_owner : prev?.executionOwner ?? null,
+        executionModeCanonical:
+          typeof payload.execution_mode_canonical === "string"
+            ? payload.execution_mode_canonical
+            : prev?.executionModeCanonical ?? null,
+        executionBackendCanonical:
+          typeof payload.execution_backend_canonical === "string"
+            ? payload.execution_backend_canonical
+            : prev?.executionBackendCanonical ?? null,
+        operationStatus,
+      }));
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: input.logStage,
+        message: input.fallbackMessage,
+        detail: detailMessage,
+        level: "info",
+        runId: input.runId,
+      });
+    },
+    [appendRefreshLog]
+  );
+
+  const applyRefreshResumeEvent = useCallback(
+    async (eventType: string, payload: unknown, requestId: string) => {
+      if (eventType === "operation" || eventType === "dispatched_to_modal") {
+        applyPipelineOperationEnvelope({
+          eventType,
+          payload,
+          fallbackPhase: PERSON_REFRESH_PHASES.syncing,
+          fallbackMessage:
+            eventType === "dispatched_to_modal" ? "Refresh dispatched to Modal." : "Refresh operation update.",
+          logStage: "operation",
+          runId: requestId,
+        });
+        return;
+      }
+      if (eventType === "progress" && payload && typeof payload === "object" && !Array.isArray(payload)) {
+        const record = payload as Record<string, unknown>;
+        const rawStage = typeof record.stage === "string" ? record.stage : typeof record.phase === "string" ? record.phase : null;
+        const mappedPhase = mapPersonRefreshStage(rawStage);
+        const message = typeof record.message === "string" ? record.message : null;
+        const heartbeat = record.heartbeat === true;
+        const elapsedMs = parseOptionalProgressNumber(record.elapsed_ms);
+        const current = parseOptionalProgressNumber(record.current);
+        const total = parseOptionalProgressNumber(record.total);
+        const checkpoint = typeof record.checkpoint === "string" ? record.checkpoint : null;
+        const streamStateRaw = record.stream_state;
+        const streamState =
+          streamStateRaw === "connecting" ||
+          streamStateRaw === "connected" ||
+          streamStateRaw === "streaming" ||
+          streamStateRaw === "failed" ||
+          streamStateRaw === "completed"
+            ? streamStateRaw
+            : null;
+        const errorCode = typeof record.error_code === "string" ? record.error_code : null;
+        const backendHost = typeof record.backend_host === "string" ? record.backend_host : null;
+        const source = typeof record.source === "string" ? record.source : null;
+        const sourceTotal = parseOptionalProgressNumber(record.source_total);
+        const mirroredCount = parseOptionalProgressNumber(record.mirrored_count);
+        const reviewedRows = parseOptionalProgressNumber(record.reviewed_rows);
+        const changedRows = parseOptionalProgressNumber(record.changed_rows);
+        const totalRows = parseOptionalProgressNumber(record.total_rows);
+        const failedRows = parseOptionalProgressNumber(record.failed_rows);
+        const skippedRows = parseOptionalProgressNumber(
+          record.skipped_rows ?? record.skipped_existing_rows ?? record.skipped_manual_rows,
+        );
+        const forceStatusRaw = record.force_status;
+        const forceStatus =
+          forceStatusRaw === "pending" ||
+          forceStatusRaw === "running" ||
+          forceStatusRaw === "completed" ||
+          forceStatusRaw === "warning" ||
+          forceStatusRaw === "skipped" ||
+          forceStatusRaw === "failed"
+            ? forceStatusRaw
+            : null;
+        const skipReason = typeof record.skip_reason === "string" ? record.skip_reason : null;
+        const detail = typeof record.detail === "string" ? record.detail : null;
+        const serviceUnavailable = record.service_unavailable === true;
+        const retryAfterS = parseOptionalProgressNumber(record.retry_after_s);
+        const sourceProgress = normalizePersonRefreshSourceProgress(record.source_progress);
+        const gettyProgress = normalizePersonGettyProgress(record.getty_progress);
+        const sourceSyncCounts = summarizePersonRefreshSourceProgress(sourceProgress);
+        const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+        setRefreshLiveCounts(nextLiveCounts);
+        const baseDetailMessage = buildPersonRefreshDetailMessage({
+          rawStage,
+          message,
+          heartbeat,
+          elapsedMs,
+          source,
+          sourceTotal,
+          mirroredCount,
+          current,
+          total,
+          skipReason,
+          detail,
+          serviceUnavailable,
+          retryAfterS,
+          reviewedRows,
+          changedRows,
+          totalRows,
+          failedRows,
+          skippedRows,
+        });
+        const enrichedMessage = appendLiveCountsToMessage(baseDetailMessage ?? message ?? "", nextLiveCounts);
+        setRefreshProgress((prev) => ({
+          current: sourceSyncCounts?.current ?? current,
+          total: sourceSyncCounts?.total ?? total,
+          phase: mappedPhase ?? rawStage,
+          rawStage,
+          message: enrichedMessage || baseDetailMessage || message || null,
+          detailMessage: enrichedMessage || baseDetailMessage || message || null,
+          runId: requestId,
+          lastEventAt: Date.now(),
+          checkpoint,
+          streamState,
+          errorCode,
+          attemptElapsedMs: null,
+          attemptTimeoutMs: null,
+          backendHost,
+          sourceProgress,
+          gettyProgress,
+          executionOwner: prev?.executionOwner ?? null,
+          executionModeCanonical: prev?.executionModeCanonical ?? null,
+          executionBackendCanonical: prev?.executionBackendCanonical ?? null,
+          operationStatus: "running",
+        }));
+        setRefreshPipelineSteps((prev) =>
+          updatePersonRefreshPipelineSteps(prev ?? createPersonRefreshPipelineSteps("ingest"), {
+            rawStage,
+            message: enrichedMessage || baseDetailMessage || message,
+            current: sourceSyncCounts?.current ?? current,
+            total: sourceSyncCounts?.total ?? total,
+            heartbeat,
+            skipReason,
+            serviceUnavailable,
+            detail,
+            forceStatus,
+          }),
+        );
+        if (!heartbeat) {
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: rawStage ?? "resume_progress",
+            message: enrichedMessage || "Refresh progress update",
+            level: "info",
+            runId: requestId,
+          });
+        }
+        return;
+      }
+      if (eventType === "complete") {
+        const requestIdFromPayload =
+          payload && typeof payload === "object" && !Array.isArray(payload) && typeof (payload as { request_id?: unknown }).request_id === "string"
+            ? (payload as { request_id: string }).request_id
+            : requestId;
+        const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+        setRefreshLiveCounts(completeLiveCounts);
+        const summary =
+          payload && typeof payload === "object" && !Array.isArray(payload) && "summary" in payload
+            ? (payload as { summary?: unknown }).summary
+            : payload;
+        const sourceProgress = normalizePersonRefreshSourceProgress(
+          summary && typeof summary === "object" && !Array.isArray(summary)
+            ? (summary as { source_progress?: unknown }).source_progress
+            : undefined,
+        );
+        const gettyProgress = normalizePersonGettyProgress(
+          summary && typeof summary === "object" && !Array.isArray(summary)
+            ? (summary as { getty_progress?: unknown }).getty_progress
+            : undefined,
+        );
+        const summaryText = formatPersonRefreshSummary(summary);
+        const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+        const completionMessage =
+          summaryText
+            ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}. Reloading page data...`
+            : liveCountSuffix
+              ? `Images refreshed. ${liveCountSuffix}. Reloading page data...`
+              : "Images refreshed. Reloading page data...";
+        setRefreshPipelineSteps((prev) =>
+          finalizePersonRefreshPipelineSteps(prev ?? createPersonRefreshPipelineSteps("ingest"), "ingest", summary),
+        );
+        setRefreshProgress((prev) => ({
+          current: null,
+          total: null,
+          phase: "COMPLETED",
+          rawStage: "complete",
+          message: completionMessage,
+          detailMessage: completionMessage,
+          runId: requestIdFromPayload,
+          lastEventAt: null,
+          checkpoint: "complete",
+          streamState: "completed",
+          errorCode: null,
+          attemptElapsedMs: prev?.attemptElapsedMs ?? null,
+          attemptTimeoutMs: prev?.attemptTimeoutMs ?? null,
+          backendHost: prev?.backendHost ?? null,
+          sourceProgress,
+          gettyProgress,
+          executionOwner: prev?.executionOwner ?? null,
+          executionModeCanonical: prev?.executionModeCanonical ?? null,
+          executionBackendCanonical: prev?.executionBackendCanonical ?? null,
+          operationStatus: "completed",
+        }));
+        setRefreshNotice(
+          summaryText
+            ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}`
+            : liveCountSuffix
+              ? `Images refreshed. ${liveCountSuffix}`
+              : "Images refreshed.",
+        );
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "complete",
+          message: summaryText || "Images refreshed.",
+          detail: liveCountSuffix,
+          level: "success",
+          runId: requestIdFromPayload,
+        });
+        return;
+      }
+      if (eventType === "error") {
+        const errorPayload =
+          payload && typeof payload === "object" && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>)
+            : null;
+        const errorText =
+          typeof errorPayload?.error === "string" && typeof errorPayload?.detail === "string"
+            ? `${errorPayload.error}: ${errorPayload.detail}`
+            : typeof errorPayload?.error === "string"
+              ? errorPayload.error
+              : "Failed to get images";
+        setRefreshError(errorText);
+        setRefreshPipelineSteps((prev) =>
+          updatePersonRefreshPipelineSteps(prev ?? createPersonRefreshPipelineSteps("ingest"), {
+            rawStage: typeof errorPayload?.stage === "string" ? errorPayload.stage : null,
+            message: typeof errorPayload?.error === "string" ? errorPayload.error : errorText,
+            detail: typeof errorPayload?.detail === "string" ? errorPayload.detail : null,
+            current: null,
+            total: null,
+            forceStatus: "failed",
+          }),
+        );
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "refresh_error",
+          message: "Get Images failed",
+          detail: errorText,
+          level: "error",
+          runId: requestId,
+        });
+        setRefreshProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                detailMessage: errorText,
+                lastEventAt: Date.now(),
+                operationStatus:
+                  String(errorPayload?.status ?? "").toLowerCase().includes("cancel") ? "cancelled" : "failed",
+              }
+            : prev,
+        );
+      }
+    },
+    [
+      appendRefreshLog,
+      applyPipelineOperationEnvelope,
+      parseOptionalProgressNumber,
+      refreshLiveCounts,
+    ]
+  );
+
+  const applyReprocessResumeEvent = useCallback(
+    async (eventType: string, payload: unknown, requestId: string) => {
+      if (eventType === "operation" || eventType === "dispatched_to_modal") {
+        applyPipelineOperationEnvelope({
+          eventType,
+          payload,
+          fallbackPhase: PERSON_REFRESH_PHASES.tagging,
+          fallbackMessage:
+            eventType === "dispatched_to_modal" ? "Reprocess dispatched to Modal." : "Reprocess operation update.",
+          logStage: "operation",
+          runId: requestId,
+        });
+        return;
+      }
+      if (eventType === "progress" && payload && typeof payload === "object" && !Array.isArray(payload)) {
+        const record = payload as Record<string, unknown>;
+        const rawPhase = typeof record.stage === "string" ? record.stage : null;
+        const mappedPhase = mapPersonRefreshStage(rawPhase);
+        const message = typeof record.message === "string" ? record.message : null;
+        const current = parseOptionalProgressNumber(record.current);
+        const total = parseOptionalProgressNumber(record.total);
+        const checkpoint = typeof record.checkpoint === "string" ? record.checkpoint : null;
+        const streamStateRaw = record.stream_state;
+        const streamState =
+          streamStateRaw === "connecting" ||
+          streamStateRaw === "connected" ||
+          streamStateRaw === "streaming" ||
+          streamStateRaw === "failed" ||
+          streamStateRaw === "completed"
+            ? streamStateRaw
+            : null;
+        const errorCode = typeof record.error_code === "string" ? record.error_code : null;
+        const backendHost = typeof record.backend_host === "string" ? record.backend_host : null;
+        const elapsedMs = parseOptionalProgressNumber(record.elapsed_ms);
+        const heartbeat = record.heartbeat === true;
+        const source = typeof record.source === "string" ? record.source : null;
+        const sourceTotal = parseOptionalProgressNumber(record.source_total);
+        const mirroredCount = parseOptionalProgressNumber(record.mirrored_count);
+        const reviewedRows = parseOptionalProgressNumber(record.reviewed_rows);
+        const changedRows = parseOptionalProgressNumber(record.changed_rows);
+        const totalRows = parseOptionalProgressNumber(record.total_rows);
+        const failedRows = parseOptionalProgressNumber(record.failed_rows);
+        const skippedRows = parseOptionalProgressNumber(
+          record.skipped_rows ?? record.skipped_existing_rows ?? record.skipped_manual_rows,
+        );
+        const forceStatusRaw = record.force_status;
+        const forceStatus =
+          forceStatusRaw === "pending" ||
+          forceStatusRaw === "running" ||
+          forceStatusRaw === "completed" ||
+          forceStatusRaw === "warning" ||
+          forceStatusRaw === "skipped" ||
+          forceStatusRaw === "failed"
+            ? forceStatusRaw
+            : null;
+        const skipReason = typeof record.skip_reason === "string" ? record.skip_reason : null;
+        const detail = typeof record.detail === "string" ? record.detail : null;
+        const serviceUnavailable = record.service_unavailable === true;
+        const retryAfterS = parseOptionalProgressNumber(record.retry_after_s);
+        const nextLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+        setRefreshLiveCounts(nextLiveCounts);
+        const baseDetailMessage = buildPersonRefreshDetailMessage({
+          rawStage: rawPhase,
+          message,
+          heartbeat,
+          elapsedMs,
+          source,
+          sourceTotal,
+          mirroredCount,
+          current,
+          total,
+          skipReason,
+          detail,
+          serviceUnavailable,
+          retryAfterS,
+          reviewedRows,
+          changedRows,
+          totalRows,
+          failedRows,
+          skippedRows,
+        });
+        const enrichedMessage = appendLiveCountsToMessage(baseDetailMessage ?? message ?? "", nextLiveCounts);
+        setRefreshProgress((prev) => ({
+          current,
+          total,
+          phase: mappedPhase ?? rawPhase,
+          message: enrichedMessage || baseDetailMessage || message || null,
+          detailMessage: enrichedMessage || baseDetailMessage || message || null,
+          runId: requestId,
+          rawStage: rawPhase,
+          lastEventAt: Date.now(),
+          checkpoint,
+          streamState,
+          errorCode,
+          attemptElapsedMs: null,
+          attemptTimeoutMs: null,
+          backendHost,
+          executionOwner: prev?.executionOwner ?? null,
+          executionModeCanonical: prev?.executionModeCanonical ?? null,
+          executionBackendCanonical: prev?.executionBackendCanonical ?? null,
+          operationStatus: "running",
+        }));
+        setRefreshPipelineSteps((prev) =>
+          updatePersonRefreshPipelineSteps(prev ?? createPersonRefreshPipelineSteps("reprocess"), {
+            rawStage: rawPhase,
+            message: enrichedMessage || baseDetailMessage || message,
+            current,
+            total,
+            heartbeat,
+            skipReason,
+            serviceUnavailable,
+            detail,
+            forceStatus,
+          }),
+        );
+        if (!heartbeat) {
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: rawPhase ?? "reprocess_progress",
+            message: enrichedMessage || baseDetailMessage || message || "Person pipeline progress update",
+            level: "info",
+            runId: requestId,
+          });
+        }
+        return;
+      }
+      if (eventType === "complete") {
+        const requestIdFromPayload =
+          payload && typeof payload === "object" && !Array.isArray(payload) && typeof (payload as { request_id?: unknown }).request_id === "string"
+            ? (payload as { request_id: string }).request_id
+            : requestId;
+        const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
+        setRefreshLiveCounts(completeLiveCounts);
+        const summary =
+          payload && typeof payload === "object" && !Array.isArray(payload) && "summary" in payload
+            ? (payload as { summary?: unknown }).summary
+            : payload;
+        const summaryText = formatPersonRefreshSummary(summary);
+        const liveCountSuffix = formatJobLiveCounts(completeLiveCounts);
+        const completionMessage =
+          summaryText
+            ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}. Reloading photos...`
+            : liveCountSuffix
+              ? `Reprocessing complete. ${liveCountSuffix}. Reloading photos...`
+              : "Reprocessing complete. Reloading photos...";
+        setRefreshPipelineSteps((prev) =>
+          finalizePersonRefreshPipelineSteps(prev ?? createPersonRefreshPipelineSteps("reprocess"), "reprocess", summary),
+        );
+        setRefreshProgress((prev) => ({
+          current: null,
+          total: null,
+          phase: "COMPLETED",
+          rawStage: "complete",
+          message: completionMessage,
+          detailMessage: completionMessage,
+          runId: requestIdFromPayload,
+          lastEventAt: null,
+          checkpoint: "complete",
+          streamState: "completed",
+          errorCode: null,
+          attemptElapsedMs: null,
+          attemptTimeoutMs: null,
+          backendHost: null,
+          executionOwner: prev?.executionOwner ?? null,
+          executionModeCanonical: prev?.executionModeCanonical ?? null,
+          executionBackendCanonical: prev?.executionBackendCanonical ?? null,
+          operationStatus: "completed",
+        }));
+        setRefreshNotice(
+          summaryText
+            ? `${summaryText}${liveCountSuffix ? `. ${liveCountSuffix}` : ""}`
+            : liveCountSuffix
+              ? `Reprocessing complete. ${liveCountSuffix}`
+              : "Reprocessing complete.",
+        );
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "reprocess_complete",
+          message: summaryText || "Reprocessing complete.",
+          detail: liveCountSuffix,
+          level: "success",
+          runId: requestIdFromPayload,
+        });
+        return;
+      }
+      if (eventType === "error") {
+        const errorPayload =
+          payload && typeof payload === "object" && !Array.isArray(payload)
+            ? (payload as Record<string, unknown>)
+            : null;
+        const errorText =
+          typeof errorPayload?.error === "string" && typeof errorPayload?.detail === "string"
+            ? `${errorPayload.error}: ${errorPayload.detail}`
+            : typeof errorPayload?.error === "string"
+              ? errorPayload.error
+              : "Failed to reprocess images";
+        setRefreshError(errorText);
+        setRefreshPipelineSteps((prev) =>
+          updatePersonRefreshPipelineSteps(prev ?? createPersonRefreshPipelineSteps("reprocess"), {
+            rawStage: typeof errorPayload?.stage === "string" ? errorPayload.stage : null,
+            message: typeof errorPayload?.error === "string" ? errorPayload.error : errorText,
+            detail: typeof errorPayload?.detail === "string" ? errorPayload.detail : null,
+            current: null,
+            total: null,
+            forceStatus: "failed",
+          }),
+        );
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "reprocess_error",
+          message: "Run Person Pipeline failed",
+          detail: errorText,
+          level: "error",
+          runId: requestId,
+        });
+        setRefreshProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                detailMessage: errorText,
+                lastEventAt: Date.now(),
+                operationStatus:
+                  String(errorPayload?.status ?? "").toLowerCase().includes("cancel") ? "cancelled" : "failed",
+              }
+            : prev,
+        );
+      }
+    },
+    [
+      appendRefreshLog,
+      applyPipelineOperationEnvelope,
+      parseOptionalProgressNumber,
+      refreshLiveCounts,
+    ]
+  );
 
   const trackGalleryFallbackEvent = useCallback((event: "attempt" | "recovered" | "failed") => {
     setGalleryFallbackTelemetry((prev) => {
@@ -3783,6 +5115,41 @@ export default function PersonProfilePage() {
         allowDevAdminBypass: true,
       }),
     [user],
+  );
+
+  const fetchBestActivePersonPipelineOperation = useCallback(
+    async (operationTypes?: readonly PersonPipelineOperationType[]) => {
+      if (!personId) return null;
+      const headers = await getAuthHeaders();
+      const response = await fetchAdminWithAuth(
+        "/api/admin/trr-api/operations/health?limit=100",
+        {
+          method: "GET",
+          headers,
+        },
+        { allowDevAdminBypass: true },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to load active admin operations (${response.status})`);
+      }
+      const payload = (await response.json().catch(() => ({}))) as {
+        active_operations?: unknown;
+      };
+      const requestedTypes = new Set(
+        (operationTypes && operationTypes.length > 0 ? operationTypes : PERSON_PIPELINE_OPERATION_TYPES).map((value) =>
+          String(value),
+        ),
+      );
+      const activeOperations = Array.isArray(payload.active_operations) ? payload.active_operations : [];
+      const candidates = activeOperations
+        .map((entry) => (asRecord(entry) as AdminOperationHealthEntry | null))
+        .filter((entry): entry is AdminOperationHealthEntry => Boolean(entry?.id))
+        .filter((entry) => requestedTypes.has(String(entry.operation_type || "")))
+        .filter((entry) => extractPersonIdFromOperationHealthEntry(entry) === personId)
+        .sort((left, right) => scorePersonPipelineOperationCandidate(right) - scorePersonPipelineOperationCandidate(left));
+      return candidates[0] ?? null;
+    },
+    [getAuthHeaders, personId],
   );
 
   useEffect(() => {
@@ -4961,6 +6328,85 @@ export default function PersonProfilePage() {
     ]
   );
 
+  const handleRefreshProfileDetails = useCallback(async () => {
+    if (!personId || !profileRefreshStreamPath) return;
+    const requestBody = JSON.stringify({ refresh_links: true, refresh_credits: true });
+    try {
+      setRefreshingProfile(true);
+      setProfileRefreshError(null);
+      setProfileRefreshSummary(null);
+      setProfileRefreshMessage("Connecting to backend profile refresh stream...");
+      const headers = await getAuthHeaders();
+      await adminStream(profileRefreshStreamPath, {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: requestBody,
+        timeoutMs: PERSON_PAGE_STREAM_MAX_DURATION_MS,
+        onEvent: async ({ event, payload }) => {
+          const payloadRecord = asRecord(payload);
+          if (event === "progress") {
+            const message =
+              typeof payloadRecord?.message === "string"
+                ? payloadRecord.message
+                : typeof payloadRecord?.stage === "string"
+                  ? `Refreshing ${payloadRecord.stage.replace(/_/g, " ")}...`
+                  : "Refreshing profile details...";
+            setProfileRefreshMessage(message);
+            return;
+          }
+          if (event === "error") {
+            const message =
+              typeof payloadRecord?.detail === "string"
+                ? payloadRecord.detail
+                : typeof payloadRecord?.error === "string"
+                  ? payloadRecord.error
+                  : "Profile refresh failed";
+            setProfileRefreshError(message);
+            setProfileRefreshMessage(null);
+            return;
+          }
+          if (event === "complete") {
+            const summary = asRecord(payloadRecord?.summary) ?? payloadRecord;
+            setProfileRefreshSummary(summary);
+            setProfileRefreshMessage("Profile refresh complete.");
+            await Promise.allSettled([
+              fetchPerson(),
+              fetchExternalIds(),
+              fetchCredits(),
+              fetchPhotos(),
+              fetchFandomData(),
+              fetchBravoVideos(),
+              loadUnifiedNews({ force: true }),
+              fetchCoverPhoto(),
+            ]);
+          }
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof AdminRequestError ? error.message : "Profile refresh failed";
+      setProfileRefreshError(message);
+      setProfileRefreshMessage(null);
+    } finally {
+      setRefreshingProfile(false);
+    }
+  }, [
+    fetchBravoVideos,
+    fetchCoverPhoto,
+    fetchCredits,
+    fetchExternalIds,
+    fetchFandomData,
+    fetchPerson,
+    fetchPhotos,
+    getAuthHeaders,
+    loadUnifiedNews,
+    personId,
+    profileRefreshStreamPath,
+  ]);
+
   // Set cover photo
   const handleSetCover = async (photo: TrrPersonPhoto) => {
     if (!personId || !photo.hosted_url) return;
@@ -5685,6 +7131,10 @@ export default function PersonProfilePage() {
       return [];
     }
     const requestId = buildPersonRefreshRequestId();
+    const refreshRequestPath = refreshStreamPath ?? `/api/admin/trr-api/people/${personId}/refresh-images/stream`;
+    const operationSessionFlowKey = refreshOperationFlowScope
+      ? getOrCreateAdminFlowKey(refreshOperationFlowScope)
+      : requestId;
     const pipelineMode: PersonRefreshPipelineMode = "ingest";
     const speedExecutionConfig = {
       execution_profile: "speed" as const,
@@ -5695,7 +7145,7 @@ export default function PersonProfilePage() {
     };
     const perSourceLimit =
       effectiveGalleryImportContext.showId ?? effectiveGalleryImportContext.showName ? 500 : 1000;
-    const selectedGetImagesSources =
+    const requestedGetImagesSources =
       mode === "full" ? getImagesSourcesForSelection(getImagesSourceSelection) : undefined;
     const refreshBody = {
       ...speedExecutionConfig,
@@ -5715,7 +7165,7 @@ export default function PersonProfilePage() {
           ? scopedStageTargets.sources.length > 0
             ? scopedStageTargets.sources
             : undefined
-          : selectedGetImagesSources,
+          : requestedGetImagesSources,
       show_id: effectiveGalleryImportContext.showId ?? undefined,
       show_name: effectiveGalleryImportContext.showName ?? undefined,
     };
@@ -5734,11 +7184,37 @@ export default function PersonProfilePage() {
       rawStage: "syncing",
       runId: requestId,
       lastEventAt: Date.now(),
+      sourceProgress: null,
+      gettyProgress: null,
+      executionOwner: null,
+      executionModeCanonical: null,
+      executionBackendCanonical: null,
+      operationStatus: "queued",
     });
     setRefreshNotice(null);
     setRefreshError(null);
     setRefreshLiveCounts(null);
     setPhotosError(null);
+    if (refreshOperationFlowScope) clearAdminOperationSession(refreshOperationFlowScope);
+    if (reprocessOperationFlowScope) clearAdminOperationSession(reprocessOperationFlowScope);
+    if (refreshOperationFlowScope && refreshStreamPath) {
+      upsertAdminOperationSession(refreshOperationFlowScope, {
+        flowKey: operationSessionFlowKey,
+        input: refreshStreamPath,
+        method: "POST",
+        status: "active",
+        operationId: null,
+        runId: null,
+        jobId: null,
+        canonicalStatus: "queued",
+        executionOwner: null,
+        executionModeCanonical: null,
+        executionBackendCanonical: null,
+        selectedSources: requestedGetImagesSources ?? null,
+        latestPhase: "syncing",
+        lastEventSeq: 0,
+      });
+    }
       appendRefreshLog({
         source: "page_refresh",
         stage: "syncing",
@@ -5762,26 +7238,122 @@ export default function PersonProfilePage() {
       appendRefreshLog({
         source: "page_refresh",
         stage: "syncing",
-        message:
-          getImagesSourceSelection === "all"
-            ? "Get Images source selection: Run All."
-            : `Get Images source selection: ${getImagesSelectionLabel(getImagesSourceSelection)}.`,
-        detail:
-          getImagesSourceSelection === "getty"
-            ? "Runs the shared Bravo / Getty / NBCUMV path, including Getty image replacements."
-            : getImagesSourceSelection === "all"
-              ? "Runs Bravo / Getty / NBCUMV, IMDb, and TMDb."
-              : `${getImagesSelectionLabel(getImagesSourceSelection)} only.`,
+        message: `Get Images source selection: ${getImagesSelectionLabel(getImagesSourceSelection)}.`,
+        detail: getImagesSelectionDetail(getImagesSourceSelection),
         level: "info",
         runId: requestId,
       });
     }
 
+    // ── GETTY LOCAL PREFETCH ──────────────────────────────────────────
+    // Getty blocks cloud IPs (Modal).  When the user selects a source
+    // set that includes Getty/NBCUMV, scrape Getty images and events
+    // via the local machine's residential IP first, then include them
+    // in the pipeline request so Modal can skip the (blocked) live
+    // Getty search and go straight to R2 upload + Supabase persistence.
+    const gettySourcesRequested =
+      mode === "full" && (requestedGetImagesSources?.includes("nbcumv") ?? false);
+    if (gettySourcesRequested && person?.full_name) {
+      setRefreshProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: "GETTY LOCAL",
+              message: "Scraping Getty images locally...",
+              detailMessage: `Fetching all Getty editorial images and events for "${person.full_name}" via local residential IP...`,
+            }
+          : prev
+      );
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "getty_local_scrape",
+        message: "Starting local Getty scrape (residential IP required for Getty access)...",
+        level: "info",
+        runId: requestId,
+      });
+      try {
+        const gettyResp = await fetch("/api/admin/getty-local/scrape", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ person_name: person.full_name }),
+          signal: AbortSignal.timeout(600_000), // 10 min — large catalogs
+        });
+        if (gettyResp.ok) {
+          const gettyData = (await gettyResp.json()) as {
+            merged?: unknown[];
+            merged_total?: number;
+            merged_events?: unknown[];
+            merged_events_total?: number;
+            elapsed_seconds?: number;
+          };
+          const mergedAssets = Array.isArray(gettyData.merged) ? gettyData.merged : [];
+          const mergedEvents = Array.isArray(gettyData.merged_events) ? gettyData.merged_events : [];
+          Object.assign(refreshBody, {
+            getty_prefetched_assets: mergedAssets,
+            getty_prefetched_events: mergedEvents,
+          });
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: "getty_local_scrape",
+            message: `Getty local scrape complete: ${mergedAssets.length} images, ${mergedEvents.length} events (${gettyData.elapsed_seconds ?? "?"}s). Sending to pipeline...`,
+            level: "info",
+            runId: requestId,
+          });
+          setRefreshProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  detailMessage: `Getty: ${mergedAssets.length} images, ${mergedEvents.length} events scraped locally. Connecting to pipeline...`,
+                }
+              : prev
+          );
+        } else {
+          const errBody = await gettyResp.json().catch(() => ({ error: "unknown" })) as {
+            error?: string;
+            hint?: string;
+          };
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: "getty_local_scrape",
+            message: `Getty local scrape failed (${gettyResp.status}): ${errBody.error ?? "unknown"}. ${errBody.hint ?? "Pipeline will attempt live Getty search (likely blocked on Modal)."}`,
+            level: "warn",
+            runId: requestId,
+          });
+        }
+      } catch (gettyErr) {
+        const errMsg = gettyErr instanceof Error ? gettyErr.message : String(gettyErr);
+        const isTimeout = errMsg.includes("timeout") || errMsg.includes("abort");
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "getty_local_scrape",
+          message: isTimeout
+            ? "Getty local scrape timed out (10 min). Pipeline will attempt live Getty search (likely blocked on Modal)."
+            : `Getty local server unreachable: ${errMsg}. Start it with: make getty-server`,
+          level: "warn",
+          runId: requestId,
+        });
+      }
+      // Restore progress phase to syncing for the pipeline stream
+      setRefreshProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: PERSON_REFRESH_PHASES.syncing,
+              message: "Connecting to pipeline...",
+            }
+          : prev
+      );
+    }
+    // ── END GETTY LOCAL PREFETCH ──────────────────────────────────────
+
     let refreshedPhotosAfterRun: TrrPersonPhoto[] = [];
+    let handoffOperationId: string | null = null;
+    let handoffRequestHeaders: HeadersInit | undefined;
     try {
       const runStreamAttempt = async () => {
         const syncProgressTracker = createSyncProgressTracker();
         const headers = await getAuthHeaders();
+        handoffRequestHeaders = headers;
         const streamController = new AbortController();
         let streamAbortReason: "max_duration" | "idle" | "start_deadline" | null = null;
         let sawFirstEvent = false;
@@ -5882,6 +7454,40 @@ export default function PersonProfilePage() {
                 bumpStreamIdleTimeout();
                 if (!sawFirstEvent) {
                   markStreamStarted();
+                }
+                persistPersonOperationSessionEvent({
+                  flowScope: refreshOperationFlowScope,
+                  flowKey: operationSessionFlowKey,
+                  requestPath: refreshStreamPath,
+                  method: "POST",
+                  eventType,
+                  payload,
+                });
+                if (eventType === "operation" || eventType === "dispatched_to_modal") {
+                  applyPipelineOperationEnvelope({
+                    eventType,
+                    payload,
+                    fallbackPhase: PERSON_REFRESH_PHASES.syncing,
+                    fallbackMessage:
+                      eventType === "dispatched_to_modal"
+                        ? "Refresh dispatched to Modal."
+                        : "Refresh operation update.",
+                    logStage: "operation",
+                    runId: requestId,
+                  });
+                  const payloadRecord =
+                    payload && typeof payload === "object" && !Array.isArray(payload)
+                      ? (payload as { operation_id?: unknown })
+                      : null;
+                  const operationId =
+                    typeof payloadRecord?.operation_id === "string" ? payloadRecord.operation_id.trim() : "";
+                  if (operationId) {
+                    handoffOperationId = operationId;
+                    throw new Error(
+                      `${PERSON_PIPELINE_SWITCH_TO_OPERATION_MONITOR_PREFIX}${operationId}`,
+                    );
+                  }
+                  return;
                 }
                 if (eventType === "progress" && payload && typeof payload === "object") {
                 const rawStage =
@@ -5987,6 +7593,16 @@ export default function PersonProfilePage() {
                     : typeof skippedRowsRaw === "string"
                       ? Number.parseInt(skippedRowsRaw, 10)
                       : null;
+                const forceStatusRaw = (payload as { force_status?: unknown }).force_status;
+                const forceStatus =
+                  forceStatusRaw === "pending" ||
+                  forceStatusRaw === "running" ||
+                  forceStatusRaw === "completed" ||
+                  forceStatusRaw === "warning" ||
+                  forceStatusRaw === "skipped" ||
+                  forceStatusRaw === "failed"
+                    ? forceStatusRaw
+                    : null;
                 const skipReason =
                   typeof (payload as { skip_reason?: unknown }).skip_reason === "string"
                     ? ((payload as { skip_reason: string }).skip_reason)
@@ -6055,6 +7671,9 @@ export default function PersonProfilePage() {
                     : null;
                 const sourceProgress = normalizePersonRefreshSourceProgress(
                   (payload as { source_progress?: unknown }).source_progress,
+                );
+                const gettyProgress = normalizePersonGettyProgress(
+                  (payload as { getty_progress?: unknown }).getty_progress,
                 );
                 const sourceSyncCounts = summarizePersonRefreshSourceProgress(sourceProgress);
                 const syncCounts =
@@ -6136,7 +7755,7 @@ export default function PersonProfilePage() {
                   baseDetailMessage ?? message ?? "",
                   nextLiveCounts
                 );
-                setRefreshProgress({
+                setRefreshProgress((prev) => ({
                   current: syncCounts?.current ?? numericCurrent,
                   total: syncCounts?.total ?? numericTotal,
                   phase: mappedPhase ?? rawStage,
@@ -6158,7 +7777,12 @@ export default function PersonProfilePage() {
                       : null,
                   backendHost,
                   sourceProgress,
-                });
+                  gettyProgress,
+                  executionOwner: prev?.executionOwner ?? null,
+                  executionModeCanonical: prev?.executionModeCanonical ?? null,
+                  executionBackendCanonical: prev?.executionBackendCanonical ?? null,
+                  operationStatus: "running",
+                }));
                 setRefreshPipelineSteps((prev) =>
                   updatePersonRefreshPipelineSteps(
                     prev ?? createPersonRefreshPipelineSteps(pipelineMode),
@@ -6171,6 +7795,7 @@ export default function PersonProfilePage() {
                       skipReason,
                       serviceUnavailable,
                       detail,
+                      forceStatus,
                     },
                   ),
                 );
@@ -6197,6 +7822,11 @@ export default function PersonProfilePage() {
                 const sourceProgress = normalizePersonRefreshSourceProgress(
                   summary && typeof summary === "object"
                     ? (summary as { source_progress?: unknown }).source_progress
+                    : undefined,
+                );
+                const gettyProgress = normalizePersonGettyProgress(
+                  summary && typeof summary === "object"
+                    ? (summary as { getty_progress?: unknown }).getty_progress
                     : undefined,
                 );
                 const summaryText = formatPersonRefreshSummary(summary);
@@ -6230,6 +7860,11 @@ export default function PersonProfilePage() {
                   attemptTimeoutMs: prev?.attemptTimeoutMs ?? null,
                   backendHost: prev?.backendHost ?? null,
                   sourceProgress,
+                  gettyProgress,
+                  executionOwner: prev?.executionOwner ?? null,
+                  executionModeCanonical: prev?.executionModeCanonical ?? null,
+                  executionBackendCanonical: prev?.executionBackendCanonical ?? null,
+                  operationStatus: "completed",
                 }));
                 setRefreshNotice(
                   summaryText
@@ -6343,6 +7978,10 @@ export default function PersonProfilePage() {
                             : prev.backendHost,
                         detailMessage: formattedErrorText,
                         lastEventAt: Date.now(),
+                        operationStatus:
+                          String(errorPayload?.error || "").toLowerCase().includes("cancel")
+                            ? "cancelled"
+                            : "failed",
                       }
                     : prev,
                 );
@@ -6432,6 +8071,12 @@ export default function PersonProfilePage() {
             streamErr.name === "StreamTimeoutError" &&
             streamErr.message.includes("received within");
           streamError = streamErr instanceof Error ? streamErr.message : String(streamErr);
+          const handoffOperationFromError = parsePersonPipelineMonitorSwitchOperationId(streamError);
+          if (handoffOperationFromError) {
+            handoffOperationId = handoffOperationFromError;
+            streamError = null;
+            break;
+          }
           const isOperationSequenceConflict =
             /admin_operation_events_op_seq_unique|duplicate key value violates unique constraint/i.test(
               streamError,
@@ -6468,6 +8113,34 @@ export default function PersonProfilePage() {
       if (streamError) {
         throw new Error(streamError);
       }
+      if (handoffOperationId) {
+        const operationIdForMonitor = handoffOperationId;
+        const state = await waitForOperationTerminalState({
+          operationId: operationIdForMonitor,
+          flowScope: refreshOperationFlowScope ?? `person:${personId}:refresh`,
+          flowKey: operationSessionFlowKey,
+          input: refreshRequestPath,
+          method: "POST",
+          requestHeaders: handoffRequestHeaders,
+          onStreamEvent: async ({ event, payload }) => {
+            persistPersonOperationSessionEvent({
+              flowScope: refreshOperationFlowScope,
+              flowKey: operationSessionFlowKey,
+              requestPath: refreshRequestPath,
+              method: "POST",
+              eventType: event,
+              payload,
+            });
+            await applyRefreshResumeEvent(event, payload, operationIdForMonitor);
+          },
+        });
+        if (state.status === "failed") {
+          throw new Error("Get Images failed");
+        }
+        if (state.status === "cancelled") {
+          throw new Error("Get Images was cancelled");
+        }
+      }
 
       await Promise.all([
         fetchPerson(),
@@ -6484,19 +8157,7 @@ export default function PersonProfilePage() {
       return refreshedPhotosAfterRun;
     } catch (err) {
       console.error("Failed to get images:", err);
-      const baseErrorMessage = err instanceof Error ? err.message : "Failed to get images";
-      const checkpoint = refreshProgress?.checkpoint;
-      const streamState = refreshProgress?.streamState;
-      const backendHost = refreshProgress?.backendHost;
-      const contextualErrorMessage =
-        (/^failed to fetch$/i.test(baseErrorMessage) || /fetch failed/i.test(baseErrorMessage)) &&
-        checkpoint
-          ? `Refresh stream failed during ${checkpoint}${backendHost ? ` (${backendHost})` : ""}. ${baseErrorMessage}`
-          : baseErrorMessage;
-      const errorMessage =
-        streamState === "failed" && checkpoint && contextualErrorMessage === "Failed to get images"
-          ? `Refresh stream failed during ${checkpoint}.`
-          : contextualErrorMessage;
+      const errorMessage = formatPipelineStreamError(err, "Failed to get images");
       setRefreshError(errorMessage);
       setRefreshPipelineSteps((prev) =>
         updatePersonRefreshPipelineSteps(
@@ -6536,9 +8197,15 @@ export default function PersonProfilePage() {
     fetchCoverPhoto,
     getAuthHeaders,
     personId,
-    refreshProgress,
+    formatPipelineStreamError,
     refreshLiveCounts,
     buildPersonRefreshRequestId,
+    refreshOperationFlowScope,
+    reprocessOperationFlowScope,
+    refreshStreamPath,
+    persistPersonOperationSessionEvent,
+    applyPipelineOperationEnvelope,
+    applyRefreshResumeEvent,
     effectiveGalleryImportContext.showId,
     effectiveGalleryImportContext.showName,
     effectiveGalleryImportSuffix,
@@ -6550,9 +8217,16 @@ export default function PersonProfilePage() {
     async (
       stage: ReprocessStageKey = "all",
       scope: StageTargetScope = "filtered",
-      stageTargetsOverride?: StageTargets
+      stageTargetsOverride?: StageTargets,
+      sourceSelectionOverride?: CanonicalScopedSource[]
     ): Promise<boolean> => {
     const stageTargets = stageTargetsOverride ?? (scope === "full" ? fullStageTargets : scopedStageTargets);
+    const selectedReprocessSources =
+      sourceSelectionOverride && sourceSelectionOverride.length > 0
+        ? sourceSelectionOverride
+        : stageTargets.sources.length > 0
+          ? stageTargets.sources
+          : undefined;
     if (!personId) return false;
     if (refreshingImages || reprocessingImages) return false;
     setGetImagesFollowUpPromptOpen(false);
@@ -6590,6 +8264,11 @@ export default function PersonProfilePage() {
       return false;
     }
     const requestId = buildPersonRefreshRequestId();
+    const reprocessRequestPath =
+      reprocessStreamPath ?? `/api/admin/trr-api/people/${personId}/reprocess-images/stream`;
+    const operationSessionFlowKey = reprocessOperationFlowScope
+      ? getOrCreateAdminFlowKey(reprocessOperationFlowScope)
+      : requestId;
     const pipelineMode: PersonRefreshPipelineMode = "reprocess";
     const stageRequest: Record<
       ReprocessStageKey,
@@ -6689,9 +8368,35 @@ export default function PersonProfilePage() {
       attemptElapsedMs: null,
       attemptTimeoutMs: null,
       backendHost: null,
+      sourceProgress: null,
+      gettyProgress: null,
+      executionOwner: null,
+      executionModeCanonical: null,
+      executionBackendCanonical: null,
+      operationStatus: "queued",
     });
     setRefreshNotice(null);
     setRefreshError(null);
+    if (refreshOperationFlowScope) clearAdminOperationSession(refreshOperationFlowScope);
+    if (reprocessOperationFlowScope) clearAdminOperationSession(reprocessOperationFlowScope);
+    if (reprocessOperationFlowScope && reprocessStreamPath) {
+      upsertAdminOperationSession(reprocessOperationFlowScope, {
+        flowKey: operationSessionFlowKey,
+        input: reprocessStreamPath,
+        method: "POST",
+        status: "active",
+        operationId: null,
+        runId: null,
+        jobId: null,
+        canonicalStatus: "queued",
+        executionOwner: null,
+        executionModeCanonical: null,
+        executionBackendCanonical: null,
+        selectedSources: selectedReprocessSources ?? null,
+        latestPhase: "reprocess_start",
+        lastEventSeq: 0,
+      });
+    }
     appendRefreshLog({
       source: "page_refresh",
       stage: "reprocess_start",
@@ -6707,8 +8412,8 @@ export default function PersonProfilePage() {
           ? `Full-gallery run: ${stageTargets.totalFiltered} images (${stageTargets.castCount} cast, ${stageTargets.mediaLinkCount} media links).`
           : `Scoped run: ${stageTargets.totalFiltered} filtered (${stageTargets.castCount} cast, ${stageTargets.mediaLinkCount} media links).`,
         detail:
-          stageTargets.sources.length > 0
-            ? `sources: ${stageTargets.sources.join(", ")}`
+          selectedReprocessSources && selectedReprocessSources.length > 0
+            ? `sources: ${selectedReprocessSources.join(", ")}`
             : "sources: all",
       level: "info",
       runId: requestId,
@@ -6716,6 +8421,7 @@ export default function PersonProfilePage() {
 
     try {
       const headers = await getAuthHeaders();
+      let handoffOperationId: string | null = null;
       const requestBody = JSON.stringify({
         ...selectedStage.body,
         execution_profile: "speed",
@@ -6723,7 +8429,7 @@ export default function PersonProfilePage() {
         batch_size: { tagging: 48, crop: 96, mirror: 256 },
         prefer_fast_pass: true,
         async_job: true,
-        sources: stageTargets.sources.length > 0 ? stageTargets.sources : undefined,
+        sources: selectedReprocessSources,
         target_cast_photo_ids: stageTargets.targetCastPhotoIds,
         target_media_link_ids: stageTargets.targetMediaLinkIds,
         show_id: effectiveGalleryImportContext.showId ?? undefined,
@@ -6731,19 +8437,53 @@ export default function PersonProfilePage() {
       });
       let hadError = false;
       let sawComplete = false;
-
-      await adminStream(
-        `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
-        {
-          method: "POST",
-          headers: {
-            ...headers,
-            "Content-Type": "application/json",
-            "x-trr-request-id": requestId,
-          },
-          body: requestBody,
-          timeoutMs: PERSON_PAGE_STREAM_MAX_DURATION_MS,
-          onEvent: async ({ event: eventType, payload }) => {
+      try {
+        await adminStream(
+          `/api/admin/trr-api/people/${personId}/reprocess-images/stream`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/json",
+              "x-trr-request-id": requestId,
+            },
+            body: requestBody,
+            timeoutMs: PERSON_PAGE_STREAM_MAX_DURATION_MS,
+            onEvent: async ({ event: eventType, payload }) => {
+            persistPersonOperationSessionEvent({
+              flowScope: reprocessOperationFlowScope,
+              flowKey: operationSessionFlowKey,
+              requestPath: reprocessStreamPath,
+              method: "POST",
+              eventType,
+              payload,
+            });
+            if (eventType === "operation" || eventType === "dispatched_to_modal") {
+              applyPipelineOperationEnvelope({
+                eventType,
+                payload,
+                fallbackPhase: PERSON_REFRESH_PHASES.tagging,
+                fallbackMessage:
+                  eventType === "dispatched_to_modal"
+                    ? "Reprocess dispatched to Modal."
+                    : "Reprocess operation update.",
+                logStage: "operation",
+                runId: requestId,
+              });
+              const payloadRecord =
+                payload && typeof payload === "object" && !Array.isArray(payload)
+                  ? (payload as { operation_id?: unknown })
+                  : null;
+              const operationId =
+                typeof payloadRecord?.operation_id === "string" ? payloadRecord.operation_id.trim() : "";
+              if (operationId) {
+                handoffOperationId = operationId;
+                throw new Error(
+                  `${PERSON_PIPELINE_SWITCH_TO_OPERATION_MONITOR_PREFIX}${operationId}`,
+                );
+              }
+              return;
+            }
             if (eventType === "progress" && payload && typeof payload === "object") {
             const rawPhase =
               typeof (payload as { stage?: unknown }).stage === "string"
@@ -6829,6 +8569,16 @@ export default function PersonProfilePage() {
                 : typeof skippedRowsRaw === "string"
                   ? Number.parseInt(skippedRowsRaw, 10)
                   : null;
+            const forceStatusRaw = (payload as { force_status?: unknown }).force_status;
+            const forceStatus =
+              forceStatusRaw === "pending" ||
+              forceStatusRaw === "running" ||
+              forceStatusRaw === "completed" ||
+              forceStatusRaw === "warning" ||
+              forceStatusRaw === "skipped" ||
+              forceStatusRaw === "failed"
+                ? forceStatusRaw
+                : null;
             const skipReason =
               typeof (payload as { skip_reason?: unknown }).skip_reason === "string"
                 ? ((payload as { skip_reason: string }).skip_reason)
@@ -7009,6 +8759,7 @@ export default function PersonProfilePage() {
                   skipReason,
                   serviceUnavailable,
                   detail,
+                  forceStatus,
                 },
               ),
             );
@@ -7186,11 +8937,47 @@ export default function PersonProfilePage() {
             backendErr.name = "BackendError";
               throw backendErr;
             }
+            },
           },
-        },
-      );
+        );
+      } catch (streamErr) {
+        const streamError = streamErr instanceof Error ? streamErr.message : String(streamErr);
+        const handoffOperationFromError = parsePersonPipelineMonitorSwitchOperationId(streamError);
+        if (handoffOperationFromError) {
+          handoffOperationId = handoffOperationFromError;
+        } else {
+          throw streamErr;
+        }
+      }
 
-      if (!sawComplete && !hadError) {
+      if (handoffOperationId) {
+        const operationIdForMonitor = handoffOperationId;
+        const state = await waitForOperationTerminalState({
+          operationId: operationIdForMonitor,
+          flowScope: reprocessOperationFlowScope ?? `person:${personId}:reprocess`,
+          flowKey: operationSessionFlowKey,
+          input: reprocessRequestPath,
+          method: "POST",
+          requestHeaders: headers,
+          onStreamEvent: async ({ event, payload }) => {
+            persistPersonOperationSessionEvent({
+              flowScope: reprocessOperationFlowScope,
+              flowKey: operationSessionFlowKey,
+              requestPath: reprocessRequestPath,
+              method: "POST",
+              eventType: event,
+              payload,
+            });
+            await applyReprocessResumeEvent(event, payload, operationIdForMonitor);
+          },
+        });
+        if (state.status === "failed") {
+          throw new Error(selectedStage.failureLabel);
+        }
+        if (state.status === "cancelled") {
+          throw new Error("Run Person Pipeline was cancelled");
+        }
+      } else if (!sawComplete && !hadError) {
         throw new Error("Reprocess stream ended before completion.");
       }
 
@@ -7199,8 +8986,7 @@ export default function PersonProfilePage() {
       return true;
     } catch (err) {
       console.error("Failed to reprocess images:", err);
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to reprocess images";
+      const errorMessage = formatPipelineStreamError(err, "Failed to reprocess images");
       setRefreshError(errorMessage);
       setRefreshPipelineSteps((prev) =>
         updatePersonRefreshPipelineSteps(
@@ -7232,10 +9018,17 @@ export default function PersonProfilePage() {
     reprocessingImages,
     appendRefreshLog,
     fetchPhotos,
+    formatPipelineStreamError,
     getAuthHeaders,
     personId,
     refreshLiveCounts,
     buildPersonRefreshRequestId,
+    refreshOperationFlowScope,
+    reprocessOperationFlowScope,
+    reprocessStreamPath,
+    persistPersonOperationSessionEvent,
+    applyPipelineOperationEnvelope,
+    applyReprocessResumeEvent,
     fullStageTargets,
     scopedStageTargets,
     effectiveGalleryImportContext.showId,
@@ -7249,16 +9042,447 @@ export default function PersonProfilePage() {
     const scopedPhotos =
       scope === "full" ? refreshedPhotos : filterPhotosByCurrentGalleryScope(refreshedPhotos);
     const stageTargets = buildStageTargetsFromPhotos(scopedPhotos);
-    return handleReprocessImages("all", scope, stageTargets);
-  }, [filterPhotosByCurrentGalleryScope, handleRefreshImages, handleReprocessImages]);
+    return handleReprocessImages(
+      "all",
+      scope,
+      stageTargets,
+      getReprocessSourcesForGetImagesSelection(getImagesSourceSelection),
+    );
+  }, [filterPhotosByCurrentGalleryScope, getImagesSourceSelection, handleRefreshImages, handleReprocessImages]);
 
   const handleGetImagesFollowUpSelection = useCallback(
     (scope: StageTargetScope) => {
       setGetImagesFollowUpPromptOpen(false);
-      void handleReprocessImages("all", scope);
+      void handleReprocessImages(
+        "all",
+        scope,
+        undefined,
+        getReprocessSourcesForGetImagesSelection(getImagesSourceSelection),
+      );
     },
-    [handleReprocessImages]
+    [getImagesSourceSelection, handleReprocessImages]
   );
+
+  useEffect(() => {
+    if (!hasAccess || !personId) return;
+    if (resumedPersonPipelineRef.current) return;
+    let cancelled = false;
+    let resumableSession: AdminOperationSessionRecord | null = null;
+    let detectedReprocessSession = false;
+
+    const resumeOperation = async () => {
+      try {
+        const refreshSession =
+          refreshOperationFlowScope ? getAutoResumableAdminOperationSession(refreshOperationFlowScope) : null;
+        const reprocessSession =
+          reprocessOperationFlowScope ? getAutoResumableAdminOperationSession(reprocessOperationFlowScope) : null;
+        const bestActiveOperation = await fetchBestActivePersonPipelineOperation();
+        if (cancelled) return;
+
+        resumableSession =
+          [refreshSession, reprocessSession]
+            .filter((session): session is NonNullable<typeof refreshSession> => Boolean(session?.operationId))
+            .sort((left, right) => (right.updatedAtMs ?? 0) - (left.updatedAtMs ?? 0))[0] ?? null;
+
+        if (bestActiveOperation && isPersonPipelineOperationType(bestActiveOperation.operation_type)) {
+          const flowScope = getPersonPipelineFlowScopeForOperationType(personId, bestActiveOperation.operation_type);
+          const requestPath =
+            bestActiveOperation.operation_type === "admin_person_reprocess_images"
+              ? reprocessStreamPath
+              : refreshStreamPath;
+          if (flowScope && requestPath) {
+            const existingSession = getAdminOperationSession(flowScope);
+            resumableSession = upsertAdminOperationSession(flowScope, {
+              flowKey: existingSession?.flowKey ?? getOrCreateAdminFlowKey(flowScope),
+              input: requestPath,
+              method: "POST",
+              status: "active",
+              operationId: bestActiveOperation.id,
+              canonicalStatus: canonicalizeOperationStatus(bestActiveOperation.status, "running"),
+              executionOwner: bestActiveOperation.execution_owner ?? null,
+              executionModeCanonical: bestActiveOperation.execution_mode_canonical ?? null,
+              executionBackendCanonical: bestActiveOperation.execution_backend_canonical ?? null,
+              latestPhase: bestActiveOperation.latest_phase ?? null,
+            });
+          }
+        }
+
+        if (!resumableSession?.operationId) return;
+        const activeSession = resumableSession;
+        const activeOperationId = activeSession.operationId;
+        if (!activeOperationId) return;
+        if (isLikelyStalePersonPipelineSession(resumableSession)) {
+          setRefreshNotice("A previous person pipeline looks stale. Clear the stale job before starting a fresh run.");
+          setRefreshProgress((prev) => ({
+            current: prev?.current ?? null,
+            total: prev?.total ?? null,
+            phase: prev?.phase ?? PERSON_REFRESH_PHASES.syncing,
+            rawStage: prev?.rawStage ?? "operation",
+            message: "A previous person pipeline looks stale.",
+            detailMessage: "A previous person pipeline looks stale. Clear the stale job before starting a fresh run.",
+            runId: activeOperationId,
+            lastEventAt: Date.now(),
+            checkpoint: "stale_resume_blocked",
+            streamState: "failed",
+            errorCode: "STALE_SESSION",
+            attemptElapsedMs: prev?.attemptElapsedMs ?? null,
+            attemptTimeoutMs: prev?.attemptTimeoutMs ?? null,
+            backendHost: prev?.backendHost ?? null,
+            sourceProgress: prev?.sourceProgress ?? null,
+            gettyProgress: prev?.gettyProgress ?? null,
+            executionOwner: activeSession.executionOwner ?? prev?.executionOwner ?? null,
+            executionModeCanonical: activeSession.executionModeCanonical ?? prev?.executionModeCanonical ?? null,
+            executionBackendCanonical:
+              activeSession.executionBackendCanonical ?? prev?.executionBackendCanonical ?? null,
+            operationStatus: "cancelling",
+          }));
+          return;
+        }
+
+        resumedPersonPipelineRef.current = true;
+        const requestHeaders = await getAuthHeaders();
+        if (cancelled) return;
+
+        const isReprocessSession =
+          !!reprocessSession?.operationId && reprocessSession.operationId === activeSession.operationId;
+        detectedReprocessSession = isReprocessSession;
+        const flowScope = isReprocessSession ? reprocessOperationFlowScope : refreshOperationFlowScope;
+        const requestPath = isReprocessSession
+          ? (reprocessStreamPath ?? `/api/admin/trr-api/people/${personId}/reprocess-images/stream`)
+          : (refreshStreamPath ?? `/api/admin/trr-api/people/${personId}/refresh-images/stream`);
+        const pipelineMode: PersonRefreshPipelineMode = isReprocessSession ? "reprocess" : "ingest";
+        const resumeMessage = isReprocessSession
+          ? "Reattaching to in-flight person reprocess operation..."
+          : "Reattaching to in-flight person refresh operation...";
+
+        if (isReprocessSession) {
+          setReprocessingImages(true);
+        } else {
+          setRefreshingImages(true);
+        }
+        setRefreshError(null);
+        setRefreshNotice(resumeMessage);
+        setRefreshPipelineSteps(createPersonRefreshPipelineSteps(pipelineMode));
+        setRefreshProgress({
+          phase: PERSON_REFRESH_PHASES.syncing,
+          rawStage: "operation",
+          message: resumeMessage,
+          detailMessage: resumeMessage,
+          current: null,
+          total: null,
+          runId: activeOperationId,
+          lastEventAt: Date.now(),
+          checkpoint: "resume_attach",
+          streamState: "connecting",
+          errorCode: null,
+          attemptElapsedMs: null,
+          attemptTimeoutMs: null,
+          backendHost: null,
+          sourceProgress: null,
+          gettyProgress: null,
+          executionOwner: activeSession.executionOwner ?? null,
+          executionModeCanonical: activeSession.executionModeCanonical ?? null,
+          executionBackendCanonical: activeSession.executionBackendCanonical ?? null,
+          operationStatus:
+            activeSession.canonicalStatus === "running" || activeSession.canonicalStatus === "cancelling"
+              ? activeSession.canonicalStatus
+              : "queued",
+        });
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "resume_attach",
+          message: resumeMessage,
+          detail: `operation ${activeOperationId.slice(0, 8)}`,
+          level: "info",
+          runId: activeOperationId,
+        });
+
+        const state = await waitForOperationTerminalState({
+          operationId: activeOperationId,
+          flowScope: flowScope ?? `person:${personId}:resume`,
+          flowKey: activeSession.flowKey,
+          input: requestPath,
+          method: activeSession.method || "POST",
+          requestHeaders,
+          onStreamEvent: async ({ event, payload }) => {
+            if (cancelled) return;
+            persistPersonOperationSessionEvent({
+              flowScope,
+              flowKey: activeSession.flowKey,
+              requestPath,
+              method: activeSession.method || "POST",
+              eventType: event,
+              payload,
+            });
+            if (isReprocessSession) {
+              await applyReprocessResumeEvent(event, payload, activeOperationId);
+            } else {
+              await applyRefreshResumeEvent(event, payload, activeOperationId);
+            }
+          },
+        });
+
+        if (cancelled) return;
+        if (state.status === "completed") {
+          if (isReprocessSession) {
+            await fetchPhotos();
+          } else {
+            await Promise.all([
+              fetchPerson(),
+              fetchCredits(),
+              fetchFandomData(),
+              fetchBravoVideos(),
+              loadUnifiedNews({ force: true }),
+              fetchCoverPhoto(),
+            ]);
+            await fetchPhotos();
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const errorMessage = formatPipelineStreamError(
+          error,
+          detectedReprocessSession ? "Failed to reprocess images" : "Failed to get images",
+        );
+        setRefreshError(errorMessage);
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "resume_error",
+          message: "Failed to reattach to in-flight operation",
+          detail: errorMessage,
+          level: "error",
+          runId: resumableSession?.operationId ?? undefined,
+        });
+      } finally {
+        if (cancelled) return;
+        setRefreshingImages(false);
+        setReprocessingImages(false);
+      }
+    };
+
+    void resumeOperation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasAccess,
+    personId,
+    refreshOperationFlowScope,
+    reprocessOperationFlowScope,
+    refreshStreamPath,
+    reprocessStreamPath,
+    getAuthHeaders,
+    persistPersonOperationSessionEvent,
+    applyRefreshResumeEvent,
+    applyReprocessResumeEvent,
+    appendRefreshLog,
+    fetchPerson,
+    fetchCredits,
+    fetchFandomData,
+    fetchBravoVideos,
+    loadUnifiedNews,
+    fetchCoverPhoto,
+    fetchPhotos,
+    fetchBestActivePersonPipelineOperation,
+    formatPipelineStreamError,
+    isLikelyStalePersonPipelineSession,
+  ]);
+
+  const handleCancelPersonPipeline = useCallback(async () => {
+    const bestActiveOperation = await fetchBestActivePersonPipelineOperation();
+    const activeSession = getCurrentPersonPipelineOperationSession();
+    const operationId =
+      (typeof bestActiveOperation?.id === "string" ? bestActiveOperation.id.trim() : "") ||
+      activeSession?.operationId?.trim() ||
+      "";
+    if (!operationId) {
+      setRefreshError("No active person pipeline operation is available to cancel yet.");
+      return;
+    }
+
+    setCancellingPersonPipeline(true);
+    setRefreshError(null);
+    setRefreshNotice(`Requesting cancellation for operation ${operationId.slice(0, 8)}...`);
+    setRefreshProgress((prev) =>
+      prev
+        ? {
+            ...prev,
+            phase: prev.phase ?? PERSON_REFRESH_PHASES.syncing,
+            rawStage: "operation",
+            message: "Cancellation requested...",
+            detailMessage: `Requesting cancellation for operation ${operationId.slice(0, 8)}...`,
+            lastEventAt: Date.now(),
+          }
+        : prev
+    );
+    appendRefreshLog({
+      source: "page_refresh",
+      stage: "cancel_requested",
+      message: "Cancellation requested.",
+      detail: `operation ${operationId.slice(0, 8)}`,
+      level: "info",
+      runId: operationId,
+    });
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/operations/${operationId}/cancel`,
+        {
+          method: "POST",
+          headers,
+        },
+        { allowDevAdminBypass: true }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        operation?: { status?: string | null };
+        cancelled_operations?: number;
+        cancelled_operation_ids?: string[];
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+
+      const resultingStatus = String(payload.operation?.status || "").trim().toLowerCase();
+      const cancelledOperationIds = Array.isArray(payload.cancelled_operation_ids)
+        ? payload.cancelled_operation_ids.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        : [];
+      if (activeSession?.flowScope && resultingStatus === "cancelled") {
+        markAdminOperationSessionStatus(activeSession.flowScope, "cancelled");
+      }
+      const notice =
+        resultingStatus === "cancelled"
+          ? cancelledOperationIds.length > 1
+            ? `Cancelled ${cancelledOperationIds.length} related person pipeline jobs.`
+            : `Pipeline operation ${operationId.slice(0, 8)} cancelled.`
+          : cancelledOperationIds.length > 1
+            ? `Cancellation requested for ${cancelledOperationIds.length} related person pipeline jobs.`
+            : `Cancellation requested for operation ${operationId.slice(0, 8)}.`;
+      setRefreshNotice(notice);
+      setRefreshProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: prev.phase ?? PERSON_REFRESH_PHASES.syncing,
+              rawStage: "operation",
+              message: notice,
+              detailMessage:
+                resultingStatus === "cancelled"
+                  ? notice
+                  : `${notice} Waiting for the worker to stop...`,
+              lastEventAt: Date.now(),
+              operationStatus: resultingStatus === "cancelled" ? "cancelled" : "cancelling",
+            }
+          : prev
+      );
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "cancel_requested",
+        message: notice,
+        detail:
+          cancelledOperationIds.length > 1
+            ? cancelledOperationIds.map((value) => value.slice(0, 8)).join(", ")
+            : undefined,
+        level: "info",
+        runId: operationId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to cancel person pipeline";
+      setRefreshError(message);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "cancel_requested",
+        message: "Cancellation failed.",
+        detail: message,
+        level: "error",
+        runId: operationId,
+      });
+    } finally {
+      setCancellingPersonPipeline(false);
+    }
+  }, [appendRefreshLog, fetchBestActivePersonPipelineOperation, getAuthHeaders, getCurrentPersonPipelineOperationSession]);
+
+  const handleClearStalePersonPipeline = useCallback(async (overrideOperationId?: string | null) => {
+    const staleSession = stalePersonPipelineSession;
+    const activeSession = getCurrentPersonPipelineOperationSession();
+    const operationId =
+      (typeof overrideOperationId === "string" ? overrideOperationId.trim() : "") ||
+      staleSession?.operationId?.trim() ||
+      activeSession?.operationId?.trim() ||
+      "";
+    if (!operationId) {
+      setRefreshError("No stale person pipeline operation is available to clear.");
+      return;
+    }
+    setCancellingPersonPipeline(true);
+    setRefreshError(null);
+    setRefreshNotice(`Clearing stale operation ${operationId.slice(0, 8)}...`);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchAdminWithAuth(
+        "/api/admin/trr-api/operations/stale/cancel",
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ operation_ids: [operationId], force_selected: true }),
+        },
+        { allowDevAdminBypass: true }
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        cancelled_operations?: number;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      if (staleSession?.flowScope) {
+        clearAdminOperationSession(staleSession.flowScope);
+      }
+      if (activeSession?.flowScope && activeSession.flowScope !== staleSession?.flowScope) {
+        clearAdminOperationSession(activeSession.flowScope);
+      }
+      setRefreshingImages(false);
+      setReprocessingImages(false);
+      setRefreshProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              message: `Cleared job ${operationId.slice(0, 8)}.`,
+              detailMessage: `Force-cancelled job ${operationId.slice(0, 8)} and returned the gallery to ready state.`,
+              lastEventAt: Date.now(),
+              operationStatus: "cancelled",
+            }
+          : prev,
+      );
+      setRefreshNotice(`Cleared job ${operationId.slice(0, 8)}.`);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "stale_cleanup",
+        message: "Cleared person pipeline job.",
+        detail: `operation ${operationId.slice(0, 8)}`,
+        level: "info",
+        runId: operationId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to clear person pipeline job";
+      setRefreshError(message);
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "stale_cleanup",
+        message: "Failed to clear person pipeline job.",
+        detail: message,
+        level: "error",
+        runId: operationId,
+      });
+    } finally {
+      setCancellingPersonPipeline(false);
+    }
+  }, [appendRefreshLog, getAuthHeaders, getCurrentPersonPipelineOperationSession, stalePersonPipelineSession]);
 
   // Initial load
   useEffect(() => {
@@ -7672,6 +9896,14 @@ export default function PersonProfilePage() {
       profileImageUrl: resolveMultiSourceField(person?.profile_image_url, canonicalSourceOrder),
     };
   }, [person, canonicalSourceOrder]);
+  const groupedAlternativeNames = useMemo(
+    () => normalizeStringListMap(person?.alternative_names),
+    [person?.alternative_names]
+  );
+  const alternativeNames = useMemo(
+    () => flattenAlternativeNames(person?.alternative_names),
+    [person?.alternative_names]
+  );
   const breadcrumbShowName =
     showScopedCredits?.show_name && showScopedCredits.show_name.trim().length > 0
       ? showScopedCredits.show_name.trim()
@@ -7726,6 +9958,21 @@ export default function PersonProfilePage() {
 
     void run();
   }, [fetchWithAuth, hasAccess, person?.id, personRouteShowContext]);
+
+  useEffect(() => {
+    if (!hasAccess || !personId || !profileRefreshAutoResumeScope) return;
+    if (resumedProfileRefreshRef.current) return;
+    const existingSession = getAutoResumableAdminOperationSession(profileRefreshAutoResumeScope);
+    if (!existingSession?.operationId || existingSession.status !== "active") return;
+    resumedProfileRefreshRef.current = true;
+    setProfileRefreshMessage("Reattaching to in-flight profile refresh...");
+    void handleRefreshProfileDetails();
+  }, [
+    handleRefreshProfileDetails,
+    hasAccess,
+    personId,
+    profileRefreshAutoResumeScope,
+  ]);
 
   const breadcrumbPersonHref = (() => {
     const queryString = searchParams.toString();
@@ -7929,6 +10176,73 @@ export default function PersonProfilePage() {
               {person?.full_name && (
                 <NbcumvSeasonBios personName={person.full_name} />
               )}
+
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-zinc-900">Refresh Info & Credits</h3>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      Refresh approved source links, profile details, Bravo hero image data, aliases, and related-show credits.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleRefreshProfileDetails()}
+                    disabled={refreshingProfile}
+                    className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {refreshingProfile ? "Refreshing..." : "Refresh Info & Credits"}
+                  </button>
+                </div>
+                {profileRefreshMessage && (
+                  <p className="mt-4 text-sm text-zinc-700">{profileRefreshMessage}</p>
+                )}
+                {profileRefreshError && (
+                  <p className="mt-2 text-sm text-red-600">{profileRefreshError}</p>
+                )}
+                {profileRefreshSummary && (
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-600">
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                      Links: {Number(profileRefreshSummary.links_refreshed ?? 0)}
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                      Aliases: {Number(profileRefreshSummary.aliases_added ?? 0)}
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                      Fields: {Number(profileRefreshSummary.profile_fields_changed ?? 0)}
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                      Shows: {Number(profileRefreshSummary.shows_processed ?? 0)}
+                    </span>
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                      Credits: {Number(profileRefreshSummary.credits_updated ?? 0)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm lg:col-span-2">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-zinc-900">Alternative Names</h3>
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-600">
+                    {alternativeNames.length}
+                  </span>
+                </div>
+                {alternativeNames.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {alternativeNames.map((name) => (
+                      <span
+                        key={name}
+                        className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700"
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-500">No alternative names saved yet.</p>
+                )}
+              </div>
 
               {/* Recent Photos Preview */}
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -8233,10 +10547,47 @@ export default function PersonProfilePage() {
                             </div>
                           )}
 
+                          <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4">
+                            <div className="mb-2 flex items-start justify-between gap-3">
+                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                                Alternative Names
+                              </p>
+                              <span className="flex-shrink-0 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-600">
+                                {alternativeNames.length}
+                              </span>
+                            </div>
+                            {alternativeNames.length > 0 ? (
+                              <div className="flex flex-wrap gap-2">
+                                {alternativeNames.map((name) => (
+                                  <span
+                                    key={name}
+                                    className="rounded-full border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                                  >
+                                    {name}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-zinc-500">No alternative names available.</p>
+                            )}
+                          </div>
+
                           <details className="rounded-xl border border-zinc-200 bg-white p-4">
                             <summary className="cursor-pointer text-sm font-semibold text-zinc-700">
                               Raw Sources
                             </summary>
+                            {Object.keys(groupedAlternativeNames).length > 0 && (
+                              <div className="mt-3 space-y-2">
+                                {Object.entries(groupedAlternativeNames).map(([source, names]) => (
+                                  <div key={source}>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                                      {formatAlternativeNameSourceLabel(source)}
+                                    </p>
+                                    <p className="mt-1 text-sm text-zinc-700">{names.join(", ")}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             <pre className="mt-3 overflow-auto rounded-lg bg-zinc-950 p-3 text-xs text-zinc-100">
                               {JSON.stringify(
                                 {
@@ -8246,6 +10597,7 @@ export default function PersonProfilePage() {
                                   place_of_birth: person.place_of_birth ?? {},
                                   homepage: person.homepage ?? {},
                                   profile_image_url: person.profile_image_url ?? {},
+                                  alternative_names: person.alternative_names ?? {},
                                 },
                                 null,
                                 2
@@ -8266,6 +10618,30 @@ export default function PersonProfilePage() {
             <div className="space-y-6">
               <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
+                <div className="mr-auto flex flex-wrap items-center gap-2">
+                  <span
+                    title={runtimeTooltipParts.length > 0 ? runtimeTooltipParts.join(" · ") : "Runtime metadata has not arrived yet."}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${runtimePillClass}`}
+                  >
+                    {runtimePillLabel}
+                  </span>
+                  <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusPillClass}`}>
+                    {statusPillLabel}
+                  </span>
+                  {latestPipelineSummary && (
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-600">
+                      {`Op ${latestPipelineSummary.operationId.slice(0, 8)} · ${latestPipelineSummary.runtimeLabel} · ${
+                        latestPipelineSummary.phase
+                          ? formatPersonRefreshPhaseLabel(latestPipelineSummary.phase) ?? latestPipelineSummary.phase
+                          : "No phase"
+                      } · ${
+                        latestPipelineSummary.lastUpdatedMs
+                          ? `${Math.max(0, Math.round((Date.now() - latestPipelineSummary.lastUpdatedMs) / 1000))}s ago`
+                          : "no timestamp"
+                      }`}
+                    </span>
+                  )}
+                </div>
                 <div className="flex flex-wrap items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1">
                   {GET_IMAGES_SOURCE_OPTIONS.map((option) => {
                     const isActive = getImagesSourceSelection === option.value;
@@ -8293,7 +10669,7 @@ export default function PersonProfilePage() {
                     onClick={() => void handleRefreshImages()}
                     disabled={refreshingImages || reprocessingImages}
                     title={
-                      `${effectiveGalleryImportLabel ? `Run Get Images for ${effectiveGalleryImportLabel}` : "Run Get Images for the current gallery context"} using ${getImagesSourceSelection === "all" ? "Bravo / Getty / NBCUMV, IMDb, and TMDb" : getImagesSelectionLabel(getImagesSourceSelection)} (source sync + mirror only).`
+                      `${effectiveGalleryImportLabel ? `Run Get Images for ${effectiveGalleryImportLabel}` : "Run Get Images for the current gallery context"} using ${getImagesSelectionDetail(getImagesSourceSelection)} (source sync + mirror only).`
                     }
                     className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
@@ -8302,23 +10678,63 @@ export default function PersonProfilePage() {
                     </svg>
                     {refreshingImages
                       ? "Getting..."
-                      : `Get Images (${getImagesSourceSelection === "all" ? "All" : getImagesSelectionLabel(getImagesSourceSelection)})`}
+                      : `Get Images (${getImagesSelectionLabel(getImagesSourceSelection)})`}
                   </button>
-                    <button
-                      onClick={() => void handleRunPersonPipeline()}
-                      disabled={refreshingImages || reprocessingImages}
-                      title={
-                        effectiveGalleryImportLabel
+                  <button
+                    onClick={() =>
+                      stalePersonPipelineSession?.operationId
+                        ? void handleClearStalePersonPipeline()
+                        : effectiveOperationStatus === "cancelling" && activePersonPipelineSession?.operationId
+                        ? void handleClearStalePersonPipeline(activePersonPipelineSession.operationId)
+                        : refreshingImages || reprocessingImages
+                        ? void handleCancelPersonPipeline()
+                        : void handleRunPersonPipeline()
+                    }
+                    disabled={
+                      stalePersonPipelineSession?.operationId
+                        ? cancellingPersonPipeline
+                        : refreshingImages || reprocessingImages
+                        ? cancellingPersonPipeline || !activePersonPipelineSession?.operationId
+                        : refreshingImages || reprocessingImages
+                    }
+                    title={
+                      stalePersonPipelineSession?.operationId
+                        ? "Force-cancel and clear the stale gallery job so the page returns to ready."
+                        : effectiveOperationStatus === "cancelling" && activePersonPipelineSession?.operationId
+                        ? "Force-cancel and clear the in-flight person pipeline job immediately."
+                        : refreshingImages || reprocessingImages
+                        ? activePersonPipelineSession?.operationId
+                          ? "Cancel the in-flight person pipeline job."
+                          : "Waiting for an active pipeline operation id before cancellation is available."
+                        : effectiveGalleryImportLabel
                           ? `Run the full person pipeline for ${effectiveGalleryImportLabel} (Get Images + tagging + ID Text + Crop + Auto-Crop).`
                           : "Run the full person pipeline for the current gallery context."
-                      }
-                      className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                    >
+                    }
+                    className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                  >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      {stalePersonPipelineSession?.operationId || refreshingImages || reprocessingImages ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 6l12 12M18 6L6 18" />
+                      ) : (
+                        <>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </>
+                      )}
                     </svg>
-                    {refreshingImages || reprocessingImages ? "Running..." : "Run Person Pipeline"}
+                    {stalePersonPipelineSession?.operationId
+                      ? cancellingPersonPipeline
+                        ? "Clearing..."
+                        : "Clear Stale Job"
+                      : effectiveOperationStatus === "cancelling" && activePersonPipelineSession?.operationId
+                      ? cancellingPersonPipeline
+                        ? "Clearing..."
+                        : "Force Cancel"
+                      : refreshingImages || reprocessingImages
+                      ? cancellingPersonPipeline
+                        ? "Cancelling..."
+                        : "Cancel Job"
+                      : "Run Person Pipeline"}
                   </button>
                   <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1">
                     <span className="px-1 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-500">
@@ -8416,6 +10832,7 @@ export default function PersonProfilePage() {
                   lastEventAt={refreshProgress?.lastEventAt}
                   steps={refreshPipelineSteps}
                   sourceProgress={refreshProgress?.sourceProgress}
+                  gettyProgress={refreshProgress?.gettyProgress}
                 />
                 {refreshError && (
                   <p className="text-xs text-red-600">{refreshError}</p>
@@ -8596,29 +11013,6 @@ export default function PersonProfilePage() {
                       </button>
                     )}
                   </div>
-                  {galleryShowFilter === "events" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {eventOptionsForSelectedSubcategory.length > 0 &&
-                        eventOptionsForSelectedSubcategory.map((option) => (
-                          <button
-                            type="button"
-                            key={option.key}
-                            onClick={() => {
-                              setSelectedEventBucketKey(option.key);
-                              setGalleryShowFilter("events");
-                            }}
-                            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                              selectedEventBucketKey === option.key
-                                ? "border-zinc-900 bg-zinc-900 text-white"
-                                : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-                            }`}
-                          >
-                            {option.label}
-                            {typeof option.count === "number" ? ` (${option.count})` : ""}
-                          </button>
-                        ))}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -8686,7 +11080,6 @@ export default function PersonProfilePage() {
 
                 {gallerySections.otherPhotos.length > 0 && (
                   <section>
-                    <h4 className="mb-3 text-sm font-semibold text-zinc-900">Other Photos</h4>
                     <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                       {gallerySections.otherPhotos.map((photo) => {
                         const index = filteredPhotoIndexById.get(photo.id) ?? 0;

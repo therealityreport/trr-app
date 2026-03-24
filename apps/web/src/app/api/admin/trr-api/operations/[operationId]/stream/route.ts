@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { withStreamingSseFetch } from "@/lib/server/sse-proxy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
@@ -48,16 +49,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const tabSessionId = toOptionalHeaderValue(request.headers.get("x-trr-tab-session-id"));
     const flowKey = toOptionalHeaderValue(request.headers.get("x-trr-flow-key"));
 
-    const backendResponse = await fetch(backendUrl.toString(), {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-        ...(requestId ? { "x-trr-request-id": requestId } : {}),
-        ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
-        ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
-      },
-      cache: "no-store",
-    });
+    const backendResponse = await fetch(
+      backendUrl.toString(),
+      withStreamingSseFetch({
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${serviceRoleKey}`,
+          ...(requestId ? { "x-trr-request-id": requestId } : {}),
+          ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
+          ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
+        },
+        cache: "no-store",
+      })
+    );
 
     if (!backendResponse.ok) {
       const text = await backendResponse.text().catch(() => "");

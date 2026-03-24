@@ -106,15 +106,6 @@ const TILE_STATES: TileState[] = [
   { abbr: "FL", col: 7, row: 7, risk: 6 },
 ];
 
-const SEQ_LEGEND = [
-  { level: 1, label: "Low" },
-  { level: 2, label: "" },
-  { level: 3, label: "" },
-  { level: 4, label: "" },
-  { level: 5, label: "" },
-  { level: 6, label: "High" },
-] as const;
-
 /* ── Satellite map cities ───────────────────────── */
 interface CityDot {
   x: number;

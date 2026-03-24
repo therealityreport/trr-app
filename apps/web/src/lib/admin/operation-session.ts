@@ -23,6 +23,12 @@ export type AdminOperationSessionRecord = {
   operationId: string | null;
   runId: string | null;
   jobId: string | null;
+  canonicalStatus: string | null;
+  executionOwner: string | null;
+  executionModeCanonical: string | null;
+  executionBackendCanonical: string | null;
+  selectedSources: string[] | null;
+  latestPhase: string | null;
   lastEventSeq: number;
   startedAtMs: number;
   updatedAtMs: number;
@@ -158,6 +164,30 @@ export const upsertAdminOperationSession = (
       patch.jobId !== undefined
         ? patch.jobId
         : existing?.jobId ?? null,
+    canonicalStatus:
+      patch.canonicalStatus !== undefined
+        ? patch.canonicalStatus
+        : existing?.canonicalStatus ?? null,
+    executionOwner:
+      patch.executionOwner !== undefined
+        ? patch.executionOwner
+        : existing?.executionOwner ?? null,
+    executionModeCanonical:
+      patch.executionModeCanonical !== undefined
+        ? patch.executionModeCanonical
+        : existing?.executionModeCanonical ?? null,
+    executionBackendCanonical:
+      patch.executionBackendCanonical !== undefined
+        ? patch.executionBackendCanonical
+        : existing?.executionBackendCanonical ?? null,
+    selectedSources:
+      patch.selectedSources !== undefined
+        ? patch.selectedSources
+        : existing?.selectedSources ?? null,
+    latestPhase:
+      patch.latestPhase !== undefined
+        ? patch.latestPhase
+        : existing?.latestPhase ?? null,
     lastEventSeq:
       typeof patch.lastEventSeq === "number"
         ? patch.lastEventSeq

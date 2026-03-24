@@ -124,6 +124,7 @@ describe("person reprocess-images stream proxy route", () => {
     const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
     const callHeaders = streamCall?.[1]?.headers as Record<string, string> | undefined;
     expect(callHeaders?.["x-trr-request-id"]).toBe("req-reprocess-forward");
+    expect(streamCall?.[1]).toMatchObject({ dispatcher: expect.anything() });
   });
 
   it("forwards scoped reprocess payload fields to backend", async () => {

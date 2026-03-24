@@ -22,25 +22,27 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     key: "trr-shows",
     title: "Shows",
     href: "/admin/shows" as Route,
-    description: "Browse the TRR metadata database. View shows, seasons, cast, and create linked surveys.",
+    description: "Browse the show library from the admin dashboard, then open show workspaces and linked survey flows.",
     badge: "API",
     hasShowsSubmenu: true,
     activeMatchPrefixes: ["/admin/shows", "/admin/trr-shows", "/shows"],
   },
   {
-    key: "screenlaytics",
+    key: "screenalytics",
     title: "Screenalytics",
-    href: "/screenlaytics" as Route,
-    description: "Pick a show and jump into the show-level admin workspace used for screen-time and related operations.",
+    href: "/screenalytics" as Route,
+    description:
+      "TRR-APP admin entry for screen-time workflows. Pick a show here, then continue into its /<show> workspace.",
     badge: "Screen",
-    activeMatchPrefixes: ["/screenlaytics", "/screenalytics", "/admin/trr-shows"],
+    activeMatchPrefixes: ["/screenalytics", "/screenlaytics", "/admin/screenalytics", "/admin/screenlaytics", "/admin/trr-shows"],
   },
   {
     key: "people",
     title: "People",
-    href: "/people",
+    href: "/people" as Route,
     description: "Find and review cast and crew profiles across shows with ranking rails and quick search.",
     badge: "People",
+    activeMatchPrefixes: ["/people", "/admin/people"],
   },
   {
     key: "games",
@@ -48,13 +50,15 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     href: "/games" as Route,
     description: "Manage games and interactive experiences.",
     badge: "Games",
+    activeMatchPrefixes: ["/games", "/admin/games"],
   },
   {
     key: "surveys",
-    title: "Survey Editor",
+    title: "Surveys",
     href: "/surveys" as Route,
     description: "Build and manage survey templates, runs, responses, and export tooling.",
     badge: "Surveys",
+    activeMatchPrefixes: ["/surveys", "/admin/surveys"],
   },
   {
     key: "social-media",
@@ -91,6 +95,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     href: "/users" as Route,
     description: "Manage users, roles, and admin access controls.",
     badge: "Admin",
+    activeMatchPrefixes: ["/users", "/admin/users"],
   },
   {
     key: "groups",
@@ -98,6 +103,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     href: "/groups" as Route,
     description: "Manage user groups and community segmentation.",
     badge: "Groups",
+    activeMatchPrefixes: ["/groups", "/admin/groups"],
   },
   {
     key: "docs",
@@ -105,6 +111,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     href: "/docs" as Route,
     description: "Operational reference for TRR-APP admin jobs with exact pages, buttons, and trigger locations.",
     badge: "Docs",
+    activeMatchPrefixes: ["/docs", "/admin/docs"],
   },
   {
     key: "design-system",
@@ -129,6 +136,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     href: "/settings" as Route,
     description: "Configure environment and application settings.",
     badge: "Settings",
+    activeMatchPrefixes: ["/settings", "/admin/settings"],
   },
 ] as const;
 

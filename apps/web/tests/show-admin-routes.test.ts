@@ -173,11 +173,25 @@ describe("show-admin-routes", () => {
       }),
     ).toBe("/admin/social/instagram/bravotv/hashtags");
 
+    expect(
+      buildSocialAccountProfileUrl({
+        platform: "instagram",
+        handle: "wwhlbravo",
+      }),
+    ).toBe("/admin/social/instagram/bravowwhl");
+
     expect(parseSocialAccountProfilePath("/social/instagram/bravotv")).toMatchObject({
       platform: "instagram",
       handle: "bravotv",
       tab: "stats",
       canonicalPath: "/admin/social/instagram/bravotv",
+    });
+
+    expect(parseSocialAccountProfilePath("/admin/social/instagram/wwhlbravo")).toMatchObject({
+      platform: "instagram",
+      handle: "bravowwhl",
+      tab: "stats",
+      canonicalPath: "/admin/social/instagram/bravowwhl",
     });
 
     expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/collaborators-tags")).toMatchObject({
@@ -672,15 +686,16 @@ describe("show-admin-routes", () => {
         personSlug: "meredith-marks--7f528757",
         tab: "gallery",
       })
-    ).toBe("/people/meredith-marks--7f528757/gallery");
+    ).toBe("/people/meredith-marks--7f528757/gallery?showId=7f528757-5017-4599-8252-c02f0d0736cf");
 
     expect(
       buildPersonAdminUrl({
         personSlug: "meredith-marks--7f528757",
         tab: "gallery",
+        showId: "the-traitors-us",
         query: new URLSearchParams({ scope: "all", page: "2" }),
       })
-    ).toBe("/people/meredith-marks--7f528757/gallery?page=2");
+    ).toBe("/people/meredith-marks--7f528757/gallery?page=2&showId=the-traitors-us");
   });
 
   it("slugifies people names and keeps clean person slugs by default", () => {

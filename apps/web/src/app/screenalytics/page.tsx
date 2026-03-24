@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import ScreenalyticsPickerPage from "@/components/admin/ScreenalyticsPickerPage";
 
-export default function ScreenalyticsRedirectPage() {
-  redirect("/screenlaytics");
+export default function ScreenalyticsPage() {
+  return <ScreenalyticsPickerPage />;
 }

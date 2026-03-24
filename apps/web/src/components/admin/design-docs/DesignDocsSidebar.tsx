@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
-import type {
-  DesignDocSection,
-  DesignDocSectionId,
+import {
+  DESIGN_DOC_GROUPS,
+  DESIGN_DOC_SECTIONS,
+  getBrandSubSections,
+  isBrandSection,
+  type DesignDocSectionId,
 } from "@/lib/admin/design-docs-config";
 
 interface DesignDocsSidebarProps {
   activeSection: DesignDocSectionId;
-  sections: readonly DesignDocSection[];
   isOpen: boolean;
   onClose: () => void;
 }
@@ -31,42 +33,146 @@ function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
   });
 }
 
-function SectionLinks({
-  sections,
+const sectionLabelMap = new Map(
+  DESIGN_DOC_SECTIONS.map((s) => [s.id, s.label]),
+);
+
+function AccordionNav({
   activeSection,
   onNavigate,
 }: {
-  sections: readonly DesignDocSection[];
   activeSection: DesignDocSectionId;
   onNavigate?: () => void;
 }) {
+  // Auto-expand the group that contains the active section
+  const activeGroupIndex = useMemo(() => {
+    return DESIGN_DOC_GROUPS.findIndex((g) =>
+      g.sectionIds.includes(activeSection),
+    );
+  }, [activeSection]);
+
+  const [expanded, setExpanded] = useState<Set<number>>(() => {
+    const initial = new Set<number>();
+    if (activeGroupIndex >= 0) initial.add(activeGroupIndex);
+    return initial;
+  });
+
+  // Keep active group expanded when section changes
+  useEffect(() => {
+    if (activeGroupIndex >= 0) {
+      setExpanded((prev) => {
+        if (prev.has(activeGroupIndex)) return prev;
+        const next = new Set(prev);
+        next.add(activeGroupIndex);
+        return next;
+      });
+    }
+  }, [activeGroupIndex]);
+
+  const toggle = (index: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
   return (
-    <ul className="flex flex-col gap-0.5">
-      {sections.map((section) => {
-        const isActive = section.id === activeSection;
+    <div className="flex flex-col gap-1">
+      {DESIGN_DOC_GROUPS.map((group, groupIdx) => {
+        const isExpanded = expanded.has(groupIdx);
+        const hasActive = group.sectionIds.includes(activeSection);
+
         return (
-          <li key={section.id}>
-            <Link
-              href={`/admin/design-docs/${section.id}` as Route}
-              onClick={onNavigate}
-              className={
-                isActive
-                  ? "block rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white"
-                  : "block rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-              }
+          <div key={group.label}>
+            {/* Group header — accordion toggle */}
+            <button
+              onClick={() => toggle(groupIdx)}
+              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
+                hasActive
+                  ? "text-zinc-900"
+                  : "text-zinc-400 hover:text-zinc-600"
+              }`}
+              aria-expanded={isExpanded}
             >
-              {section.label}
-            </Link>
-          </li>
+              <span>{group.label}</span>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`shrink-0 transition-transform duration-150 ${
+                  isExpanded ? "rotate-90" : ""
+                }`}
+              >
+                <polyline points="4,2 8,6 4,10" />
+              </svg>
+            </button>
+
+            {/* Section links */}
+            {isExpanded && (
+              <ul className="mb-1 ml-1 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
+                {group.sectionIds.map((sectionId) => {
+                  const isActive = sectionId === activeSection;
+                  const label =
+                    sectionLabelMap.get(sectionId) ?? sectionId;
+                  const showSubLinks =
+                    isActive && isBrandSection(sectionId);
+
+                  return (
+                    <li key={sectionId}>
+                      <Link
+                        href={
+                          `/admin/design-docs/${sectionId}` as Route
+                        }
+                        onClick={onNavigate}
+                        className={
+                          isActive
+                            ? "block rounded-lg bg-zinc-900 px-3 py-1.5 text-[13px] font-semibold text-white"
+                            : "block rounded-lg px-3 py-1.5 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                        }
+                      >
+                        {label}
+                      </Link>
+
+                      {/* Brand sub-section anchor links */}
+                      {showSubLinks && (
+                        <ul className="mb-1 ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-300 pl-2">
+                          {getBrandSubSections(sectionId).map((sub) => (
+                            <li key={sub.anchor}>
+                              <a
+                                href={`#${sub.anchor}`}
+                                onClick={onNavigate}
+                                className="block rounded px-2 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+                              >
+                                {sub.label}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         );
       })}
-    </ul>
+    </div>
   );
 }
 
 export default function DesignDocsSidebar({
   activeSection,
-  sections,
   isOpen,
   onClose,
 }: DesignDocsSidebarProps) {
@@ -107,7 +213,6 @@ export default function DesignDocsSidebar({
     };
 
     document.addEventListener("keydown", handleKeyDown);
-    // Auto-focus first link
     const focusables = getFocusableElements(menu);
     if (focusables.length > 0) {
       focusables[0].focus();
@@ -132,14 +237,11 @@ export default function DesignDocsSidebar({
     <>
       {/* Desktop sidebar — persistent left column */}
       <nav
-        className="hidden lg:block w-64 shrink-0 border-r border-zinc-200 bg-white"
+        className="hidden w-64 shrink-0 border-r border-zinc-200 bg-white lg:block"
         aria-label="Design docs navigation"
       >
-        <div className="sticky top-[57px] h-[calc(100vh-57px)] overflow-y-auto px-3 py-6">
-          <div className="mb-4 px-3 text-xs font-semibold uppercase tracking-widest text-zinc-400">
-            Sections
-          </div>
-          <SectionLinks sections={sections} activeSection={activeSection} />
+        <div className="sticky top-[57px] h-[calc(100vh-57px)] overflow-y-auto px-2 py-4">
+          <AccordionNav activeSection={activeSection} />
         </div>
       </nav>
 
@@ -169,7 +271,7 @@ export default function DesignDocsSidebar({
           {/* Drawer header */}
           <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
             <span className="text-sm font-semibold text-zinc-900">
-              Sections
+              Design Docs
             </span>
             <button
               onClick={onClose}
@@ -192,9 +294,11 @@ export default function DesignDocsSidebar({
           </div>
 
           {/* Drawer body */}
-          <div className="overflow-y-auto px-3 py-4" style={{ maxHeight: "calc(100vh - 57px)" }}>
-            <SectionLinks
-              sections={sections}
+          <div
+            className="overflow-y-auto px-2 py-3"
+            style={{ maxHeight: "calc(100vh - 57px)" }}
+          >
+            <AccordionNav
               activeSection={activeSection}
               onNavigate={onClose}
             />

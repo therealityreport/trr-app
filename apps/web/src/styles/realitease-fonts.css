@@ -3,9 +3,9 @@
 /* NYTKarnak_Condensed for the main title */
 @font-face {
   font-family: 'NYTKarnak_Condensed';
-  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/NYTKarnak_Condensed.woff2') format('woff2'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/NYTKarnak_Condensed.woff') format('woff'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/NYTKarnak_Condensed.ttf') format('truetype');
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTKarnak_Condensed.woff2') format('woff2'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTKarnak_Condensed.woff') format('woff'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTKarnak_Condensed.ttf') format('truetype');
   font-weight: bold;
   font-style: normal;
   font-display: swap;
@@ -14,9 +14,9 @@
 /* KarnakPro-Book for the subtitle */
 @font-face {
   font-family: 'KarnakPro-Book';
-  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/KarnakPro-Book.woff2') format('woff2'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/KarnakPro-Book.woff') format('woff'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/KarnakPro-Book.ttf') format('truetype');
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/KarnakPro-Book.woff2') format('woff2'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/KarnakPro-Book.woff') format('woff'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/KarnakPro-Book.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -25,9 +25,9 @@
 /* NYTFranklin for the play button */
 @font-face {
   font-family: 'NYTFranklin';
-  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/NYTFranklin.woff2') format('woff2'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/NYTFranklin.woff') format('woff'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/NYTFranklin.ttf') format('truetype');
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTFranklin.woff2') format('woff2'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTFranklin.woff') format('woff'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTFranklin.ttf') format('truetype');
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -36,9 +36,9 @@
 /* TN_Web_Use_Only for date */
 @font-face {
   font-family: 'TN_Web_Use_Only';
-  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/TN_Web_Use_Only.woff2') format('woff2'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/TN_Web_Use_Only.woff') format('woff'),
-       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/TN_Web_Use_Only.ttf') format('truetype');
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/TN_Web_Use_Only.woff2') format('woff2'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/TN_Web_Use_Only.woff') format('woff'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/TN_Web_Use_Only.ttf') format('truetype');
   font-weight: bold;
   font-style: normal;
   font-display: swap;
@@ -47,7 +47,7 @@
 /* Helvetica_Neue for general text */
 @font-face {
   font-family: 'Helvetica_Neue';
-  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/realitease/Helvetica_Neue.ttf') format('truetype');
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/Helvetica_Neue.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;

@@ -89,22 +89,20 @@ export const buildCardImageUrlCandidates = (input: ImageCardCandidateInput): str
 };
 
 export const buildDetailImageUrlCandidates = (input: ImageDetailCandidateInput): string[] => {
-  const sourceCandidates = [
+  const primaryCandidates = [
     normalizeImageUrl(input.hostedUrl),
-    normalizeImageUrl(input.originalUrl),
     normalizeImageUrl(input.sourceUrl),
-  ];
-  const generatedCandidates = [
+    normalizeImageUrl(input.originalUrl),
     normalizeImageUrl(input.detailUrl),
-    normalizeImageUrl(input.cropDetailUrl),
   ];
-  const variantPartition = partitionByHostedMedia(generatedCandidates);
-  const sourcePartition = partitionByHostedMedia(sourceCandidates);
+  const editFallbackCandidates = [normalizeImageUrl(input.cropDetailUrl)];
+  const primaryPartition = partitionByHostedMedia(primaryCandidates);
+  const editFallbackPartition = partitionByHostedMedia(editFallbackCandidates);
   return dedupeCandidates([
-    ...sourcePartition.hosted,
-    ...sourcePartition.external,
-    ...variantPartition.hosted,
-    ...variantPartition.external,
+    ...primaryPartition.hosted,
+    ...primaryPartition.external,
+    ...editFallbackPartition.hosted,
+    ...editFallbackPartition.external,
   ]);
 };
 

@@ -55,6 +55,12 @@ const parseSseEvents = (payload: string): SseEvent[] => {
   });
 };
 
+const countRelevantFetchCalls = (fetchMock: ReturnType<typeof vi.fn>): number =>
+  fetchMock.mock.calls.filter((call) => {
+    const url = String(call[0]);
+    return url === BACKEND_HEALTH_URL || url === BACKEND_STREAM_URL;
+  }).length;
+
 describe("person refresh-images stream proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
@@ -184,9 +190,10 @@ describe("person refresh-images stream proxy route", () => {
     const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
     const callHeaders = streamCall?.[1]?.headers as Record<string, string> | undefined;
     expect(callHeaders?.["x-trr-request-id"]).toBe("req-forward-1");
+    expect(streamCall?.[1]).toMatchObject({ dispatcher: expect.anything() });
   });
 
-  it("prefers local execution for admin.localhost in development", async () => {
+  it("does not force local execution for admin.localhost in development", async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "development";
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
@@ -217,7 +224,7 @@ describe("person refresh-images stream proxy route", () => {
 
       const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
       const callHeaders = streamCall?.[1]?.headers as Record<string, string> | undefined;
-      expect(callHeaders?.["x-trr-prefer-local-execution"]).toBe("1");
+      expect(callHeaders?.["x-trr-prefer-local-execution"]).toBeUndefined();
     } finally {
       process.env.NODE_ENV = previousNodeEnv;
     }
@@ -251,7 +258,7 @@ describe("person refresh-images stream proxy route", () => {
     const events = parseSseEvents(payload);
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(countRelevantFetchCalls(fetchMock)).toBe(3);
     expect(payload).toContain("\"sync_tmdb\"");
     expect(
       events.some(
@@ -329,7 +336,7 @@ describe("person refresh-images stream proxy route", () => {
           evt.data.is_terminal === true
       )
     ).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(countRelevantFetchCalls(fetchMock)).toBe(6);
   });
 
   it("fails fast with BACKEND_UNRESPONSIVE when health preflight fails", async () => {

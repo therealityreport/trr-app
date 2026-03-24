@@ -1,0 +1,318 @@
+{
+  "nyt-games": {
+    "word-game-icon": {
+      "label": "Word Game Icon",
+      "original": {
+        "prompt": "A minimalist, flat-design game icon for a word puzzle game. White letters on colored tiles (green, yellow, gray) arranged in a 5x5 grid. Clean vector style, no text, playful and modern. White background.",
+        "description": "NYT Wordle — 5-letter word puzzle tiles",
+        "imageUrl": "/design-docs/nyt-games/wordle-card.svg"
+      },
+      "trr": {
+        "prompt": "A minimalist, flat-design game icon for a reality TV word puzzle game. Golden apple and orange emoji tiles arranged in a 5x5 grid with letters spelling BRAVO. Saffron yellow and deep gold tones. Clean vector style, playful and modern. White background.",
+        "description": "TRR Realitease — Bravo word puzzle tiles"
+      }
+    },
+    "connections-icon": {
+      "label": "Connections Illustration",
+      "original": {
+        "prompt": "A playful, colorful illustration of interconnected puzzle pieces in purple, blue, green, and yellow. Flat design style, game-like aesthetic, minimal detail, clean vector art. White background.",
+        "description": "NYT Connections — category grouping puzzle",
+        "imageUrl": "/design-docs/nyt-games/connections-card.svg"
+      },
+      "trr": {
+        "prompt": "A playful illustration of four groups of reality TV housewives icons — diamond shapes, apple shapes, orange shapes, and snowflake shapes — arranged in a 4x4 grid. Each group in a different color (purple diamonds, green apples, orange oranges, blue snowflakes). Flat vector art, game-like. White background.",
+        "description": "TRR Realations — Housewives franchise grouping puzzle"
+      }
+    },
+    "spelling-bee-icon": {
+      "label": "Spelling Bee Icon",
+      "original": {
+        "prompt": "A minimalist icon of a honeycomb pattern with letters inside each hexagonal cell. Golden yellow and warm amber colors. Clean flat vector design, game app icon style. White background.",
+        "description": "NYT Spelling Bee — hexagonal letter puzzle",
+        "imageUrl": "/design-docs/nyt-games/spelling-bee-card.svg"
+      },
+      "trr": {
+        "prompt": "A minimalist icon of a honeycomb pattern with Bravo show initials inside each hexagonal cell (RH, VPR, BD, SC, SH, TM). Saffron gold and warm amber colors. Clean flat vector design with a small diamond shape in the center hex. White background.",
+        "description": "TRR Bravodle — Bravo show hexagonal puzzle"
+      }
+    },
+    "crossword-icon": {
+      "label": "Mini Crossword Icon",
+      "original": {
+        "prompt": "A crossword grid icon with some cells filled in black and white pattern. Minimalist newspaper style, clean geometric design. Black and white only. White background.",
+        "description": "NYT Mini Crossword — compact crossword grid",
+        "imageUrl": "/design-docs/nyt-games/icon-daily.svg"
+      },
+      "trr": {
+        "prompt": "A crossword grid icon with cells forming the shape of a diamond (RHOBH icon) in the center. Some cells filled black, others white with tiny letters. Minimalist style with a saffron gold border. Clean geometric design. White background.",
+        "description": "TRR Reality Crossword — housewives-themed crossword"
+      }
+    }
+  },
+  "nyt-magazine": {
+    "cover-art": {
+      "label": "Magazine Cover Art",
+      "original": {
+        "prompt": "A dramatic editorial magazine cover illustration in the style of The New York Times Magazine. Bold typography treatment with large serif letterforms overlapping a striking portrait silhouette. Black, white, and one accent red. High contrast, sophisticated composition.",
+        "description": "NYT Magazine — dramatic editorial cover",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A dramatic editorial magazine cover illustration for a reality TV publication. Bold serif typography spelling 'THE REALITY REPORT' overlapping a glamorous silhouette of a housewife holding a cocktail glass. Black, white, and saffron gold accent. High contrast, sophisticated composition.",
+        "description": "TRR Magazine — reality TV editorial cover"
+      }
+    },
+    "feature-illustration": {
+      "label": "Feature Illustration",
+      "original": {
+        "prompt": "An editorial illustration for a feature article about technology and society. Surreal, conceptual art style with bold geometric shapes, human silhouettes, and digital elements. Limited color palette: black, white, deep blue, and warm red. Magazine editorial quality.",
+        "description": "NYT Magazine — conceptual feature art",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "An editorial illustration for a feature article about reality TV culture and social media influence. Surreal, conceptual art style showing a smartphone screen reflecting multiple reality TV personalities as geometric silhouettes. Limited palette: black, white, saffron gold, and deep teal. Magazine editorial quality.",
+        "description": "TRR Magazine — reality TV culture feature"
+      }
+    },
+    "photo-essay": {
+      "label": "Photo Essay Concept",
+      "original": {
+        "prompt": "A sophisticated photo essay layout concept — abstract black and white photography composition with dramatic lighting and high contrast. Artistic, editorial quality, moody atmosphere. Suitable for a premium magazine spread.",
+        "description": "NYT Magazine — photo essay spread",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A sophisticated photo essay layout concept — abstract black and white photography composition of a glamorous reality TV reunion set, empty chairs arranged in a dramatic semi-circle. Dramatic lighting, high contrast. Premium editorial quality, moody atmosphere.",
+        "description": "TRR Magazine — reunion set photo essay"
+      }
+    }
+  },
+  "wirecutter": {
+    "product-hero": {
+      "label": "Product Hero",
+      "original": {
+        "prompt": "A clean, minimal product illustration of wireless earbuds on a simple white background. Soft shadows, product photography style. Clean, trustworthy, consumer electronics review aesthetic.",
+        "description": "Wirecutter — product review hero image",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A clean, minimal product illustration of a rose gold wine glass and cocktail shaker on a simple white background, styled like a product review photo. Soft shadows, editorial product photography. Clean, trustworthy aesthetic — as if reviewing the best housewives party essentials.",
+        "description": "TRR Picks — best housewives party essentials"
+      }
+    },
+    "comparison-icon": {
+      "label": "Comparison Icon",
+      "original": {
+        "prompt": "A comparison infographic icon showing three products side by side with checkmarks and ratings. Flat design, blue accent color, clean vector style. Consumer product review aesthetic.",
+        "description": "Wirecutter — product comparison chart",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A comparison infographic icon showing three reality TV shows side by side with star ratings and checkmarks. Each represented by their city icon (apple for NY, orange for OC, peach for Atlanta). Flat design, saffron accent color, clean vector style.",
+        "description": "TRR Compare — franchise comparison chart"
+      }
+    },
+    "deal-alert-icon": {
+      "label": "Deal Alert Icon",
+      "original": {
+        "prompt": "A deal alert icon with a price tag, percentage discount badge, and subtle urgency arrows. Orange and amber colors, flat vector design, e-commerce style.",
+        "description": "Wirecutter — deal alert notification",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A notification alert icon for a reality TV streaming deal — a TV screen icon with a diamond badge showing 'NEW EPISODE' and a sparkle effect. Saffron gold and deep amber colors, flat vector design, entertainment alert style.",
+        "description": "TRR Alerts — new episode notification"
+      }
+    }
+  },
+  "the-athletic": {
+    "sports-action": {
+      "label": "Sports Action Art",
+      "original": {
+        "prompt": "A dramatic sports illustration of a basketball player mid-dunk, rendered in bold graphic style with dark navy blue background (#1A1A2E). Gold and white highlights. Premium sports media aesthetic, dynamic action pose.",
+        "description": "The Athletic — sports action illustration",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A dramatic illustration of a reality TV housewife in a powerful pose — mid table-flip — rendered in bold graphic style with dark navy blue background (#1A1A2E). Saffron gold and white highlights. Premium entertainment media aesthetic, dynamic dramatic moment.",
+        "description": "TRR Athletic — iconic housewives moment"
+      }
+    },
+    "live-score-icon": {
+      "label": "Live Score Icon",
+      "original": {
+        "prompt": "A minimalist live score scoreboard icon with two team colors, a digital score display, and a green live indicator dot. Dark navy background (#1A1A2E), clean flat design, sports app UI style.",
+        "description": "The Athletic — live game scoreboard",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A minimalist live poll scoreboard icon showing two housewife silhouettes facing off, with voting percentages displayed digitally and a green 'LIVE' indicator dot. Dark navy background (#1A1A2E), clean flat design, entertainment polling UI style.",
+        "description": "TRR Live — real-time housewives poll"
+      }
+    },
+    "stats-dashboard-icon": {
+      "label": "Stats Dashboard Icon",
+      "original": {
+        "prompt": "A sports analytics data visualization icon — abstract bar chart and stats dashboard on dark navy background. White and gold accents, premium sports data aesthetic, clean geometric design.",
+        "description": "The Athletic — sports analytics dashboard",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A reality TV analytics data visualization icon — abstract bar chart showing screen time minutes and confessional counts on dark navy background. White and saffron gold accents, premium entertainment data aesthetic, clean geometric design.",
+        "description": "TRR Screenalytics — screen time dashboard"
+      }
+    }
+  },
+  "nyt-opinion": {
+    "op-ed-democracy": {
+      "label": "Op-Ed: Democracy",
+      "original": {
+        "prompt": "A bold editorial illustration about democracy and politics. Flat color blocks style with geometric shapes — a podium, microphone, and abstract crowd. Colors: red, blue, white, and black. Heavy black outlines, simplified forms, slightly confrontational editorial cartoon style like NYT Opinion Art.",
+        "description": "NYT Opinion — editorial political illustration",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A bold editorial illustration about reality TV reunion drama and confrontation. Flat color blocks style with geometric shapes — wine glasses being raised, abstract figures seated in a semi-circle, pointing fingers. Colors: saffron gold, deep teal, white, and black. Heavy black outlines, simplified confrontational editorial style.",
+        "description": "TRR Opinion — reunion drama editorial"
+      }
+    },
+    "columnist-portrait": {
+      "label": "Columnist Portrait",
+      "original": {
+        "prompt": "An editorial portrait illustration of a generic columnist figure. Simplified face with bold flat color fills — skin tones, hair in solid color, strong jawline. Background of geometric shapes in blue and orange. Editorial opinion art style, not photorealistic, bold and graphic.",
+        "description": "NYT Opinion — columnist portrait illustration",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "An editorial portrait illustration of a reality TV recap columnist. Simplified face with bold flat color fills, wearing oversized sunglasses and holding a cocktail glass. Background of geometric diamond and apple shapes in saffron and teal. Editorial opinion art style, bold and graphic.",
+        "description": "TRR Opinion — recap columnist portrait"
+      }
+    },
+    "op-ed-technology": {
+      "label": "Op-Ed: Technology",
+      "original": {
+        "prompt": "A conceptual editorial illustration about technology and privacy. Abstract human figure surrounded by surveillance cameras and data streams rendered as geometric patterns. Limited palette: black, white, orange, and teal. Bold graphic editorial style with thick black outlines.",
+        "description": "NYT Opinion — technology editorial",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A conceptual editorial illustration about social media influence and reality TV fame. Abstract housewife figure surrounded by floating phone screens, Instagram hearts, and follower count numbers rendered as geometric patterns. Limited palette: black, white, saffron, and teal. Bold graphic editorial style.",
+        "description": "TRR Opinion — social media influence editorial"
+      }
+    }
+  },
+  "nyt-cooking": {
+    "recipe-hero": {
+      "label": "Recipe Hero",
+      "original": {
+        "prompt": "A warm, appetizing illustration of carrot cake oatmeal cookies on a rustic wooden surface. Soft watercolor style with warm cream and saffron tones. Cozy kitchen aesthetic, food magazine quality, inviting and homey.",
+        "description": "NYT Cooking — recipe hero photograph",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A warm, appetizing illustration of a glamorous cocktail party spread — diamond-shaped canapes, gold-rimmed glasses with colorful drinks, and elegant appetizers. Soft watercolor style with saffron and gold tones. Luxurious entertaining aesthetic, reality TV party quality.",
+        "description": "TRR Entertaining — housewives cocktail party spread"
+      }
+    },
+    "ingredient-illustration": {
+      "label": "Ingredient Illustration",
+      "original": {
+        "prompt": "A hand-drawn style illustration of fresh cooking ingredients — carrots, herbs, butter, eggs, and flour arranged in a flat lay composition. Warm cream background, soft watercolor strokes, earthy natural colors. NYT Cooking editorial illustration style.",
+        "description": "NYT Cooking — ingredient flat lay",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A hand-drawn style illustration of housewives franchise icons arranged in a flat lay — a red apple (NY), orange (OC), peach (Atlanta), diamond (Beverly Hills), snowflake (Salt Lake), and pineapple (Miami). Warm cream background, soft watercolor strokes, jewel-toned colors.",
+        "description": "TRR Icons — franchise fruit flat lay"
+      }
+    },
+    "cooking-icons": {
+      "label": "Cooking Icons",
+      "original": {
+        "prompt": "A minimalist icon set for cooking: a whisk, a timer, a knife, and a pot. Clean line art style with saffron yellow accent color. Simple, warm, professional cooking app iconography on cream background.",
+        "description": "NYT Cooking — kitchen utensil icons",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A minimalist icon set for reality TV: a diamond, an apple, a wine glass, and a confessional chair. Clean line art style with saffron gold accent color. Simple, warm, professional entertainment app iconography on cream background.",
+        "description": "TRR Icons — housewives object iconography"
+      }
+    }
+  },
+  "nyt-style": {
+    "runway-illustration": {
+      "label": "Runway Illustration",
+      "original": {
+        "prompt": "A high-fashion editorial illustration of a silhouette on a runway. Elegant, minimal line art with blush pink and deep burgundy watercolor washes. Fashion sketch style, editorial quality, sophisticated and refined. White background.",
+        "description": "NYT Style — fashion runway illustration",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A high-fashion editorial illustration of a housewife silhouette at a Bravo reunion, wearing a dramatic gown. Elegant, minimal line art with saffron gold and deep burgundy watercolor washes. Fashion sketch style, editorial quality, glamorous and dramatic. White background.",
+        "description": "TRR Style — reunion fashion illustration"
+      }
+    },
+    "accessories-flat-lay": {
+      "label": "Accessories Flat Lay",
+      "original": {
+        "prompt": "A fashion flat lay composition illustration — designer accessories including sunglasses, handbag, shoes, and jewelry arranged artfully. Clean editorial photography style rendered as an illustration. Neutral tones with gold accents, elegant composition.",
+        "description": "NYT Style — accessories editorial",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A glamorous flat lay composition illustration — housewives essentials including oversized sunglasses, Birkin bag, diamond earrings, wine glass charm, and a sparkly phone case arranged artfully. Clean editorial photography style rendered as an illustration. Neutral tones with saffron gold accents.",
+        "description": "TRR Style — housewives essentials flat lay"
+      }
+    },
+    "trend-report": {
+      "label": "Trend Report Header",
+      "original": {
+        "prompt": "A trend report header illustration with abstract geometric shapes representing fashion elements — fabric swatches, color blocks, and silhouettes. Blush pink, champagne, and deep burgundy palette. Modern editorial collage style.",
+        "description": "NYT Style — trend report header",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A trend report header illustration for reality TV fashion — abstract geometric shapes representing iconic housewives looks, franchise logos as color blocks, and dramatic silhouettes. Saffron gold, champagne, and deep teal palette. Modern editorial collage style.",
+        "description": "TRR Style — housewives fashion trends"
+      }
+    }
+  },
+  "nyt-store": {
+    "front-page-reprint": {
+      "label": "Front Page Reprint",
+      "original": {
+        "prompt": "A clean product photography style illustration of a newspaper front page reprint in an elegant black frame, displayed on a white wall. Premium gift product aesthetic, soft shadows, editorial commerce style.",
+        "description": "NYT Store — framed front page product",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A clean product photography style illustration of a framed reality TV moment print in an elegant black frame — showing a dramatic reunion screenshot as art. Displayed on a white wall. Premium entertainment merchandise aesthetic, soft shadows.",
+        "description": "TRR Store — framed iconic moment print"
+      }
+    },
+    "gift-bundle": {
+      "label": "Gift Bundle",
+      "original": {
+        "prompt": "A gift box illustration with NYT-branded merchandise — a tote bag, coffee mug, and book. Clean flat illustration style with black, white, and blue accents. E-commerce product bundle aesthetic.",
+        "description": "NYT Store — merchandise gift bundle",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A gift box illustration with reality TV fan merchandise — a 'Not Well Bitch' tote bag, a wine glass with diamond logo, and a housewives trivia card game. Clean flat illustration style with saffron gold, black, and white accents. E-commerce fan merch bundle aesthetic.",
+        "description": "TRR Store — housewives fan merch bundle"
+      }
+    },
+    "store-icons": {
+      "label": "Store Icons",
+      "original": {
+        "prompt": "A minimalist e-commerce icon set: shopping cart, gift tag, star rating, and delivery truck. Clean line art with store blue accent color. Professional retail iconography style.",
+        "description": "NYT Store — e-commerce iconography",
+        "imageUrl": null
+      },
+      "trr": {
+        "prompt": "A minimalist entertainment merch icon set: shopping bag with diamond logo, gift tag with apple shape, five-star rating with wine glass, and a streaming play button. Clean line art with saffron gold accent color. Professional entertainment retail iconography style.",
+        "description": "TRR Store — entertainment merch iconography"
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 export type DesignSystemTabId =
   | "fonts"
+  | "admin-labels"
   | "colors"
   | "buttons"
   | "questions-forms"
@@ -43,6 +44,7 @@ export const DESIGN_SYSTEM_TAB_DEFINITIONS: readonly DesignSystemTabDefinition[]
       { id: "typography", label: "Typography" },
     ],
   },
+  { id: "admin-labels", label: "Admin Labels & Routes" },
   { id: "colors", label: "Colors" },
   { id: "buttons", label: "Buttons" },
   {

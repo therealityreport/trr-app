@@ -1,0 +1,2560 @@
+{
+  "schemaVersion": "2026-03-23.v2",
+  "inputHash": "cf742cb0bba31a68ffd0f12278388e0707d43f559df67da12489d97a97cd6383",
+  "generatedAt": "2026-03-23T23:00:37.249Z",
+  "scoringConfigVersion": "2026-03-23.score.v3",
+  "data": [
+    {
+      "brandId": "brand-nyt-cooking",
+      "brandLabel": "NYT Cooking",
+      "roleLabel": "Body / Instructions",
+      "roleType": "body",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Body / Instructions",
+      "evidenceExcerpt": "Gloucester Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTCookingSection.tsx",
+        "anchor": "typography",
+        "lineHint": 261
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-cooking:jsx-label:261",
+        "brand-nyt-cooking:specimen-meta:278"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-cooking",
+      "brandLabel": "NYT Cooking",
+      "roleLabel": "Notes / Tips",
+      "roleType": "caption",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "italic"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Notes / Tips",
+      "evidenceExcerpt": "Gloucester Italic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTCookingSection.tsx",
+        "anchor": "typography",
+        "lineHint": 365
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-cooking:jsx-label:365",
+        "brand-nyt-cooking:specimen-meta:381"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-cooking",
+      "brandLabel": "NYT Cooking",
+      "roleLabel": "Collection Headlines",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Collection Headlines",
+      "evidenceExcerpt": "Cheltenham Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTCookingSection.tsx",
+        "anchor": "typography",
+        "lineHint": 232
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-cooking:jsx-label:232",
+        "brand-nyt-cooking:specimen-meta:245"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-cooking",
+      "brandLabel": "NYT Cooking",
+      "roleLabel": "Recipe Titles",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Recipe Titles",
+      "evidenceExcerpt": "Cheltenham Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTCookingSection.tsx",
+        "anchor": "typography",
+        "lineHint": 203
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-cooking:jsx-label:203",
+        "brand-nyt-cooking:specimen-meta:216"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-cooking",
+      "brandLabel": "NYT Cooking",
+      "roleLabel": "Ingredient List",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Regular",
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        400,
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Ingredient List",
+      "evidenceExcerpt": "Franklin Gothic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTCookingSection.tsx",
+        "anchor": "typography",
+        "lineHint": 294
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-cooking:jsx-label:294",
+        "brand-nyt-cooking:specimen-meta:309"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-cooking",
+      "brandLabel": "NYT Cooking",
+      "roleLabel": "Step Numbers",
+      "roleType": "ui",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Step Numbers",
+      "evidenceExcerpt": "Cheltenham Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTCookingSection.tsx",
+        "anchor": "typography",
+        "lineHint": 325
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-cooking:jsx-label:325",
+        "brand-nyt-cooking:specimen-meta:349"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-cooking",
+      "brandLabel": "NYT Cooking",
+      "roleLabel": "Tags",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Tags",
+      "evidenceExcerpt": "Franklin Gothic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTCookingSection.tsx",
+        "anchor": "typography",
+        "lineHint": 397
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-cooking:jsx-label:397",
+        "brand-nyt-cooking:specimen-meta:419"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games",
+      "brandLabel": "NYT Games",
+      "roleLabel": "Primary Display",
+      "roleType": "display",
+      "sourceFontFamily": "Hamburg Serial",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Hamburg Serial",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Primary Display",
+      "evidenceExcerpt": "Hamburg Serial Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
+        "anchor": "typography",
+        "lineHint": 504
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "headline",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:jsx-label:504"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games",
+      "brandLabel": "NYT Games",
+      "roleLabel": "Secondary Display",
+      "roleType": "display",
+      "sourceFontFamily": "Stymie",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Stymie",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Secondary Display",
+      "evidenceExcerpt": "Stymie Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
+        "anchor": "typography",
+        "lineHint": 562
+      },
+      "sourceTraitTokens": [
+        "display",
+        "slab"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:jsx-label:562"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games",
+      "brandLabel": "NYT Games",
+      "roleLabel": "Tile Letters",
+      "roleType": "display",
+      "sourceFontFamily": "Hamburg Serial",
+      "sourceWeightsRaw": [
+        "Black"
+      ],
+      "sourceWeightsNormalized": [
+        900
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Hamburg Serial",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Tile Letters",
+      "evidenceExcerpt": "Hamburg Serial Black",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
+        "anchor": "typography",
+        "lineHint": 667
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "headline",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:jsx-label:667"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games",
+      "brandLabel": "NYT Games",
+      "roleLabel": "Body / UI",
+      "roleType": "ui",
+      "sourceFontFamily": "Hamburg Serial",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Hamburg Serial",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Body / UI",
+      "evidenceExcerpt": "Hamburg Serial Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
+        "anchor": "typography",
+        "lineHint": 620
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "headline",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:jsx-label:620"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:canonical",
+      "brandLabel": "NYT Games Canonical",
+      "roleLabel": "nyt-karnak",
+      "roleType": "body",
+      "sourceFontFamily": "nyt-karnak",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "explicit-mapping",
+      "confidence": "high",
+      "evidenceLabel": "nyt-karnak",
+      "evidenceExcerpt": "* nyt-karnak → Gloucester (var(--dd-font-serif))",
+      "evidenceNote": "Canonical family mapping from game-palettes.ts.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 11
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:canonical:mapping-line:11"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:canonical",
+      "brandLabel": "NYT Games Canonical",
+      "roleLabel": "nyt-stymie",
+      "roleType": "display",
+      "sourceFontFamily": "nyt-stymie",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Stymie",
+      "provenance": "explicit-mapping",
+      "confidence": "high",
+      "evidenceLabel": "nyt-stymie",
+      "evidenceExcerpt": "* nyt-stymie → \"Stymie\" (var(--dd-font-slab))",
+      "evidenceNote": "Canonical family mapping from game-palettes.ts.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 12
+      },
+      "sourceTraitTokens": [
+        "display",
+        "slab"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:canonical:mapping-line:12"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:canonical",
+      "brandLabel": "NYT Games Canonical",
+      "roleLabel": "nyt-cheltenham",
+      "roleType": "headline",
+      "sourceFontFamily": "nyt-cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "explicit-mapping",
+      "confidence": "high",
+      "evidenceLabel": "nyt-cheltenham",
+      "evidenceExcerpt": "* nyt-cheltenham → \"Cheltenham\" (var(--dd-font-headline))",
+      "evidenceNote": "Canonical family mapping from game-palettes.ts.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 13
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:canonical:mapping-line:13"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:canonical",
+      "brandLabel": "NYT Games Canonical",
+      "roleLabel": "nyt-karnakcondensed",
+      "roleType": "headline",
+      "sourceFontFamily": "nyt-karnakcondensed",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "Condensed"
+      ],
+      "sourceWidthNormalized": [
+        "condensed"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "explicit-mapping",
+      "confidence": "high",
+      "evidenceLabel": "nyt-karnakcondensed",
+      "evidenceExcerpt": "* nyt-karnakcondensed → Cheltenham (var(--dd-font-headline))",
+      "evidenceNote": "Canonical family mapping from game-palettes.ts.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 10
+      },
+      "sourceTraitTokens": [
+        "condensed",
+        "display",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:canonical:mapping-line:10"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:canonical",
+      "brandLabel": "NYT Games Canonical",
+      "roleLabel": "nyt-franklin",
+      "roleType": "ui",
+      "sourceFontFamily": "nyt-franklin",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Hamburg Serial",
+      "provenance": "explicit-mapping",
+      "confidence": "high",
+      "evidenceLabel": "nyt-franklin",
+      "evidenceExcerpt": "* nyt-franklin → Hamburg Serial (var(--dd-font-ui))",
+      "evidenceNote": "Canonical family mapping from game-palettes.ts.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 9
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:canonical:mapping-line:9"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:connections",
+      "brandLabel": "NYT Games Connections",
+      "roleLabel": "nyt-karnakcondensed",
+      "roleType": "headline",
+      "sourceFontFamily": "nyt-karnakcondensed",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "Condensed"
+      ],
+      "sourceWidthNormalized": [
+        "condensed"
+      ],
+      "currentReferenceSubstitute": "Rude Slab Condensed",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-karnakcondensed",
+      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 32px / 700",
+      "evidenceNote": "Game-specific mapping captured from Connections specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameConnections.tsx",
+        "lineHint": 258
+      },
+      "sourceTraitTokens": [
+        "condensed",
+        "display",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:connections:mapping-line:258"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:connections",
+      "brandLabel": "NYT Games Connections",
+      "roleLabel": "nyt-franklin",
+      "roleType": "ui",
+      "sourceFontFamily": "nyt-franklin",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-franklin",
+      "evidenceExcerpt": "nyt-franklin → Franklin Gothic · 16px / 400",
+      "evidenceNote": "Game-specific mapping captured from Connections specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameConnections.tsx",
+        "lineHint": 273
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:connections:mapping-line:273"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:spelling-bee",
+      "brandLabel": "NYT Games Spelling Bee",
+      "roleLabel": "nyt-karnakcondensed",
+      "roleType": "headline",
+      "sourceFontFamily": "nyt-karnakcondensed",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "Condensed"
+      ],
+      "sourceWidthNormalized": [
+        "condensed"
+      ],
+      "currentReferenceSubstitute": "Rude Slab Condensed",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-karnakcondensed",
+      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 40px / 700",
+      "evidenceNote": "Game-specific mapping captured from Spelling Bee specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameSpellingBee.tsx",
+        "lineHint": 286
+      },
+      "sourceTraitTokens": [
+        "condensed",
+        "display",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:spelling-bee:mapping-line:286"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:spelling-bee",
+      "brandLabel": "NYT Games Spelling Bee",
+      "roleLabel": "nyt-franklin",
+      "roleType": "ui",
+      "sourceFontFamily": "nyt-franklin",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-franklin",
+      "evidenceExcerpt": "nyt-franklin → Franklin Gothic · 16px / 400",
+      "evidenceNote": "Game-specific mapping captured from Spelling Bee specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameSpellingBee.tsx",
+        "lineHint": 301
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:spelling-bee:mapping-line:301"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:tiles",
+      "brandLabel": "NYT Games Tiles",
+      "roleLabel": "nyt-karnakcondensed",
+      "roleType": "headline",
+      "sourceFontFamily": "nyt-karnakcondensed",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "Condensed"
+      ],
+      "sourceWidthNormalized": [
+        "condensed"
+      ],
+      "currentReferenceSubstitute": "Rude Slab Condensed",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-karnakcondensed",
+      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 32px / 700",
+      "evidenceNote": "Game-specific mapping captured from Tiles specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameTiles.tsx",
+        "lineHint": 296
+      },
+      "sourceTraitTokens": [
+        "condensed",
+        "display",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:tiles:mapping-line:296"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:tiles",
+      "brandLabel": "NYT Games Tiles",
+      "roleLabel": "nyt-franklin",
+      "roleType": "ui",
+      "sourceFontFamily": "nyt-franklin",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-franklin",
+      "evidenceExcerpt": "nyt-franklin → Franklin Gothic · 16px / 400",
+      "evidenceNote": "Game-specific mapping captured from Tiles specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameTiles.tsx",
+        "lineHint": 311
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:tiles:mapping-line:311"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:wordle",
+      "brandLabel": "NYT Games Wordle",
+      "roleLabel": "Clear Sans",
+      "roleType": "body",
+      "sourceFontFamily": "Clear Sans",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Hamburg Serial",
+      "provenance": "explicit-mapping",
+      "confidence": "high",
+      "evidenceLabel": "Clear Sans",
+      "evidenceExcerpt": "* Clear Sans (Wordle) → \"Hamburg Serial\" (var(--dd-font-ui)) [closest match]",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 14
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "humanist",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:canonical:mapping-line:14",
+        "brand-nyt-games:wordle:mapping-line:337"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:wordle",
+      "brandLabel": "NYT Games Wordle",
+      "roleLabel": "nyt-karnak",
+      "roleType": "headline",
+      "sourceFontFamily": "nyt-karnak",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Stymie",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-karnak",
+      "evidenceExcerpt": "nyt-karnak → Stymie · 38px / 400",
+      "evidenceNote": "Game-specific mapping captured from Wordle specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameWordle.tsx",
+        "lineHint": 322
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:wordle:mapping-line:322"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-games:wordle",
+      "brandLabel": "NYT Games Wordle",
+      "roleLabel": "nyt-karnakcondensed",
+      "roleType": "headline",
+      "sourceFontFamily": "nyt-karnakcondensed",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "Condensed"
+      ],
+      "sourceWidthNormalized": [
+        "condensed"
+      ],
+      "currentReferenceSubstitute": "Rude Slab Condensed",
+      "provenance": "explicit-mapping",
+      "confidence": "medium",
+      "evidenceLabel": "nyt-karnakcondensed",
+      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 50px / 700",
+      "evidenceNote": "Game-specific mapping captured from Wordle specimen.",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/games/GameWordle.tsx",
+        "lineHint": 307
+      },
+      "sourceTraitTokens": [
+        "condensed",
+        "display",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-games:wordle:mapping-line:307"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-magazine",
+      "brandLabel": "NYT Magazine",
+      "roleLabel": "Body",
+      "roleType": "body",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Body",
+      "evidenceExcerpt": "Gloucester Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTMagazineSection.tsx",
+        "anchor": "typography",
+        "lineHint": 294
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-magazine:jsx-label:294"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-magazine",
+      "brandLabel": "NYT Magazine",
+      "roleLabel": "Byline",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Medium"
+      ],
+      "sourceWeightsNormalized": [
+        500
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Byline",
+      "evidenceExcerpt": "Franklin Gothic Medium",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTMagazineSection.tsx",
+        "anchor": "typography",
+        "lineHint": 396
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-magazine:jsx-label:396"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-magazine",
+      "brandLabel": "NYT Magazine",
+      "roleLabel": "Captions",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Captions",
+      "evidenceExcerpt": "Franklin Gothic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTMagazineSection.tsx",
+        "anchor": "typography",
+        "lineHint": 351
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-magazine:jsx-label:351"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-magazine",
+      "brandLabel": "NYT Magazine",
+      "roleLabel": "Cover Display",
+      "roleType": "display",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Black"
+      ],
+      "sourceWeightsNormalized": [
+        900
+      ],
+      "sourceStyles": [
+        "italic"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Cover Display",
+      "evidenceExcerpt": "Cheltenham Black Italic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTMagazineSection.tsx",
+        "anchor": "typography",
+        "lineHint": 136
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-magazine:jsx-label:136"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-magazine",
+      "brandLabel": "NYT Magazine",
+      "roleLabel": "Feature Headlines",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Feature Headlines",
+      "evidenceExcerpt": "Cheltenham Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTMagazineSection.tsx",
+        "anchor": "typography",
+        "lineHint": 200
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-magazine:jsx-label:200"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-magazine",
+      "brandLabel": "NYT Magazine",
+      "roleLabel": "Deck / Subhead",
+      "roleType": "subhead",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "italic"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Deck / Subhead",
+      "evidenceExcerpt": "Gloucester Italic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTMagazineSection.tsx",
+        "anchor": "typography",
+        "lineHint": 246
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-magazine:jsx-label:246"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-opinion",
+      "brandLabel": "NYT Opinion",
+      "roleLabel": "Body",
+      "roleType": "body",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Body",
+      "evidenceExcerpt": "Gloucester Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTOpinionSection.tsx",
+        "anchor": "typography",
+        "lineHint": 235
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-opinion:jsx-label:235",
+        "brand-nyt-opinion:specimen-meta:252"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-opinion",
+      "brandLabel": "NYT Opinion",
+      "roleLabel": "Columnist Name",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Columnist Name",
+      "evidenceExcerpt": "Franklin Gothic Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTOpinionSection.tsx",
+        "anchor": "typography",
+        "lineHint": 205
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-opinion:jsx-label:205",
+        "brand-nyt-opinion:specimen-meta:219"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-opinion",
+      "brandLabel": "NYT Opinion",
+      "roleLabel": "Section Labels",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Section Labels",
+      "evidenceExcerpt": "Franklin Gothic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTOpinionSection.tsx",
+        "anchor": "typography",
+        "lineHint": 310
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-opinion:jsx-label:310",
+        "brand-nyt-opinion:specimen-meta:329"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-opinion",
+      "brandLabel": "NYT Opinion",
+      "roleLabel": "Pull Quotes",
+      "roleType": "display",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "italic"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Pull Quotes",
+      "evidenceExcerpt": "Cheltenham Italic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTOpinionSection.tsx",
+        "anchor": "typography",
+        "lineHint": 268
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-opinion:jsx-label:268",
+        "brand-nyt-opinion:specimen-meta:294"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-opinion",
+      "brandLabel": "NYT Opinion",
+      "roleLabel": "Column Headlines",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Column Headlines",
+      "evidenceExcerpt": "Cheltenham Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTOpinionSection.tsx",
+        "anchor": "typography",
+        "lineHint": 175
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-opinion:jsx-label:175",
+        "brand-nyt-opinion:specimen-meta:189"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-opinion",
+      "brandLabel": "NYT Opinion",
+      "roleLabel": "Letters Header",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "italic"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Letters Header",
+      "evidenceExcerpt": "Cheltenham Bold Italic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTOpinionSection.tsx",
+        "anchor": "typography",
+        "lineHint": 345
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-opinion:jsx-label:345",
+        "brand-nyt-opinion:specimen-meta:358"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-store",
+      "brandLabel": "NYT Store",
+      "roleLabel": "Descriptions",
+      "roleType": "body",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Descriptions",
+      "evidenceExcerpt": "Gloucester Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStoreSection.tsx",
+        "anchor": "typography",
+        "lineHint": 335
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-store:jsx-label:335"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-store",
+      "brandLabel": "NYT Store",
+      "roleLabel": "Badge Text",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Badge Text",
+      "evidenceExcerpt": "Franklin Gothic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStoreSection.tsx",
+        "anchor": "typography",
+        "lineHint": 383
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-store:jsx-label:383"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-store",
+      "brandLabel": "NYT Store",
+      "roleLabel": "Product Names",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Product Names",
+      "evidenceExcerpt": "Cheltenham Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStoreSection.tsx",
+        "anchor": "typography",
+        "lineHint": 164
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-store:jsx-label:164"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-store",
+      "brandLabel": "NYT Store",
+      "roleLabel": "Cart / CTA",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Cart / CTA",
+      "evidenceExcerpt": "Franklin Gothic Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStoreSection.tsx",
+        "anchor": "typography",
+        "lineHint": 442
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-store:jsx-label:442"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-store",
+      "brandLabel": "NYT Store",
+      "roleLabel": "Category Titles",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Category Titles",
+      "evidenceExcerpt": "Franklin Gothic Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStoreSection.tsx",
+        "anchor": "typography",
+        "lineHint": 210
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-store:jsx-label:210"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-store",
+      "brandLabel": "NYT Store",
+      "roleLabel": "Prices",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Prices",
+      "evidenceExcerpt": "Franklin Gothic Bold",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStoreSection.tsx",
+        "anchor": "typography",
+        "lineHint": 262
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-store:jsx-label:262"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-style",
+      "brandLabel": "NYT Style",
+      "roleLabel": "Body",
+      "roleType": "body",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Body",
+      "evidenceExcerpt": "Gloucester Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStyleSection.tsx",
+        "anchor": "typography",
+        "lineHint": 259
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-style:jsx-label:259"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-style",
+      "brandLabel": "NYT Style",
+      "roleLabel": "Captions",
+      "roleType": "caption",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "italic"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Captions",
+      "evidenceExcerpt": "Gloucester Italic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStyleSection.tsx",
+        "anchor": "typography",
+        "lineHint": 406
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-style:jsx-label:406"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-style",
+      "brandLabel": "NYT Style",
+      "roleLabel": "Category Labels",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Medium"
+      ],
+      "sourceWeightsNormalized": [
+        500
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Category Labels",
+      "evidenceExcerpt": "Franklin Gothic Medium",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStyleSection.tsx",
+        "anchor": "typography",
+        "lineHint": 354
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-style:jsx-label:354"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-style",
+      "brandLabel": "NYT Style",
+      "roleLabel": "Photo Credits",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Photo Credits",
+      "evidenceExcerpt": "Franklin Gothic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStyleSection.tsx",
+        "anchor": "typography",
+        "lineHint": 308
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-nyt-style:jsx-label:308"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-style",
+      "brandLabel": "NYT Style",
+      "roleLabel": "Feature Headlines",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Feature Headlines",
+      "evidenceExcerpt": "Cheltenham Regular",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStyleSection.tsx",
+        "anchor": "typography",
+        "lineHint": 164
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-style:jsx-label:164"
+      ]
+    },
+    {
+      "brandId": "brand-nyt-style",
+      "brandLabel": "NYT Style",
+      "roleLabel": "Trend Headlines",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "italic"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Trend Headlines",
+      "evidenceExcerpt": "Cheltenham Bold Italic",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandNYTStyleSection.tsx",
+        "anchor": "typography",
+        "lineHint": 212
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-nyt-style:jsx-label:212"
+      ]
+    },
+    {
+      "brandId": "brand-the-athletic",
+      "brandLabel": "The Athletic",
+      "roleLabel": "Body",
+      "roleType": "body",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Body",
+      "evidenceExcerpt": "Body: Gloucester Regular | 17px | 1.7 line-height | #E0E0E0",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "anchor": "typography",
+        "lineHint": 680
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-the-athletic:specimen-meta:680"
+      ]
+    },
+    {
+      "brandId": "brand-the-athletic",
+      "brandLabel": "The Athletic",
+      "roleLabel": "Metadata",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Metadata",
+      "evidenceExcerpt": "Metadata: Franklin Gothic | 12px | #888888",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "anchor": "typography",
+        "lineHint": 744
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-the-athletic:specimen-meta:744"
+      ]
+    },
+    {
+      "brandId": "brand-the-athletic",
+      "brandLabel": "The Athletic",
+      "roleLabel": "Headlines",
+      "roleType": "headline",
+      "sourceFontFamily": "Cheltenham",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Cheltenham",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Headlines",
+      "evidenceExcerpt": "Headlines: Cheltenham Bold | 32px | white",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "anchor": "typography",
+        "lineHint": 644
+      },
+      "sourceTraitTokens": [
+        "editorial",
+        "headline",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-the-athletic:specimen-meta:644"
+      ]
+    },
+    {
+      "brandId": "brand-the-athletic",
+      "brandLabel": "The Athletic",
+      "roleLabel": "Section Titles",
+      "roleType": "headline",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Section Titles",
+      "evidenceExcerpt": "Section Titles: Franklin Gothic Bold | 22px | uppercase | 0.08em tracking",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "anchor": "typography",
+        "lineHint": 661
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-the-athletic:specimen-meta:661"
+      ]
+    },
+    {
+      "brandId": "brand-the-athletic",
+      "brandLabel": "The Athletic",
+      "roleLabel": "Live Indicator",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Live Indicator",
+      "evidenceExcerpt": "Live Indicator: Franklin Gothic Bold | 11px | uppercase | red bg",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "anchor": "typography",
+        "lineHint": 769
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-the-athletic:specimen-meta:769"
+      ]
+    },
+    {
+      "brandId": "brand-the-athletic",
+      "brandLabel": "The Athletic",
+      "roleLabel": "Stat Numbers",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Stat Numbers",
+      "evidenceExcerpt": "Stat Numbers: Franklin Gothic Bold | 36px | tabular-nums | white",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "anchor": "typography",
+        "lineHint": 730
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-the-athletic:specimen-meta:730"
+      ]
+    },
+    {
+      "brandId": "brand-wirecutter",
+      "brandLabel": "Wirecutter",
+      "roleLabel": "Body",
+      "roleType": "body",
+      "sourceFontFamily": "Gloucester",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Gloucester",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Body",
+      "evidenceExcerpt": "Body: Gloucester Regular | 17px | 1.65 line-height | 680px max-width",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandWirecutterSection.tsx",
+        "anchor": "typography",
+        "lineHint": 586
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "editorial",
+        "text",
+        "traditional"
+      ],
+      "evidenceIds": [
+        "brand-wirecutter:specimen-meta:586"
+      ]
+    },
+    {
+      "brandId": "brand-wirecutter",
+      "brandLabel": "Wirecutter",
+      "roleLabel": "Fine Print",
+      "roleType": "caption",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Fine Print",
+      "evidenceExcerpt": "Fine Print: Franklin Gothic | 12px | Caption Gray",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandWirecutterSection.tsx",
+        "anchor": "typography",
+        "lineHint": 642
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-wirecutter:specimen-meta:642"
+      ]
+    },
+    {
+      "brandId": "brand-wirecutter",
+      "brandLabel": "Wirecutter",
+      "roleLabel": "Headlines",
+      "roleType": "headline",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Headlines",
+      "evidenceExcerpt": "Headlines: Franklin Gothic Bold | 28px | -0.01em tracking",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandWirecutterSection.tsx",
+        "anchor": "typography",
+        "lineHint": 552
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-wirecutter:specimen-meta:552"
+      ]
+    },
+    {
+      "brandId": "brand-wirecutter",
+      "brandLabel": "Wirecutter",
+      "roleLabel": "Sub-headlines",
+      "roleType": "subhead",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Medium"
+      ],
+      "sourceWeightsNormalized": [
+        500
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Sub-headlines",
+      "evidenceExcerpt": "Sub-headlines: Franklin Gothic Medium | 20px",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandWirecutterSection.tsx",
+        "anchor": "typography",
+        "lineHint": 567
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-wirecutter:specimen-meta:567"
+      ]
+    },
+    {
+      "brandId": "brand-wirecutter",
+      "brandLabel": "Wirecutter",
+      "roleLabel": "Price / Spec",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Regular"
+      ],
+      "sourceWeightsNormalized": [
+        400
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Price / Spec",
+      "evidenceExcerpt": "Price/Spec: Franklin Gothic | 14px | tabular-nums",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandWirecutterSection.tsx",
+        "anchor": "typography",
+        "lineHint": 628
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-wirecutter:specimen-meta:628"
+      ]
+    },
+    {
+      "brandId": "brand-wirecutter",
+      "brandLabel": "Wirecutter",
+      "roleLabel": "Verdict / Callout",
+      "roleType": "ui",
+      "sourceFontFamily": "Franklin Gothic",
+      "sourceWeightsRaw": [
+        "Bold"
+      ],
+      "sourceWeightsNormalized": [
+        700
+      ],
+      "sourceStyles": [
+        "normal"
+      ],
+      "sourceWidthRaw": [
+        "normal"
+      ],
+      "sourceWidthNormalized": [
+        "normal"
+      ],
+      "currentReferenceSubstitute": "Franklin Gothic",
+      "provenance": "design-doc-jsx",
+      "confidence": "high",
+      "evidenceLabel": "Verdict / Callout",
+      "evidenceExcerpt": "Verdict/Callout: Franklin Gothic Bold | 14px uppercase",
+      "evidencePath": {
+        "type": "file",
+        "path": "src/components/admin/design-docs/sections/BrandWirecutterSection.tsx",
+        "anchor": "typography",
+        "lineHint": 613
+      },
+      "sourceTraitTokens": [
+        "body-safe",
+        "grotesque",
+        "news",
+        "text"
+      ],
+      "evidenceIds": [
+        "brand-wirecutter:specimen-meta:613"
+      ]
+    }
+  ]
+}

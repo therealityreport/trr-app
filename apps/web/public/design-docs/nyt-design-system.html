@@ -1,0 +1,2634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NYT Design System Reference</title>
+<style>
+/* ============================================================
+   NYT DESIGN SYSTEM — EXTRACTED REFERENCE DOCUMENT
+   Source: nytimes.com production CSS (March 2026)
+   ============================================================ */
+
+/* --- Reset & Base --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Font Stacks */
+  --f-cheltenham: "nyt-cheltenham", georgia, "times new roman", times, serif;
+  --f-franklin: "nyt-franklin", arial, helvetica, sans-serif;
+  --f-karnak: "nyt-karnak", georgia, "times new roman", times, serif;
+  --f-karnakcondensed: "nyt-karnakcondensed", "arial black", arial, sans-serif;
+  --f-stymie: "nyt-stymie", rockwell, georgia, serif;
+  --f-inter: "nyt-inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --f-franklin-cw: "nyt-franklin-cw", arial, helvetica, sans-serif;
+
+  /* Graphics Font Stacks */
+  --g-chelt: nyt-cheltenham, cheltenham-fallback-georgia, georgia, "times new roman", times, serif;
+  --g-chelt-cond: nyt-cheltenham-cond, nyt-cheltenham, georgia, "times new roman", times, serif;
+  --g-franklin: "nyt-franklin", arial, helvetica, sans-serif;
+  --g-imperial: "nyt-imperial", georgia, "times new roman", times, serif;
+
+  /* Game Brand Colors */
+  --games-yellow: #fbd300;
+  --xd-blue: #6493e6;
+  --mini-blue: #95befa;
+  --tiles-green: #b5e352;
+  --sb-yellow: #f7da21;
+  --lb-red: #fc716b;
+  --sudoku-orange: #fb9b00;
+  --wordle-gray: #d3d6da;
+  --connections-purple: #b4a8ff;
+  --strands-mint: #b2ded8;
+  --pips-purple: #9251ca;
+
+  /* Grayscale System */
+  --white: #fff;
+  --cool-gray: #f8f8f8;
+  --lightest-gray: #ebebeb;
+  --extra-light-gray: #dfdfdf;
+  --lighter-gray: #bbb;
+  --light-gray: #a3a3a3;
+  --gray: #979797;
+  --gray2: #8b8b8b;
+  --dark-gray: #727272;
+  --darker-gray: #5a5a5a;
+  --extra-dark-gray: #424242;
+  --darkest-gray: #363636;
+  --black: #2a2a2a;
+  --med-black: #1b1b1b;
+  --dark-black: #121212;
+
+  /* Graphics Spot Colors */
+  --spot-orange: #fdba58;
+  --spot-blue: #569adc;
+  --spot-green: #53a451;
+  --spot-purple: #866da0;
+  --spot-red: #bc261a;
+
+  /* Semantic Text Colors */
+  --g-color-header: #121212;
+  --g-color-copy: #363636;
+  --g-color-caption: #727272;
+  --g-color-credit: #727272;
+  --g-color-anchor: #326891;
+
+  /* Spacing (4px base) */
+  --spacing-0-5: 4px;
+  --spacing-1: 8px;
+  --spacing-1-5: 12px;
+  --spacing-2: 16px;
+  --spacing-2-5: 20px;
+  --spacing-3: 24px;
+  --spacing-4: 32px;
+  --spacing-5: 40px;
+  --spacing-6: 48px;
+  --spacing-7: 56px;
+  --spacing-8: 64px;
+  --spacing-9: 72px;
+  --spacing-10: 80px;
+
+  /* Layout */
+  --g-width-body: 600px;
+  --g-width-wide: 1050px;
+  --nav-height-mobile: 48px;
+  --nav-height-desktop: 56px;
+
+  /* Sidebar */
+  --sidebar-width: 260px;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 80px;
+}
+
+body {
+  font-family: var(--f-franklin);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--g-color-copy);
+  background: var(--white);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- Scroll Progress Bar --- */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0%;
+  height: 3px;
+  background: linear-gradient(90deg, var(--games-yellow), var(--xd-blue), var(--connections-purple), var(--lb-red));
+  z-index: 10000;
+  transition: width 50ms linear;
+}
+
+/* --- Sidebar Navigation --- */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  height: 100vh;
+  background: var(--dark-black);
+  color: var(--white);
+  overflow-y: auto;
+  z-index: 1000;
+  padding: 24px 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--extra-dark-gray) transparent;
+}
+
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--extra-dark-gray); border-radius: 2px; }
+
+.sidebar-header {
+  padding: 0 20px 20px;
+  border-bottom: 1px solid var(--extra-dark-gray);
+  margin-bottom: 16px;
+}
+
+.sidebar-header h1 {
+  font-family: var(--f-cheltenham);
+  font-weight: 300;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--white);
+}
+
+.sidebar-header .subtitle {
+  font-family: var(--f-franklin);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dark-gray);
+  margin-top: 6px;
+}
+
+.sidebar-section-label {
+  font-family: var(--f-franklin);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dark-gray);
+  padding: 12px 20px 6px;
+}
+
+.sidebar nav a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 20px;
+  color: var(--lighter-gray);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 400;
+  transition: all 0.15s ease;
+  border-left: 3px solid transparent;
+}
+
+.sidebar nav a:hover {
+  color: var(--white);
+  background: rgba(255,255,255,0.04);
+  border-left-color: var(--games-yellow);
+}
+
+.sidebar nav a.active {
+  color: var(--white);
+  background: rgba(255,255,255,0.07);
+  border-left-color: var(--games-yellow);
+  font-weight: 500;
+}
+
+.sidebar nav a .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* --- Main Content --- */
+.main {
+  margin-left: var(--sidebar-width);
+  padding: 48px 48px 120px;
+  max-width: 1200px;
+}
+
+/* --- Hero Section --- */
+.hero {
+  padding-bottom: 48px;
+  border-bottom: 1px solid var(--lightest-gray);
+  margin-bottom: 56px;
+}
+
+.hero h1 {
+  font-family: var(--f-cheltenham);
+  font-weight: 300;
+  font-size: 48px;
+  line-height: 1.1;
+  color: var(--g-color-header);
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.hero .tagline {
+  font-family: var(--f-franklin);
+  font-size: 18px;
+  font-weight: 300;
+  color: var(--dark-gray);
+  max-width: 600px;
+  line-height: 1.5;
+}
+
+.hero .meta {
+  margin-top: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--light-gray);
+  letter-spacing: 0.03em;
+}
+
+.hero .meta span {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--darkest-gray);
+  color: var(--white);
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05rem;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* --- Section Headings --- */
+.section {
+  margin-bottom: 72px;
+  scroll-margin-top: 32px;
+}
+
+.section-title {
+  font-family: var(--f-karnak);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--g-color-header);
+  padding-bottom: 12px;
+  border-bottom: 3px solid var(--games-yellow);
+  margin-bottom: 32px;
+}
+
+.section-title.blue { border-bottom-color: var(--xd-blue); }
+.section-title.green { border-bottom-color: var(--tiles-green); }
+.section-title.purple { border-bottom-color: var(--connections-purple); }
+.section-title.red { border-bottom-color: var(--lb-red); }
+.section-title.orange { border-bottom-color: var(--sudoku-orange); }
+.section-title.mint { border-bottom-color: var(--strands-mint); }
+
+.subsection {
+  margin-bottom: 40px;
+}
+
+.subsection-title {
+  font-family: var(--f-franklin);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--g-color-header);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subsection-title .badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05rem;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--darkest-gray);
+  color: var(--white);
+}
+
+p.desc {
+  font-size: 14px;
+  color: var(--darker-gray);
+  margin-bottom: 16px;
+  max-width: 680px;
+  line-height: 1.6;
+}
+
+/* --- Tables --- */
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 24px;
+  font-size: 13px;
+}
+
+.token-table th {
+  text-align: left;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dark-gray);
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--lightest-gray);
+}
+
+.token-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--lightest-gray);
+  vertical-align: middle;
+}
+
+.token-table tr:hover td {
+  background: var(--cool-gray);
+}
+
+.token-table code {
+  font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  font-size: 12px;
+  background: var(--cool-gray);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--extra-dark-gray);
+}
+
+/* --- Color Swatches --- */
+.swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch-color {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.08);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.swatch-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--darker-gray);
+  text-align: center;
+  max-width: 64px;
+  line-height: 1.3;
+}
+
+.swatch-hex {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 10px;
+  color: var(--dark-gray);
+}
+
+/* --- Color Ramp Bars --- */
+.ramp-row {
+  margin-bottom: 16px;
+}
+
+.ramp-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: var(--g-color-header);
+  margin-bottom: 4px;
+}
+
+.ramp-bar {
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+  height: 36px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.ramp-bar .step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "SF Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  transition: flex 0.2s ease;
+  cursor: default;
+}
+
+.ramp-bar .step:hover {
+  flex: 2;
+}
+
+.ramp-bar .step.light-text { color: rgba(255,255,255,0.9); }
+.ramp-bar .step.dark-text { color: rgba(0,0,0,0.55); }
+
+/* --- Font Specimens --- */
+.font-specimen {
+  padding: 24px;
+  background: var(--cool-gray);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.font-specimen .sample {
+  margin-bottom: 12px;
+  color: var(--g-color-header);
+}
+
+.font-specimen .meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--dark-gray);
+}
+
+.font-specimen .meta-row .tag {
+  background: var(--white);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.weight-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.weight-chip {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--white);
+  font-size: 13px;
+  border: 1px solid var(--lightest-gray);
+}
+
+/* --- Spacing Visual --- */
+.spacing-visual {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.spacing-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.spacing-row .label {
+  width: 120px;
+  font-family: "SF Mono", monospace;
+  font-size: 12px;
+  color: var(--darker-gray);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.spacing-row .bar {
+  height: 24px;
+  background: linear-gradient(135deg, var(--xd-blue), var(--connections-purple));
+  border-radius: 4px;
+  transition: transform 0.2s ease;
+}
+
+.spacing-row:hover .bar {
+  transform: scaleY(1.2);
+}
+
+.spacing-row .value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dark-gray);
+  min-width: 40px;
+}
+
+/* --- Button Specimens --- */
+.button-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--darkest-gray);
+  color: var(--white);
+  font-family: var(--f-franklin);
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 0.5rem 2rem;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-decoration: none;
+}
+
+.btn-primary:hover { background: var(--dark-black); }
+
+.btn-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--darkest-gray);
+  color: var(--white);
+  font-family: var(--f-franklin);
+  font-weight: 700;
+  font-size: 0.625rem;
+  letter-spacing: 0.05rem;
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.btn-card-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 24px;
+  font-family: var(--f-franklin);
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background: var(--dark-black);
+  color: var(--white);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-card-primary:hover {
+  background: #5960ec;
+  border-color: #5960ec;
+}
+
+.btn-card-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 24px;
+  font-family: var(--f-franklin);
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 2px solid var(--dark-black);
+  border-radius: 9999px;
+  background: var(--white);
+  color: var(--dark-black);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-card-secondary:hover {
+  background: var(--cool-gray);
+}
+
+/* --- Component Mockups --- */
+.component-stage {
+  background: var(--cool-gray);
+  border-radius: 12px;
+  padding: 32px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.component-stage.dark-stage {
+  background: var(--dark-black);
+}
+
+/* Game Card */
+.game-card-mockup {
+  width: 280px;
+  background: var(--white);
+  border-radius: 8px;
+  border: 1px solid #dcdcdc;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  transition: box-shadow 0.2s ease;
+}
+
+.game-card-mockup:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+}
+
+.game-card-cover {
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.game-card-cover .icon-placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  opacity: 0.9;
+}
+
+.game-card-body {
+  padding: 16px;
+}
+
+.game-card-body .name {
+  font-family: var(--f-karnakcondensed);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--g-color-header);
+  line-height: 1.1;
+  margin-bottom: 8px;
+}
+
+.game-card-body .description {
+  font-family: var(--f-franklin);
+  font-size: 14px;
+  font-weight: 300;
+  color: var(--darker-gray);
+  line-height: 1.4;
+  margin-bottom: 16px;
+}
+
+.game-card-body .play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--dark-black);
+  color: var(--white);
+  font-family: var(--f-franklin);
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 10px 32px;
+  border: none;
+  cursor: pointer;
+}
+
+/* Nav Drawer */
+.nav-drawer-mockup {
+  width: 320px;
+  max-width: 375px;
+  background: var(--white);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 23px 0 rgba(0,0,0,0.08);
+}
+
+.nav-drawer-mockup .drawer-header {
+  padding: 16px 20px;
+  font-family: var(--f-karnak);
+  font-weight: 700;
+  font-size: 20px;
+  color: var(--g-color-header);
+  border-bottom: 1px solid var(--lightest-gray);
+}
+
+.nav-drawer-mockup .drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  font-family: var(--f-franklin);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--g-color-copy);
+  border-left: 3px solid transparent;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.nav-drawer-mockup .drawer-item:hover {
+  background: var(--cool-gray);
+}
+
+.nav-drawer-mockup .drawer-item .game-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* Modal */
+.modal-mockup {
+  width: 400px;
+  max-width: 100%;
+  background: var(--white);
+  border-radius: 7px;
+  box-shadow: 0 4px 23px 0 rgba(0,0,0,0.08);
+  overflow: hidden;
+}
+
+.modal-mockup .modal-header {
+  padding: 20px 24px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-mockup .modal-header h3 {
+  font-family: var(--f-karnak);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--g-color-header);
+}
+
+.modal-mockup .modal-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--cool-gray);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--darker-gray);
+}
+
+.modal-mockup .modal-body {
+  padding: 0 24px 24px;
+  font-size: 14px;
+  color: var(--darker-gray);
+  line-height: 1.6;
+}
+
+/* Progress Tracker */
+.progress-tracker-mockup {
+  width: 100%;
+  max-width: 500px;
+  background: var(--white);
+  border-radius: 8px;
+  border: 1px solid var(--lightest-gray);
+  overflow: hidden;
+}
+
+.progress-tracker-mockup .tracker-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--lightest-gray);
+}
+
+.progress-tracker-mockup .tracker-header h4 {
+  font-family: var(--f-franklin);
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--g-color-header);
+}
+
+.progress-day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--lightest-gray);
+}
+
+.progress-day .day-label {
+  font-family: var(--f-franklin);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--g-color-copy);
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.progress-day .icons {
+  display: flex;
+  gap: 6px;
+}
+
+.progress-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-icon.complete {
+  background: var(--tiles-green);
+}
+
+.progress-icon.partial {
+  background: var(--games-yellow);
+}
+
+.progress-icon.empty {
+  background: var(--lightest-gray);
+}
+
+/* Quote Callout */
+.quote-callout {
+  background: var(--cool-gray);
+  padding: 24px 28px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.quote-callout .quote-text {
+  font-family: var(--f-cheltenham);
+  font-weight: 300;
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--g-color-header);
+  margin-bottom: 12px;
+}
+
+.quote-callout .quote-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  background: var(--darkest-gray);
+  color: var(--white);
+  font-family: var(--f-franklin);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05rem;
+  height: 24px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+/* Footer Mockup */
+.footer-mockup {
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 40px 32px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  min-height: 200px;
+}
+
+.footer-mockup .footer-col h5 {
+  font-family: var(--f-franklin);
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--dark-gray);
+  margin-bottom: 12px;
+}
+
+.footer-mockup .footer-col a {
+  display: block;
+  font-family: var(--f-franklin);
+  font-size: 13px;
+  color: var(--darker-gray);
+  text-decoration: none;
+  padding: 3px 0;
+  transition: color 0.15s;
+}
+
+.footer-mockup .footer-col a:hover {
+  color: var(--g-color-header);
+}
+
+.footer-mockup .footer-featured {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding-top: 24px;
+  border-top: 1px solid var(--lightest-gray);
+}
+
+.footer-mockup .footer-featured p {
+  font-family: var(--f-cheltenham);
+  font-weight: 300;
+  font-size: 18px;
+  color: var(--dark-gray);
+}
+
+/* --- Dark Mode Preview --- */
+.dark-mode-preview {
+  background: var(--dark-black);
+  border-radius: 12px;
+  padding: 32px;
+  color: var(--white);
+}
+
+.dark-mode-preview .dm-header {
+  color: var(--lightest-gray);
+}
+
+.dark-mode-preview .dm-copy {
+  color: var(--lighter-gray);
+}
+
+.dark-mode-preview .dm-caption {
+  color: var(--gray);
+}
+
+.dark-mode-preview .dm-swatch-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dark-mode-preview .dm-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.dark-mode-preview .dm-swatch .dm-color {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.dark-mode-preview .dm-swatch .dm-label {
+  font-size: 10px;
+  color: var(--gray);
+}
+
+/* --- Layout Constants Visual --- */
+.layout-diagram {
+  background: var(--cool-gray);
+  border-radius: 8px;
+  padding: 32px;
+  position: relative;
+  margin-bottom: 24px;
+}
+
+.layout-diagram .outer-frame {
+  border: 2px dashed var(--lighter-gray);
+  border-radius: 4px;
+  padding: 24px;
+  position: relative;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.layout-diagram .body-col {
+  background: rgba(86, 154, 220, 0.1);
+  border: 1px dashed var(--xd-blue);
+  border-radius: 4px;
+  height: 120px;
+  max-width: 600px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "SF Mono", monospace;
+  font-size: 12px;
+  color: var(--xd-blue);
+  font-weight: 600;
+}
+
+.layout-diagram .wide-col {
+  background: rgba(180, 168, 255, 0.08);
+  border: 1px dashed var(--connections-purple);
+  border-radius: 4px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "SF Mono", monospace;
+  font-size: 12px;
+  color: var(--connections-purple);
+  font-weight: 600;
+}
+
+.layout-dimension {
+  font-family: "SF Mono", monospace;
+  font-size: 11px;
+  color: var(--dark-gray);
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* --- Code Blocks --- */
+.code-block {
+  background: var(--dark-black);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #e6e6e6;
+}
+
+.code-block .comment { color: #6a9955; }
+.code-block .prop { color: #9cdcfe; }
+.code-block .value { color: #ce9178; }
+.code-block .selector { color: #d7ba7d; }
+
+/* --- Utility --- */
+.flex-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.flex-row.gap-24 { gap: 24px; }
+.flex-row.gap-32 { gap: 32px; }
+
+.info-box {
+  background: rgba(100, 147, 230, 0.08);
+  border-left: 3px solid var(--xd-blue);
+  padding: 12px 16px;
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  color: var(--darker-gray);
+  margin-bottom: 16px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--lightest-gray);
+  margin: 48px 0;
+}
+
+/* --- Responsive --- */
+@media (max-width: 900px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; padding: 24px; }
+  .footer-mockup { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<!-- Scroll Progress -->
+<div class="scroll-progress" id="scrollProgress"></div>
+
+<!-- Sidebar Navigation -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <h1>NYT Design<br>System</h1>
+    <div class="subtitle">Production CSS Reference</div>
+  </div>
+
+  <div class="sidebar-section-label">Foundation</div>
+  <nav>
+    <a href="#typography"><span class="dot" style="background:var(--games-yellow)"></span> Typography</a>
+    <a href="#font-stacks"><span class="dot" style="background:var(--xd-blue)"></span> Font Stacks</a>
+    <a href="#colors-grayscale"><span class="dot" style="background:var(--gray)"></span> Grayscale</a>
+    <a href="#colors-game"><span class="dot" style="background:var(--games-yellow)"></span> Game Colors</a>
+    <a href="#colors-spot"><span class="dot" style="background:var(--spot-orange)"></span> Spot Colors</a>
+    <a href="#colors-semantic"><span class="dot" style="background:var(--g-color-anchor)"></span> Semantic Colors</a>
+    <a href="#color-ramps"><span class="dot" style="background:var(--spot-green)"></span> Color Ramps</a>
+    <a href="#spacing"><span class="dot" style="background:var(--connections-purple)"></span> Spacing</a>
+    <a href="#layout"><span class="dot" style="background:var(--strands-mint)"></span> Layout</a>
+  </nav>
+
+  <div class="sidebar-section-label">Components</div>
+  <nav>
+    <a href="#buttons"><span class="dot" style="background:var(--lb-red)"></span> Buttons</a>
+    <a href="#game-cards"><span class="dot" style="background:var(--games-yellow)"></span> Game Cards</a>
+    <a href="#nav-drawer"><span class="dot" style="background:var(--xd-blue)"></span> Nav Drawer</a>
+    <a href="#progress-tracker"><span class="dot" style="background:var(--tiles-green)"></span> Progress Tracker</a>
+    <a href="#modals"><span class="dot" style="background:var(--connections-purple)"></span> Modals</a>
+    <a href="#quote-callout"><span class="dot" style="background:var(--sb-yellow)"></span> Quote Callout</a>
+    <a href="#footer"><span class="dot" style="background:var(--dark-gray)"></span> Footer</a>
+  </nav>
+
+  <div class="sidebar-section-label">Modes</div>
+  <nav>
+    <a href="#dark-mode"><span class="dot" style="background:var(--white)"></span> Dark Mode</a>
+  </nav>
+</aside>
+
+<!-- Main Content -->
+<div class="main">
+
+  <!-- Hero -->
+  <div class="hero" id="top">
+    <h1>The New York Times<br>Design System</h1>
+    <p class="tagline">A comprehensive reference of design tokens, typography, color systems, spacing scales, and component patterns extracted from the NYT production stylesheets.</p>
+    <div class="meta">
+      <span>EXTRACTED</span> nytimes.com production CSS &mdash; 7 font families, 15 grayscale values, 11 game brand colors, 17 color ramps, 13 spacing tokens
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: TYPOGRAPHY
+       ============================================================ -->
+  <div class="section" id="typography">
+    <h2 class="section-title">Typography</h2>
+    <p class="desc">Seven font families declared via <code>@font-face</code> in the NYT production CSS. Each serves a distinct editorial or functional purpose across the platform.</p>
+
+    <!-- nyt-cheltenham -->
+    <div class="subsection">
+      <h3 class="subsection-title">nyt-cheltenham <span class="badge">EDITORIAL DISPLAY</span></h3>
+      <div class="font-specimen">
+        <div class="sample" style="font-family:var(--f-cheltenham);font-weight:300;font-size:36px;line-height:1.15;letter-spacing:-0.02em;">
+          The Truth Is Worth It
+        </div>
+        <div class="sample" style="font-family:var(--f-cheltenham);font-weight:500;font-size:24px;line-height:1.25;margin-top:8px;">
+          Independent Journalism Since 1851
+        </div>
+        <div class="meta-row" style="margin-top:16px;">
+          <span class="tag">Weights: 300, 500</span>
+          <span class="tag">Role: Headlines, article titles</span>
+          <span class="tag">Category: Serif Display</span>
+        </div>
+        <div class="weight-row">
+          <span class="weight-chip" style="font-family:var(--f-cheltenham);font-weight:300;">Light 300</span>
+          <span class="weight-chip" style="font-family:var(--f-cheltenham);font-weight:500;">Medium 500</span>
+        </div>
+      </div>
+      <div class="code-block">
+        <span class="comment">/* CSS Variable */</span><br>
+        <span class="prop">--g-chelt</span>: <span class="value">nyt-cheltenham, cheltenham-fallback-georgia, georgia, "times new roman", times, serif</span>;<br>
+        <span class="prop">--g-chelt-cond</span>: <span class="value">nyt-cheltenham-cond, nyt-cheltenham, georgia, "times new roman", times, serif</span>;
+      </div>
+    </div>
+
+    <!-- nyt-franklin -->
+    <div class="subsection">
+      <h3 class="subsection-title">nyt-franklin <span class="badge">PRIMARY SANS-SERIF</span></h3>
+      <div class="font-specimen">
+        <div class="sample" style="font-family:var(--f-franklin);font-weight:300;font-size:18px;">
+          Light 300 &mdash; Body text for long-form reading
+        </div>
+        <div class="sample" style="font-family:var(--f-franklin);font-weight:400;font-size:16px;margin-top:4px;">
+          Regular 400 &mdash; Default UI text and navigation
+        </div>
+        <div class="sample" style="font-family:var(--f-franklin);font-weight:500;font-size:16px;margin-top:4px;">
+          Medium 500 &mdash; Interactive labels and subheads
+        </div>
+        <div class="sample" style="font-family:var(--f-franklin);font-weight:600;font-size:16px;margin-top:4px;">
+          Semibold 600 &mdash; Buttons, emphasis, CTAs
+        </div>
+        <div class="sample" style="font-family:var(--f-franklin);font-weight:700;font-size:16px;margin-top:4px;">
+          Bold 700 &mdash; Section headers, pills, badges
+        </div>
+        <div class="sample" style="font-family:var(--f-franklin);font-weight:800;font-size:16px;margin-top:4px;">
+          ExtraBold 800 &mdash; Impact headlines
+        </div>
+        <div class="sample" style="font-family:var(--f-franklin);font-weight:500;font-style:italic;font-size:16px;margin-top:4px;">
+          Medium Italic 500 &mdash; Attributions, captions
+        </div>
+        <div class="meta-row" style="margin-top:16px;">
+          <span class="tag">Weights: 300, 400, 500, 600, 700, 800 + italic 500</span>
+          <span class="tag">Role: UI, navigation, buttons</span>
+          <span class="tag">Category: Sans-serif</span>
+        </div>
+        <div class="weight-row">
+          <span class="weight-chip" style="font-family:var(--f-franklin);font-weight:300;">Lgt 300</span>
+          <span class="weight-chip" style="font-family:var(--f-franklin);font-weight:400;">Reg 400</span>
+          <span class="weight-chip" style="font-family:var(--f-franklin);font-weight:500;">Med 500</span>
+          <span class="weight-chip" style="font-family:var(--f-franklin);font-weight:600;">SB 600</span>
+          <span class="weight-chip" style="font-family:var(--f-franklin);font-weight:700;">Bld 700</span>
+          <span class="weight-chip" style="font-family:var(--f-franklin);font-weight:800;">XBd 800</span>
+        </div>
+      </div>
+      <div class="code-block">
+        <span class="prop">--g-franklin</span>: <span class="value">"nyt-franklin", arial, helvetica, sans-serif</span>;
+      </div>
+    </div>
+
+    <!-- nyt-franklin-cw -->
+    <div class="subsection">
+      <h3 class="subsection-title">nyt-franklin-cw <span class="badge">CROSSWORD VARIANT</span></h3>
+      <div class="font-specimen">
+        <div class="sample" style="font-family:var(--f-franklin-cw);font-weight:400;font-size:20px;">
+          Crossword grid clue text (400)
+        </div>
+        <div class="sample" style="font-family:var(--f-franklin-cw);font-weight:500;font-size:20px;margin-top:4px;">
+          Crossword labels and UI (500)
+        </div>
+        <div class="meta-row" style="margin-top:16px;">
+          <span class="tag">Weights: 400, 500</span>
+          <span class="tag">Role: Crossword puzzle interface</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- nyt-karnak -->
+    <div class="subsection">
+      <h3 class="subsection-title">nyt-karnak <span class="badge">SECONDARY DISPLAY SERIF</span></h3>
+      <div class="font-specimen">
+        <div class="sample" style="font-family:var(--f-karnak);font-weight:400;font-size:28px;">
+          Regular 400 &mdash; Modal headings
+        </div>
+        <div class="sample" style="font-family:var(--f-karnak);font-weight:500;font-size:24px;margin-top:4px;">
+          Medium 500 &mdash; Sub-section titles
+        </div>
+        <div class="sample" style="font-family:var(--f-karnak);font-weight:700;font-size:22px;margin-top:4px;">
+          Bold 700 &mdash; Panel headers, drawer titles
+        </div>
+        <div class="meta-row" style="margin-top:16px;">
+          <span class="tag">Weights: 400, 500, 600, 700</span>
+          <span class="tag">Role: Section titles, nav headers</span>
+          <span class="tag">Category: Serif Display</span>
+        </div>
+        <div class="weight-row">
+          <span class="weight-chip" style="font-family:var(--f-karnak);font-weight:400;">Reg 400</span>
+          <span class="weight-chip" style="font-family:var(--f-karnak);font-weight:500;">Med 500</span>
+          <span class="weight-chip" style="font-family:var(--f-karnak);font-weight:600;">SB 600</span>
+          <span class="weight-chip" style="font-family:var(--f-karnak);font-weight:700;">Bld 700</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- nyt-karnakcondensed -->
+    <div class="subsection">
+      <h3 class="subsection-title">nyt-karnakcondensed <span class="badge">GAME TITLES</span></h3>
+      <div class="font-specimen">
+        <div class="sample" style="font-family:var(--f-karnakcondensed);font-weight:700;font-size:42px;line-height:1;">
+          WORDLE
+        </div>
+        <div class="sample" style="font-family:var(--f-karnakcondensed);font-weight:700;font-size:36px;line-height:1;margin-top:8px;">
+          Connections
+        </div>
+        <div class="sample" style="font-family:var(--f-karnakcondensed);font-weight:700;font-size:28px;line-height:1;margin-top:8px;">
+          The Mini Crossword
+        </div>
+        <div class="meta-row" style="margin-top:16px;">
+          <span class="tag">Weight: 700 only</span>
+          <span class="tag">Role: Game card titles, section headings</span>
+          <span class="tag">Key size: 28px on game cards</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- nyt-stymie -->
+    <div class="subsection">
+      <h3 class="subsection-title">nyt-stymie <span class="badge">DECORATIVE SLAB SERIF</span></h3>
+      <div class="font-specimen">
+        <div class="sample" style="font-family:var(--f-stymie);font-weight:500;font-size:24px;">
+          Medium 500 &mdash; Decorative headers
+        </div>
+        <div class="sample" style="font-family:var(--f-stymie);font-weight:700;font-size:28px;margin-top:4px;">
+          Bold 700 &mdash; Brand moments
+        </div>
+        <div class="sample" style="font-family:var(--f-stymie);font-weight:800;font-size:32px;margin-top:4px;">
+          ExtraBold 800 &mdash; Impact
+        </div>
+        <div class="meta-row" style="margin-top:16px;">
+          <span class="tag">Weights: 500, 700, 800</span>
+          <span class="tag">Role: Brand moments, decorative</span>
+          <span class="tag">Category: Slab Serif</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- nyt-inter -->
+    <div class="subsection">
+      <h3 class="subsection-title">nyt-inter <span class="badge">UI UTILITY</span></h3>
+      <div class="font-specimen">
+        <div class="sample" style="font-family:var(--f-inter);font-weight:600;font-size:14px;">
+          Semibold 600 &mdash; Limited UI use, system-like text
+        </div>
+        <div class="meta-row" style="margin-top:16px;">
+          <span class="tag">Weight: 600 only</span>
+          <span class="tag">Role: System UI, limited use</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: FONT STACKS
+       ============================================================ -->
+  <div class="section" id="font-stacks">
+    <h2 class="section-title blue">Font Stacks (CSS Variables)</h2>
+    <p class="desc">Graphics team CSS custom properties defining complete font stacks with appropriate fallbacks.</p>
+
+    <table class="token-table">
+      <thead>
+        <tr><th>Variable</th><th>Stack</th><th>Usage</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>--g-chelt</code></td>
+          <td style="font-size:12px">nyt-cheltenham, cheltenham-fallback-georgia, georgia, "times new roman", times, serif</td>
+          <td>Headlines, story titles</td>
+        </tr>
+        <tr>
+          <td><code>--g-chelt-cond</code></td>
+          <td style="font-size:12px">nyt-cheltenham-cond, nyt-cheltenham, georgia, "times new roman", times, serif</td>
+          <td>Condensed headlines</td>
+        </tr>
+        <tr>
+          <td><code>--g-franklin</code></td>
+          <td style="font-size:12px">"nyt-franklin", arial, helvetica, sans-serif</td>
+          <td>UI text, labels, buttons</td>
+        </tr>
+        <tr>
+          <td><code>--g-imperial</code></td>
+          <td style="font-size:12px">"nyt-imperial", georgia, "times new roman", times, serif</td>
+          <td>Body copy, long-form</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================
+       SECTION: COLORS — GRAYSCALE
+       ============================================================ -->
+  <div class="section" id="colors-grayscale">
+    <h2 class="section-title">Grayscale System</h2>
+    <p class="desc">15 grayscale values forming the foundation of the NYT neutral palette. Used for text, borders, backgrounds, and UI chrome.</p>
+
+    <div class="swatch-grid">
+      <div class="swatch">
+        <div class="swatch-color" style="background:#fff;border:1px solid #ddd"></div>
+        <div class="swatch-label">White</div>
+        <div class="swatch-hex">#fff</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#f8f8f8"></div>
+        <div class="swatch-label">Cool Gray</div>
+        <div class="swatch-hex">#f8f8f8</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#ebebeb"></div>
+        <div class="swatch-label">Lightest Gray</div>
+        <div class="swatch-hex">#ebebeb</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#dfdfdf"></div>
+        <div class="swatch-label">Extra Light</div>
+        <div class="swatch-hex">#dfdfdf</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#bbb"></div>
+        <div class="swatch-label">Lighter Gray</div>
+        <div class="swatch-hex">#bbb</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#a3a3a3"></div>
+        <div class="swatch-label">Light Gray</div>
+        <div class="swatch-hex">#a3a3a3</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#979797"></div>
+        <div class="swatch-label">Gray</div>
+        <div class="swatch-hex">#979797</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#8b8b8b"></div>
+        <div class="swatch-label">Gray 2</div>
+        <div class="swatch-hex">#8b8b8b</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#727272"></div>
+        <div class="swatch-label">Dark Gray</div>
+        <div class="swatch-hex">#727272</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#5a5a5a"></div>
+        <div class="swatch-label">Darker Gray</div>
+        <div class="swatch-hex">#5a5a5a</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#424242"></div>
+        <div class="swatch-label">Extra Dark</div>
+        <div class="swatch-hex">#424242</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#363636"></div>
+        <div class="swatch-label">Darkest Gray</div>
+        <div class="swatch-hex">#363636</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#2a2a2a"></div>
+        <div class="swatch-label">Black</div>
+        <div class="swatch-hex">#2a2a2a</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#1b1b1b"></div>
+        <div class="swatch-label">Med Black</div>
+        <div class="swatch-hex">#1b1b1b</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#121212"></div>
+        <div class="swatch-label">Dark Black</div>
+        <div class="swatch-hex">#121212</div>
+      </div>
+    </div>
+
+    <table class="token-table">
+      <thead><tr><th>Token</th><th>Hex</th><th>Usage</th></tr></thead>
+      <tbody>
+        <tr><td><code>--white</code></td><td>#fff</td><td>Page background, card surfaces</td></tr>
+        <tr><td><code>--cool-gray</code></td><td>#f8f8f8</td><td>Quote callout bg, subtle backgrounds</td></tr>
+        <tr><td><code>--lightest-gray</code></td><td>#ebebeb</td><td>Borders, dividers</td></tr>
+        <tr><td><code>--extra-light-gray</code></td><td>#dfdfdf</td><td>Secondary borders</td></tr>
+        <tr><td><code>--lighter-gray</code></td><td>#bbb</td><td>Disabled text, subtle borders</td></tr>
+        <tr><td><code>--light-gray</code></td><td>#a3a3a3</td><td>Placeholder text</td></tr>
+        <tr><td><code>--gray</code></td><td>#979797</td><td>Muted text</td></tr>
+        <tr><td><code>--gray2</code></td><td>#8b8b8b</td><td>Secondary muted text</td></tr>
+        <tr><td><code>--dark-gray</code></td><td>#727272</td><td>Captions, credits</td></tr>
+        <tr><td><code>--darker-gray</code></td><td>#5a5a5a</td><td>Body text secondary</td></tr>
+        <tr><td><code>--extra-dark-gray</code></td><td>#424242</td><td>Subheads, labels</td></tr>
+        <tr><td><code>--darkest-gray</code></td><td>#363636</td><td>Body text primary, pill backgrounds</td></tr>
+        <tr><td><code>--black</code></td><td>#2a2a2a</td><td>Primary text</td></tr>
+        <tr><td><code>--med-black</code></td><td>#1b1b1b</td><td>Dark surface text</td></tr>
+        <tr><td><code>--dark-black</code></td><td>#121212</td><td>Backgrounds, headers, dark mode base</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================
+       SECTION: COLORS — GAME BRAND
+       ============================================================ -->
+  <div class="section" id="colors-game">
+    <h2 class="section-title">Game Brand Colors</h2>
+    <p class="desc">Each NYT Games product has a unique brand color used for card covers, navigation highlights, and iconography.</p>
+
+    <div class="swatch-grid" style="gap:20px">
+      <div class="swatch">
+        <div class="swatch-color" style="background:#fbd300;width:64px;height:64px"></div>
+        <div class="swatch-label">Games Hub</div>
+        <div class="swatch-hex">#fbd300</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#6493e6;width:64px;height:64px"></div>
+        <div class="swatch-label">Crossword</div>
+        <div class="swatch-hex">#6493e6</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#95befa;width:64px;height:64px"></div>
+        <div class="swatch-label">The Mini</div>
+        <div class="swatch-hex">#95befa</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#b5e352;width:64px;height:64px"></div>
+        <div class="swatch-label">Tiles</div>
+        <div class="swatch-hex">#b5e352</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#f7da21;width:64px;height:64px"></div>
+        <div class="swatch-label">Spelling Bee</div>
+        <div class="swatch-hex">#f7da21</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#fc716b;width:64px;height:64px"></div>
+        <div class="swatch-label">Letter Boxed</div>
+        <div class="swatch-hex">#fc716b</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#fb9b00;width:64px;height:64px"></div>
+        <div class="swatch-label">Sudoku</div>
+        <div class="swatch-hex">#fb9b00</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#d3d6da;width:64px;height:64px"></div>
+        <div class="swatch-label">Wordle</div>
+        <div class="swatch-hex">#d3d6da</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#b4a8ff;width:64px;height:64px"></div>
+        <div class="swatch-label">Connections</div>
+        <div class="swatch-hex">#b4a8ff</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#b2ded8;width:64px;height:64px"></div>
+        <div class="swatch-label">Strands</div>
+        <div class="swatch-hex">#b2ded8</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#9251ca;width:64px;height:64px"></div>
+        <div class="swatch-label">Pips</div>
+        <div class="swatch-hex">#9251ca</div>
+      </div>
+    </div>
+
+    <table class="token-table">
+      <thead><tr><th>Token</th><th>Hex</th><th>Game</th></tr></thead>
+      <tbody>
+        <tr><td><code>--games-yellow</code></td><td>#fbd300</td><td>Games hub, brand primary</td></tr>
+        <tr><td><code>--xd-blue</code></td><td>#6493e6</td><td>The Crossword</td></tr>
+        <tr><td><code>--mini-blue</code></td><td>#95befa</td><td>The Mini</td></tr>
+        <tr><td><code>--tiles-green</code></td><td>#b5e352</td><td>Tiles</td></tr>
+        <tr><td><code>--sb-yellow</code></td><td>#f7da21</td><td>Spelling Bee</td></tr>
+        <tr><td><code>--lb-red</code></td><td>#fc716b</td><td>Letter Boxed</td></tr>
+        <tr><td><code>--sudoku-orange</code></td><td>#fb9b00</td><td>Sudoku</td></tr>
+        <tr><td><code>--wordle-gray</code></td><td>#d3d6da</td><td>Wordle</td></tr>
+        <tr><td><code>--connections-purple</code></td><td>#b4a8ff</td><td>Connections</td></tr>
+        <tr><td><code>--strands-mint</code></td><td>#b2ded8</td><td>Strands</td></tr>
+        <tr><td><code>--pips-purple</code></td><td>#9251ca</td><td>Pips</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================
+       SECTION: COLORS — SPOT
+       ============================================================ -->
+  <div class="section" id="colors-spot">
+    <h2 class="section-title orange">Graphics Spot Colors</h2>
+    <p class="desc">Five accent colors used in NYT graphics, data visualization, and editorial illustrations.</p>
+
+    <div class="swatch-grid" style="gap:20px">
+      <div class="swatch">
+        <div class="swatch-color" style="background:#fdba58;width:64px;height:64px"></div>
+        <div class="swatch-label">Orange</div>
+        <div class="swatch-hex">#fdba58</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#569adc;width:64px;height:64px"></div>
+        <div class="swatch-label">Blue</div>
+        <div class="swatch-hex">#569adc</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#53a451;width:64px;height:64px"></div>
+        <div class="swatch-label">Green</div>
+        <div class="swatch-hex">#53a451</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#866da0;width:64px;height:64px"></div>
+        <div class="swatch-label">Purple</div>
+        <div class="swatch-hex">#866da0</div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background:#bc261a;width:64px;height:64px"></div>
+        <div class="swatch-label">Red</div>
+        <div class="swatch-hex">#bc261a</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: COLORS — SEMANTIC
+       ============================================================ -->
+  <div class="section" id="colors-semantic">
+    <h2 class="section-title blue">Semantic Text Colors</h2>
+    <p class="desc">Purpose-driven color tokens for text hierarchy. These map to specific editorial contexts rather than raw values.</p>
+
+    <table class="token-table">
+      <thead><tr><th>Token</th><th>Hex</th><th style="width:200px">Preview</th><th>Usage</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>--g-color-header</code></td>
+          <td>#121212</td>
+          <td><span style="color:#121212;font-weight:700;font-size:18px;font-family:var(--f-karnak)">Headline</span></td>
+          <td>Article headers, section titles</td>
+        </tr>
+        <tr>
+          <td><code>--g-color-copy</code></td>
+          <td>#363636</td>
+          <td><span style="color:#363636;font-size:15px">Body copy text</span></td>
+          <td>Primary body text</td>
+        </tr>
+        <tr>
+          <td><code>--g-color-caption</code></td>
+          <td>#727272</td>
+          <td><span style="color:#727272;font-size:13px">Photo caption text</span></td>
+          <td>Image captions</td>
+        </tr>
+        <tr>
+          <td><code>--g-color-credit</code></td>
+          <td>#727272</td>
+          <td><span style="color:#727272;font-size:11px;text-transform:uppercase;letter-spacing:0.05em">Credit Text</span></td>
+          <td>Photo credits, bylines</td>
+        </tr>
+        <tr>
+          <td><code>--g-color-anchor</code></td>
+          <td>#326891</td>
+          <td><span style="color:#326891;text-decoration:underline">Link text</span></td>
+          <td>Hyperlinks, interactive text</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================
+       SECTION: COLOR RAMPS
+       ============================================================ -->
+  <div class="section" id="color-ramps">
+    <h2 class="section-title green">Color Ramps</h2>
+    <p class="desc">17 color ramps with 9 steps each, from lightest (-1) to darkest (-9). Used in data visualization and editorial graphics.</p>
+
+    <!-- Gray -->
+    <div class="ramp-row">
+      <div class="ramp-label">Gray</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#f0f0f0">#f0f0f0</div>
+        <div class="step dark-text" style="background:#dcdcdc">#dcdcdc</div>
+        <div class="step dark-text" style="background:#bdbdbd">#bdbdbd</div>
+        <div class="step dark-text" style="background:#999">#999</div>
+        <div class="step light-text" style="background:#777">#777</div>
+        <div class="step light-text" style="background:#5b5b5b">#5b5b5b</div>
+        <div class="step light-text" style="background:#444">#444</div>
+        <div class="step light-text" style="background:#2e2e2e">#2e2e2e</div>
+        <div class="step light-text" style="background:#1a1a1a">#1a1a1a</div>
+      </div>
+    </div>
+
+    <!-- Khaki -->
+    <div class="ramp-row">
+      <div class="ramp-label">Khaki</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#f4f1e7">#f4f1e7</div>
+        <div class="step dark-text" style="background:#e8e2cf">#e8e2cf</div>
+        <div class="step dark-text" style="background:#d5ccae">#d5ccae</div>
+        <div class="step dark-text" style="background:#bfb48f">#bfb48f</div>
+        <div class="step dark-text" style="background:#a89b72">#a89b72</div>
+        <div class="step light-text" style="background:#8c7f58">#8c7f58</div>
+        <div class="step light-text" style="background:#6e6342">#6e6342</div>
+        <div class="step light-text" style="background:#52492e">#52492e</div>
+        <div class="step light-text" style="background:#38311e">#38311e</div>
+      </div>
+    </div>
+
+    <!-- Camo -->
+    <div class="ramp-row">
+      <div class="ramp-label">Camo</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#eef0e4">#eef0e4</div>
+        <div class="step dark-text" style="background:#dbe0c7">#dbe0c7</div>
+        <div class="step dark-text" style="background:#c1c99e">#c1c99e</div>
+        <div class="step dark-text" style="background:#a5af7a">#a5af7a</div>
+        <div class="step dark-text" style="background:#8a965b">#8a965b</div>
+        <div class="step light-text" style="background:#6f7a41">#6f7a41</div>
+        <div class="step light-text" style="background:#575f30">#575f30</div>
+        <div class="step light-text" style="background:#404622">#404622</div>
+        <div class="step light-text" style="background:#2b2f16">#2b2f16</div>
+      </div>
+    </div>
+
+    <!-- Tan -->
+    <div class="ramp-row">
+      <div class="ramp-label">Tan</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#f5f0e8">#f5f0e8</div>
+        <div class="step dark-text" style="background:#ebe0cf">#ebe0cf</div>
+        <div class="step dark-text" style="background:#dac9a8">#dac9a8</div>
+        <div class="step dark-text" style="background:#c6af83">#c6af83</div>
+        <div class="step dark-text" style="background:#b09563">#b09563</div>
+        <div class="step light-text" style="background:#947a49">#947a49</div>
+        <div class="step light-text" style="background:#755f36">#755f36</div>
+        <div class="step light-text" style="background:#574626">#574626</div>
+        <div class="step light-text" style="background:#3b2f19">#3b2f19</div>
+      </div>
+    </div>
+
+    <!-- Slate -->
+    <div class="ramp-row">
+      <div class="ramp-label">Slate</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#eceef1">#eceef1</div>
+        <div class="step dark-text" style="background:#d7dbe2">#d7dbe2</div>
+        <div class="step dark-text" style="background:#b7bec8">#b7bec8</div>
+        <div class="step dark-text" style="background:#98a2af">#98a2af</div>
+        <div class="step light-text" style="background:#7b8695">#7b8695</div>
+        <div class="step light-text" style="background:#616d7c">#616d7c</div>
+        <div class="step light-text" style="background:#4b5562">#4b5562</div>
+        <div class="step light-text" style="background:#373f49">#373f49</div>
+        <div class="step light-text" style="background:#252b32">#252b32</div>
+      </div>
+    </div>
+
+    <!-- Pigeon -->
+    <div class="ramp-row">
+      <div class="ramp-label">Pigeon</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#eceff4">#eceff4</div>
+        <div class="step dark-text" style="background:#d7dde7">#d7dde7</div>
+        <div class="step dark-text" style="background:#b5c0d1">#b5c0d1</div>
+        <div class="step dark-text" style="background:#94a3ba">#94a3ba</div>
+        <div class="step light-text" style="background:#7688a3">#7688a3</div>
+        <div class="step light-text" style="background:#5d6f89">#5d6f89</div>
+        <div class="step light-text" style="background:#48576b">#48576b</div>
+        <div class="step light-text" style="background:#35404f">#35404f</div>
+        <div class="step light-text" style="background:#242c35">#242c35</div>
+      </div>
+    </div>
+
+    <!-- Sky -->
+    <div class="ramp-row">
+      <div class="ramp-label">Sky</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#e4f1f8">#e4f1f8</div>
+        <div class="step dark-text" style="background:#c6e2f0">#c6e2f0</div>
+        <div class="step dark-text" style="background:#9bcce4">#9bcce4</div>
+        <div class="step dark-text" style="background:#6eb4d6">#6eb4d6</div>
+        <div class="step dark-text" style="background:#469cc5">#469cc5</div>
+        <div class="step light-text" style="background:#2c82ae">#2c82ae</div>
+        <div class="step light-text" style="background:#1f6589">#1f6589</div>
+        <div class="step light-text" style="background:#164a65">#164a65</div>
+        <div class="step light-text" style="background:#0e3143">#0e3143</div>
+      </div>
+    </div>
+
+    <!-- Ice -->
+    <div class="ramp-row">
+      <div class="ramp-label">Ice</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#e4f3f6">#e4f3f6</div>
+        <div class="step dark-text" style="background:#c6e6ec">#c6e6ec</div>
+        <div class="step dark-text" style="background:#98d2de">#98d2de</div>
+        <div class="step dark-text" style="background:#6bbcce">#6bbcce</div>
+        <div class="step dark-text" style="background:#44a5bc">#44a5bc</div>
+        <div class="step light-text" style="background:#2d8ba1">#2d8ba1</div>
+        <div class="step light-text" style="background:#216d7e">#216d7e</div>
+        <div class="step light-text" style="background:#17505c">#17505c</div>
+        <div class="step light-text" style="background:#0f363d">#0f363d</div>
+      </div>
+    </div>
+
+    <!-- Sea -->
+    <div class="ramp-row">
+      <div class="ramp-label">Sea</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#e1f4f0">#e1f4f0</div>
+        <div class="step dark-text" style="background:#bfe8df">#bfe8df</div>
+        <div class="step dark-text" style="background:#8dd6c8">#8dd6c8</div>
+        <div class="step dark-text" style="background:#5ec2af">#5ec2af</div>
+        <div class="step dark-text" style="background:#38ac97">#38ac97</div>
+        <div class="step light-text" style="background:#28907e">#28907e</div>
+        <div class="step light-text" style="background:#1d7163">#1d7163</div>
+        <div class="step light-text" style="background:#145349">#145349</div>
+        <div class="step light-text" style="background:#0d3831">#0d3831</div>
+      </div>
+    </div>
+
+    <!-- Forest -->
+    <div class="ramp-row">
+      <div class="ramp-label">Forest</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#e3f2e4">#e3f2e4</div>
+        <div class="step dark-text" style="background:#c4e4c6">#c4e4c6</div>
+        <div class="step dark-text" style="background:#95cf9a">#95cf9a</div>
+        <div class="step dark-text" style="background:#68b86f">#68b86f</div>
+        <div class="step dark-text" style="background:#45a04c">#45a04c</div>
+        <div class="step light-text" style="background:#32853a">#32853a</div>
+        <div class="step light-text" style="background:#25682d">#25682d</div>
+        <div class="step light-text" style="background:#1a4c20">#1a4c20</div>
+        <div class="step light-text" style="background:#113316">#113316</div>
+      </div>
+    </div>
+
+    <!-- Mint -->
+    <div class="ramp-row">
+      <div class="ramp-label">Mint</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#e5f5ea">#e5f5ea</div>
+        <div class="step dark-text" style="background:#c8ead3">#c8ead3</div>
+        <div class="step dark-text" style="background:#9dd9b3">#9dd9b3</div>
+        <div class="step dark-text" style="background:#73c694">#73c694</div>
+        <div class="step dark-text" style="background:#4eb177">#4eb177</div>
+        <div class="step light-text" style="background:#389560">#389560</div>
+        <div class="step light-text" style="background:#2a744a">#2a744a</div>
+        <div class="step light-text" style="background:#1e5536">#1e5536</div>
+        <div class="step light-text" style="background:#143924">#143924</div>
+      </div>
+    </div>
+
+    <!-- Lemon -->
+    <div class="ramp-row">
+      <div class="ramp-label">Lemon</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#fdf4d0">#fdf4d0</div>
+        <div class="step dark-text" style="background:#fbe99e">#fbe99e</div>
+        <div class="step dark-text" style="background:#f8d96b">#f8d96b</div>
+        <div class="step dark-text" style="background:#f3c63a">#f3c63a</div>
+        <div class="step dark-text" style="background:#e5b018">#e5b018</div>
+        <div class="step light-text" style="background:#c09212">#c09212</div>
+        <div class="step light-text" style="background:#96720d">#96720d</div>
+        <div class="step light-text" style="background:#6d5309">#6d5309</div>
+        <div class="step light-text" style="background:#483706">#483706</div>
+      </div>
+    </div>
+
+    <!-- Peach -->
+    <div class="ramp-row">
+      <div class="ramp-label">Peach</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#fdf0e2">#fdf0e2</div>
+        <div class="step dark-text" style="background:#fbdfc1">#fbdfc1</div>
+        <div class="step dark-text" style="background:#f8c58f">#f8c58f</div>
+        <div class="step dark-text" style="background:#f4a95e">#f4a95e</div>
+        <div class="step dark-text" style="background:#ed8d35">#ed8d35</div>
+        <div class="step light-text" style="background:#d07420">#d07420</div>
+        <div class="step light-text" style="background:#a45a17">#a45a17</div>
+        <div class="step light-text" style="background:#794210">#794210</div>
+        <div class="step light-text" style="background:#502c0a">#502c0a</div>
+      </div>
+    </div>
+
+    <!-- Apricot -->
+    <div class="ramp-row">
+      <div class="ramp-label">Apricot</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#fdeee4">#fdeee4</div>
+        <div class="step dark-text" style="background:#fbdac5">#fbdac5</div>
+        <div class="step dark-text" style="background:#f7bb96">#f7bb96</div>
+        <div class="step dark-text" style="background:#f29b68">#f29b68</div>
+        <div class="step dark-text" style="background:#ea7c40">#ea7c40</div>
+        <div class="step light-text" style="background:#cf6329">#cf6329</div>
+        <div class="step light-text" style="background:#a34d1e">#a34d1e</div>
+        <div class="step light-text" style="background:#783915">#783915</div>
+        <div class="step light-text" style="background:#50260d">#50260d</div>
+      </div>
+    </div>
+
+    <!-- Rose -->
+    <div class="ramp-row">
+      <div class="ramp-label">Rose</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#fce8e6">#fce8e6</div>
+        <div class="step dark-text" style="background:#f9cecb">#f9cecb</div>
+        <div class="step dark-text" style="background:#f3a39e">#f3a39e</div>
+        <div class="step dark-text" style="background:#ec7972">#ec7972</div>
+        <div class="step light-text" style="background:#e3524b">#e3524b</div>
+        <div class="step light-text" style="background:#ca3732">#ca3732</div>
+        <div class="step light-text" style="background:#a02a26">#a02a26</div>
+        <div class="step light-text" style="background:#76201c">#76201c</div>
+        <div class="step light-text" style="background:#4f1513">#4f1513</div>
+      </div>
+    </div>
+
+    <!-- Brick -->
+    <div class="ramp-row">
+      <div class="ramp-label">Brick</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#f8e7e0">#f8e7e0</div>
+        <div class="step dark-text" style="background:#f0ccbe">#f0ccbe</div>
+        <div class="step dark-text" style="background:#e0a38e">#e0a38e</div>
+        <div class="step dark-text" style="background:#ce7c62">#ce7c62</div>
+        <div class="step light-text" style="background:#ba5940">#ba5940</div>
+        <div class="step light-text" style="background:#9d4430">#9d4430</div>
+        <div class="step light-text" style="background:#7c3424">#7c3424</div>
+        <div class="step light-text" style="background:#5c2619">#5c2619</div>
+        <div class="step light-text" style="background:#3e1a10">#3e1a10</div>
+      </div>
+    </div>
+
+    <!-- Plum -->
+    <div class="ramp-row">
+      <div class="ramp-label">Plum</div>
+      <div class="ramp-bar">
+        <div class="step dark-text" style="background:#f2eaf4">#f2eaf4</div>
+        <div class="step dark-text" style="background:#e3d3e8">#e3d3e8</div>
+        <div class="step dark-text" style="background:#ccb0d5">#ccb0d5</div>
+        <div class="step dark-text" style="background:#b48ec0">#b48ec0</div>
+        <div class="step light-text" style="background:#9c6eaa">#9c6eaa</div>
+        <div class="step light-text" style="background:#82558f">#82558f</div>
+        <div class="step light-text" style="background:#664170">#664170</div>
+        <div class="step light-text" style="background:#4c3053">#4c3053</div>
+        <div class="step light-text" style="background:#342038">#342038</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: SPACING
+       ============================================================ -->
+  <div class="section" id="spacing">
+    <h2 class="section-title purple">Spacing System</h2>
+    <p class="desc">13-step spacing scale built on a 4px base unit. Used consistently for padding, margins, and gaps throughout the interface.</p>
+
+    <div class="spacing-visual">
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-0-5</code></div>
+        <div class="bar" style="width:4px"></div>
+        <div class="value">4px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-1</code></div>
+        <div class="bar" style="width:8px"></div>
+        <div class="value">8px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-1-5</code></div>
+        <div class="bar" style="width:12px"></div>
+        <div class="value">12px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-2</code></div>
+        <div class="bar" style="width:16px"></div>
+        <div class="value">16px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-2-5</code></div>
+        <div class="bar" style="width:20px"></div>
+        <div class="value">20px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-3</code></div>
+        <div class="bar" style="width:24px"></div>
+        <div class="value">24px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-4</code></div>
+        <div class="bar" style="width:32px"></div>
+        <div class="value">32px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-5</code></div>
+        <div class="bar" style="width:40px"></div>
+        <div class="value">40px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-6</code></div>
+        <div class="bar" style="width:48px"></div>
+        <div class="value">48px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-7</code></div>
+        <div class="bar" style="width:56px"></div>
+        <div class="value">56px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-8</code></div>
+        <div class="bar" style="width:64px"></div>
+        <div class="value">64px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-9</code></div>
+        <div class="bar" style="width:72px"></div>
+        <div class="value">72px</div>
+      </div>
+      <div class="spacing-row">
+        <div class="label"><code>--spacing-10</code></div>
+        <div class="bar" style="width:80px"></div>
+        <div class="value">80px</div>
+      </div>
+    </div>
+
+    <div class="info-box">
+      Base unit is <strong>4px</strong>. The scale follows a consistent progression: 0.5x (4px), 1x (8px), 1.5x (12px), 2x (16px) ... 10x (80px). Use half-steps (0.5, 1.5, 2.5) for fine-grained control.
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: LAYOUT
+       ============================================================ -->
+  <div class="section" id="layout">
+    <h2 class="section-title mint">Layout Constants</h2>
+    <p class="desc">Key layout dimensions extracted from the production CSS. These define the article reading experience and navigation chrome.</p>
+
+    <div class="layout-diagram">
+      <div class="outer-frame">
+        <div class="layout-dimension" style="margin-bottom:16px">--g-width-wide: 1050px</div>
+        <div class="wide-col">
+          <div class="body-col">--g-width-body: 600px</div>
+        </div>
+      </div>
+    </div>
+
+    <table class="token-table">
+      <thead><tr><th>Constant</th><th>Value</th><th>Context</th></tr></thead>
+      <tbody>
+        <tr><td><code>--g-width-body</code></td><td>600px</td><td>Article body column width</td></tr>
+        <tr><td><code>--g-width-wide</code></td><td>1050px</td><td>Breakout / wide column</td></tr>
+        <tr><td>Nav height (mobile)</td><td>48px</td><td>Top navigation bar on mobile</td></tr>
+        <tr><td>Nav height (desktop)</td><td>56px</td><td>Top navigation bar on desktop</td></tr>
+        <tr><td>Nav drawer max-width</td><td>375px</td><td>Slide-out game navigation</td></tr>
+        <tr><td>Nav drawer top offset</td><td>56px</td><td>Below fixed nav bar</td></tr>
+        <tr><td>Footer min-height</td><td>412px</td><td>Site footer section</td></tr>
+        <tr><td>Footer background</td><td>#fafafa</td><td>Subtle off-white</td></tr>
+        <tr><td>Game card border-radius</td><td>8px</td><td>Rounded card corners</td></tr>
+        <tr><td>Game card border</td><td>1px solid #dcdcdc</td><td>Subtle card outline</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============================================================
+       SECTION: BUTTONS
+       ============================================================ -->
+  <div class="section" id="buttons">
+    <h2 class="section-title red">Button System</h2>
+    <p class="desc">Four distinct button variants used across the NYT Games platform, from primary CTAs to status badges.</p>
+
+    <div class="subsection">
+      <h3 class="subsection-title">Primary Button</h3>
+      <div class="component-stage">
+        <div class="button-gallery">
+          <button class="btn-primary">Play Now</button>
+          <button class="btn-primary" style="background:var(--xd-blue)">Start Puzzle</button>
+          <button class="btn-primary" style="background:var(--spot-green)">Subscribe</button>
+        </div>
+      </div>
+      <div class="code-block">
+        <span class="selector">.btn-primary</span> {<br>
+        &nbsp;&nbsp;<span class="prop">border-radius</span>: <span class="value">9999px</span>;<br>
+        &nbsp;&nbsp;<span class="prop">background</span>: <span class="value">var(--bg-btn-emphasis)</span>;<br>
+        &nbsp;&nbsp;<span class="prop">font</span>: <span class="value">600 1rem nyt-franklin</span>;<br>
+        &nbsp;&nbsp;<span class="prop">padding</span>: <span class="value">0.5rem 2rem</span>;<br>
+        }
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-title">Pill / Badge (PillGrey)</h3>
+      <div class="component-stage">
+        <div class="button-gallery">
+          <span class="btn-pill">NEW</span>
+          <span class="btn-pill" style="background:#6493e6">DAILY</span>
+          <span class="btn-pill" style="background:#53a451">COMPLETE</span>
+          <span class="btn-pill" style="background:#bc261a">STREAK</span>
+          <span class="btn-pill" style="background:#866da0">BETA</span>
+        </div>
+      </div>
+      <div class="code-block">
+        <span class="selector">.PillGrey</span> {<br>
+        &nbsp;&nbsp;<span class="prop">border-radius</span>: <span class="value">6px</span>;<br>
+        &nbsp;&nbsp;<span class="prop">background</span>: <span class="value">#363636</span>;<br>
+        &nbsp;&nbsp;<span class="prop">color</span>: <span class="value">#fff</span>;<br>
+        &nbsp;&nbsp;<span class="prop">font</span>: <span class="value">700 0.625rem nyt-franklin</span>;<br>
+        &nbsp;&nbsp;<span class="prop">letter-spacing</span>: <span class="value">0.05rem</span>;<br>
+        &nbsp;&nbsp;<span class="prop">height</span>: <span class="value">24px</span>;<br>
+        }
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-title">Card Buttons</h3>
+      <div class="component-stage">
+        <div class="button-gallery">
+          <button class="btn-card-primary">PLAY</button>
+          <button class="btn-card-secondary">HOW TO PLAY</button>
+        </div>
+      </div>
+      <div class="code-block">
+        <span class="comment">/* Card Primary — hover turns #5960ec */</span><br>
+        <span class="selector">.card-btn-primary</span> {<br>
+        &nbsp;&nbsp;<span class="prop">text-transform</span>: <span class="value">uppercase</span>;<br>
+        &nbsp;&nbsp;<span class="prop">border</span>: <span class="value">2px solid transparent</span>;<br>
+        }<br><br>
+        <span class="comment">/* Card Secondary */</span><br>
+        <span class="selector">.card-btn-secondary</span> {<br>
+        &nbsp;&nbsp;<span class="prop">background</span>: <span class="value">#fff</span>;<br>
+        &nbsp;&nbsp;<span class="prop">border</span>: <span class="value">2px solid #000</span>;<br>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: GAME CARDS
+       ============================================================ -->
+  <div class="section" id="game-cards">
+    <h2 class="section-title">Game Cards</h2>
+    <p class="desc">The <code>.hub-game-card</code> component: a cover area with illustration, game name in karnakcondensed at 28px, description text, and a play button.</p>
+
+    <div class="component-stage">
+      <div class="flex-row gap-24">
+        <!-- Wordle Card -->
+        <div class="game-card-mockup">
+          <div class="game-card-cover" style="background:linear-gradient(135deg, #6aaa64 0%, #c9b458 50%, #787c7e 100%)">
+            <div class="icon-placeholder" style="background:rgba(255,255,255,0.2);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;">
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="8" height="8" rx="1" fill="#6aaa64"/><rect x="12" y="2" width="8" height="8" rx="1" fill="#c9b458"/><rect x="22" y="2" width="8" height="8" rx="1" fill="#787c7e"/><rect x="2" y="12" width="8" height="8" rx="1" fill="#787c7e"/><rect x="12" y="12" width="8" height="8" rx="1" fill="#6aaa64"/></svg>
+            </div>
+          </div>
+          <div class="game-card-body">
+            <div class="name">Wordle</div>
+            <div class="description">Get 6 chances to guess a 5-letter word.</div>
+            <button class="play-btn">PLAY</button>
+          </div>
+        </div>
+
+        <!-- Connections Card -->
+        <div class="game-card-mockup">
+          <div class="game-card-cover" style="background:linear-gradient(135deg, #b4a8ff 0%, #8b7fd4 100%)">
+            <div class="icon-placeholder" style="background:rgba(255,255,255,0.2);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;">
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><circle cx="10" cy="10" r="4" fill="#f9df6d"/><circle cx="22" cy="10" r="4" fill="#a0c35a"/><circle cx="10" cy="22" r="4" fill="#b0c4ef"/><circle cx="22" cy="22" r="4" fill="#ba81c5"/></svg>
+            </div>
+          </div>
+          <div class="game-card-body">
+            <div class="name">Connections</div>
+            <div class="description">Group words that share a common thread.</div>
+            <button class="play-btn">PLAY</button>
+          </div>
+        </div>
+
+        <!-- Spelling Bee Card -->
+        <div class="game-card-mockup">
+          <div class="game-card-cover" style="background:linear-gradient(135deg, #f7da21 0%, #f5c518 100%)">
+            <div class="icon-placeholder" style="background:rgba(255,255,255,0.2);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;">
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><polygon points="16,4 19,12 28,12 21,18 23,27 16,22 9,27 11,18 4,12 13,12" fill="#f7da21" stroke="#c9a500" stroke-width="1"/></svg>
+            </div>
+          </div>
+          <div class="game-card-body">
+            <div class="name">Spelling Bee</div>
+            <div class="description">How many words can you make with 7 letters?</div>
+            <button class="play-btn">PLAY</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <span class="selector">.hub-game-card</span> {<br>
+      &nbsp;&nbsp;<span class="prop">border-radius</span>: <span class="value">8px</span>;<br>
+      &nbsp;&nbsp;<span class="prop">border</span>: <span class="value">1px solid #dcdcdc</span>;<br>
+      &nbsp;&nbsp;<span class="prop">overflow</span>: <span class="value">hidden</span>;<br>
+      }<br><br>
+      <span class="selector">.hub-game-card .name</span> {<br>
+      &nbsp;&nbsp;<span class="prop">font-family</span>: <span class="value">nyt-karnakcondensed</span>;<br>
+      &nbsp;&nbsp;<span class="prop">font-size</span>: <span class="value">28px</span>;<br>
+      &nbsp;&nbsp;<span class="prop">font-weight</span>: <span class="value">700</span>;<br>
+      }
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: NAV DRAWER
+       ============================================================ -->
+  <div class="section" id="nav-drawer">
+    <h2 class="section-title blue">Navigation Drawer</h2>
+    <p class="desc">The <code>.pz-nav-drawer</code> slides in from the left with a max-width of 375px. Each game row features a colored icon and a border-left highlight on hover matching the game's brand color.</p>
+
+    <div class="component-stage">
+      <div class="nav-drawer-mockup">
+        <div class="drawer-header">Games</div>
+        <div class="drawer-item" style="border-left-color:#d3d6da" onmouseenter="this.style.borderLeftColor='#d3d6da'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:linear-gradient(135deg,#6aaa64,#c9b458,#787c7e);border-radius:4px"></div>
+          Wordle
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#f7da21'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#f7da21"></div>
+          Spelling Bee
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#6493e6'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#6493e6"></div>
+          The Crossword
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#95befa'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#95befa"></div>
+          The Mini
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#b4a8ff'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#b4a8ff"></div>
+          Connections
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#b2ded8'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#b2ded8"></div>
+          Strands
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#b5e352'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#b5e352"></div>
+          Tiles
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#fb9b00'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#fb9b00"></div>
+          Sudoku
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#fc716b'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#fc716b"></div>
+          Letter Boxed
+        </div>
+        <div class="drawer-item" onmouseenter="this.style.borderLeftColor='#9251ca'" onmouseleave="this.style.borderLeftColor='transparent'">
+          <div class="game-dot" style="background:#9251ca"></div>
+          Pips
+        </div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <span class="selector">.pz-nav-drawer</span> {<br>
+      &nbsp;&nbsp;<span class="prop">max-width</span>: <span class="value">375px</span>;<br>
+      &nbsp;&nbsp;<span class="prop">top</span>: <span class="value">56px</span>;<br>
+      &nbsp;&nbsp;<span class="prop">position</span>: <span class="value">fixed</span>;<br>
+      }<br><br>
+      <span class="selector">.drawer-item:hover</span> {<br>
+      &nbsp;&nbsp;<span class="prop">border-left</span>: <span class="value">3px solid var(--game-brand-color)</span>;<br>
+      }
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: PROGRESS TRACKER
+       ============================================================ -->
+  <div class="section" id="progress-tracker">
+    <h2 class="section-title green">Progress Tracker</h2>
+    <p class="desc">An accordion-style component showing daily progress across games. Each day card displays SVG circle icons indicating completion status, with print tools available.</p>
+
+    <div class="component-stage">
+      <div class="progress-tracker-mockup">
+        <div class="tracker-header">
+          <h4>This Week</h4>
+          <span class="btn-pill" style="background:var(--tiles-green);color:#000">5/7</span>
+        </div>
+        <div class="progress-day">
+          <div class="day-label">Monday</div>
+          <div class="icons">
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon partial"></div>
+            <div class="progress-icon empty"></div>
+          </div>
+        </div>
+        <div class="progress-day">
+          <div class="day-label">Tuesday</div>
+          <div class="icons">
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon partial"></div>
+            <div class="progress-icon empty"></div>
+            <div class="progress-icon empty"></div>
+          </div>
+        </div>
+        <div class="progress-day">
+          <div class="day-label">Wednesday</div>
+          <div class="icons">
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+            <div class="progress-icon complete"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 7l2 2 4-4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div>
+          </div>
+        </div>
+        <div class="progress-day" style="border-bottom:none">
+          <div class="day-label" style="color:var(--light-gray)">Thursday</div>
+          <div class="icons">
+            <div class="progress-icon empty"></div>
+            <div class="progress-icon empty"></div>
+            <div class="progress-icon empty"></div>
+            <div class="progress-icon empty"></div>
+            <div class="progress-icon empty"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: MODALS
+       ============================================================ -->
+  <div class="section" id="modals">
+    <h2 class="section-title purple">Modals</h2>
+    <p class="desc">The <code>.pzm-modal</code> pattern: 7px border-radius, a soft box-shadow, and centered content with close button.</p>
+
+    <div class="component-stage">
+      <div class="modal-mockup">
+        <div class="modal-header">
+          <h3>Statistics</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;text-align:center;margin-bottom:20px;">
+            <div>
+              <div style="font-family:var(--f-karnak);font-size:32px;font-weight:400;color:var(--g-color-header)">42</div>
+              <div style="font-size:11px;color:var(--dark-gray)">Played</div>
+            </div>
+            <div>
+              <div style="font-family:var(--f-karnak);font-size:32px;font-weight:400;color:var(--g-color-header)">95</div>
+              <div style="font-size:11px;color:var(--dark-gray)">Win %</div>
+            </div>
+            <div>
+              <div style="font-family:var(--f-karnak);font-size:32px;font-weight:400;color:var(--g-color-header)">12</div>
+              <div style="font-size:11px;color:var(--dark-gray)">Streak</div>
+            </div>
+            <div>
+              <div style="font-family:var(--f-karnak);font-size:32px;font-weight:400;color:var(--g-color-header)">18</div>
+              <div style="font-size:11px;color:var(--dark-gray)">Max Streak</div>
+            </div>
+          </div>
+          <div style="margin-top:16px;text-align:center;">
+            <button class="btn-card-primary" style="width:100%">SHARE</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <span class="selector">.pzm-modal</span> {<br>
+      &nbsp;&nbsp;<span class="prop">border-radius</span>: <span class="value">7px</span>;<br>
+      &nbsp;&nbsp;<span class="prop">box-shadow</span>: <span class="value">0 4px 23px 0 rgba(0,0,0,0.08)</span>;<br>
+      &nbsp;&nbsp;<span class="prop">background</span>: <span class="value">#fff</span>;<br>
+      }
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: QUOTE CALLOUT
+       ============================================================ -->
+  <div class="section" id="quote-callout">
+    <h2 class="section-title">Quote Callout</h2>
+    <p class="desc">A gray-backgrounded callout used for editorial quotes and status messages. Features a serif quote and optional badge pill.</p>
+
+    <div class="component-stage">
+      <div class="quote-callout">
+        <div class="quote-text">"The crossword is one of the most popular features in the newspaper, and has been since 1942."</div>
+        <div class="quote-badge">EDITOR'S NOTE</div>
+      </div>
+
+      <div class="quote-callout" style="margin-top:16px">
+        <div class="quote-text" style="font-size:16px">"Connections requires you to find groups of four items that share something in common."</div>
+        <div class="quote-badge" style="background:#b4a8ff;color:#000">HOW TO PLAY</div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <span class="selector">.quote-callout</span> {<br>
+      &nbsp;&nbsp;<span class="prop">background</span>: <span class="value">#f8f8f8</span>; <span class="comment">/* --cool-gray */</span><br>
+      &nbsp;&nbsp;<span class="prop">padding</span>: <span class="value">24px 28px</span>;<br>
+      &nbsp;&nbsp;<span class="prop">border-radius</span>: <span class="value">8px</span>;<br>
+      }<br><br>
+      <span class="selector">.quote-text</span> {<br>
+      &nbsp;&nbsp;<span class="prop">font-family</span>: <span class="value">var(--g-chelt)</span>;<br>
+      &nbsp;&nbsp;<span class="prop">font-weight</span>: <span class="value">300</span>;<br>
+      &nbsp;&nbsp;<span class="prop">font-size</span>: <span class="value">20px</span>;<br>
+      }
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: FOOTER
+       ============================================================ -->
+  <div class="section" id="footer">
+    <h2 class="section-title">Footer</h2>
+    <p class="desc">4-column footer layout on a #fafafa background with cheltenham featured text. Minimum height 412px.</p>
+
+    <div class="component-stage">
+      <div class="footer-mockup">
+        <div class="footer-col">
+          <h5>News</h5>
+          <a href="#">Home Page</a>
+          <a href="#">World</a>
+          <a href="#">U.S.</a>
+          <a href="#">Politics</a>
+          <a href="#">Business</a>
+        </div>
+        <div class="footer-col">
+          <h5>Opinion</h5>
+          <a href="#">Editorials</a>
+          <a href="#">Columnists</a>
+          <a href="#">Letters</a>
+          <a href="#">Sunday Review</a>
+        </div>
+        <div class="footer-col">
+          <h5>Arts</h5>
+          <a href="#">Books</a>
+          <a href="#">Movies</a>
+          <a href="#">Music</a>
+          <a href="#">Television</a>
+        </div>
+        <div class="footer-col">
+          <h5>More</h5>
+          <a href="#">Games</a>
+          <a href="#">Cooking</a>
+          <a href="#">Wirecutter</a>
+          <a href="#">The Athletic</a>
+        </div>
+        <div class="footer-featured">
+          <p style="font-family:var(--f-cheltenham);font-weight:300;font-size:18px;color:var(--dark-gray)">The New York Times Company</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <span class="selector">footer</span> {<br>
+      &nbsp;&nbsp;<span class="prop">min-height</span>: <span class="value">412px</span>;<br>
+      &nbsp;&nbsp;<span class="prop">background</span>: <span class="value">#fafafa</span>;<br>
+      &nbsp;&nbsp;<span class="prop">display</span>: <span class="value">grid</span>;<br>
+      &nbsp;&nbsp;<span class="prop">grid-template-columns</span>: <span class="value">repeat(4, 1fr)</span>;<br>
+      }
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SECTION: DARK MODE
+       ============================================================ -->
+  <div class="section" id="dark-mode">
+    <h2 class="section-title" style="border-bottom-color:var(--white)">Dark Mode</h2>
+    <p class="desc"><code>[data-mode=dark]</code> overrides invert text colors, switch to dark backgrounds, and adjust game brand colors for accessibility on dark surfaces.</p>
+
+    <div class="dark-mode-preview">
+      <h3 class="dm-header" style="font-family:var(--f-karnak);font-size:24px;font-weight:700;margin-bottom:8px;">Dark Mode Token Overrides</h3>
+      <p class="dm-copy" style="font-size:14px;margin-bottom:8px;">Body text becomes lighter on dark backgrounds, maintaining the same hierarchy but with inverted luminance values.</p>
+      <p class="dm-caption" style="font-size:12px;margin-bottom:24px;">Captions and credits shift to mid-gray tones for comfortable reading.</p>
+
+      <div style="margin-bottom:24px">
+        <h4 style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dark-gray);margin-bottom:12px;">Text Color Inversions</h4>
+        <table class="token-table" style="color:var(--lighter-gray)">
+          <thead>
+            <tr><th style="color:var(--gray)">Token</th><th style="color:var(--gray)">Light</th><th style="color:var(--gray)">Dark</th></tr>
+          </thead>
+          <tbody>
+            <tr style="border-color:var(--extra-dark-gray)">
+              <td><code style="background:var(--extra-dark-gray);color:#e6e6e6">--g-color-header</code></td>
+              <td>#121212</td>
+              <td style="color:#ebebeb">#ebebeb</td>
+            </tr>
+            <tr style="border-color:var(--extra-dark-gray)">
+              <td><code style="background:var(--extra-dark-gray);color:#e6e6e6">--g-color-copy</code></td>
+              <td>#363636</td>
+              <td style="color:#bbb">#bbb</td>
+            </tr>
+            <tr style="border-color:var(--extra-dark-gray)">
+              <td><code style="background:var(--extra-dark-gray);color:#e6e6e6">--g-color-caption</code></td>
+              <td>#727272</td>
+              <td style="color:#979797">#979797</td>
+            </tr>
+            <tr style="border-color:var(--extra-dark-gray)">
+              <td><code style="background:var(--extra-dark-gray);color:#e6e6e6">--g-color-anchor</code></td>
+              <td>#326891</td>
+              <td style="color:#6493e6">#6493e6</td>
+            </tr>
+            <tr style="border-color:var(--extra-dark-gray)">
+              <td><code style="background:var(--extra-dark-gray);color:#e6e6e6">background</code></td>
+              <td>#fff</td>
+              <td style="color:#999">#121212</td>
+            </tr>
+            <tr style="border-color:var(--extra-dark-gray)">
+              <td><code style="background:var(--extra-dark-gray);color:#e6e6e6">surface</code></td>
+              <td>#f8f8f8</td>
+              <td style="color:#999">#1b1b1b</td>
+            </tr>
+            <tr style="border-color:var(--extra-dark-gray)">
+              <td><code style="background:var(--extra-dark-gray);color:#e6e6e6">border</code></td>
+              <td>#ebebeb</td>
+              <td style="color:#999">#363636</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <h4 style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dark-gray);margin-bottom:12px;">Adjusted Game Colors (Dark)</h4>
+        <div class="dm-swatch-grid">
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#fbd300"></div>
+            <div class="dm-label">Games</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#7aa8eb"></div>
+            <div class="dm-label">Crossword</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#a5c8fb"></div>
+            <div class="dm-label">Mini</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#c2e86e"></div>
+            <div class="dm-label">Tiles</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#f7da21"></div>
+            <div class="dm-label">Sp. Bee</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#fd8a82"></div>
+            <div class="dm-label">Lt. Boxed</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#fcab2e"></div>
+            <div class="dm-label">Sudoku</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#565758"></div>
+            <div class="dm-label">Wordle</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#c4baff"></div>
+            <div class="dm-label">Connect.</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#c2e8e2"></div>
+            <div class="dm-label">Strands</div>
+          </div>
+          <div class="dm-swatch">
+            <div class="dm-color" style="background:#a56bd4"></div>
+            <div class="dm-label">Pips</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dark Mode Card Example -->
+      <div style="margin-top:32px;">
+        <h4 style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dark-gray);margin-bottom:12px;">Component Preview (Dark)</h4>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div style="background:var(--med-black);border-radius:8px;border:1px solid var(--extra-dark-gray);padding:20px;width:260px;">
+            <div style="font-family:var(--f-karnakcondensed);font-size:24px;font-weight:700;color:var(--lightest-gray);margin-bottom:8px;">Wordle</div>
+            <div style="font-size:13px;color:var(--lighter-gray);margin-bottom:16px;">Get 6 chances to guess a 5-letter word.</div>
+            <button style="border-radius:9999px;background:var(--lightest-gray);color:var(--dark-black);font-family:var(--f-franklin);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:0.04em;padding:8px 24px;border:none;cursor:pointer;">PLAY</button>
+          </div>
+          <div style="background:var(--med-black);border-radius:7px;padding:20px;width:260px;box-shadow:0 4px 23px rgba(0,0,0,0.3);">
+            <div style="font-family:var(--f-karnak);font-size:18px;font-weight:700;color:var(--lightest-gray);margin-bottom:12px;">Statistics</div>
+            <div style="display:flex;gap:16px;text-align:center;">
+              <div style="flex:1;">
+                <div style="font-family:var(--f-karnak);font-size:24px;color:var(--lightest-gray);">42</div>
+                <div style="font-size:10px;color:var(--gray);">Played</div>
+              </div>
+              <div style="flex:1;">
+                <div style="font-family:var(--f-karnak);font-size:24px;color:var(--lightest-gray);">95</div>
+                <div style="font-size:10px;color:var(--gray);">Win %</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="code-block" style="margin-top:16px">
+      <span class="selector">[data-mode=dark]</span> {<br>
+      &nbsp;&nbsp;<span class="prop">--g-color-header</span>: <span class="value">#ebebeb</span>;<br>
+      &nbsp;&nbsp;<span class="prop">--g-color-copy</span>: <span class="value">#bbb</span>;<br>
+      &nbsp;&nbsp;<span class="prop">--g-color-caption</span>: <span class="value">#979797</span>;<br>
+      &nbsp;&nbsp;<span class="prop">--g-color-anchor</span>: <span class="value">#6493e6</span>;<br>
+      &nbsp;&nbsp;<span class="prop">--background</span>: <span class="value">#121212</span>;<br>
+      &nbsp;&nbsp;<span class="prop">--surface</span>: <span class="value">#1b1b1b</span>;<br>
+      &nbsp;&nbsp;<span class="prop">--border</span>: <span class="value">#363636</span>;<br>
+      &nbsp;&nbsp;<span class="prop">--wordle-gray</span>: <span class="value">#565758</span>; <span class="comment">/* darkened for contrast */</span><br>
+      }
+    </div>
+  </div>
+
+  <!-- ============================================================
+       END — CREDITS
+       ============================================================ -->
+  <div class="divider"></div>
+  <div style="text-align:center;padding:40px 0;">
+    <p style="font-family:var(--f-cheltenham);font-weight:300;font-size:24px;color:var(--dark-gray);margin-bottom:8px;">NYT Design System Reference</p>
+    <p style="font-size:12px;color:var(--light-gray);letter-spacing:0.03em;">Extracted from nytimes.com production CSS &mdash; For internal reference only</p>
+    <p style="font-size:11px;color:var(--lighter-gray);margin-top:8px;">7 font families &bull; 15 grayscale values &bull; 11 game brand colors &bull; 17 color ramps &bull; 13 spacing tokens &bull; 6 component patterns</p>
+  </div>
+
+</div><!-- /.main -->
+
+<!-- ============================================================
+     SCRIPTS
+     ============================================================ -->
+<script>
+// Scroll progress bar
+(function() {
+  const bar = document.getElementById('scrollProgress');
+  function update() {
+    const scrollTop = window.scrollY;
+    const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+    bar.style.width = progress + '%';
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+
+// Active section highlighting in sidebar
+(function() {
+  const links = document.querySelectorAll('.sidebar nav a');
+  const sections = [];
+
+  links.forEach(function(link) {
+    const href = link.getAttribute('href');
+    if (href && href.startsWith('#')) {
+      const target = document.getElementById(href.slice(1));
+      if (target) {
+        sections.push({ link: link, target: target });
+      }
+    }
+  });
+
+  function update() {
+    const scrollY = window.scrollY + 100;
+    let current = null;
+
+    for (let i = sections.length - 1; i >= 0; i--) {
+      if (scrollY >= sections[i].target.offsetTop) {
+        current = sections[i].link;
+        break;
+      }
+    }
+
+    links.forEach(function(link) {
+      link.classList.remove('active');
+    });
+
+    if (current) {
+      current.classList.add('active');
+    }
+  }
+
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+</script>
+
+</body>
+</html>

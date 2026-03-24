@@ -117,4 +117,43 @@ describe("admin async handles", () => {
     expect(session?.lastEventSeq).toBe(4);
     expect(session?.status).toBe("completed");
   });
+
+  it("treats nested operation status payloads as terminal during poll fallback", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("stream disconnected"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            operation: {
+              id: "op-2",
+              status: "completed",
+              updated_at: "2026-03-21T06:15:00Z",
+            },
+            latest_event_seq: 9,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const state = await waitForOperationTerminalState({
+      operationId: "op-2",
+      flowScope: "POST:/api/admin/trr-api/operations:poll",
+      flowKey: "flow-2",
+      input: "/api/admin/trr-api/operations",
+      method: "POST",
+      streamTimeoutMs: 1_000,
+      statusTimeoutMs: 1_000,
+    });
+
+    expect(state.status).toBe("completed");
+    expect(state.eventSeq).toBe(9);
+    const session = getAdminOperationSession("POST:/api/admin/trr-api/operations:poll");
+    expect(session?.status).toBe("completed");
+    expect(session?.lastEventSeq).toBe(9);
+  });
 });

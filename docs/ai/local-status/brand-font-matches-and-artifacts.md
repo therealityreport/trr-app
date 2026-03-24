@@ -1,0 +1,196 @@
+# Brand font matches and artifacts
+
+Last updated: 2026-03-22
+
+## Handoff Snapshot
+```yaml
+handoff:
+  include: true
+  state: recent
+  last_updated: 2026-03-22
+  current_phase: "refresh flow, stylesheet-backed R2 inventory sync, stronger similarity scoring, and offline visual pipeline scaffold implemented"
+  next_action: "Use real text specimen imagery to review visual-similarity reports and promote approved results into curated rules"
+  detail: self
+```
+
+- Added a new deterministic brand-font matching stack under `apps/web/src/lib/fonts/brand-fonts/`:
+  - bounded discovery scanner over the brand typography sections and NYT Games helper files
+  - weight and width normalization tables
+  - typed brand registry and normalized R2 catalog generation
+  - curated rules plus deterministic scoring with warnings, fit-for-role, and credibility thresholds
+- Extended the brand-font stack with a refreshable admin data path and stronger family-affinity scoring:
+  - added `apps/web/src/app/api/admin/design-system/brand-font-matches/route.ts` for authenticated artifact reads and live regeneration
+  - added API response helpers in `apps/web/src/lib/fonts/brand-fonts/index.ts`
+  - promoted family-similarity ranking into reusable scorer exports in `apps/web/src/lib/fonts/brand-fonts/scoring.ts`
+  - bumped scoring config to `2026-03-22.score.v2`
+- Updated the Fonts Library inventory so the hosted and Realitease font sections now derive from the actual `/hosted-fonts.css` stylesheet inventory instead of only hand-curated arrays:
+  - added `apps/web/src/lib/fonts/hosted-font-catalog.ts`
+  - `DesignSystemPageClient.tsx` now parses the served stylesheet and merges it with local usage/description overrides
+  - this keeps `http://admin.localhost:3000/design-system/fonts` aligned with the font files actually published from R2, including stylesheet-backed families such as `Rude Slab Condensed`
+- Added checked-in generated artifacts under `apps/web/src/lib/fonts/brand-fonts/generated/` for:
+  - discovered brand-font evidence snapshot
+  - normalized brand registry
+  - normalized R2 catalog
+  - scored brand match results
+- Added `apps/web/scripts/generate-brand-font-artifacts.mjs` and `generate:brand-font-artifacts` in `apps/web/package.json`.
+- Added `apps/web/scripts/brand-font-visual-similarity.mjs` and `brand-fonts:visual-similarity` in `apps/web/package.json`:
+  - accepts a brand role plus specimen image
+  - renders candidate hosted fonts offline with Playwright
+  - combines heuristic and visual scores into a reviewable JSON report
+  - emits a suggested curated-rule patch template for human review
+- Extended `DesignSystemPageClient.tsx` with a new local `Brand Matches` mode inside the existing Fonts Library:
+  - preserves the comparison tray
+  - shows provenance, confidence, evidence, top match, warnings, and secondary matches
+  - supports `Compare Top Match` and `View In Catalog` handoff back into the hosted catalog search
+  - now exposes a top-container `Run / Refresh Matches` button that triggers live regeneration and reloads results in place
+- Added targeted coverage in:
+  - `apps/web/tests/brand-font-artifacts.test.ts`
+  - `apps/web/tests/brand-font-matching-scoring.test.ts`
+  - `apps/web/tests/brand-font-matches-route.test.ts`
+  - `apps/web/tests/design-system-fonts-page.test.tsx`
+  - `apps/web/tests/hosted-font-catalog.test.ts`
+- Validation:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run generate:brand-font-artifacts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-font-artifacts.test.ts tests/design-system-fonts-page.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-font-artifacts.test.ts tests/brand-font-matching-scoring.test.ts tests/brand-font-matches-route.test.ts tests/design-system-fonts-page.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/design-system-fonts-page.test.tsx tests/hosted-font-catalog.test.ts tests/brand-font-artifacts.test.ts tests/brand-font-matches-route.test.ts tests/brand-font-matching-scoring.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-system/DesignSystemPageClient.tsx src/components/admin/design-system/BrandFontMatchesPanel.tsx src/lib/fonts/brand-fonts tests/design-system-fonts-page.test.tsx tests/brand-font-artifacts.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/fonts/hosted-font-catalog.ts src/components/admin/design-system/DesignSystemPageClient.tsx tests/design-system-fonts-page.test.tsx tests/hosted-font-catalog.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/app/api/admin/design-system/brand-font-matches/route.ts src/components/admin/design-system/BrandFontMatchesPanel.tsx src/components/admin/design-system/DesignSystemPageClient.tsx src/lib/fonts/brand-fonts/index.ts src/lib/fonts/brand-fonts/normalization.ts src/lib/fonts/brand-fonts/scoring.ts tests/brand-font-matches-route.test.ts tests/brand-font-matching-scoring.test.ts tests/design-system-fonts-page.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc -p tsconfig.typecheck.json --noEmit`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec node scripts/brand-font-visual-similarity.mjs --brand-id brand-nyt-games --role-label "Primary Display" --specimen public/design-docs/nyt-games/wordle-card.svg --text WORDLE --limit 6 --output tmp/brand-font-visual-similarity-wordle.json`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-docs/AIIllustration.tsx src/components/admin/design-docs/sections/games/game-palettes.ts src/lib/fonts/brand-fonts/discovery.ts`
+  - `/Users/thomashulihan/Projects/TRR/scripts/handoff-lifecycle.sh closeout`
+- Follow-through completed:
+  - `AIIllustration.tsx` now accepts `imageUrl: null` from the checked-in illustration prompt JSON, which cleared the shared brand design-doc typecheck break.
+  - `SPELLING_BEE` in `game-palettes.ts` now exposes the `blue` and `darkBlue` aliases expected by `GameSpellingBee.tsx`.
+  - `AGENTS.md` at the workspace root was trimmed to the 600-word policy cap, and closeout now passes.
+  - The visual pipeline scaffold is runnable today, but meaningful ranking still depends on supplying real text-bearing specimen imagery rather than icon-only brand assets.
+- R2 font storage was renamed and the app was synced to the new prefixes:
+  - moved `fonts/monotype/` to `fonts/trr/` in Cloudflare R2 and verified the new prefix contains 867 objects while the old prefix is empty
+  - moved `fonts/realitease/` to `fonts/reference fonts/NYTimes/` in Cloudflare R2 and verified the new prefix contains 22 objects while the old prefix is empty
+  - updated `cdn-fonts.css`, `realitease-fonts.css`, `hosted-fonts.ts`, `hosted-font-catalog.ts`, `DesignSystemPageClient.tsx`, and the targeted tests to use `/fonts/trr/...` and `/fonts/reference%20fonts/NYTimes/...`
+  - retitled the admin source filter/section from `Realitease` to `Reference` so `/design-system/fonts` matches the renamed R2 structure while preserving the existing Realitease game routes
+  - verified live public URLs return `200 OK`, including:
+    - `https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Hamburg%20Serial/HamburgSerial-930108065.otf`
+    - `https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTKarnak_Condensed.woff2`
+- Additional validation for the rename:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run generate:brand-font-artifacts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/hosted-fonts.test.ts tests/hosted-font-catalog.test.ts tests/design-system-fonts-page.test.tsx tests/brand-font-artifacts.test.ts tests/brand-font-matches-route.test.ts tests/brand-font-matching-scoring.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc -p tsconfig.typecheck.json --noEmit`
+- Follow-up fix for incomplete additional-family coverage on `/design-system/fonts`:
+  - added `/Users/thomashulihan/Projects/TRR/TRR-APP/scripts/generate-additional-trr-font-catalog.py`
+  - generated `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/fonts/generated/additional-trr-font-catalog.ts` from the live R2 `fonts/trr/` keys for the extra hosted families that were not fully declared in `cdn-fonts.css`
+  - updated `DesignSystemPageClient.tsx` so those additional TRR families use generated style inventories instead of the old single-preview-file fallback
+  - updated `brand-fonts/generator.ts` so the normalized R2 catalog also includes the richer additional-family style coverage
+  - verified `Rude Slab` now resolves from the generated catalog and exposes its multi-style inventory instead of a single fallback style
+- Additional validation for the follow-up fix:
+  - `python3.11 /Users/thomashulihan/Projects/TRR/TRR-APP/scripts/generate-additional-trr-font-catalog.py`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/design-system-fonts-page.test.tsx tests/brand-font-artifacts.test.ts tests/hosted-font-catalog.test.ts tests/hosted-fonts.test.ts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc -p tsconfig.typecheck.json --noEmit`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-system/DesignSystemPageClient.tsx src/lib/fonts/brand-fonts/generator.ts src/lib/fonts/hosted-font-catalog.ts src/lib/fonts/hosted-fonts.ts src/lib/fonts/additional-monotype-fonts.ts src/lib/fonts/generated/additional-trr-font-catalog.ts tests/design-system-fonts-page.test.tsx tests/brand-font-artifacts.test.ts tests/hosted-font-catalog.test.ts tests/hosted-fonts.test.ts`
+- Follow-up polish for Brand Matches specimen rendering:
+  - updated `BrandFontMatchesPanel.tsx` so each brand-role row now renders a dedicated specimen block in the source/substitute family instead of relying only on plain metadata text
+  - added deterministic specimen font-family, weight, style, and size inference so display roles like `NYT Games / Secondary Display` render in `Stymie`
+  - added a focused page test asserting the `Secondary Display` specimen renders with the `Stymie` family and bold weight in Brand Matches
+- Additional validation for the specimen-rendering follow-up:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/design-system-fonts-page.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc -p tsconfig.typecheck.json --noEmit`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-system/BrandFontMatchesPanel.tsx tests/design-system-fonts-page.test.tsx`
+- Glyph-driven visual affinity is now wired into the brand-font stack:
+  - added `apps/web/scripts/brand-font-glyph-comparison.mjs` to render offline glyph comparisons with Playwright/canvas, score 62 glyphs per pair across candidate weights, compute kerning deltas, and emit:
+    - raw debug output in `apps/web/tmp/brand-font-glyph-comparison-raw.json`
+    - checked-in runtime/UI summary artifact in `apps/web/src/lib/fonts/brand-fonts/generated/glyph-comparison-results.json`
+  - added `apps/web/src/lib/fonts/brand-fonts/glyph-comparison.ts` plus new glyph/scoring types in `apps/web/src/lib/fonts/brand-fonts/types.ts`
+  - normalized alias and trait override lookup keys in `apps/web/src/lib/fonts/brand-fonts/normalization.ts` so hyphenated/source-family aliases resolve consistently
+  - replaced the old static visual-affinity map in `apps/web/src/lib/fonts/brand-fonts/scoring.ts` with artifact-backed visual affinity scoring, explicit `ScoreBreakdown`, `scoringMode`, and rebalanced weights:
+    - `classification` max `18`
+    - `role` max `20`
+    - `width` max `15`
+    - `weightCoverage` max `15`
+    - `styleSupport` max `10`
+    - `traitCompatibility` max `10`
+    - `familyName` max `20`
+    - `visualAffinity` max `15`
+    - `ruleBonus` max `24`
+    - `riskPenalty` `0/-10/-20`
+  - tightened the `nyt-karnakcondensed` classification path so serif lineage no longer dominates on its own, and curated substitute intent can outrank generic editorial-serif matches when visual affinity agrees
+  - updated `apps/web/src/lib/fonts/brand-fonts/generator.ts`, `apps/web/src/lib/fonts/brand-fonts/index.ts`, and `apps/web/scripts/generate-brand-font-artifacts.mjs` so brand-font artifacts now carry `scoringMode`, can read the glyph artifact when hashes match, and support `--with-glyph-comparison`
+  - added package scripts:
+    - `brand-fonts:glyph-comparison`
+    - `generate:brand-font-artifacts:with-glyphs`
+- Brand Matches and Font Pair Audit now expose the new artifact-driven scoring transparently:
+  - `DesignSystemPageClient.tsx` now labels the top-container action `Rebuild Rankings`
+  - `BrandFontMatchesPanel.tsx` now shows:
+    - `artifact` vs `local-rerank`
+    - `metadata-only` vs `visual+metadata`
+    - expandable score breakdown bars for every match
+    - short brand-reference specimen text in the source font when the evidence excerpt is concise enough, preserving rows like `NYT Games / Secondary Display -> Stymie Bold`
+  - `FontPairAudit.tsx` was refactored to read `glyph-comparison-results.json` directly, render per-weight tabs, classify glyphs from computed similarity thresholds, and prefill kerning letter-spacing recommendations from the artifact
+- Additional validation for the glyph-driven follow-up:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run brand-fonts:glyph-comparison`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run generate:brand-font-artifacts:with-glyphs`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-font-normalization.test.ts tests/brand-font-matching-scoring.test.ts tests/brand-font-matches-route.test.ts tests/design-system-fonts-page.test.tsx tests/font-pair-audit.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/fonts/brand-fonts/types.ts src/lib/fonts/brand-fonts/normalization.ts src/lib/fonts/brand-fonts/glyph-comparison.ts src/lib/fonts/brand-fonts/scoring.ts src/lib/fonts/brand-fonts/generator.ts src/lib/fonts/brand-fonts/index.ts src/lib/fonts/hosted-font-catalog.ts src/components/admin/design-system/BrandFontMatchesPanel.tsx src/components/admin/design-system/DesignSystemPageClient.tsx src/components/admin/design-system/FontPairAudit.tsx tests/brand-font-normalization.test.ts tests/brand-font-matching-scoring.test.ts tests/brand-font-matches-route.test.ts tests/design-system-fonts-page.test.tsx tests/font-pair-audit.test.tsx`
+- Follow-up closeout on the earlier `AdminIASection` blocker:
+  - the stale typecheck note was incorrect in the current repo state; `AdminIASection.tsx` now resolves `@/lib/admin/admin-route-audit` normally and the app typecheck passes
+  - existing regression coverage already proves both sides of the contract:
+    - `tests/admin-ia-section.test.tsx` renders the section from the exported matrix data
+    - `tests/admin-route-audit.test.ts` validates the route-audit matrix and forwarder data shape
+  - canonical verification captured for this closeout:
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc -p tsconfig.typecheck.json --noEmit`
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/admin-ia-section.test.tsx tests/admin-route-audit.test.ts`
+    - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/components/admin/design-docs/sections/AdminIASection.tsx src/lib/admin/admin-route-audit.ts`
+- Follow-up correction for inflated glyph similarity scores:
+  - rewrote `apps/web/scripts/brand-font-glyph-comparison.mjs` so glyph affinity is now based on ink-only alpha masks rather than full-canvas RGB averages:
+    - crop each rendered glyph to its tight ink bounding box
+    - pad and normalize into a shared comparison frame
+    - compare alpha masks with `sum(abs(A - B)) / sum(max(A, B))` so whitespace no longer dominates the score
+    - add a fixed sentence comparison (`The quick brown fox jumps over the lazy dog 0123456789`) as a separate weight-level score
+    - aggregate each candidate weight with explicit buckets: uppercase `35%`, lowercase `35%`, numerals `10%`, sentence `20%`
+  - removed manual preferred-family injection from the visual pipeline:
+    - dropped `AUDIT_SEED_PAIRS`
+    - stopped adding `preferFamily` / `forceTopMatch` candidates to the glyph-comparison set
+    - kept `currentReferenceSubstitute` only as an auditable inclusion reason (`candidateSource: "current-substitute"`)
+  - removed positive preferred-family bonuses from runtime scoring in `apps/web/src/lib/fonts/brand-fonts/scoring.ts`; current substitutes are still labeled, but they no longer receive manual preference points
+  - updated `FontPairAudit.tsx` to show inclusion reason, per-weight uppercase/lowercase/numeral/sentence scores, and the fixed sentence comparison score
+  - updated `BrandFontMatchesPanel.tsx` to remove curated/preferred winner language and show current-substitute inclusion explicitly where applicable
+  - regenerated artifacts after the algorithm change; the previously inflated `KarnakPro-Book -> Gloucester` pair now lands at `51` aggregate visual affinity with a `31` sentence score instead of the old mid/high-90s result
+- Additional validation for the glyph-affinity correction:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run brand-fonts:glyph-comparison`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run generate:brand-font-artifacts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-font-matching-scoring.test.ts tests/font-pair-audit.test.tsx tests/design-system-fonts-page.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc -p tsconfig.typecheck.json --noEmit`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/fonts/brand-fonts/types.ts src/lib/fonts/brand-fonts/scoring.ts src/components/admin/design-system/FontPairAudit.tsx src/components/admin/design-system/BrandFontMatchesPanel.tsx scripts/brand-font-glyph-comparison.mjs tests/brand-font-matching-scoring.test.ts tests/font-pair-audit.test.tsx`
+- Weighted score rebalance landed after the glyph fix so visual evidence can change the winner instead of getting clipped by metadata:
+  - updated `apps/web/src/lib/fonts/brand-fonts/scoring.ts` to replace the old additive/clamp model with provenance-aware weighted profiles:
+    - `explicit-mapping-visual`
+    - `balanced-visual`
+    - `metadata-only`
+  - profile selection is now based on whether the source record has glyph-comparison coverage, not whether an individual candidate happened to resolve a pair
+  - the final score now uses normalized weighted contributions for:
+    - structural bucket: classification, role, width, weight coverage, style support, trait compatibility
+    - identity bucket: source-family token affinity
+    - visual bucket: glyph artifact aggregate visual affinity
+    - penalty bucket: risk subtraction after weighting
+  - updated `ScoreBreakdown` in `apps/web/src/lib/fonts/brand-fonts/types.ts` to carry:
+    - `profile`
+    - `structuralTotal`
+    - `identityTotal`
+    - `visualTotal`
+    - `penaltyTotal`
+    - weighted per-component values for UI bars
+  - updated `BrandFontMatchesPanel.tsx` so the breakdown is grouped by Structural / Identity / Visual / Penalty and shows the active profile badge instead of raw additive bars
+  - regenerated `brand-font-match-results.json`; the key NYT outcomes are now:
+    - `brand-nyt-games:spelling-bee / nyt-karnakcondensed`: `Rude Slab Condensed` above `Velino Compressed Text`
+    - `brand-nyt-games:canonical / nyt-franklin`: `Franklin Gothic`, `Hamburg Serial`, `News Gothic No. 2`
+    - `brand-nyt-games:canonical / nyt-cheltenham`: `Cheltenham`, `ITC Cheltenham`, `Gloucester`
+  - added regression coverage:
+    - expanded `tests/brand-font-matching-scoring.test.ts` for profile selection and the new ranking behavior
+    - added `tests/brand-font-ranking-snapshot.test.ts` to lock the current NYT top-3 outputs into an inline snapshot fixture
+    - updated `tests/design-system-fonts-page.test.tsx` to assert the weighted breakdown/profile UI in Brand Matches
+- Additional validation for the weighted rebalance:
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web run generate:brand-font-artifacts`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec vitest run tests/brand-font-matching-scoring.test.ts tests/brand-font-ranking-snapshot.test.ts tests/design-system-fonts-page.test.tsx`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec tsc -p tsconfig.typecheck.json --noEmit`
+  - `pnpm -C /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web exec eslint src/lib/fonts/brand-fonts/glyph-comparison.ts src/lib/fonts/brand-fonts/scoring.ts src/lib/fonts/brand-fonts/types.ts src/components/admin/design-system/BrandFontMatchesPanel.tsx tests/brand-font-matching-scoring.test.ts tests/brand-font-ranking-snapshot.test.ts tests/design-system-fonts-page.test.tsx`

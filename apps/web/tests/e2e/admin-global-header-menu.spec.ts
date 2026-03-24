@@ -19,20 +19,23 @@ test.describe("admin global header menu", () => {
     for (const label of [
       "Dev Dashboard",
       "Shows",
+      "Screenalytics",
+      "People",
       "Games",
-      "Survey Editor",
+      "Surveys",
       "Social Media",
       "Brands",
       "Users",
       "Groups",
       "UI Design System",
+      "Design Docs",
       "Settings",
     ]) {
       await expect(nav.getByRole("link", { name: label, exact: true })).toBeVisible();
     }
 
     await expect(nav.getByRole("button", { name: "Toggle shows submenu" })).toHaveAttribute("aria-expanded", "true");
-    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/shows");
+    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/shows");
   });
 
   test("limits recent shows submenu to the latest five", async ({ page }) => {

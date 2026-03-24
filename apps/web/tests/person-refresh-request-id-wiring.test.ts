@@ -25,7 +25,7 @@ describe("person refresh request-id diagnostics wiring", () => {
     expect(pageContents).toContain("target_cast_photo_ids");
     expect(pageContents).toContain("target_media_link_ids");
     expect(pageContents).toContain("scopedStageTargets.sources.length > 0");
-    expect(pageContents).toContain("selectedGetImagesSources");
+    expect(pageContents).toContain("getImagesSourceSelection");
     expect(pageContents).toContain("No filtered images to reprocess${effectiveGalleryImportSuffix}.");
     expect(pageContents).toContain("No filtered images to sync${effectiveGalleryImportSuffix}.");
   });
@@ -49,10 +49,10 @@ describe("person refresh request-id diagnostics wiring", () => {
     expect(pageContents).toContain("limit_per_source: perSourceLimit");
     expect(pageContents).toContain("const [getImagesSourceSelection, setGetImagesSourceSelection] =");
     expect(pageContents).toContain("GET_IMAGES_SOURCE_OPTIONS");
+    expect(pageContents).toContain("GET_IMAGES_SOURCE_SELECTION_MAP");
     expect(pageContents).toContain('all: ["nbcumv", "imdb", "tmdb"]');
     expect(pageContents).toContain('getty: ["nbcumv"]');
     expect(pageContents).toContain("getImagesSourcesForSelection(getImagesSourceSelection)");
-    expect(pageContents).toContain('getImagesSourceSelection === "getty"');
     expect(pageContents).toContain("skip_auto_count: true");
     expect(pageContents).toContain("skip_word_detection: true");
     expect(pageContents).toContain("skip_centering: true");
@@ -60,10 +60,10 @@ describe("person refresh request-id diagnostics wiring", () => {
     expect(pageContents).toContain("skip_prune: true");
     expect(pageContents).toContain("Runs the fused Getty / NBCUMV path.");
     expect(pageContents).toContain("Runs Getty, IMDb, and TMDb.");
-    expect(pageContents).toContain("Get Images source selection: Run All.");
+    expect(pageContents).toContain("Get Images source selection: ${getImagesSelectionLabel(getImagesSourceSelection)}.");
     expect(pageContents).toContain("Connecting to backend stream for source sync and mirroring");
     expect(pageContents).toContain("source sync + mirror only");
-    expect(pageContents).toContain("Run full Refresh Details now?");
+    expect(pageContents).toContain('Run Get Images for ${effectiveGalleryImportLabel}');
   });
 
   it("treats duplicate operation event sequence failures as non-retryable", () => {

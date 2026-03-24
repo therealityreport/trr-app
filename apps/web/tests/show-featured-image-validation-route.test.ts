@@ -4,11 +4,13 @@ import { NextRequest } from "next/server";
 const {
   requireAdminMock,
   getShowByIdMock,
+  getShowByExactSlugMock,
   updateShowByIdMock,
   validateShowImageForFieldMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getShowByIdMock: vi.fn(),
+  getShowByExactSlugMock: vi.fn(),
   updateShowByIdMock: vi.fn(),
   validateShowImageForFieldMock: vi.fn(),
 }));
@@ -19,6 +21,7 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getShowById: getShowByIdMock,
+  getShowByExactSlug: getShowByExactSlugMock,
   updateShowById: updateShowByIdMock,
   validateShowImageForField: validateShowImageForFieldMock,
 }));
@@ -40,10 +43,19 @@ describe("show route featured image validation", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getShowByIdMock.mockReset();
+    getShowByExactSlugMock.mockReset();
     updateShowByIdMock.mockReset();
     validateShowImageForFieldMock.mockReset();
 
     requireAdminMock.mockResolvedValue(undefined);
+    getShowByIdMock.mockResolvedValue({
+      id: SHOW_ID,
+      name: "Test Show",
+      slug: "test-show",
+      canonical_slug: "test-show",
+      alternative_names: ["Legacy Alias"],
+    });
+    getShowByExactSlugMock.mockResolvedValue(null);
     updateShowByIdMock.mockResolvedValue({
       id: SHOW_ID,
       name: "Test Show",
@@ -155,6 +167,74 @@ describe("show route featured image validation", () => {
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
       expect.objectContaining({ name: "Updated Name" })
+    );
+  });
+
+  it("normalizes nickname into the canonical slug and healed alternative names", async () => {
+    const response = await PUT(
+      buildRequest({
+        name: "Test Show",
+        nickname: " RHOSLC!!! ",
+        alternative_names: ["Salt Lake", "rhoslc", "Test Show"],
+      }),
+      {
+        params: Promise.resolve({ showId: SHOW_ID }),
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(getShowByExactSlugMock).toHaveBeenCalledWith("rhoslc");
+    expect(updateShowByIdMock).toHaveBeenCalledWith(
+      SHOW_ID,
+      expect.objectContaining({
+        name: "Test Show",
+        slug: "rhoslc",
+        alternativeNames: ["rhoslc", "Salt Lake"],
+      })
+    );
+  });
+
+  it("rejects nickname values that normalize to an empty slug", async () => {
+    const response = await PUT(buildRequest({ nickname: "!!!" }), {
+      params: Promise.resolve({ showId: SHOW_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({ error: "nickname must produce a valid slug" });
+    expect(updateShowByIdMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects nickname slug collisions with a clear 409 response", async () => {
+    getShowByExactSlugMock.mockResolvedValue({
+      id: "99999999-9999-9999-9999-999999999999",
+      name: "Other Show",
+      slug: "rhoslc",
+    });
+
+    const response = await PUT(buildRequest({ nickname: "RHOSLC" }), {
+      params: Promise.resolve({ showId: SHOW_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload).toEqual({
+      error: 'nickname slug "rhoslc" is already used by Other Show',
+    });
+    expect(updateShowByIdMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps slug first when alternative names are saved without a nickname change", async () => {
+    const response = await PUT(buildRequest({ alternative_names: ["Bravo Alias", "test-show"] }), {
+      params: Promise.resolve({ showId: SHOW_ID }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(updateShowByIdMock).toHaveBeenCalledWith(
+      SHOW_ID,
+      expect.objectContaining({
+        alternativeNames: ["test-show", "Bravo Alias"],
+      })
     );
   });
 });

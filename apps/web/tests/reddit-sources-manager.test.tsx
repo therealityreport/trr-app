@@ -1,7 +1,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
+import RedditSourcesManager, { buildContainerRefreshTimeoutMessage } from "@/components/admin/reddit-sources-manager";
 import { auth } from "@/lib/firebase";
 
 const { usePathnameMock, useSearchParamsMock, useRouterPushMock, useRouterReplaceMock } = vi.hoisted(() => ({
@@ -312,6 +312,39 @@ describe("RedditSourcesManager", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("builds state-aware timeout guidance for stranded and degraded refresh runs", () => {
+    expect(
+      buildContainerRefreshTimeoutMessage("Episode 3", {
+        run_id: "run-queued",
+        status: "queued",
+        stalled: true,
+        failure_reason_code: "worker_unavailable",
+        attempt_count: 0,
+        claimed_by_worker_id: null,
+        heartbeat_at: null,
+      } as never),
+    ).toContain("backend queue unavailable / no healthy worker detected");
+
+    expect(
+      buildContainerRefreshTimeoutMessage("Episode 3", {
+        run_id: "run-stranded",
+        status: "queued",
+        stalled: true,
+        attempt_count: 0,
+        claimed_by_worker_id: "worker-1",
+        heartbeat_at: "2026-03-22T10:00:00.000Z",
+      } as never),
+    ).toContain("queued run appears stranded in backend");
+
+    expect(
+      buildContainerRefreshTimeoutMessage("Episode 3", {
+        run_id: "run-partial",
+        status: "partial",
+        operator_hint: "Episode 3: live scrape blocked by Reddit (403); showing cached posts when available.",
+      } as never),
+    ).toContain("live scrape blocked by Reddit (403)");
   });
 
   it("renders communities grouped with Add Community and Add Thread actions", async () => {
@@ -1692,6 +1725,229 @@ describe("RedditSourcesManager", () => {
     expect(pushedPath).not.toBe("/admin/social/reddit");
   });
 
+  it("renders reddit analytics recovery summary and bulk stale-window backfill CTA", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/analytics/community/community-1/summary")) {
+        return jsonResponse({
+          totals: { tracked_flair_post_count: 660, show_match_post_count: 401, comment_count: 18841 },
+          freshness: {
+            latest_run_timestamp: "2026-03-22T14:00:00.000Z",
+            latest_run_status: "partial",
+          },
+          coverage: {
+            tracked_post_count: 660,
+            detail_scraped_post_count: 46,
+            comment_saved_post_count: 163,
+            media_post_count: 42,
+            detail_coverage_pct: 7,
+            comment_coverage_pct: 24.7,
+            stale_container_count: 1,
+            recovered_container_count: 18,
+            container_count: 19,
+          },
+          container_statuses: [
+            {
+              container_key: "episode-3",
+              stale: true,
+              stale_reason_code: "reddit_http_403",
+              failure_reason_code: "reddit_http_403",
+            },
+            {
+              container_key: "episode-5",
+              stale: false,
+              failure_reason_code: "coverage_incomplete",
+            },
+          ],
+        });
+      }
+      if (url.includes("/stored-post-counts")) {
+        return jsonResponse({
+          counts: { "episode-3": 0, "episode-5": 19 },
+          total_posts: 660,
+          tracked_total_posts: 660,
+        });
+      }
+      if (url.includes("/api/admin/reddit/runs/backfill")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          status: "started",
+          operation_id: "op-backfill-1",
+          attached: false,
+          operation: {
+            id: "op-backfill-1",
+            status: "running",
+            progress_payload: {
+              stage: "waiting_for_run",
+              message: "Waiting for Reddit recovery run for episode-3.",
+              summary: { target_count: 1, completed_count: 0 },
+              started: [{ container_key: "episode-3", run: { run_id: "run-new-1", status: "queued" } }],
+            },
+          },
+        });
+      }
+      if (url.includes("/api/admin/trr-api/operations/op-backfill-1")) {
+        return jsonResponse({
+          operation: {
+            id: "op-backfill-1",
+            status: "completed",
+            result_payload: {
+              stage: "complete",
+              message: "Reddit stale-window recovery session finished.",
+              summary: { target_count: 1, completed_count: 1 },
+              started: [{ container_key: "episode-3", run: { run_id: "run-new-1", status: "completed" } }],
+              skipped: [],
+              failures: [],
+            },
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        seasonId="season-1"
+        seasonNumber={6}
+      />,
+    );
+
+    expect(await screen.findByTestId("reddit-analytics-summary")).toBeInTheDocument();
+    expect(screen.getByText(/18 recovered · 1 stale/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Rerun Stale Windows \(1\)/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Rerun Stale Windows \(1\)/i }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/backfill")),
+      ).toBe(true);
+    });
+  });
+
+  it("starts detail enrichment even when there are no stale windows", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/analytics/community/community-1/summary")) {
+        return jsonResponse({
+          totals: { tracked_flair_post_count: 20, show_match_post_count: 20, comment_count: 200 },
+          freshness: {
+            latest_run_timestamp: "2026-03-22T14:00:00.000Z",
+            latest_run_status: "completed",
+          },
+          coverage: {
+            tracked_post_count: 20,
+            detail_scraped_post_count: 12,
+            comment_saved_post_count: 20,
+            media_post_count: 10,
+            detail_coverage_pct: 60,
+            comment_coverage_pct: 100,
+            stale_container_count: 0,
+            recovered_container_count: 21,
+            container_count: 21,
+          },
+          container_statuses: [
+            {
+              container_key: "episode-1",
+              stale: false,
+              failure_reason_code: null,
+            },
+            {
+              container_key: "episode-2",
+              stale: false,
+              failure_reason_code: null,
+            },
+          ],
+        });
+      }
+      if (url.includes("/stored-post-counts")) {
+        return jsonResponse({
+          counts: { "episode-1": 20 },
+          total_posts: 20,
+          tracked_total_posts: 20,
+        });
+      }
+      if (url.includes("/api/admin/reddit/runs/backfill")) {
+        const parsedBody = JSON.parse(String(init?.body ?? "{}")) as {
+          detail_refresh?: boolean;
+          mode?: string;
+          container_keys?: string[];
+        };
+        expect(parsedBody.detail_refresh).toBe(true);
+        expect(parsedBody.mode).toBe("sync_details");
+        expect(parsedBody.container_keys).toEqual(["episode-1", "episode-2"]);
+        return jsonResponse({
+          status: "started",
+          operation_id: "op-detail-1",
+          attached: false,
+          operation: {
+            id: "op-detail-1",
+            status: "running",
+            progress_payload: {
+              detail_refresh: true,
+              message: "Planned Reddit detail-enrichment session.",
+              summary: { target_count: 2, completed_count: 0, enrichment_target_count: 2 },
+              started: [],
+            },
+          },
+        });
+      }
+      if (url.includes("/api/admin/trr-api/operations/op-detail-1")) {
+        return jsonResponse({
+          operation: {
+            id: "op-detail-1",
+            status: "completed",
+            result_payload: {
+              detail_refresh: true,
+              message: "Reddit detail-enrichment session finished.",
+              summary: { target_count: 2, completed_count: 2, enrichment_target_count: 2 },
+              started: [],
+              skipped: [],
+              failures: [],
+            },
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        seasonId="season-1"
+        seasonNumber={6}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /Enrich Missing Detail/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Enrich Missing Detail/i }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/backfill")),
+      ).toBe(true);
+    });
+  });
+
   it("renders episode pills and opens modal with linked + unassigned posts on demand", async () => {
     const communityWithSaltLakeFlair = {
       ...baseCommunity,
@@ -2666,6 +2922,99 @@ describe("RedditSourcesManager", () => {
     }, { timeout: 60_000 });
   }, 60_000);
 
+  it("renders kickoff-blocked worker-unavailable errors before polling begins", async () => {
+    const communityWithSaltLakeFlair = {
+      ...baseCommunity,
+      post_flairs: ["Salt Lake City"],
+      analysis_flairs: ["Salt Lake City"],
+      analysis_all_flairs: ["Salt Lake City"],
+    };
+    const refreshPayload = {
+      community: communityWithSaltLakeFlair,
+      candidates: [],
+      episode_matrix: [],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 0,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+    const customAnalyticsPayload = {
+      weekly: [
+        {
+          week_index: 1,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00.000Z",
+          end: "2025-09-16T18:59:59.000Z",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        return jsonResponse(customAnalyticsPayload);
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/runs/")) {
+        return jsonResponse({ error: "unexpected polling" }, 500);
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        if (url.includes("refresh=true")) {
+          return jsonResponse(
+            {
+              error: "Reddit refresh remote-worker ownership is enforced and Modal dispatch is not ready.",
+            },
+            503,
+          );
+        }
+        return jsonResponse({
+          discovery: {
+            ...discoveryPayload.discovery,
+            totals: {
+              fetched_rows: 0,
+              matched_rows: 0,
+              tracked_flair_rows: 0,
+            },
+            threads: [],
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithSaltLakeFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: /Sync Posts/ }).length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: /Sync Posts/ })[0]);
+    expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
+
+    clickPeriodRefreshPosts("Pre-Season");
+
+    expect(
+      await screen.findAllByText("Reddit refresh remote-worker ownership is enforced and Modal dispatch is not ready."),
+    ).toHaveLength(2);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(false);
+  });
+
   it("shows live comments-stage counters from backend run diagnostics", async () => {
     const communityWithSaltLakeFlair = {
       ...baseCommunity,
@@ -2955,6 +3304,123 @@ describe("RedditSourcesManager", () => {
       expect(within(preSeasonCard).queryByText("Salt Lake City · 2")).not.toBeInTheDocument();
     }, { timeout: 10_000 });
   }, 20_000);
+
+  it("surfaces partial Reddit 403 window syncs as warnings without a hard failure", async () => {
+    const communityWithSaltLakeFlair = {
+      ...baseCommunity,
+      post_flairs: ["Salt Lake City"],
+      analysis_flairs: ["Salt Lake City"],
+      analysis_all_flairs: ["Salt Lake City"],
+    };
+    const refreshPayload = {
+      community: communityWithSaltLakeFlair,
+      candidates: [],
+      episode_matrix: [],
+      meta: {
+        fetched_at: "2026-02-24T12:00:00.000Z",
+        total_found: 0,
+        season_context: { season_id: "season-1", season_number: 6 },
+      },
+    };
+    const customAnalyticsPayload = {
+      weekly: [
+        {
+          week_index: 1,
+          label: "Pre-Season",
+          start: "2025-08-14T00:00:00.000Z",
+          end: "2025-09-16T18:59:59.000Z",
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics")) {
+        return jsonResponse(customAnalyticsPayload);
+      }
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/episode-discussions/refresh")) {
+        return jsonResponse(refreshPayload);
+      }
+      if (url.includes("/api/admin/reddit/runs/")) {
+        return jsonResponse({ error: "unexpected polling" }, 500);
+      }
+      if (url.includes("/api/admin/reddit/communities/") && url.includes("/discover")) {
+        const cachedDiscovery = {
+          ...discoveryPayload.discovery,
+          totals: {
+            fetched_rows: 1,
+            matched_rows: 1,
+            tracked_flair_rows: 1,
+          },
+          threads: [
+            {
+              ...discoveryPayload.discovery.threads[0],
+              reddit_post_id: "cached-preseason-post",
+              title: "Cached preseason post",
+              posted_at: "2025-09-01T00:00:00.000Z",
+              link_flair_text: "Salt Lake City",
+            },
+          ],
+        };
+        if (url.includes("refresh=true")) {
+          return jsonResponse({
+            discovery: cachedDiscovery,
+            warning: "Cached posts shown because the live Reddit scrape was blocked.",
+            run: {
+              run_id: "run-partial-403",
+              status: "partial",
+              failure_reason_code: "reddit_http_403",
+              operator_hint: "Pre-Season: live scrape blocked by Reddit (403); showing cached posts when available.",
+              totals: {
+                fetched_rows: 1,
+                matched_rows: 1,
+                tracked_flair_rows: 1,
+              },
+              partial_failures: [
+                {
+                  stage: "discover",
+                  error: "Reddit request failed (403)",
+                  failure_reason_code: "reddit_http_403",
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ discovery: cachedDiscovery });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [communityWithSaltLakeFlair, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <RedditSourcesManager
+        mode="global"
+        hideCommunityList
+        initialCommunityId="community-1"
+        episodeDiscussionsPlacement="inline"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: /Sync Posts/ }).length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: /Sync Posts/ })[0]);
+    expect(await screen.findByText("Pre-Season")).toBeInTheDocument();
+
+    clickPeriodRefreshPosts("Pre-Season");
+
+    expect(
+      await screen.findByText(/Pre-Season: live scrape blocked by Reddit \(403\); showing cached posts when available\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to refresh posts for Pre-Season/i)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(false);
+  });
 
   it("shows per-candidate reason when a post is not auto-synced", async () => {
     const refreshPayload = {

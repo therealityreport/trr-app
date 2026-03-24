@@ -22,6 +22,7 @@ const eslintConfig = [
       ".next/**",
       ".next-e2e/**",
       ".next-e2e-debug/**",
+      ".vercel/**",
       "out/**",
       "build/**",
       "test-results/**",

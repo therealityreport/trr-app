@@ -99,7 +99,7 @@ export default function AdminSurveysPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Survey Editor", "/admin/surveys")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Surveys", "/surveys")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Survey Configuration</h1>
               <p className="text-sm text-zinc-500">
                 Create and manage survey themes, cast members, episodes, and air schedules.

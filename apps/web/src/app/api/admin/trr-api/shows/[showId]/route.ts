@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   getShowById,
+  getShowByExactSlug,
   updateShowById,
   validateShowImageForField,
 } from "@/lib/server/trr-api/trr-shows-repository";
+import { buildCanonicalShowAlternativeNames } from "@/lib/admin/show-page/details-form";
+import { slugifyToken } from "@/lib/slugify";
 
 export const dynamic = "force-dynamic";
 
@@ -167,22 +170,44 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    const currentShow =
+      nickname !== undefined || alternativeNamesInput !== undefined
+        ? await getShowById(showId)
+        : null;
+    if ((nickname !== undefined || alternativeNamesInput !== undefined) && !currentShow) {
+      return NextResponse.json({ error: "Show not found" }, { status: 404 });
+    }
+
+    let slug: string | undefined;
+    if (nickname !== undefined) {
+      slug = slugifyToken(nickname);
+      if (!slug) {
+        return NextResponse.json(
+          { error: "nickname must produce a valid slug" },
+          { status: 400 }
+        );
+      }
+    }
+
     let alternativeNames: string[] | undefined;
     if (nickname !== undefined || alternativeNamesInput !== undefined) {
-      const combined: string[] = [];
-      if (nickname && nickname.length > 0) combined.push(nickname);
-      if (alternativeNamesInput && alternativeNamesInput.length > 0) {
-        combined.push(...alternativeNamesInput);
+      alternativeNames = buildCanonicalShowAlternativeNames({
+        displayName: name ?? currentShow?.name ?? "",
+        nickname: slug ?? currentShow?.slug ?? "",
+        alternativeNames: alternativeNamesInput ?? [],
+      });
+    }
+
+    if (slug !== undefined) {
+      const conflictingShow = await getShowByExactSlug(slug);
+      if (conflictingShow && conflictingShow.id !== showId) {
+        return NextResponse.json(
+          {
+            error: `nickname slug "${slug}" is already used by ${conflictingShow.name}`,
+          },
+          { status: 409 }
+        );
       }
-      const seen = new Set<string>();
-      const deduped: string[] = [];
-      for (const candidate of combined) {
-        const key = candidate.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        deduped.push(candidate);
-      }
-      alternativeNames = deduped;
     }
 
     if (primaryPosterImageId) {
@@ -225,6 +250,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const show = await updateShowById(showId, {
       ...(name !== undefined ? { name } : {}),
+      ...(slug !== undefined ? { slug } : {}),
       ...(description !== undefined ? { description: description.length > 0 ? description : null } : {}),
       ...(premiereDate !== undefined ? { premiereDate } : {}),
       ...(alternativeNames !== undefined ? { alternativeNames } : {}),

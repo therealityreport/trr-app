@@ -1189,6 +1189,7 @@ export function mapPhotoToMetadata(
   const originalImageUrl = resolveOriginalImageUrl(
     [
       getMetadataString(metadata, "original_source_file_url", "originalSourceFileUrl"),
+      getMetadataString(metadata, "getty_original_image_url", "gettyOriginalImageUrl"),
       typeof metadata.source_image_url === "string" ? metadata.source_image_url : null,
       typeof metadata.original_image_url === "string" ? metadata.original_image_url : null,
       typeof metadata.image_url === "string" ? metadata.image_url : null,
@@ -1666,6 +1667,8 @@ export function mapSeasonAssetToMetadata(
   const originalSourcePageUrl = sourceUrl;
   const originalImageUrl = resolveOriginalImageUrl(
     [
+      getMetadataString(metadata, "original_source_file_url", "originalSourceFileUrl"),
+      getMetadataString(metadata, "getty_original_image_url", "gettyOriginalImageUrl"),
       asset.source_url ?? null,
       typeof metadata.source_image_url === "string" ? metadata.source_image_url : null,
       typeof metadata.original_image_url === "string" ? metadata.original_image_url : null,

@@ -20,6 +20,7 @@ export type NormalizedKickoffHandle = {
   runId?: string;
   jobId?: string;
   executionOwner?: string;
+  executionBackendCanonical?: string;
   executionModeCanonical?: string;
   canonicalStatus: CanonicalOperationStatus;
   rawStatus?: string;
@@ -30,6 +31,7 @@ export type OperationMonitorState = {
   status: CanonicalOperationStatus;
   eventSeq: number;
   lastEventAt: string | null;
+  latestPhase?: string | null;
 };
 
 const normalizeToken = (value: unknown): string | null => {
@@ -102,6 +104,9 @@ export const normalizeKickoffHandle = (payload: unknown): NormalizedKickoffHandl
     ...(runId ? { runId } : {}),
     ...(jobId ? { jobId } : {}),
     ...(normalizeToken(record?.execution_owner) ? { executionOwner: normalizeToken(record?.execution_owner)! } : {}),
+    ...(normalizeToken(record?.execution_backend_canonical)
+      ? { executionBackendCanonical: normalizeToken(record?.execution_backend_canonical)! }
+      : {}),
     ...(normalizeToken(record?.execution_mode_canonical)
       ? { executionModeCanonical: normalizeToken(record?.execution_mode_canonical)! }
       : {}),
@@ -121,7 +126,14 @@ const toSessionStatus = (
 
 const readOperationStatus = (payload: unknown): CanonicalOperationStatus => {
   const record = asRecord(payload);
-  return canonicalizeOperationStatus(record?.status, "running");
+  const operationRecord = asRecord(record?.operation);
+  return canonicalizeOperationStatus(
+    record?.status ??
+      operationRecord?.status ??
+      record?.state ??
+      operationRecord?.state,
+    "running",
+  );
 };
 
 type MonitorCallbacks = {
@@ -159,6 +171,8 @@ const updateOperationSessionFromState = (
     input: options.input,
     method: (options.method || "POST").toUpperCase(),
     operationId: state.operationId,
+    canonicalStatus: state.status,
+    latestPhase: state.latestPhase ?? null,
     lastEventSeq: state.eventSeq,
     status: toSessionStatus(state.status),
   });
@@ -185,6 +199,7 @@ const pollOperationStatus = async (
   }
   const payload = (await response.json().catch(() => ({}))) as unknown;
   const record = asRecord(payload);
+  const operationRecord = asRecord(record?.operation);
   const eventSeq =
     parseEventSeq(record?.event_seq) ??
     parseEventSeq(record?.latest_event_seq) ??
@@ -195,8 +210,16 @@ const pollOperationStatus = async (
     eventSeq,
     lastEventAt:
       normalizeToken(record?.updated_at) ??
+      normalizeToken(operationRecord?.updated_at) ??
       normalizeToken(record?.last_event_at) ??
+      normalizeToken(operationRecord?.last_event_at) ??
       fallbackState.lastEventAt,
+    latestPhase:
+      normalizeToken(record?.latest_phase) ??
+      normalizeToken((operationRecord?.progress_payload as Record<string, unknown> | undefined)?.phase) ??
+      normalizeToken((operationRecord?.progress_payload as Record<string, unknown> | undefined)?.stage) ??
+      fallbackState.latestPhase ??
+      null,
   };
   updateOperationSessionFromState(options, nextState);
   if (options.onState) await options.onState(nextState);

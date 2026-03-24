@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   fetchSocialBackendJson,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const data = await fetchSocialBackendJson(`/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`, {
       fallbackError: "Failed to fetch social account profile summary",
       retries: 0,
-      timeoutMs: 30_000,
+      timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
     });
     return NextResponse.json(data);
   } catch (error) {
