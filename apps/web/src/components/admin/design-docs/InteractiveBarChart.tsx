@@ -221,9 +221,9 @@ export default function InteractiveBarChart({ data }: Props) {
       {/* Source credit line */}
       <div style={{
         fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
-        fontSize: 13,
-        color: "#727272",
-        fontWeight: 400,
+        fontSize: 12,
+        color: "#999999",
+        fontWeight: 300,
         marginTop: 4,
         lineHeight: 1.4,
       }}>
