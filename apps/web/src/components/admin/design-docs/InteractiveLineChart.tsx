@@ -79,8 +79,8 @@ export default function InteractiveLineChart({ data }: Props) {
     decimals = 1,
   } = data;
 
-  const chartW = 600;
-  const chartH = 300;
+  const chartW = 560;
+  const chartH = 320;
   const marginLeft = 36;
   const marginRight = 12;
   const marginTop = 8;
@@ -150,16 +150,16 @@ export default function InteractiveLineChart({ data }: Props) {
         position: "relative" as const,
       }}
     >
-      {/* Y-axis top label */}
+      {/* Y-axis top label — positioned ABOVE the SVG */}
       {yAxisLabel && (
         <div
           style={{
             fontFamily:
-              '"nyt-franklin", var(--dd-font-ui, arial), sans-serif',
-            fontSize: 12,
+              '"nyt-franklin", arial, helvetica, sans-serif',
+            fontSize: 13,
             fontWeight: 300,
-            color: "#333333",
-            marginBottom: 2,
+            color: "#727272",
+            marginBottom: 4,
           }}
         >
           {yAxisLabel}
@@ -189,14 +189,14 @@ export default function InteractiveLineChart({ data }: Props) {
                 x2={chartW - marginRight}
                 y2={y}
                 stroke={isZero ? "#121212" : "#ededed"}
-                strokeWidth={1}
+                strokeWidth={isZero ? 1 : 1}
               />
               <text
                 x={marginLeft - 8}
                 y={y + 4}
-                fontFamily='"nyt-franklin", arial, sans-serif'
+                fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
                 fontSize={12}
-                fill="#333333"
+                fill="#727272"
                 fontWeight={300}
                 textAnchor="end"
               >
@@ -286,12 +286,12 @@ export default function InteractiveLineChart({ data }: Props) {
           </g>
         )}
 
-        {/* Inline annotation — primary series label */}
+        {/* Inline annotation — primary series label, positioned next to line */}
         {annotation && (
           <text
             x={marginLeft + annotationX * plotW}
             y={marginTop + annotationY * plotH + 2}
-            fontFamily='"nyt-franklin", arial, sans-serif'
+            fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
             fontSize={13}
             fill="#121212"
             fontWeight={700}
@@ -305,7 +305,7 @@ export default function InteractiveLineChart({ data }: Props) {
           <text
             x={marginLeft + annotationX * plotW}
             y={marginTop + annotationY * plotH + 18}
-            fontFamily='"nyt-franklin", arial, sans-serif'
+            fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
             fontSize={12}
             fill="#999999"
             fontWeight={400}
@@ -314,7 +314,7 @@ export default function InteractiveLineChart({ data }: Props) {
           </text>
         )}
 
-        {/* X-axis year labels */}
+        {/* X-axis year labels — bold, below chart area */}
         {xLabels.map((yr, i) => {
           const labelX =
             marginLeft + (i / (xLabels.length - 1)) * plotW;
@@ -323,9 +323,9 @@ export default function InteractiveLineChart({ data }: Props) {
               key={yr}
               x={labelX}
               y={chartH + 20}
-              fontFamily='"nyt-franklin", arial, sans-serif'
-              fontSize={12}
-              fill="#333333"
+              fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
+              fontSize={13}
+              fill="#121212"
               fontWeight={700}
               textAnchor="middle"
             >
@@ -354,26 +354,25 @@ export default function InteractiveLineChart({ data }: Props) {
         <div style={{ height: 22 }} />
       )}
 
-      {/* Source credit line */}
+      {/* Source credit line — NYT pattern */}
       <div
         style={{
           fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
-          fontSize: 12,
-          color: "#999999",
+          fontSize: 13,
+          color: "#727272",
           fontWeight: 300,
-          marginTop: 4,
+          marginTop: 8,
           lineHeight: 1.4,
         }}
       >
         {note && (
           <>
-            <span style={{ fontStyle: "italic" }}>Note:</span> {note}{" "}
+            <span style={{ fontStyle: "normal" }}>Note: {note}</span>{" "}
           </>
         )}
-        {source && <>Source: {source}</>}
-        <span style={{ marginLeft: 8, color: "#363636" }}>
-          The New York Times
-        </span>
+        {source && <span>Source: {source}</span>}
+        {"  "}
+        <span style={{ fontWeight: 500 }}>The New York Times</span>
       </div>
     </div>
   );

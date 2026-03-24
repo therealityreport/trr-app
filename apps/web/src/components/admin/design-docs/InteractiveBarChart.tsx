@@ -51,8 +51,8 @@ export default function InteractiveBarChart({ data }: Props) {
   } = data;
 
   const maxVal = Math.max(...values);
-  const chartW = 600;
-  const chartH = 300;
+  const chartW = 560;
+  const chartH = 320;
   const marginLeft = 32;
   const marginRight = 8;
   const barArea = chartW - marginLeft - marginRight;
@@ -69,13 +69,13 @@ export default function InteractiveBarChart({ data }: Props) {
 
   return (
     <div style={{ maxWidth: 600, margin: "0 auto 28px", position: "relative" as const }}>
-      {/* Y-axis top label */}
+      {/* Y-axis top label — positioned ABOVE the SVG */}
       <div style={{
-        fontFamily: '"nyt-franklin", var(--dd-font-ui, arial), sans-serif',
-        fontSize: 12,
+        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+        fontSize: 13,
         fontWeight: 300,
-        color: "#333333",
-        marginBottom: 2,
+        color: "#727272",
+        marginBottom: 4,
       }}>
         {yAxisLabel}
       </div>
@@ -87,20 +87,21 @@ export default function InteractiveBarChart({ data }: Props) {
         style={{ display: "block", cursor: "crosshair", overflow: "visible" }}
         onMouseLeave={() => setHoveredIndex(null)}
       >
-        {/* Horizontal grid lines */}
+        {/* Horizontal grid lines + zero baseline */}
         {yTicks.map((tick, i) => {
           const y = chartH - (tick / maxVal) * (chartH - 5);
+          const isZero = tick === 0;
           return (
             <g key={tick}>
-              <line x1={marginLeft - 4} y1={y} x2={chartW - marginRight} y2={y} stroke="#ededed" strokeWidth={1} />
+              <line x1={marginLeft - 4} y1={y} x2={chartW - marginRight} y2={y} stroke={isZero ? "#121212" : "#ededed"} strokeWidth={1} />
               {/* Y-axis tick labels (skip the top one — it's the header) */}
               {i < yTicks.length - 1 && (
                 <text
                   x={marginLeft - 8}
                   y={y + 4}
-                  fontFamily='"nyt-franklin", arial, sans-serif'
+                  fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
                   fontSize={12}
-                  fill="#333333"
+                  fill="#727272"
                   fontWeight={300}
                   textAnchor="end"
                 >
@@ -170,11 +171,11 @@ export default function InteractiveBarChart({ data }: Props) {
           </g>
         )}
 
-        {/* Inline annotation: bold black label */}
+        {/* Inline annotation: bold black label, positioned next to bars */}
         <text
           x={marginLeft + barArea * 0.4}
           y={chartH * 0.55}
-          fontFamily='"nyt-franklin", arial, sans-serif'
+          fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
           fontSize={13}
           fill="#121212"
           fontWeight={700}
@@ -182,7 +183,7 @@ export default function InteractiveBarChart({ data }: Props) {
           {annotation}
         </text>
 
-        {/* X-axis year labels */}
+        {/* X-axis year labels — bold, below chart area */}
         {xLabels.map((yr, i) => {
           // Position labels evenly across the bar area
           const labelX = marginLeft + (i / (xLabels.length - 1)) * barArea;
@@ -191,9 +192,9 @@ export default function InteractiveBarChart({ data }: Props) {
               key={yr}
               x={labelX}
               y={chartH + 20}
-              fontFamily='"nyt-franklin", arial, sans-serif'
-              fontSize={12}
-              fill="#333333"
+              fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
+              fontSize={13}
+              fill="#121212"
               fontWeight={700}
               textAnchor="middle"
             >
@@ -218,18 +219,19 @@ export default function InteractiveBarChart({ data }: Props) {
       )}
       {hoveredIndex === null && <div style={{ height: 22 }} />}
 
-      {/* Source credit line */}
+      {/* Source credit line — NYT pattern */}
       <div style={{
         fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
-        fontSize: 12,
-        color: "#999999",
+        fontSize: 13,
+        color: "#727272",
         fontWeight: 300,
-        marginTop: 4,
+        marginTop: 8,
         lineHeight: 1.4,
       }}>
-        {note && <><span style={{ fontStyle: "italic" }}>Note:</span> {note} </>}
-        Source: {source}
-        <span style={{ marginLeft: 8, color: "#363636" }}>The New York Times</span>
+        {note && <><span style={{ fontStyle: "normal" }}>Note: {note}</span>{" "}</>}
+        <span>Source: {source}</span>
+        {"  "}
+        <span style={{ fontWeight: 500 }}>The New York Times</span>
       </div>
     </div>
   );

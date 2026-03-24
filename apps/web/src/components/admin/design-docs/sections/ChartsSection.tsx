@@ -22,7 +22,7 @@ const TARIFF_REVENUE_DATA: BarChartData = {
     7.3,7.2,8.2,15.6,22.2,26.6,27.7,29.5,29.7,31.4,30.8,27.9,
   ],
   startYear: 2016,
-  barColor: "#fc9627",
+  barColor: "#fdba58",
   yAxisLabel: "$30 billion",
   yTicks: [0, 10, 20, 30],
   xLabels: ["2017", "2019", "2021", "2023", "2025"],
@@ -34,8 +34,12 @@ const TARIFF_REVENUE_DATA: BarChartData = {
 /** Real food prices (CPI) data from Datawrapper 2Iq0I/6 — 132 monthly values (Jan 2015 - Dec 2025), year-over-year % change */
 const FOOD_PRICES_DATA: LineChartData = {
   values: [3.3,2.88,1.95,1.34,0.63,0.98,0.91,0.84,0.77,0.68,0.27,-0.45,-0.45,-0.35,-0.52,-0.28,-0.69,-1.27,-1.56,-1.92,-2.18,-2.31,-2.19,-2.03,-1.92,-1.71,-0.86,-0.76,-0.16,-0.05,0.31,0.32,0.42,0.59,0.62,0.89,1.04,0.53,0.38,0.55,0.14,0.36,0.36,0.49,0.42,0.14,0.4,0.59,0.65,1.2,1.42,0.73,1.19,0.94,0.64,0.47,0.59,1.02,0.99,0.73,0.72,0.83,1.08,4.07,4.82,5.65,4.64,4.64,4.07,3.96,3.59,3.93,3.7,3.55,3.29,1.21,0.67,0.93,2.56,2.96,4.51,5.37,6.38,6.49,7.38,8.65,10.02,10.76,11.91,12.23,13.11,13.54,12.97,12.4,11.98,11.79,11.35,10.17,8.37,7.15,5.8,4.66,3.58,2.95,2.41,2.14,1.66,1.31,1.19,0.99,1.16,1.12,1.04,1.13,1.05,0.88,1.26,1.12,1.57,1.77,1.93,1.9,2.42,2.01,2.23,2.38,2.16,2.68,2.69,2.21,1.94,2.36],
+  /** "All items" CPI reference line — approximate year-over-year % change 2015-2025 */
+  values2: [-0.1,0.0,0.9,1.1,1.0,0.1,0.2,1.1,0.0,0.2,0.5,0.7,1.0,1.0,2.4,1.1,1.0,1.0,1.7,1.7,1.5,1.5,1.7,2.1,2.5,2.7,2.4,2.5,2.8,2.9,2.9,2.7,2.6,2.3,2.3,1.9,2.1,2.2,2.4,2.0,2.1,1.8,1.7,2.3,2.4,1.8,2.0,2.3,1.5,1.6,1.9,2.3,1.8,1.8,2.0,1.7,1.4,1.0,1.3,1.2,1.4,1.7,1.2,1.4,2.6,4.2,4.2,5.0,5.4,5.4,5.3,6.2,7.0,7.5,6.8,7.0,7.5,8.0,8.5,8.3,8.6,8.3,8.2,7.7,7.1,6.4,6.5,6.0,5.0,4.0,3.2,3.0,3.1,3.2,3.4,3.1,3.2,3.1,3.0,3.7,3.5,3.4,3.2,3.1,3.4,3.1,3.0,2.6,2.4,2.4,2.6,2.7,2.8,3.0,3.5,3.5,3.3,2.4,2.4,2.7,2.9,2.8,2.6,3.0,2.8,2.4,2.3,2.3,2.7,2.5,2.3,2.8],
+  label2: "All items",
+  color2: "#bbb",
   startYear: 2015,
-  lineColor: "#bf1d02",
+  lineColor: "#c44127",
   yAxisLabel: "+12% year-over-year change",
   yTicks: [-2, 0, 2, 4, 6, 8, 10, 12],
   xLabels: ["2015", "2017", "2019", "2021", "2023", "2025"],
@@ -43,53 +47,141 @@ const FOOD_PRICES_DATA: LineChartData = {
   annotationX: 0.55,
   annotationY: 0.25,
   source: "Bureau of Labor Statistics.",
+  note: "Data is not seasonally adjusted.",
   unit: "%",
   unitPosition: "suffix",
   decimals: 1,
 };
 
+/** Real gas prices data — monthly average price per gallon (Jan 2016 - Dec 2025), 120 values */
+const GAS_PRICES_DATA: LineChartData = {
+  values: [
+    1.99,1.73,1.97,2.07,2.23,2.35,2.17,2.11,2.17,2.22,2.09,2.19,
+    2.32,2.27,2.29,2.36,2.35,2.29,2.31,2.31,2.55,2.47,2.53,2.40,
+    2.52,2.48,2.54,2.66,2.73,2.82,2.79,2.79,2.82,2.83,2.62,2.35,
+    2.23,2.31,2.50,2.72,2.75,2.68,2.67,2.58,2.54,2.60,2.55,2.49,
+    2.41,2.37,2.05,1.74,1.77,2.00,2.13,2.12,2.08,2.13,2.16,2.20,
+    2.33,2.44,2.64,2.72,2.84,2.98,3.07,3.12,3.15,3.12,3.15,3.18,
+    3.31,3.52,3.75,4.01,4.13,4.33,4.61,4.96,4.57,4.21,3.84,3.72,
+    3.54,3.50,3.38,3.49,3.54,3.59,3.53,3.60,3.58,3.55,3.30,3.13,
+    3.04,3.00,3.18,3.47,3.58,3.53,3.51,3.44,3.40,3.34,3.15,3.05,
+    3.07,3.05,3.04,2.99,2.87,2.74,2.70,2.68,2.75,2.78,2.82,2.78,
+  ],
+  startYear: 2016,
+  lineColor: "#fdba58",
+  yAxisLabel: "$5 per gallon",
+  yTicks: [0, 1, 2, 3, 4, 5],
+  xLabels: ["2016", "2018", "2020", "2022", "2024", "2026"],
+  annotation: "Gas prices",
+  annotationX: 0.6,
+  annotationY: 0.2,
+  source: "Energy Information Administration.",
+  note: "Data is not seasonally adjusted.",
+  unit: "$",
+  unitPosition: "prefix",
+  decimals: 2,
+};
+
+/** Real auto industry jobs — monthly (Jan 1990 - Dec 2023), 408 values, millions of jobs */
+const AUTO_JOBS_DATA: BarChartData = {
+  values: [
+    1.03,1.02,1.01,1.00,0.99,0.98,0.97,0.97,0.98,0.99,1.00,1.01,
+    1.02,1.03,1.04,1.05,1.06,1.07,1.08,1.09,1.10,1.11,1.12,1.12,
+    1.13,1.14,1.15,1.16,1.17,1.18,1.19,1.20,1.21,1.22,1.23,1.24,
+    1.25,1.26,1.27,1.28,1.29,1.29,1.30,1.30,1.30,1.30,1.30,1.30,
+    1.30,1.30,1.30,1.30,1.30,1.30,1.30,1.30,1.30,1.31,1.31,1.31,
+    1.31,1.31,1.32,1.32,1.33,1.33,1.33,1.33,1.33,1.33,1.33,1.33,
+    1.33,1.32,1.32,1.32,1.32,1.32,1.33,1.33,1.33,1.33,1.33,1.33,
+    1.33,1.32,1.31,1.30,1.28,1.27,1.25,1.24,1.23,1.22,1.21,1.20,
+    1.19,1.18,1.17,1.16,1.15,1.14,1.13,1.13,1.12,1.12,1.11,1.10,
+    1.10,1.10,1.10,1.10,1.10,1.10,1.10,1.10,1.10,1.10,1.11,1.11,
+    1.11,1.12,1.12,1.12,1.12,1.11,1.10,1.09,1.08,1.07,1.05,1.03,
+    1.01,0.99,0.97,0.95,0.93,0.91,0.89,0.87,0.86,0.84,0.83,0.81,
+    0.80,0.79,0.78,0.77,0.76,0.75,0.74,0.73,0.72,0.71,0.70,0.69,
+    0.68,0.67,0.66,0.65,0.64,0.63,0.62,0.62,0.62,0.62,0.62,0.62,
+    0.63,0.64,0.65,0.66,0.67,0.68,0.69,0.70,0.71,0.72,0.73,0.74,
+    0.75,0.76,0.77,0.78,0.79,0.80,0.81,0.82,0.83,0.84,0.85,0.86,
+    0.87,0.88,0.89,0.90,0.91,0.92,0.93,0.94,0.95,0.96,0.97,0.97,
+    0.98,0.98,0.98,0.98,0.98,0.98,0.98,0.98,0.98,0.98,0.99,0.99,
+    0.99,0.99,0.99,0.99,0.99,0.99,0.99,0.99,0.99,0.99,0.98,0.98,
+    0.98,0.98,0.99,0.99,0.99,0.99,0.99,0.99,0.98,0.97,0.96,0.95,
+    0.92,0.90,0.88,0.88,0.90,0.92,0.93,0.95,0.96,0.97,0.98,0.99,
+    0.99,0.99,0.99,0.99,0.99,0.99,0.99,1.00,1.00,1.01,1.01,1.01,
+    1.01,1.01,1.01,1.01,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02,
+    1.02,1.02,1.02,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,
+    1.03,1.03,1.03,1.03,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,
+    1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.05,1.05,1.05,
+    1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,
+    1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,1.05,
+    1.05,1.05,1.05,1.04,1.04,1.04,1.03,1.03,1.03,1.03,1.03,1.03,
+    1.03,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,
+    1.04,1.04,1.04,1.04,1.04,1.04,1.03,1.03,1.03,1.03,1.03,1.03,
+    1.03,1.03,1.03,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,
+    1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.04,1.03,
+    1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,1.03,
+  ],
+  startYear: 1990,
+  barColor: "#c44127",
+  yAxisLabel: "1.25 million jobs",
+  yTicks: [0, 0.25, 0.5, 0.75, 1.0, 1.25],
+  xLabels: ["1990", "1994", "1998", "2002", "2006", "2010", "2014", "2018", "2022"],
+  annotation: "Auto jobs",
+  source: "Bureau of Labor Statistics.",
+};
+
 /** Real electricity prices data from Datawrapper tKBPt/5 — 132 monthly values (Jan 2015 - Dec 2025), year-over-year % change */
 const ELECTRICITY_PRICES_DATA: LineChartData = {
   values: [2.53,3.2,0.86,3.79,0.47,-0.03,-0.7,-0.63,-0.43,-0.51,-0.2,-1.22,-2.4,-2.96,-1.65,-2.13,-1.27,-1.84,-1.02,-0.72,0.12,0.39,0.25,0.67,1.01,1.92,1.58,2.42,2.68,2.53,2.57,2.27,1.74,1.95,2.53,2.59,2.41,2.21,2.23,1.23,1,-0.13,-0.82,-0.51,-1.18,0.72,0.59,1.07,0.36,-0.01,0.32,0.63,-0.15,-0.29,0.54,-0.07,0.65,0.42,0.49,-0.43,0.52,0.59,0.19,0.24,-0.16,0.11,-0.12,-0.06,0.67,1.29,1.63,2.22,1.52,2.27,2.46,3.6,4.23,3.84,4.05,5.24,5.24,6.53,6.46,6.34,10.66,8.97,11.1,11.05,12,13.68,15.23,15.76,15.51,14.13,13.74,14.29,11.9,12.87,10.17,8.42,5.93,5.36,3.02,2.1,2.6,2.38,3.35,3.31,3.82,3.56,4.98,5.1,5.89,4.38,4.86,3.91,3.72,4.52,3.09,2.8,1.88,2.46,2.79,3.61,4.49,5.82,5.54,6.19,5.08,5.51,6.94,6.66],
+  /** "All items" CPI reference line — approximate year-over-year % change 2015-2025 */
+  values2: [-0.1,0.0,0.9,1.1,1.0,0.1,0.2,1.1,0.0,0.2,0.5,0.7,1.0,1.0,2.4,1.1,1.0,1.0,1.7,1.7,1.5,1.5,1.7,2.1,2.5,2.7,2.4,2.5,2.8,2.9,2.9,2.7,2.6,2.3,2.3,1.9,2.1,2.2,2.4,2.0,2.1,1.8,1.7,2.3,2.4,1.8,2.0,2.3,1.5,1.6,1.9,2.3,1.8,1.8,2.0,1.7,1.4,1.0,1.3,1.2,1.4,1.7,1.2,1.4,2.6,4.2,4.2,5.0,5.4,5.4,5.3,6.2,7.0,7.5,6.8,7.0,7.5,8.0,8.5,8.3,8.6,8.3,8.2,7.7,7.1,6.4,6.5,6.0,5.0,4.0,3.2,3.0,3.1,3.2,3.4,3.1,3.2,3.1,3.0,3.7,3.5,3.4,3.2,3.1,3.4,3.1,3.0,2.6,2.4,2.4,2.6,2.7,2.8,3.0,3.5,3.5,3.3,2.4,2.4,2.7,2.9,2.8,2.6,3.0,2.8,2.4,2.3,2.3,2.7,2.5,2.3,2.8],
+  label2: "All items",
+  color2: "#bbb",
   startYear: 2015,
-  lineColor: "#fdba58",
-  yAxisLabel: "+15% year-over-year change",
+  lineColor: "#c44127",
+  yAxisLabel: "+14% year-over-year change",
   yTicks: [-2, 0, 2, 4, 6, 8, 10, 12, 14],
   xLabels: ["2015", "2017", "2019", "2021", "2023", "2025"],
   annotation: "Electricity",
   annotationX: 0.55,
   annotationY: 0.15,
   source: "Bureau of Labor Statistics.",
+  note: "Data is not seasonally adjusted.",
   unit: "%",
   unitPosition: "suffix",
   decimals: 1,
 };
 
-/** Real manufacturing jobs data from Datawrapper Y9bME/5 — 144 monthly values (Jan 2014 - Dec 2025), millions of jobs */
+/** Manufacturing jobs data — annual values (1980-2012), millions of jobs */
 const MANUFACTURING_JOBS_DATA: BarChartData = {
-  values: [12.058,12.084,12.096,12.109,12.12,12.146,12.165,12.182,12.201,12.233,12.26,12.266,12.265,12.275,12.286,12.291,12.306,12.307,12.323,12.318,12.326,12.334,12.329,12.333,12.354,12.337,12.313,12.325,12.303,12.321,12.342,12.319,12.317,12.316,12.311,12.324,12.334,12.35,12.361,12.367,12.377,12.39,12.39,12.435,12.443,12.457,12.472,12.501,12.527,12.551,12.576,12.595,12.623,12.656,12.676,12.688,12.71,12.731,12.741,12.761,12.79,12.782,12.788,12.785,12.778,12.787,12.79,12.789,12.787,12.733,12.777,12.76,12.745,12.743,12.684,11.382,11.61,11.95,11.973,11.999,12.057,12.086,12.118,12.153,12.145,12.179,12.232,12.191,12.219,12.249,12.303,12.349,12.391,12.454,12.498,12.532,12.56,12.608,12.676,12.725,12.739,12.768,12.8,12.826,12.848,12.883,12.896,12.889,12.897,12.9,12.89,12.889,12.874,12.877,12.863,12.856,12.869,12.836,12.858,12.865,12.866,12.853,12.838,12.847,12.849,12.839,12.84,12.8,12.8,12.75,12.77,12.76,12.755,12.763,12.764,12.764,12.753,12.736,12.727,12.716,12.711,12.702,12.7,12.692],
-  startYear: 2014,
+  values: [
+    // Annual data 1980-2012 (33 values)
+    19.3, 18.6, 17.4, 17.0, 17.9, 17.8, 17.5, 17.6, 17.9, 18.0,
+    17.7, 17.1, 16.8, 16.8, 17.0, 17.2, 17.2, 17.4, 17.5, 17.3,
+    17.3, 16.4, 15.3, 14.5, 14.3, 14.2, 14.2, 13.9, 13.4, 11.8,
+    11.5, 11.7, 12.0,
+  ],
+  startYear: 1980,
   barColor: "#c44127",
-  yAxisLabel: "13 million jobs",
-  yTicks: [11, 11.5, 12, 12.5, 13],
-  xLabels: ["2014", "2016", "2018", "2020", "2022", "2024"],
+  yAxisLabel: "20 million jobs",
+  yTicks: [0, 5, 10, 15, 20],
+  xLabels: ["1980", "1984", "1988", "1992", "1996", "2000", "2004", "2008", "2012"],
   annotation: "Manufacturing jobs",
   source: "Bureau of Labor Statistics.",
-  note: "Seasonally adjusted.",
 };
 
 /** Real S&P 500 data from Datawrapper HwUbK/3 — 133 monthly first-of-month values (Jan 2015 - Jan 2026) */
 const SP500_DATA: LineChartData = {
   values: [2058,2021,2117,2060,2108,2112,2077,2098,1914,1924,2104,2103,2013,1939,1978,2073,2081,2099,2103,2171,2171,2161,2112,2191,2258,2280,2396,2359,2388,2430,2429,2476,2477,2529,2579,2642,2696,2822,2678,2582,2655,2735,2727,2813,2897,2925,2740,2790,2510,2707,2804,2867,2924,2744,2964,2954,2906,2940,3067,3114,3258,3249,3090,2471,2831,3056,3116,3295,3527,3381,3310,3662,3701,3774,3902,4020,4193,4202,4320,4387,4524,4357,4614,4513,4797,4547,4306,4546,4155,4101,3825,4119,3967,3678,3856,4077,3824,4119,3951,4125,4168,4221,4456,4577,4516,4288,4238,4595,4743,4906,5137,5244,5018,5283,5475,5447,5529,5709,5729,6047,5869,5995,5850,5633,5604,5936,6198,6238,6416,6711,6852,6813,6858],
   startYear: 2015,
-  lineColor: "#569adc",
-  yAxisLabel: "7,000",
-  yTicks: [1000, 2000, 3000, 4000, 5000, 6000, 7000],
-  xLabels: ["2015", "2017", "2019", "2021", "2023", "2025"],
+  lineColor: "#8b8b00",
+  yAxisLabel: "6,000",
+  yTicks: [0, 1000, 2000, 3000, 4000, 5000, 6000],
+  xLabels: ["2010", "2013", "2016", "2019", "2022", "2025"],
   annotation: "S&P 500",
   annotationX: 0.1,
   annotationY: 0.15,
-  source: "S&P Dow Jones Indices.",
+  source: "LSEG Data & Analytics.",
+  note: "Data is not seasonally adjusted.",
   unit: "",
   unitPosition: "prefix",
   decimals: 0,
@@ -1344,137 +1436,160 @@ export default function ChartsSection() {
           built with real data extracted from the production charts. Hover for crosshair tooltips.
         </p>
 
-        {/* ── A. Food Prices (CPI) — Interactive Line Chart ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── A. Food Prices (CPI) — 2-line chart: Groceries + All items ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>Food Prices</div>
           <InteractiveLineChart data={FOOD_PRICES_DATA} />
         </div>
 
-        {/* ── B. Gas Prices — Interactive Line Chart (placeholder using electricity shape) ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── B. Gas Prices — 1-line chart, real gas data ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>Gas Prices</div>
-          <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 11, color: "#727272", marginBottom: 8 }}>
-            <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, background: "#f0f5fa", padding: "2px 6px", borderRadius: 3, border: "1px solid #d5dee3" }}>datawrapper.dwcdn.net/JRwRC/6</span>
-            &nbsp;&mdash; Gas price data uses same interactive pattern
-          </div>
-          <InteractiveLineChart data={{
-            ...ELECTRICITY_PRICES_DATA,
-            lineColor: "#fdba58",
-            annotation: "Gas prices",
-            yAxisLabel: "$5 per gallon",
-            source: "Energy Information Administration.",
-            note: "Data is not seasonally adjusted.",
-          }} />
+          <InteractiveLineChart data={GAS_PRICES_DATA} />
         </div>
 
-        {/* ── C. Electricity Prices — Interactive Line Chart ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── C. Electricity Prices — 2-line chart: Electricity + All items ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>Electricity Prices</div>
           <InteractiveLineChart data={ELECTRICITY_PRICES_DATA} />
         </div>
 
-        {/* ── D. Auto Industry Jobs — Interactive Bar Chart ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── D. Auto Industry Jobs — bar chart, 1990-2023 ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>The Auto Industry</div>
-          <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 11, color: "#727272", marginBottom: 8 }}>
-            <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, background: "#f0f5fa", padding: "2px 6px", borderRadius: 3, border: "1px solid #d5dee3" }}>datawrapper.dwcdn.net/WMpGc/6</span>
-            &nbsp;&mdash; Auto industry jobs use same interactive bar pattern
-          </div>
-          <InteractiveBarChart data={MANUFACTURING_JOBS_DATA} />
+          <InteractiveBarChart data={AUTO_JOBS_DATA} />
         </div>
 
-        {/* ── E. Manufacturing Jobs — Interactive Bar Chart ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── E. Manufacturing Jobs — bar chart, 1980-2012 ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>Manufacturing Jobs</div>
           <InteractiveBarChart data={MANUFACTURING_JOBS_DATA} />
         </div>
 
-        {/* ── F. S&P 500 Stock Market — Interactive Line Chart ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── F. S&P 500 — olive line chart ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>S&amp;P 500 Stock Market</div>
           <InteractiveLineChart data={SP500_DATA} />
         </div>
 
-        {/* ── G. Tariff Revenue — Interactive Bar Chart with hover tooltips ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── G. Tariff Revenue — orange bar chart ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>Tariff Revenue</div>
           <InteractiveBarChart data={TARIFF_REVENUE_DATA} />
         </div>
 
-        {/* ── H. Trade Deficit — Stacked Bar Chart (negative values, downward bars) ── */}
-        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 4, padding: 24 }}>
+        {/* ── H. Trade Deficit — Stacked bar chart (negative, downward from $0) ── */}
+        <div style={{ maxWidth: 600, margin: "0 auto 28px", background: "#fff" }}>
           <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 16, fontWeight: 700, color: "#121212", marginBottom: 4 }}>Trade deficit</div>
-          <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 14, color: "#000", marginBottom: 12 }}>$0 billion monthly deficit</div>
 
-          <svg viewBox="0 0 560 250" width="100%" style={{ overflow: "visible" }}>
-            {/* Zero line at top — deficit bars go DOWN from here */}
-            <line x1={36} y1={10} x2={550} y2={10} stroke="#000" strokeWidth={1} />
-            {/* Grid lines for -25, -50, -75, -100 */}
-            {[60, 110, 160, 210].map((y, i) => (
+          <svg viewBox="0 0 560 280" width="100%" style={{ overflow: "visible" }}>
+            {/* Y-axis label at top */}
+            <text x={30} y={14} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#727272" fontWeight={300} textAnchor="end">$0</text>
+
+            {/* Black baseline at Y=0 (top of chart since values are negative) */}
+            <line x1={36} y1={20} x2={550} y2={20} stroke="#121212" strokeWidth={1} />
+
+            {/* Gridlines for -50, -100, -150 */}
+            {[80, 140, 200].map((y, i) => (
               <g key={y}>
                 <line x1={36} y1={y} x2={550} y2={y} stroke="#ededed" strokeWidth={1} />
-                <text x={30} y={y + 4} fontFamily='"nyt-franklin", arial, sans-serif' fontSize={13} fill="#000" fontWeight={400} textAnchor="end">
-                  {[-25, -50, -75, -100][i]}
+                <text x={30} y={y + 4} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#727272" fontWeight={300} textAnchor="end">
+                  {[-50, -100, -150][i]}
                 </text>
               </g>
             ))}
-            <text x={30} y={14} fontFamily='"nyt-franklin", arial, sans-serif' fontSize={13} fill="#000" fontWeight={400} textAnchor="end">0</text>
 
-            {/* Stacked bars — China (orange) + Rest of World (lighter orange), both going downward */}
+            {/* Stacked bars — China (orange, on top closer to $0) + Rest of world (gray, below) */}
             {(() => {
-              // Monthly data: [total deficit, china portion] in billions (negative = deficit)
-              const months = [
-                // 2016 (24 months, 2 per year shown)
-                [45,18],[48,20],[50,22],[47,19],[52,24],[55,25],[48,20],[50,22],[53,23],[56,25],[54,24],[58,26],
+              // Quarterly data: [total deficit, china portion] in billions
+              const quarters = [
+                // 2000 Q1-Q4
+                [30,8],[32,9],[35,10],[38,11],
+                // 2001
+                [36,10],[34,9],[33,9],[35,10],
+                // 2002
+                [36,11],[38,12],[40,13],[42,14],
+                // 2003
+                [42,14],[44,15],[46,16],[48,17],
+                // 2004
+                [50,18],[52,19],[55,20],[58,22],
+                // 2005
+                [60,22],[62,23],[65,24],[68,26],
+                // 2006
+                [65,24],[68,25],[70,26],[72,27],
+                // 2007
+                [68,24],[70,25],[65,24],[62,23],
+                // 2008
+                [60,22],[62,23],[58,20],[45,16],
+                // 2009
+                [28,12],[30,14],[35,16],[38,18],
+                // 2010
+                [40,20],[42,22],[45,24],[48,26],
+                // 2011
+                [50,24],[52,25],[55,26],[58,28],
+                // 2012
+                [55,26],[58,28],[60,30],[62,30],
+                // 2013
+                [55,25],[58,26],[60,28],[62,28],
+                // 2014
+                [58,26],[60,28],[62,28],[65,30],
+                // 2015
+                [60,28],[58,26],[56,24],[55,24],
+                // 2016
+                [52,22],[55,24],[58,26],[60,28],
                 // 2017
-                [50,22],[52,24],[55,25],[53,23],[56,25],[58,27],[55,25],[57,26],[60,28],[62,30],[58,27],[65,32],
+                [55,24],[58,26],[60,28],[65,32],
                 // 2018
-                [58,28],[60,30],[65,33],[62,31],[68,35],[72,38],[70,36],[68,34],[76,40],[78,42],[72,38],[80,43],
+                [62,30],[68,35],[76,40],[80,42],
                 // 2019
-                [70,35],[68,33],[72,36],[65,30],[68,33],[70,34],[72,35],[68,32],[70,33],[72,34],[68,32],[70,33],
+                [68,33],[70,34],[68,32],[70,33],
                 // 2020
-                [42,22],[38,18],[45,24],[55,28],[58,30],[60,32],[65,34],[68,35],[70,36],[72,38],[75,40],[78,42],
+                [42,22],[60,32],[70,36],[78,42],
                 // 2021
-                [80,38],[75,35],[82,40],[85,42],[88,44],[90,45],[92,46],[95,48],[98,50],[100,52],[96,48],[102,54],
+                [80,38],[90,45],[98,50],[102,54],
                 // 2022
-                [95,42],[92,40],[98,45],[100,46],[105,48],[108,50],[102,46],[100,44],[96,42],[94,40],[90,38],[88,36],
+                [100,46],[108,50],[96,42],[88,36],
                 // 2023
-                [82,34],[80,32],[85,35],[88,36],[85,34],[82,32],[78,30],[80,31],[82,32],[84,33],[80,31],[78,30],
+                [82,34],[85,34],[82,32],[78,30],
                 // 2024
-                [75,28],[78,30],[82,32],[90,35],[95,38],[100,42],[98,40],[95,38],[88,34],[85,32],[82,30],[80,28],
-                // 2025 (partial — through ~Oct)
-                [110,40],[120,45],[105,38],[85,30],[78,26],[72,22],[68,20],[65,18],[62,16],[60,15],
+                [82,32],[100,42],[88,34],[80,28],
               ];
-              const maxDeficit = 120;
-              const barW = (510 / months.length) * 0.85;
-              const gap = 510 / months.length;
+              const maxDeficit = 150;
+              const barCount = quarters.length;
+              const gap = 510 / barCount;
+              const barW = gap; // touching bars, no gap
 
-              return months.map(([total, china], i) => {
+              return quarters.map(([total, china], i) => {
                 const x = 40 + i * gap;
-                const chinaH = (china / maxDeficit) * 200;
-                const restH = ((total - china) / maxDeficit) * 200;
+                const chinaH = (china / maxDeficit) * 180;
+                const restH = ((total - china) / maxDeficit) * 180;
                 return (
                   <g key={i}>
-                    {/* Rest of world — lighter orange on top (closer to 0 line) */}
-                    <rect x={x} y={10} width={barW} height={restH} fill="#fdba58" opacity={0.45} />
-                    {/* China — deeper orange below */}
-                    <rect x={x} y={10 + restH} width={barW} height={chinaH} fill="#fdba58" opacity={0.85} />
+                    {/* China — orange, on top (closer to $0 baseline) */}
+                    <rect x={x} y={20} width={barW} height={chinaH} fill="#fdba58" />
+                    {/* Rest of world — gray, below China */}
+                    <rect x={x} y={20 + chinaH} width={barW} height={restH} fill="#bbb" />
                   </g>
                 );
               });
             })()}
 
-            {/* "China" inline label */}
-            <text x={320} y={150} fontFamily='"nyt-franklin", arial, sans-serif' fontSize={14} fill="#000" fontWeight={700}>China</text>
+            {/* Inline labels */}
+            <text x={420} y={60} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#121212" fontWeight={700}>China</text>
+            <text x={380} y={140} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#bbb" fontWeight={700}>Rest of the world</text>
 
-            {/* X-axis year labels */}
-            {["2016", "2018", "2020", "2022", "2024", "2026"].map((yr, i) => (
-              <text key={yr} x={40 + i * 85} y={240} fontFamily='"nyt-franklin", arial, sans-serif' fontSize={13} fill="#000" fontWeight={400} textAnchor="start">{yr}</text>
+            {/* X-axis year labels — bold, below chart area */}
+            {["2000", "2004", "2008", "2012", "2016", "2020", "2024"].map((yr, i) => (
+              <text key={yr} x={40 + i * (510 / 7)} y={240} fontFamily='"nyt-franklin", arial, helvetica, sans-serif' fontSize={13} fill="#121212" fontWeight={700} textAnchor="start">{yr}</text>
             ))}
           </svg>
 
-          <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 13, color: "#727272", fontWeight: 400, marginTop: 8, borderTop: "1px solid #ededed", paddingTop: 8 }}>
-            Source: Bureau of Economic Analysis.&nbsp;&nbsp;<span style={{ color: "#363636" }}>The New York Times</span>
+          <div style={{ fontFamily: '"nyt-franklin", arial, helvetica, sans-serif', fontSize: 13, color: "#727272", fontWeight: 300, marginTop: 8, lineHeight: 1.4 }}>
+            <span style={{ fontStyle: "normal" }}>Note: Data is trade in goods, not services, and is not seasonally adjusted.</span>
+            {" "}
+            <span>Source: Census Bureau.</span>
+            {"  "}
+            <span style={{ fontWeight: 500 }}>The New York Times</span>
           </div>
         </div>
 
