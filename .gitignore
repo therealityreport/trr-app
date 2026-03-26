@@ -23,4 +23,6 @@ docs/Repository/generated/
 
 # Temp/cache
 .tmp/
+tmp/
 apps/web/.cache/
+.next-social-debug/
