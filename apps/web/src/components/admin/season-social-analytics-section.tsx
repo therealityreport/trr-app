@@ -3550,11 +3550,11 @@ export default function SeasonSocialAnalyticsSection({
       const [targetsResult, runsResult, runSummariesResult, workerHealthResult, sharedStatusResult] =
         await settleWithConcurrencyLimit(
           [
-            () => fetchTargets(),
-            () => fetchRuns(),
-            () => fetchRunSummaries(),
-            () => fetchWorkerHealth(),
-            () => fetchSharedStatus(),
+            () => fetchTargets() as Promise<unknown>,
+            () => fetchRuns() as Promise<unknown>,
+            () => fetchRunSummaries() as Promise<unknown>,
+            () => fetchWorkerHealth() as Promise<unknown>,
+            () => fetchSharedStatus() as Promise<unknown>,
           ],
           INITIAL_SOCIAL_REFRESH_CONCURRENCY,
         );
@@ -3570,7 +3570,7 @@ export default function SeasonSocialAnalyticsSection({
 
       let runIdToLoad = selectedRunId;
       if (runsResult.status === "fulfilled") {
-        const loadedRuns = runsResult.value;
+        const loadedRuns = runsResult.value as SocialRun[];
         const activeRun = loadedRuns.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
         if (activeRun) {
           setActiveRunId(activeRun.id);
