@@ -503,7 +503,8 @@ async function collectCodexProjectAgents(
   const items = await Promise.all(
     Object.entries(agentsSection)
       .filter(([, value]) => isRecord(value))
-      .map(async ([key, value]: [string, Record<string, unknown>]) => {
+      .map(async ([key, _value]) => {
+        const value = _value as Record<string, unknown>;
         const configFile =
           typeof value.config_file === "string" && value.config_file.trim().length > 0
             ? value.config_file.trim()
