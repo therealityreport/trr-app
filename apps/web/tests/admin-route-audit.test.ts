@@ -85,4 +85,19 @@ describe("admin route audit matrix", () => {
       ]),
     );
   });
+
+  it("documents /screenlaytics as the retained typo alias for canonical /screenalytics", () => {
+    const adminHomeGroup = ADMIN_ROUTE_MATRIX_GROUPS.find((group) => group.id === "admin-home");
+    const screenalyticsEntry = adminHomeGroup?.entries.find((entry) => entry.key === "screenalytics");
+
+    expect(screenalyticsEntry?.variantPaths).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/screenlaytics",
+          status: "legacy_alias",
+          note: "Historical typo alias retained for compatibility; the canonical spelling remains /screenalytics.",
+        }),
+      ]),
+    );
+  });
 });

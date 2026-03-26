@@ -33,6 +33,7 @@ describe("brand font matches route", () => {
     expect(payload.source).toBe("generated-artifact");
     expect(payload.refreshMode).toBe("artifact");
     expect(payload.scoringMode).toBeDefined();
+    expect(payload.visualEvidence).toBeDefined();
     expect(Array.isArray(payload.matches)).toBe(true);
     expect(buildBrandFontArtifactsMock).not.toHaveBeenCalled();
   });
@@ -88,6 +89,13 @@ describe("brand font matches route", () => {
         ],
       },
       scoringMode: "metadata-only",
+      visualEvidenceHealth: {
+        status: "stale",
+        reason: "input-hash-mismatch",
+        compatible: false,
+        generatedAt: "2026-03-20T12:00:00.000Z",
+        inputHash: "old-hash",
+      },
     });
 
     const response = await getBrandFontMatches(
@@ -99,6 +107,7 @@ describe("brand font matches route", () => {
     expect(payload.source).toBe("live-regenerated");
     expect(payload.refreshMode).toBe("local-rerank");
     expect(payload.scoringMode).toBe("metadata-only");
+    expect(payload.visualEvidence.status).toBe("stale");
     expect(payload.registryCount).toBe(1);
     expect(payload.catalogCount).toBe(2);
     expect(payload.inputHash).toBe("hash-1");

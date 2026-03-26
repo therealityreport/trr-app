@@ -1,15 +1,15 @@
 # Cross-platform social sync closeout
 
-Last updated: 2026-03-20
+Last updated: 2026-03-24
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: active
-  last_updated: 2026-03-20
-  current_phase: "app-side sync closeout remains green, with the only remaining work being optional fresh-session smoke verification after the backend/runtime stabilizations"
-  next_action: "Run a real admin season or week sync-session smoke only if the live backend or browser workflow needs another acceptance pass; otherwise archive this entry during the next cleanup sweep"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer continuity notes if follow-up is needed"
   detail: self
 ```
 

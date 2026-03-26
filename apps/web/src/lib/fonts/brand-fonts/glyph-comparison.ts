@@ -1,6 +1,12 @@
 import glyphComparisonArtifactJson from "./generated/glyph-comparison-results.json" with { type: "json" };
 import { normalizeFontKey } from "./normalization.ts";
-import type { BrandFontRecord, GlyphComparisonArtifact, GlyphComparisonPair, ScoringMode } from "./types.ts";
+import type {
+  BrandFontRecord,
+  GlyphComparisonArtifact,
+  GlyphComparisonPair,
+  ScoringMode,
+  VisualEvidenceHealth,
+} from "./types.ts";
 
 export const GLYPH_COMPARISON_SCHEMA_VERSION = "2026-03-23.glyph.v1";
 
@@ -11,6 +17,7 @@ export type GlyphComparisonLookup = {
   pairMap: Map<string, GlyphComparisonPair>;
   recordKeySet: Set<string>;
   scoringMode: ScoringMode;
+  health: VisualEvidenceHealth;
 };
 
 function buildRecordKey(
@@ -37,12 +44,49 @@ export function buildGlyphComparisonLookup(
   artifact: GlyphComparisonArtifact | null | undefined,
   expectedInputHash?: string,
 ): GlyphComparisonLookup {
-  if (!artifact || artifact.pairs.length === 0) {
-    return { pairMap: new Map(), recordKeySet: new Set(), scoringMode: "metadata-only" };
+  if (!artifact) {
+    return {
+      pairMap: new Map(),
+      recordKeySet: new Set(),
+      scoringMode: "metadata-only",
+      health: {
+        status: "missing",
+        reason: "missing-artifact",
+        compatible: false,
+        generatedAt: null,
+        inputHash: null,
+      },
+    };
+  }
+
+  if (artifact.pairs.length === 0) {
+    return {
+      pairMap: new Map(),
+      recordKeySet: new Set(),
+      scoringMode: "metadata-only",
+      health: {
+        status: "missing",
+        reason: "empty-artifact",
+        compatible: false,
+        generatedAt: artifact.generatedAt,
+        inputHash: artifact.inputHash,
+      },
+    };
   }
 
   if (expectedInputHash && artifact.inputHash !== expectedInputHash) {
-    return { pairMap: new Map(), recordKeySet: new Set(), scoringMode: "metadata-only" };
+    return {
+      pairMap: new Map(),
+      recordKeySet: new Set(),
+      scoringMode: "metadata-only",
+      health: {
+        status: "stale",
+        reason: "input-hash-mismatch",
+        compatible: false,
+        generatedAt: artifact.generatedAt,
+        inputHash: artifact.inputHash,
+      },
+    };
   }
 
   const pairMap = new Map<string, GlyphComparisonPair>();
@@ -63,6 +107,13 @@ export function buildGlyphComparisonLookup(
     pairMap,
     recordKeySet,
     scoringMode: "visual+metadata",
+    health: {
+      status: "fresh",
+      reason: "compatible-glyph-artifact",
+      compatible: true,
+      generatedAt: artifact.generatedAt,
+      inputHash: artifact.inputHash,
+    },
   };
 }
 

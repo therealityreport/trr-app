@@ -137,7 +137,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -163,10 +163,10 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update Posts" }));
 
     await waitFor(() => {
       expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
@@ -203,7 +203,7 @@ describe("SocialAccountProfilePage", () => {
     const { rerender } = render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -248,7 +248,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -426,10 +426,10 @@ describe("SocialAccountProfilePage", () => {
           display_name: "Bravo",
           bio: "Official Bravo channel",
           follower_count: 1200000,
-          live_total_posts: 2450,
-          total_posts: 2450,
-          catalog_total_posts: 2450,
-          live_catalog_total_posts: 2450,
+          live_total_posts: 12562,
+          total_posts: 417,
+          catalog_total_posts: 417,
+          live_catalog_total_posts: 417,
         });
       }
       if (url.endsWith("/hashtags")) {
@@ -444,7 +444,7 @@ describe("SocialAccountProfilePage", () => {
     const { rerender } = render(<SocialAccountProfilePage platform="youtube" handle="bravo" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -452,6 +452,7 @@ describe("SocialAccountProfilePage", () => {
       "href",
       "https://www.youtube.com/@bravo",
     );
+    expect(screen.getByText("12,562")).toBeInTheDocument();
 
     rerender(<SocialAccountProfilePage platform="youtube" handle="bravo" activeTab="hashtags" />);
 
@@ -691,7 +692,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeDisabled();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
@@ -822,7 +823,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeDisabled();
     });
 
     const failedRunCard = screen.getByText("Run run-fail").closest(".rounded-xl");
@@ -836,7 +837,7 @@ describe("SocialAccountProfilePage", () => {
         ),
       ).toBe(true);
     });
-    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Update Posts" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
   });
 
@@ -1551,7 +1552,7 @@ describe("SocialAccountProfilePage", () => {
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/cancel-race-1/cancel")]);
     expect(progressCalls).toBeGreaterThan(1);
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Update Posts" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
   });
 
@@ -1641,7 +1642,7 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/queued-run-1/cancel")]);
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Update Posts" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
   });
 
@@ -1683,7 +1684,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Restart Backfill" })).not.toBeInTheDocument();
     expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
@@ -1795,7 +1796,7 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it(
-    "refreshes the live catalog summary while an active run is still running",
+    "does not re-poll the heavy summary while an active run is still running",
     async () => {
       let summaryCalls = 0;
 
@@ -1879,18 +1880,15 @@ describe("SocialAccountProfilePage", () => {
         expect(screen.getAllByText("1,001").length).toBeGreaterThan(0);
       });
 
-      await waitFor(
-        () => {
-          expect(screen.getAllByText("1,234").length).toBeGreaterThan(0);
-        },
-        { timeout: 7_000 },
-      );
+      await new Promise((resolve) => setTimeout(resolve, 5_500));
+      expect(summaryCalls).toBe(1);
+      expect(screen.queryByText("1,234")).not.toBeInTheDocument();
     },
     12_000,
   );
 
   it(
-    "keeps the last good summary visible when a live refresh times out during an active run",
+    "keeps the last good summary visible without retrying timed-out summaries during an active run",
     async () => {
       let summaryCalls = 0;
 
@@ -1938,12 +1936,8 @@ describe("SocialAccountProfilePage", () => {
         expect(screen.getByRole("heading", { name: "Distribution" })).toBeInTheDocument();
       });
 
-      await waitFor(
-        () => {
-          expect(summaryCalls).toBeGreaterThan(1);
-        },
-        { timeout: 7_000 },
-      );
+      await new Promise((resolve) => setTimeout(resolve, 5_500));
+      expect(summaryCalls).toBe(1);
       expect(screen.getByRole("heading", { name: "Distribution" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
     },
@@ -2073,7 +2067,7 @@ describe("SocialAccountProfilePage", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Update Posts" })).toBeEnabled();
     expect(screen.getByText("Background")).toBeInTheDocument();
   });
 
@@ -2403,7 +2397,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="facebook" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -2411,6 +2405,60 @@ describe("SocialAccountProfilePage", () => {
       "href",
       "https://www.facebook.com/bravotv",
     );
+  });
+
+  it("automatically probes instagram catalog freshness after a completed backfill", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-freshness-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/hashtags/timeline")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          years: [],
+          series: [],
+          top_rank_limit: 10,
+          off_chart_rank: 11,
+        });
+      }
+      if (url.includes("/hashtags")) {
+        return jsonResponse({
+          items: [],
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          live_total_posts_current: 14,
+          stored_total_posts: 12,
+          delta_posts: 2,
+          needs_recent_sync: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("2 newer posts detected")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Stored 12 posts · live profile shows 14 · checked 3/20/2026, 8:30:00 AM")).toBeInTheDocument();
   });
 
   it("renders the catalog tab empty state", async () => {
@@ -2436,7 +2484,7 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Recent Catalog Runs")).toBeInTheDocument();
   });
 
-  it("lets operators resolve unknown hashtags with an explicit season picker", async () => {
+  it("lets operators resolve unknown hashtags with a show-only assignment", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -2475,20 +2523,11 @@ describe("SocialAccountProfilePage", () => {
           ],
         });
       }
-      if (url.includes("/api/admin/trr-api/shows/show-rhop/seasons")) {
-        return jsonResponse({
-          seasons: [
-            { id: "season-rhop-9", season_number: 9 },
-            { id: "season-rhop-8", season_number: 8 },
-          ],
-        });
-      }
       if (url.includes("/catalog/review-queue/review-1/resolve")) {
         expect(init?.method).toBe("POST");
         expect(JSON.parse(String(init?.body))).toEqual({
-          resolution_action: "assign_season",
+          resolution_action: "assign_show",
           show_id: "show-rhop",
-          season_id: "season-rhop-9",
         });
         return jsonResponse({ ok: true });
       }
@@ -2501,25 +2540,8 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Unknown Hashtags")).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByLabelText("Resolution for #RHOP"), {
-      target: { value: "assign_season" },
-    });
-
-    await waitFor(() => {
-      expect(
-        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
-          String(input).includes("/api/admin/trr-api/shows/show-rhop/seasons"),
-        ),
-      ).toBe(true);
-    });
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Season for #RHOP")).toBeEnabled();
-    });
-
-    fireEvent.change(screen.getByLabelText("Season for #RHOP"), {
-      target: { value: "season-rhop-9" },
-    });
+    expect(screen.getByText("3 uses · First seen 3/10/2026, 8:00:00 AM · Last seen 3/17/2026, 8:00:00 AM")).toBeInTheDocument();
+    expect(screen.getByLabelText("Show for #RHOP")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
 
     await waitFor(() => {
@@ -2529,5 +2551,10 @@ describe("SocialAccountProfilePage", () => {
         ),
       ).toBe(true);
     });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/shows/show-rhop/seasons"),
+      ),
+    ).toBe(false);
   });
 });

@@ -18,14 +18,19 @@
   --font-sans: "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Gloucester", "Playfair Display", Georgia, "Times New Roman", serif;
   --font-display: "Gloucester", "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-headline: "Gloucester", "Playfair Display", Georgia, "Times New Roman", serif;
   --font-body: "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
+  --font-caption: "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
   --font-games: "Plymouth Serial", "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   /* ── Semantic Color Tokens (shadcn-compatible) ───────────────────────── */
   /* Surfaces */
   --background: #ffffff;
+  --surface: #ffffff;
   --foreground: #171717;
+  --text-primary: #171717;
+  --text-muted: #737373;
   --card: #ffffff;
   --card-foreground: #171717;
   --popover: #ffffff;
@@ -74,6 +79,10 @@
   /* ── Layout Tokens ───────────────────────────────────────────────────── */
   --side-menu-width: min(384px, 92vw);
   --header-height: 56px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 
   /* ── Flashback Game Tokens ───────────────────────────────────────────── */
   --fb-bg: #E8E0D0;
@@ -100,7 +109,10 @@
 @theme {
   /* ── Core Colors ─────────────────────────────────────────────────────── */
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -137,7 +149,9 @@
   --font-sans: var(--font-hamburg), var(--font-inter), var(--font-geist-sans);
   --font-serif: var(--font-gloucester), var(--font-playfair), var(--font-figma-serif), Georgia, "Times New Roman", serif;
   --font-display: var(--font-gloucester);
+  --font-headline: var(--font-gloucester), var(--font-playfair), var(--font-figma-serif), Georgia, "Times New Roman", serif;
   --font-body: var(--font-hamburg);
+  --font-caption: var(--font-hamburg);
   --font-games: var(--font-plymouth-serial), var(--font-hamburg), var(--font-inter), var(--font-geist-sans);
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 

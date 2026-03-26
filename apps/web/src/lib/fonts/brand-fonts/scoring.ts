@@ -10,6 +10,7 @@ import type {
   BrandFontMatchRule,
   BrandFontRecord,
   GlyphComparisonArtifact,
+  GlyphComparisonPair,
   MatchSource,
   MatchWarning,
   NormalizedR2FontRecord,
@@ -17,6 +18,7 @@ import type {
   ScoreBreakdown,
   ScoreBreakdownProfile,
   ScoringMode,
+  VisualEvidenceHealth,
 } from "./types.ts";
 import {
   extractFamilySimilarityTokens,
@@ -280,15 +282,16 @@ function visualAffinityScore(
   source: BrandFontRecord,
   candidate: NormalizedR2FontRecord,
   lookup: ReturnType<typeof buildLookup>,
-): { score: number; scoringMode: ScoringMode; aggregateVisualAffinity: number } {
+) : { score: number; scoringMode: ScoringMode; aggregateVisualAffinity: number; pair: GlyphComparisonPair | null } {
   const pair = resolveGlyphComparisonPair(source, candidate.familyName, lookup);
   if (!pair) {
-    return { score: 0, scoringMode: "metadata-only", aggregateVisualAffinity: 0 };
+    return { score: 0, scoringMode: "metadata-only", aggregateVisualAffinity: 0, pair: null };
   }
   return {
     score: Math.round((pair.aggregateVisualAffinity / 100) * VISUAL_AFFINITY_MAX),
     scoringMode: lookup.scoringMode,
     aggregateVisualAffinity: pair.aggregateVisualAffinity,
+    pair,
   };
 }
 
@@ -350,6 +353,7 @@ type ScoredCandidate = {
   candidate: NormalizedR2FontRecord;
   score: number;
   breakdown: ScoreBreakdown;
+  visualDiagnostics?: BrandFontMatch["visualDiagnostics"];
   rawScores: {
     classification: number;
     role: number;
@@ -483,6 +487,14 @@ function scoreCandidate(
     },
     currentSubstituteTop,
     scoringMode: hasRecordVisualEvidence ? "visual+metadata" : "metadata-only",
+    visualDiagnostics: visual.pair
+      ? {
+          aggregateVisualAffinity: visual.aggregateVisualAffinity,
+          resolvedSourceFamily: visual.pair.resolvedSourceFamily,
+          sourceAsset: visual.pair.resolvedSourceAsset,
+          candidateAsset: visual.pair.resolvedCandidateAsset,
+        }
+      : undefined,
   };
 }
 
@@ -540,6 +552,7 @@ export function rankBrandFontCandidates(
     matchSource: matchSourceForCandidate(candidate),
     scoreBreakdown: candidate.breakdown,
     scoringMode: candidate.scoringMode,
+    visualDiagnostics: candidate.visualDiagnostics,
   }));
 }
 
@@ -548,7 +561,8 @@ export function buildBrandFontMatchResults(
   catalog: readonly NormalizedR2FontRecord[],
   rules: readonly BrandFontMatchRule[],
   scoringOptions: RankingScoringOptions = {},
-): { matches: BrandFontMatchResult[]; scoringMode: ScoringMode } {
+) : { matches: BrandFontMatchResult[]; scoringMode: ScoringMode; visualEvidenceHealth: VisualEvidenceHealth } {
+  const lookup = buildLookup(scoringOptions.glyphComparisonArtifact, scoringOptions.expectedInputHash);
   const matches = registry.map((record) => {
     const rankedMatches: BrandFontMatch[] = rankBrandFontCandidates(
       record,
@@ -595,5 +609,6 @@ export function buildBrandFontMatchResults(
     scoringMode: (matches.some((entry) => entry.scoringMode === "visual+metadata")
       ? "visual+metadata"
       : "metadata-only") as ScoringMode,
+    visualEvidenceHealth: lookup.health,
   };
 }

@@ -8,6 +8,7 @@ import {
   createPersonRefreshPipelineSteps,
   createSyncProgressTracker,
   finalizePersonRefreshPipelineSteps,
+  formatGettySubtaskCountLabel,
   formatRefreshSourceLabel,
   formatPersonRefreshPhaseLabel,
   mapPersonRefreshStage,
@@ -168,6 +169,18 @@ describe("person refresh progress mapping", () => {
       ],
       breakdown: {
         raw_getty_candidates: 24,
+        getty_query_image_total: 5700,
+        getty_query_event_total: 379,
+        getty_query_page_total: 96,
+        getty_pages_completed: 96,
+        getty_pages_total: 96,
+        getty_discovered_total: 4823,
+        getty_usable_total: 3946,
+        getty_existing_shared_total: 877,
+        getty_existing_getty_total: 12,
+        getty_to_import_total: 3069,
+        getty_skipped_existing_total: 889,
+        getty_deferred_resolution_total: 14,
         matched_via_nbcumv: 10,
         matched_via_bravotv_json: 0,
         matched_via_image_search: 2,
@@ -189,12 +202,60 @@ describe("person refresh progress mapping", () => {
     ]);
     expect(gettyProgress?.breakdown).toMatchObject({
       rawGettyCandidates: 24,
+      gettyQueryImageTotal: 5700,
+      gettyQueryEventTotal: 379,
+      gettyQueryPageTotal: 96,
+      gettyPagesCompleted: 96,
+      gettyExistingSharedTotal: 877,
+      gettyToImportTotal: 3069,
       matchedViaNbcumv: 10,
       matchedViaImageSearch: 2,
       nbcumvOnlyImported: 2,
       mirroredHosted: 16,
       failed: 1,
     });
+  });
+
+  it("formats getty count labels using site totals before fetched totals", () => {
+    expect(
+      formatGettySubtaskCountLabel({
+        id: "primary_person_search",
+        label: "Primary Person Search",
+        status: "completed",
+        query: "Brandi Glanville Bravo",
+        queryUrl: "https://www.gettyimages.com/search/2/image?family=editorial&phrase=Brandi%20Glanville%20Bravo&sort=newest",
+        candidatesFound: 180,
+        siteImageTotal: 877,
+        siteEventTotal: 39,
+        siteVideoTotal: 0,
+        usableAfterDedupeTotal: 180,
+        overlapCount: 0,
+        current: 180,
+        total: 180,
+        message: "Getty reports 877 images. fetched 180. 180 usable after dedupe.",
+      }),
+    ).toBe("877 found");
+  });
+
+  it("formats getty count labels as fetched when site totals are absent", () => {
+    expect(
+      formatGettySubtaskCountLabel({
+        id: "fallback_person_search",
+        label: "Fallback Person Search",
+        status: "completed",
+        query: "Brandi Glanville",
+        queryUrl: "https://www.gettyimages.com/search/2/image?family=editorial&phrase=Brandi%20Glanville&sort=newest",
+        candidatesFound: 312,
+        siteImageTotal: null,
+        siteEventTotal: null,
+        siteVideoTotal: null,
+        usableAfterDedupeTotal: 312,
+        overlapCount: 0,
+        current: 312,
+        total: 312,
+        message: "Fetched 312 Getty candidates.",
+      }),
+    ).toBe("312 fetched");
   });
 
   it("builds detailed heartbeat messages with source + elapsed context", () => {

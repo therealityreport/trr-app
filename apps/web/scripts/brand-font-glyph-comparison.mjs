@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { chromium } from "@playwright/test";
 
-import { parseHostedFontCatalogStylesheet } from "../src/lib/fonts/hosted-font-catalog.ts";
 import { buildHostedFontUrl } from "../src/lib/fonts/hosted-fonts.ts";
+import {
+  readHostedFamilyMap,
+  resolveFontAsset,
+  resolveHostedFamily,
+  resolveSourceHostedFamily,
+} from "../src/lib/fonts/brand-fonts/asset-resolution.ts";
 import { discoverBrandFontEvidence } from "../src/lib/fonts/brand-fonts/discovery.ts";
 import {
   buildBrandFontArtifactsInputHash,
@@ -46,13 +51,6 @@ const SENTENCE_FONT_SIZE = 92;
 const PADDING = 8;
 const DEFAULT_LIMIT = 5;
 const SENTENCE_TEXT = "The quick brown fox jumps over the lazy dog 0123456789";
-const SOURCE_FAMILY_ALIASES = new Map([
-  ["nytkarnakcondensed", ["NYTKarnak_Condensed"]],
-  ["nytkarnak", ["KarnakPro-Book"]],
-  ["nytfranklin", ["NYTFranklin"]],
-  ["tnwebuseonly", ["TN_Web_Use_Only"]],
-  ["helveticaneue", ["Helvetica_Neue"]],
-]);
 
 function printUsage() {
   console.log(`Usage:
@@ -138,43 +136,6 @@ function buildCandidateScope(record, catalog, limit) {
             : "metadata",
       })),
     (candidate) => normalizeFontKey(candidate.familyName),
-  );
-}
-
-async function readStylesheet(relativePath) {
-  return readFile(join(PROJECT_ROOT, relativePath), "utf8");
-}
-
-function buildFontFamilyCatalog(hostedStylesheet, referenceStylesheet) {
-  const allFamilies = parseHostedFontCatalogStylesheet(`${hostedStylesheet}\n${referenceStylesheet}`);
-  const familyMap = new Map();
-  for (const family of allFamilies) {
-    familyMap.set(normalizeFontKey(family.familyName), family);
-  }
-  return familyMap;
-}
-
-function resolveSourceFamily(record, familyMap) {
-  const direct = familyMap.get(normalizeFontKey(record.sourceFontFamily));
-  if (direct) return direct;
-  const substitute = record.currentReferenceSubstitute
-    ? familyMap.get(normalizeFontKey(record.currentReferenceSubstitute))
-    : null;
-  const aliases = SOURCE_FAMILY_ALIASES.get(normalizeFontKey(record.sourceFontFamily)) ?? [];
-  const aliasMatch = aliases
-    .map((alias) => familyMap.get(normalizeFontKey(alias)))
-    .find(Boolean);
-  return aliasMatch ?? substitute ?? null;
-}
-
-function selectSourceStyle(record, family) {
-  const sourceWeight = record.sourceWeightsNormalized[0] ?? 400;
-  const sourceStyle = record.sourceStyles[0] ?? "normal";
-  return (
-    family.styles.find((style) => style.weight === sourceWeight && style.style === sourceStyle) ??
-    family.styles.find((style) => style.style === sourceStyle) ??
-    family.styles[0] ??
-    null
   );
 }
 
@@ -500,9 +461,7 @@ async function main() {
     return;
   }
 
-  const hostedStylesheet = await readStylesheet("src/styles/cdn-fonts.css");
-  const referenceStylesheet = await readStylesheet("src/styles/realitease-fonts.css");
-  const familyMap = buildFontFamilyCatalog(hostedStylesheet, referenceStylesheet);
+  const familyMap = readHostedFamilyMap(PROJECT_ROOT);
   const discovered = discoverBrandFontEvidence(PROJECT_ROOT);
   const registry = buildRegistry(discovered);
   const hostedCatalog = parseHostedCatalog(PROJECT_ROOT);
@@ -518,15 +477,21 @@ async function main() {
 
   try {
     for (const record of registry) {
-      const sourceFamily = resolveSourceFamily(record, familyMap);
+      const sourceFamily = resolveSourceHostedFamily(record, familyMap);
       if (!sourceFamily) continue;
-      const sourceStyle = selectSourceStyle(record, sourceFamily);
-      if (!sourceStyle?.sourceUrl) continue;
-      const sourceFontDataUrl = await loadFontDataUrl(resolveFontFetchUrl(sourceStyle.sourceUrl), fontCache);
+      const sourceAsset = resolveFontAsset(
+        record.sourceFontFamily,
+        sourceFamily,
+        record.sourceWeightsNormalized[0] ?? 400,
+        record.sourceStyles[0] ?? "normal",
+        record.sourceWidthNormalized[0] ?? "normal",
+      );
+      if (!sourceAsset?.sourceUrl) continue;
+      const sourceFontDataUrl = await loadFontDataUrl(resolveFontFetchUrl(sourceAsset.sourceUrl), fontCache);
       const candidates = buildCandidateScope(record, hostedCatalog, options.limit);
 
       for (const candidate of candidates) {
-        const candidateFamily = familyMap.get(normalizeFontKey(candidate.familyName));
+        const candidateFamily = resolveHostedFamily(candidate.familyName, familyMap);
         if (!candidateFamily) continue;
         const candidateStyles = selectCandidateStyles(record, candidateFamily).filter((style) => Boolean(style.sourceUrl));
         if (candidateStyles.length === 0) continue;
@@ -537,8 +502,8 @@ async function main() {
           const comparison = await compareWeight(page, {
             sourceFamily: sourceFamily.familyName,
             sourceFontDataUrl,
-            sourceFontStyle: sourceStyle.style,
-            sourceFontWeight: sourceStyle.weight,
+            sourceFontStyle: sourceAsset.resolvedStyle,
+            sourceFontWeight: sourceAsset.resolvedWeight,
             candidateFamily: candidateFamily.familyName,
             candidateFontDataUrl,
             candidateFontStyle: candidateStyle.style,
@@ -563,11 +528,19 @@ async function main() {
             comparison.numeralScore * 0.10 +
             comparison.sentenceScore * 0.20,
           );
+          const resolvedCandidateAsset = resolveFontAsset(
+            candidate.familyName,
+            candidateFamily,
+            candidateStyle.weight,
+            candidateStyle.style,
+            candidate.widthsNormalized[0] ?? "normal",
+          );
           const recommendedLetterSpacingEm = round(
             mean(comparison.kerningPairs.map((pair) => pair.deltaEm)),
             3,
           );
           perWeight.push({
+            resolvedCandidateAsset,
             weight: candidateStyle.weight,
             overallScore,
             uppercaseScore: comparison.uppercaseScore,
@@ -592,10 +565,11 @@ async function main() {
           roleType: record.roleType,
           sourceFamily: record.sourceFontFamily,
           resolvedSourceFamily: sourceFamily.familyName,
+          resolvedSourceAsset: sourceAsset,
           currentReferenceSubstitute: record.currentReferenceSubstitute,
           candidateFamily: candidate.familyName,
           candidateSource: candidate.candidateSource,
-          sourceWeight: sourceStyle.weight,
+          sourceWeight: sourceAsset.resolvedWeight,
           perWeight,
         });
         summaryPairs.push({
@@ -605,10 +579,12 @@ async function main() {
           roleType: record.roleType,
           sourceFamily: record.sourceFontFamily,
           resolvedSourceFamily: sourceFamily.familyName,
-          sourceWeight: sourceStyle.weight,
+          resolvedSourceAsset: sourceAsset,
+          sourceWeight: sourceAsset.resolvedWeight,
           currentReferenceSubstitute: record.currentReferenceSubstitute,
           candidateFamily: candidate.familyName,
           candidateSource: candidate.candidateSource,
+          resolvedCandidateAsset: bestWeight.resolvedCandidateAsset,
           aggregateVisualAffinity: bestWeight.overallScore,
           perWeight: perWeight.map((entry) => ({
             weight: entry.weight,

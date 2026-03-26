@@ -316,14 +316,14 @@ function healthState(data: HealthDotStatus | null, error: string | null): Health
 function healthDotColor(state: HealthState): string {
   switch (state) {
     case "healthy":
-      return "bg-emerald-500";
+      return "bg-[#7A0307]";
     case "degraded":
-      return "bg-amber-500";
+      return "bg-black";
     case "down":
     case "error":
-      return "bg-red-500";
+      return "border border-black bg-white";
     case "loading":
-      return "bg-zinc-300";
+      return "border border-black/40 bg-white";
   }
 }
 
@@ -2138,15 +2138,15 @@ export function HealthIndicator({
       onClick={onClick}
       className={
         className ??
-        "group absolute right-4 flex items-center gap-1.5 rounded-full px-2.5 py-1.5 transition hover:bg-zinc-100"
+        "group absolute right-4 flex items-center gap-1.5 rounded-full border border-black px-2.5 py-1.5 transition hover:bg-black/[0.04]"
       }
     >
       <span className={`relative inline-block h-2.5 w-2.5 rounded-full ${healthDotColor(state)}`}>
         {state === "healthy" && (
-          <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400 opacity-40" />
+          <span className="absolute inset-0 animate-ping rounded-full bg-[#7A0307] opacity-30" />
         )}
       </span>
-      <span className="hidden text-xs font-medium text-zinc-500 group-hover:inline">{healthLabel(state)}</span>
+      <span className="hidden text-xs font-medium text-black/65 group-hover:inline">{healthLabel(state)}</span>
     </button>
   );
 }

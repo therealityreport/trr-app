@@ -45,12 +45,13 @@ type AdminGlobalSearchProps = {
 
 const MIN_QUERY_LENGTH = 3;
 const SEARCH_DEBOUNCE_MS = 250;
+const ACCENT = "#7A0307";
 
 const hasQuery = (value: string): boolean => value.trim().length >= MIN_QUERY_LENGTH;
 
 function SectionHeader({ id, children }: { id: string; children: string }) {
   return (
-    <h3 id={id} className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+    <h3 id={id} className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: ACCENT }}>
       {children}
     </h3>
   );
@@ -165,13 +166,13 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
       <div
         className={
           isHero
-            ? "flex items-center rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm"
-            : "flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1.5 shadow-sm"
+            ? "flex items-center rounded-2xl border border-black bg-white px-4 py-3"
+            : "flex items-center rounded-full border border-black bg-white px-3 py-1.5"
         }
       >
         <svg
           aria-hidden="true"
-          className={isHero ? "h-5 w-5 text-zinc-500" : "h-4 w-4 text-zinc-500"}
+          className={isHero ? "h-5 w-5 text-black/65" : "h-4 w-4 text-black/65"}
           viewBox="0 0 24 24"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
@@ -197,8 +198,8 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
           }}
           className={
             isHero
-              ? "ml-3 h-8 w-full bg-transparent text-base text-zinc-800 outline-none placeholder:text-zinc-400"
-              : "ml-2 h-7 w-full bg-transparent text-sm text-zinc-800 outline-none placeholder:text-zinc-400"
+              ? "ml-3 h-8 w-full bg-transparent text-base text-black outline-none placeholder:text-black/45"
+              : "ml-2 h-7 w-full bg-transparent text-sm text-black outline-none placeholder:text-black/45"
           }
         />
       </div>
@@ -207,30 +208,30 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
         <div
           className={
             isHero
-              ? "absolute left-0 z-50 mt-2 w-full rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
-              : "absolute right-0 z-50 mt-2 w-full rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
+              ? "absolute left-0 z-50 mt-2 w-full rounded-2xl border border-black bg-white p-4"
+              : "absolute right-0 z-50 mt-2 w-full rounded-2xl border border-black bg-white p-4"
           }
         >
-          {loading && <p className="text-sm text-zinc-500">Searching...</p>}
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {loading && <p className="text-sm text-black/60">Searching...</p>}
+          {error && <p className="text-sm" style={{ color: ACCENT }}>{error}</p>}
           {!loading && !error && results && totalHits === 0 && (
-            <p className="text-sm text-zinc-500">No matches for &quot;{debouncedQuery.trim()}&quot;.</p>
+            <p className="text-sm text-black/60">No matches for &quot;{debouncedQuery.trim()}&quot;.</p>
           )}
 
           {!loading && !error && results && totalHits > 0 && (
             <div className="flex flex-col gap-3" role="region" aria-label="Grouped search results">
-              <section aria-labelledby="admin-search-shows-heading" className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <section aria-labelledby="admin-search-shows-heading" className="rounded-xl border border-black bg-white p-3">
                 <SectionHeader id="admin-search-shows-heading">Shows</SectionHeader>
                 <div className="space-y-1.5">
                   {results.shows.length === 0 ? (
-                    <p className="text-xs text-zinc-500">No show matches.</p>
+                    <p className="text-xs text-black/60">No show matches.</p>
                   ) : (
                     results.shows.map((show) => (
                       <Link
                         key={show.id}
                         href={buildShowAdminUrl({ showSlug: show.slug }) as Route}
                         onClick={() => setOpen(false)}
-                        className="block rounded-md px-2 py-1.5 text-sm text-zinc-800 transition hover:bg-zinc-100"
+                        className="block rounded-md px-2 py-1.5 text-sm text-black transition hover:bg-black/[0.04]"
                       >
                         {show.name}
                       </Link>
@@ -239,11 +240,11 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
                 </div>
               </section>
 
-              <section aria-labelledby="admin-search-people-heading" className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <section aria-labelledby="admin-search-people-heading" className="rounded-xl border border-black bg-white p-3">
                 <SectionHeader id="admin-search-people-heading">People</SectionHeader>
                 <div className="space-y-1.5">
                   {results.people.length === 0 ? (
-                    <p className="text-xs text-zinc-500">No people matches.</p>
+                    <p className="text-xs text-black/60">No people matches.</p>
                   ) : (
                     results.people.map((person) => {
                       const label = person.full_name?.trim() || "Unknown Person";
@@ -257,11 +258,11 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
                             }) as Route
                           }
                           onClick={() => setOpen(false)}
-                          className="block rounded-md px-2 py-1.5 transition hover:bg-zinc-100"
+                          className="block rounded-md px-2 py-1.5 transition hover:bg-black/[0.04]"
                         >
-                          <p className="text-sm text-zinc-800">{label}</p>
+                          <p className="text-sm text-black">{label}</p>
                           {person.known_for && (
-                            <p className="truncate text-xs text-zinc-500">{person.known_for}</p>
+                            <p className="truncate text-xs text-black/60">{person.known_for}</p>
                           )}
                         </Link>
                       );
@@ -270,11 +271,11 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
                 </div>
               </section>
 
-              <section aria-labelledby="admin-search-episodes-heading" className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <section aria-labelledby="admin-search-episodes-heading" className="rounded-xl border border-black bg-white p-3">
                 <SectionHeader id="admin-search-episodes-heading">Episodes</SectionHeader>
                 <div className="space-y-1.5">
                   {results.episodes.length === 0 ? (
-                    <p className="text-xs text-zinc-500">No episode matches.</p>
+                    <p className="text-xs text-black/60">No episode matches.</p>
                   ) : (
                     results.episodes.map((episode) => {
                       const seasonNumber = Number.isFinite(episode.season_number)
@@ -295,10 +296,10 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
                           key={episode.id}
                           href={href as Route}
                           onClick={() => setOpen(false)}
-                          className="block rounded-md px-2 py-1.5 transition hover:bg-zinc-100"
+                          className="block rounded-md px-2 py-1.5 transition hover:bg-black/[0.04]"
                         >
-                          <p className="truncate text-sm text-zinc-800">{episode.title || "Untitled Episode"}</p>
-                          <p className="truncate text-xs text-zinc-500">
+                          <p className="truncate text-sm text-black">{episode.title || "Untitled Episode"}</p>
+                          <p className="truncate text-xs text-black/60">
                             {episode.show_name || "Unknown Show"}
                             {seasonNumber && Number.isFinite(episode.episode_number)
                               ? ` · S${seasonNumber}E${episode.episode_number}`

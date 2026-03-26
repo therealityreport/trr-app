@@ -5,6 +5,10 @@ const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
 }));
+const { readGettyPrefetchPayloadMock, deleteGettyPrefetchPayloadMock } = vi.hoisted(() => ({
+  readGettyPrefetchPayloadMock: vi.fn(),
+  deleteGettyPrefetchPayloadMock: vi.fn(),
+}));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
@@ -14,19 +18,24 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/admin/getty-local-scrape", () => ({
+  readGettyPrefetchPayload: readGettyPrefetchPayloadMock,
+  deleteGettyPrefetchPayload: deleteGettyPrefetchPayloadMock,
+}));
+
 import { POST } from "@/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route";
 
 const BACKEND_STREAM_URL = "https://backend.example.com/api/v1/admin/person/person-1/refresh-images/stream";
 const BACKEND_HEALTH_URL = "https://backend.example.com/health";
 
-const makeRequest = (requestId?: string) =>
+const makeRequest = (requestId?: string, body: Record<string, unknown> = { force_mirror: true }) =>
   new NextRequest("http://localhost/api/admin/trr-api/people/person-1/refresh-images/stream", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(requestId ? { "x-trr-request-id": requestId } : {}),
     },
-    body: JSON.stringify({ force_mirror: true }),
+    body: JSON.stringify(body),
   });
 
 type SseEvent = {
@@ -68,6 +77,10 @@ describe("person refresh-images stream proxy route", () => {
     vi.restoreAllMocks();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(BACKEND_STREAM_URL);
+    readGettyPrefetchPayloadMock.mockReset();
+    readGettyPrefetchPayloadMock.mockResolvedValue(null);
+    deleteGettyPrefetchPayloadMock.mockReset();
+    deleteGettyPrefetchPayloadMock.mockResolvedValue(undefined);
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     process.env.TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS = "20000";
     process.env.TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS = "2000";
@@ -191,6 +204,143 @@ describe("person refresh-images stream proxy route", () => {
     const callHeaders = streamCall?.[1]?.headers as Record<string, string> | undefined;
     expect(callHeaders?.["x-trr-request-id"]).toBe("req-forward-1");
     expect(streamCall?.[1]).toMatchObject({ dispatcher: expect.anything() });
+  });
+
+  it("forwards large Getty prefetch payloads without dropping source selection", async () => {
+    const largeBody = {
+      sources: ["nbcumv"],
+      getty_prefetch_attempted: true,
+      getty_prefetch_succeeded: true,
+      getty_prefetched_assets: [
+        {
+          id: "asset-1",
+          caption: "Example",
+          nested: { values: Array.from({ length: 50 }, (_, index) => `value-${index}`) },
+        },
+      ],
+      getty_prefetched_events: [
+        {
+          id: "event-1",
+          title: "Example event",
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest("req-large-body", largeBody), {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+    await response.text();
+
+    const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
+    expect(streamCall?.[1]?.body).toBe(JSON.stringify(largeBody));
+  });
+
+  it("hydrates server-staged Getty payloads before forwarding to backend", async () => {
+    readGettyPrefetchPayloadMock.mockResolvedValue({
+      merged: [{ id: "asset-1" }, { id: "asset-2" }],
+      merged_events: [{ id: "event-1" }],
+    });
+
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(
+      makeRequest("req-token-body", {
+        sources: ["nbcumv"],
+        getty_prefetch_attempted: true,
+        getty_prefetch_succeeded: true,
+        getty_prefetch_token: "prefetch-token-1",
+      }),
+      {
+        params: Promise.resolve({ personId: "person-1" }),
+      }
+    );
+    await response.text();
+
+    const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
+    expect(streamCall).toBeTruthy();
+    const forwarded = JSON.parse(String(streamCall?.[1]?.body)) as Record<string, unknown>;
+    expect(forwarded.sources).toEqual(["nbcumv"]);
+    expect(Array.isArray(forwarded.getty_prefetched_assets)).toBe(true);
+    expect((forwarded.getty_prefetched_assets as unknown[]).length).toBe(2);
+    expect(Array.isArray(forwarded.getty_prefetched_events)).toBe(true);
+    expect((forwarded.getty_prefetched_events as unknown[]).length).toBe(1);
+    expect(forwarded.getty_prefetch_token).toBeUndefined();
+    expect(readGettyPrefetchPayloadMock).toHaveBeenCalledWith("prefetch-token-1");
+    expect(deleteGettyPrefetchPayloadMock).not.toHaveBeenCalled();
+  });
+
+  it("hydrates discovery manifests without deleting the persistent Getty token", async () => {
+    readGettyPrefetchPayloadMock.mockResolvedValue({
+      prefetch_mode: "discovery",
+      discovery_manifest: [{ id: "asset-discovery-1" }],
+      merged: [{ id: "asset-full-1" }],
+      merged_events: [{ id: "event-full-1" }],
+      deferred_editorial_ids: ["123", "456"],
+      enrichment_status: "pending",
+      query_summaries: [{ phrase: "Brandi Glanville", query_url: "https://getty.example.com" }],
+    });
+
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response("event: progress\ndata: {\"stage\":\"sync_imdb\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(
+      makeRequest("req-discovery-token", {
+        sources: ["nbcumv"],
+        getty_prefetch_attempted: true,
+        getty_prefetch_succeeded: true,
+        getty_prefetch_token: "prefetch-token-discovery",
+      }),
+      {
+        params: Promise.resolve({ personId: "person-1" }),
+      }
+    );
+    await response.text();
+
+    const streamCall = fetchMock.mock.calls.find((call) => String(call[0]) === BACKEND_STREAM_URL);
+    const forwarded = JSON.parse(String(streamCall?.[1]?.body)) as Record<string, unknown>;
+    expect(forwarded.getty_prefetched_assets).toEqual([{ id: "asset-discovery-1" }]);
+    expect(forwarded.getty_prefetched_events).toEqual([]);
+    expect(forwarded.getty_prefetch_mode).toBe("discovery");
+    expect(forwarded.getty_deferred_enrichment).toBe(true);
+    expect(forwarded.getty_deferred_editorial_ids).toEqual(["123", "456"]);
+    expect(forwarded.getty_prefetch_token).toBeUndefined();
+    expect(deleteGettyPrefetchPayloadMock).not.toHaveBeenCalled();
   });
 
   it("does not force local execution for admin.localhost in development", async () => {

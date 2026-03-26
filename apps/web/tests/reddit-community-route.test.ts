@@ -8,6 +8,8 @@ const {
   deleteRedditCommunityMock,
   normalizeSubredditMock,
   isValidSubredditMock,
+  getCachedStableReadMock,
+  loadStableRedditReadMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getRedditCommunityByIdMock: vi.fn(),
@@ -15,6 +17,8 @@ const {
   deleteRedditCommunityMock: vi.fn(),
   normalizeSubredditMock: vi.fn((value: string) => value.replace(/^r\//i, "")),
   isValidSubredditMock: vi.fn(() => true),
+  getCachedStableReadMock: vi.fn(async ({ loader }) => ({ payload: await loader(), cacheHit: false })),
+  loadStableRedditReadMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -29,6 +33,20 @@ vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   updateRedditCommunity: updateRedditCommunityMock,
 }));
 
+vi.mock("@/lib/server/trr-api/reddit-stable-route-cache", () => ({
+  buildUserScopedRouteCacheKey: vi.fn(
+    (userId: string, scope: string, searchParams?: URLSearchParams) =>
+      `${userId}:${scope}:${searchParams?.toString() ?? ""}`,
+  ),
+  getCachedStableRead: getCachedStableReadMock,
+  REDDIT_STABLE_DETAIL_CACHE_NAMESPACE: "admin-reddit-stable-detail",
+  REDDIT_STABLE_DETAIL_CACHE_TTL_MS: 10_000,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-read", () => ({
+  loadStableRedditRead: loadStableRedditReadMock,
+}));
+
 import { GET, PATCH } from "@/app/api/admin/reddit/communities/[communityId]/route";
 
 const COMMUNITY_ID = "33333333-3333-4333-8333-333333333333";
@@ -41,21 +59,32 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     deleteRedditCommunityMock.mockReset();
     normalizeSubredditMock.mockClear();
     isValidSubredditMock.mockReset();
+    getCachedStableReadMock.mockReset();
+    loadStableRedditReadMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
     isValidSubredditMock.mockReturnValue(true);
+    getCachedStableReadMock.mockImplementation(async ({ loader }) => ({
+      payload: await loader(),
+      cacheHit: false,
+    }));
   });
 
   it("returns community payload including analysis flairs", async () => {
-    getRedditCommunityByIdMock.mockResolvedValue({
-      id: COMMUNITY_ID,
-      subreddit: "BravoRealHousewives",
-      analysis_flairs: ["Episode Discussion", "Live Thread"],
-      analysis_all_flairs: ["Salt Lake City"],
-      is_show_focused: false,
-      network_focus_targets: ["Bravo"],
-      franchise_focus_targets: ["Real Housewives"],
-      episode_title_patterns: ["Live Episode Discussion"],
+    loadStableRedditReadMock.mockResolvedValue({
+      payload: {
+        community: {
+          id: COMMUNITY_ID,
+          subreddit: "BravoRealHousewives",
+          analysis_flairs: ["Episode Discussion", "Live Thread"],
+          analysis_all_flairs: ["Salt Lake City"],
+          is_show_focused: false,
+          network_focus_targets: ["Bravo"],
+          franchise_focus_targets: ["Real Housewives"],
+          episode_title_patterns: ["Live Episode Discussion"],
+        },
+      },
+      source: "backend",
     });
 
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
@@ -72,6 +101,12 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     expect(payload.community?.network_focus_targets).toEqual(["Bravo"]);
     expect(payload.community?.franchise_focus_targets).toEqual(["Real Housewives"]);
     expect(payload.community?.episode_title_patterns).toEqual(["Live Episode Discussion"]);
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: `/admin/reddit/communities/${COMMUNITY_ID}`,
+        routeName: "reddit-communities:detail",
+      }),
+    );
   });
 
   it("updates analysis flair modes when PATCH payload is valid", async () => {

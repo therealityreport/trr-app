@@ -1,16 +1,16 @@
 # Status — Task 12 (Cast Screen-Time Analytics)
 
 Repo: TRR-APP
-Last updated: 2026-03-20
+Last updated: 2026-03-24
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: active
-  last_updated: 2026-03-20
-  current_phase: "mirror-prefill and proxy env guidance remain shipped; only fresh-session operator/browser acceptance evidence is still open"
-  next_action: "Use the restarted workspace to capture the mirrored social-week import walkthrough and feature-flag rollback proof if that acceptance evidence is still needed; otherwise archive this task during the next cross-collab cleanup pass"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer task status notes if follow-up is needed"
   detail: self
 ```
 

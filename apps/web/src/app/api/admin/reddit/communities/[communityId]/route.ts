@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import {
   deleteRedditCommunity,
   getRedditCommunityById,
@@ -8,6 +9,13 @@ import {
   normalizeSubreddit,
   updateRedditCommunity,
 } from "@/lib/server/admin/reddit-sources-repository";
+import {
+  buildUserScopedRouteCacheKey,
+  getCachedStableRead,
+  REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
+  REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/reddit-stable-route-cache";
+import { loadStableRedditRead } from "@/lib/server/trr-api/reddit-stable-read";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +26,7 @@ interface RouteParams {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { communityId } = await params;
     if (!communityId) {
       return NextResponse.json({ error: "communityId is required" }, { status: 400 });
@@ -27,11 +35,36 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
     }
 
-    const community = await getRedditCommunityById(communityId);
-    if (!community) {
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+    const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    searchParams.delete("refresh");
+
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `reddit-community:${communityId}`, searchParams);
+    const { payload, cacheHit } = await getCachedStableRead({
+      namespace: REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
+      cacheKey,
+      promiseKey: forceRefresh ? `${cacheKey}:refresh` : cacheKey,
+      ttlMs: REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
+      forceRefresh,
+      loader: async () => {
+        const resolved = await loadStableRedditRead<{ community?: Record<string, unknown> | null }>({
+          backendPath: `/admin/reddit/communities/${communityId}`,
+          routeName: "reddit-communities:detail",
+          allowFallbackStatusCodes: [501],
+          fallback: async () => ({
+            community: (await getRedditCommunityById(communityId)) as Record<string, unknown> | null,
+          }),
+        });
+        return {
+          community: resolved.payload.community ?? null,
+        };
+      },
+    });
+
+    if (!payload.community) {
       return NextResponse.json({ error: "Community not found" }, { status: 404 });
     }
-    return NextResponse.json({ community });
+    return NextResponse.json(payload, cacheHit ? { headers: { "x-trr-cache": "hit" } } : undefined);
   } catch (error) {
     console.error("[api] Failed to fetch reddit community", error);
     const message = error instanceof Error ? error.message : "failed";
@@ -187,6 +220,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!community) {
       return NextResponse.json({ error: "Community not found" }, { status: 404 });
     }
+    invalidateRouteResponseCache("admin-reddit-stable-list", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-detail", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-summary", `${user.uid}:`);
 
     return NextResponse.json({ community });
   } catch (error) {
@@ -221,6 +257,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!deleted) {
       return NextResponse.json({ error: "Community not found" }, { status: 404 });
     }
+    invalidateRouteResponseCache("admin-reddit-stable-list", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-detail", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-summary", `${user.uid}:`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

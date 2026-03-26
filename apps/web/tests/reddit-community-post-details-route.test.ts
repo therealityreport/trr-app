@@ -1,17 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const { requireAdminMock, getRedditPostDetailsByCommunityAndSeasonMock } = vi.hoisted(() => ({
+const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  getRedditPostDetailsByCommunityAndSeasonMock: vi.fn(),
+  fetchAdminBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
 }));
 
-vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
-  getRedditPostDetailsByCommunityAndSeason: getRedditPostDetailsByCommunityAndSeasonMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminProxyErrorResponse: (error: unknown) =>
+    NextResponse.json(
+      { error: error instanceof Error ? error.message : "failed" },
+      { status: error instanceof Error && error.message === "unauthorized" ? 401 : 500 },
+    ),
 }));
 
 import { GET } from "@/app/api/admin/reddit/communities/[communityId]/posts/[postId]/details/route";
@@ -23,20 +29,20 @@ const POST_ID = "abc123";
 describe("/api/admin/reddit/communities/[communityId]/posts/[postId]/details route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    getRedditPostDetailsByCommunityAndSeasonMock.mockReset();
+    fetchAdminBackendJsonMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
   });
 
-  it("returns post details for a valid community/season/post request", async () => {
-    getRedditPostDetailsByCommunityAndSeasonMock.mockResolvedValue({
-      reddit_post_id: POST_ID,
-      title: "Test title",
-      comments: [],
-      media: [],
-      matches: [],
-      assigned_threads: [],
-      comment_summary: { total_comments: 0, top_level_comments: 0, reply_comments: 0 },
-      media_summary: { total_media: 0, mirrored_media: 0, pending_media: 0, failed_media: 0 },
+  it("returns backend-owned post details for a valid request", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        post: {
+          reddit_post_id: POST_ID,
+          title: "Test title",
+        },
+      },
+      durationMs: 9,
     });
 
     const request = new NextRequest(
@@ -50,12 +56,12 @@ describe("/api/admin/reddit/communities/[communityId]/posts/[postId]/details rou
 
     expect(response.status).toBe(200);
     expect(payload.post.reddit_post_id).toBe(POST_ID);
-    expect(getRedditPostDetailsByCommunityAndSeasonMock).toHaveBeenCalledWith({
-      communityId: COMMUNITY_ID,
-      seasonId: SEASON_ID,
-      redditPostId: POST_ID,
-      commentsLimit: 100,
-    });
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      `/admin/reddit/communities/${COMMUNITY_ID}/posts/${POST_ID}/details?season_id=${SEASON_ID}&comments_limit=100`,
+      expect.objectContaining({
+        routeName: "reddit-post-detail",
+      }),
+    );
   });
 
   it("returns 400 for invalid communityId", async () => {
@@ -70,7 +76,7 @@ describe("/api/admin/reddit/communities/[communityId]/posts/[postId]/details rou
 
     expect(response.status).toBe(400);
     expect(payload.error).toContain("communityId");
-    expect(getRedditPostDetailsByCommunityAndSeasonMock).not.toHaveBeenCalled();
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid season_id", async () => {
@@ -85,11 +91,15 @@ describe("/api/admin/reddit/communities/[communityId]/posts/[postId]/details rou
 
     expect(response.status).toBe(400);
     expect(payload.error).toContain("season_id");
-    expect(getRedditPostDetailsByCommunityAndSeasonMock).not.toHaveBeenCalled();
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when post is not found", async () => {
-    getRedditPostDetailsByCommunityAndSeasonMock.mockResolvedValue(null);
+  it("maps backend 404s", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 404,
+      data: { detail: "Post not found for community and season" },
+      durationMs: 2,
+    });
     const request = new NextRequest(
       `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/posts/${POST_ID}/details?season_id=${SEASON_ID}`,
       { method: "GET" },

@@ -6454,10 +6454,6 @@ export default function WeekDetailPage() {
   useEffect(() => {
     if (!hasValidNumericPathParams || !isAdmin || syncingComments) return;
     void fetchManualAttachRunCandidates();
-    const intervalId = window.setInterval(() => {
-      void fetchManualAttachRunCandidates();
-    }, 20_000);
-    return () => window.clearInterval(intervalId);
   }, [fetchManualAttachRunCandidates, hasValidNumericPathParams, isAdmin, syncingComments]);
 
   useEffect(() => {

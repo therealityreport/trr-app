@@ -6,11 +6,15 @@ const {
   listRedditThreadsMock,
   getRedditCommunityByIdMock,
   createRedditThreadMock,
+  getCachedStableReadMock,
+  loadStableRedditReadMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   listRedditThreadsMock: vi.fn(),
   getRedditCommunityByIdMock: vi.fn(),
   createRedditThreadMock: vi.fn(),
+  getCachedStableReadMock: vi.fn(async ({ loader }) => ({ payload: await loader(), cacheHit: false })),
+  loadStableRedditReadMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -21,6 +25,20 @@ vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   listRedditThreads: listRedditThreadsMock,
   getRedditCommunityById: getRedditCommunityByIdMock,
   createRedditThread: createRedditThreadMock,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-route-cache", () => ({
+  buildUserScopedRouteCacheKey: vi.fn(
+    (userId: string, scope: string, searchParams?: URLSearchParams) =>
+      `${userId}:${scope}:${searchParams?.toString() ?? ""}`,
+  ),
+  getCachedStableRead: getCachedStableReadMock,
+  REDDIT_STABLE_LIST_CACHE_NAMESPACE: "admin-reddit-stable-list",
+  REDDIT_STABLE_LIST_CACHE_TTL_MS: 5_000,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-read", () => ({
+  loadStableRedditRead: loadStableRedditReadMock,
 }));
 
 import { GET, POST } from "@/app/api/admin/reddit/threads/route";
@@ -34,8 +52,14 @@ describe("/api/admin/reddit/threads route", () => {
     listRedditThreadsMock.mockReset();
     getRedditCommunityByIdMock.mockReset();
     createRedditThreadMock.mockReset();
+    getCachedStableReadMock.mockReset();
+    loadStableRedditReadMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
+    getCachedStableReadMock.mockImplementation(async ({ loader }) => ({
+      payload: await loader(),
+      cacheHit: false,
+    }));
     getRedditCommunityByIdMock.mockResolvedValue({
       id: COMMUNITY_ID,
       trr_show_id: SHOW_ID,
@@ -55,6 +79,31 @@ describe("/api/admin/reddit/threads route", () => {
     expect(response.status).toBe(400);
     expect(payload.error).toContain("community_id");
     expect(listRedditThreadsMock).not.toHaveBeenCalled();
+  });
+
+  it("routes GET through the backend stable read path", async () => {
+    loadStableRedditReadMock.mockResolvedValue({
+      payload: {
+        threads: [{ id: "thread-1", title: "Stored thread" }],
+      },
+      source: "backend",
+    });
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/threads?community_id=${COMMUNITY_ID}&trr_show_id=${SHOW_ID}&include_global_threads_for_season=true`,
+      { method: "GET" },
+    );
+    const response = await GET(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.threads).toHaveLength(1);
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: "/admin/reddit/threads",
+        routeName: "reddit-threads:list",
+      }),
+    );
   });
 
   it("rejects non-Reddit URLs", async () => {

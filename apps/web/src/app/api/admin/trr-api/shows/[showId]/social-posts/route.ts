@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import type { AuthContext } from "@/lib/server/postgres";
 import {
-  getPostsByShowId,
-  getPostsBySeasonId,
-  createPost,
-  type SocialPlatform,
-} from "@/lib/server/admin/social-posts-repository";
-import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -16,161 +13,155 @@ interface RouteParams {
   params: Promise<{ showId: string }>;
 }
 
-const VALID_PLATFORMS: SocialPlatform[] = [
+const VALID_PLATFORMS = [
   "reddit",
   "twitter",
   "instagram",
   "tiktok",
   "youtube",
   "other",
-];
+] as const;
 
-/**
- * GET /api/admin/trr-api/shows/[showId]/social-posts
- *
- * List all social posts for a TRR show.
- */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
-
+    const user = await requireAdmin(request);
     const { showId } = await params;
 
     if (!showId) {
-      return NextResponse.json(
-        { error: "showId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "showId is required" }, { status: 400 });
     }
     if (!isValidUuid(showId)) {
-      return NextResponse.json(
-        { error: "showId must be a valid UUID" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "showId must be a valid UUID" }, { status: 400 });
     }
 
-    const { searchParams } = new URL(request.url);
-    const trrSeasonId = searchParams.get("trr_season_id");
+    const trrSeasonId = request.nextUrl.searchParams.get("trr_season_id");
     if (trrSeasonId && !isValidUuid(trrSeasonId)) {
+      return NextResponse.json({ error: "trr_season_id must be a valid UUID" }, { status: 400 });
+    }
+
+    const upstream = await fetchAdminBackendJson(`/admin/shows/${showId}/social-posts`, {
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "social-posts:list",
+      headers: { "X-TRR-Admin-User-Uid": user.uid },
+      queryString: trrSeasonId ? `trr_season_id=${encodeURIComponent(trrSeasonId)}` : "",
+    });
+
+    if (upstream.status === 400 || upstream.status === 404) {
       return NextResponse.json(
-        { error: "trr_season_id must be a valid UUID" },
-        { status: 400 }
+        {
+          error:
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Failed to list social posts",
+        },
+        { status: upstream.status },
+      );
+    }
+    if (upstream.status !== 200) {
+      throw new Error(
+        typeof upstream.data.error === "string"
+          ? upstream.data.error
+          : typeof upstream.data.detail === "string"
+            ? upstream.data.detail
+            : "Failed to list social posts",
       );
     }
 
-    if (trrSeasonId) {
-      const season = await getSeasonById(trrSeasonId);
-      if (!season || season.show_id !== showId) {
-        return NextResponse.json(
-          { error: "trr_season_id must belong to the showId route" },
-          { status: 400 }
-        );
-      }
-    }
-
-    const posts = trrSeasonId ? await getPostsBySeasonId(trrSeasonId) : await getPostsByShowId(showId);
-
-    return NextResponse.json({ posts });
+    return NextResponse.json(upstream.data);
   } catch (error) {
     console.error("[api] Failed to list social posts for TRR show", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
-/**
- * POST /api/admin/trr-api/shows/[showId]/social-posts
- *
- * Create a new social post for a TRR show.
- *
- * Request body:
- * - platform: "reddit" | "twitter" | "instagram" | "tiktok" | "youtube" | "other" (required)
- * - url: string (required)
- * - trr_season_id: string (optional)
- * - title: string (optional)
- * - notes: string (optional)
- */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAdmin(request);
-    const authContext: AuthContext = { firebaseUid: user.uid, isAdmin: true };
-
     const { showId } = await params;
 
     if (!showId) {
-      return NextResponse.json(
-        { error: "showId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "showId is required" }, { status: 400 });
     }
     if (!isValidUuid(showId)) {
-      return NextResponse.json(
-        { error: "showId must be a valid UUID" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "showId must be a valid UUID" }, { status: 400 });
     }
 
-    const body = await request.json();
-    const { platform, url, trr_season_id, title, notes } = body;
+    const body = (await request.json().catch(() => ({}))) as {
+      platform?: string;
+      url?: string;
+      trr_season_id?: string | null;
+      title?: string | null;
+      notes?: string | null;
+    };
 
-    // Validate required fields
-    if (!platform || !VALID_PLATFORMS.includes(platform)) {
+    if (!body.platform || !VALID_PLATFORMS.includes(body.platform as (typeof VALID_PLATFORMS)[number])) {
       return NextResponse.json(
         { error: `platform must be one of: ${VALID_PLATFORMS.join(", ")}` },
-        { status: 400 }
+        { status: 400 },
       );
     }
-
-    if (!url || typeof url !== "string") {
-      return NextResponse.json(
-        { error: "url is required and must be a string" },
-        { status: 400 }
-      );
+    if (!body.url || typeof body.url !== "string") {
+      return NextResponse.json({ error: "url is required and must be a string" }, { status: 400 });
     }
-
-    // Basic URL validation
     try {
-      new URL(url);
+      new URL(body.url);
     } catch {
-      return NextResponse.json(
-        { error: "url must be a valid URL" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "url must be a valid URL" }, { status: 400 });
     }
-
-    if (trr_season_id !== undefined && trr_season_id !== null) {
-      if (typeof trr_season_id !== "string" || !isValidUuid(trr_season_id)) {
+    if (body.trr_season_id !== undefined && body.trr_season_id !== null) {
+      if (typeof body.trr_season_id !== "string" || !isValidUuid(body.trr_season_id)) {
         return NextResponse.json(
           { error: "trr_season_id must be a valid UUID when provided" },
-          { status: 400 }
-        );
-      }
-      const season = await getSeasonById(trr_season_id);
-      if (!season || season.show_id !== showId) {
-        return NextResponse.json(
-          { error: "trr_season_id must belong to the showId route" },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
 
-    const post = await createPost(authContext, {
-      trr_show_id: showId,
-      trr_season_id: trr_season_id ?? null,
-      platform,
-      url,
-      title: title ?? null,
-      notes: notes ?? null,
+    const upstream = await fetchAdminBackendJson(`/admin/shows/${showId}/social-posts`, {
+      method: "POST",
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "social-posts:create",
+      headers: {
+        "Content-Type": "application/json",
+        "X-TRR-Admin-User-Uid": user.uid,
+      },
+      body: JSON.stringify({
+        platform: body.platform,
+        url: body.url,
+        trr_season_id: body.trr_season_id ?? null,
+        title: body.title ?? null,
+        notes: body.notes ?? null,
+      }),
     });
 
-    return NextResponse.json({ post }, { status: 201 });
+    if (upstream.status === 400 || upstream.status === 404) {
+      return NextResponse.json(
+        {
+          error:
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Failed to create social post",
+        },
+        { status: upstream.status },
+      );
+    }
+    if (upstream.status !== 201) {
+      throw new Error(
+        typeof upstream.data.error === "string"
+          ? upstream.data.error
+          : typeof upstream.data.detail === "string"
+            ? upstream.data.detail
+            : "Failed to create social post",
+      );
+    }
+
+    return NextResponse.json(upstream.data, { status: 201 });
   } catch (error) {
     console.error("[api] Failed to create social post", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

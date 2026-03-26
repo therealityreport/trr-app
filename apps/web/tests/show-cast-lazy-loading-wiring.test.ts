@@ -50,8 +50,8 @@ describe("show detail cast lazy-loading wiring", () => {
   });
 
   it("threads abort signals through cast refresh/person media paths", () => {
-    expect(contents).toMatch(/options\?: \{ mode\?: PersonRefreshMode; signal\?: AbortSignal \}/);
-    expect(contents).toMatch(/\{ mode, signal: options\?\.signal \}/);
+    expect(contents).toMatch(/options\?: \{ mode\?: PersonRefreshMode; signal\?: AbortSignal(?:; personName\?: string)? \}/);
+    expect(contents).toMatch(/\{ mode, signal: options\?\.signal, personName: label \}/);
     expect(contents).toMatch(/runPhasedCastRefresh\(\{\s*phases,\s*signal: runController\.signal,/s);
     expect(contents).toMatch(/if \(options\?\.signal\?\.aborted \|\| \/canceled\/i\.test\(errorText\)\)/);
   });

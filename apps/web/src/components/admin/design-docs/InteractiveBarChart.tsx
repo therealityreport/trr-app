@@ -153,17 +153,18 @@ export default function InteractiveBarChart({ data }: Props) {
               y1={chartH - getBarH(hoveredVal) - 4}
               x2={getBarX(hoveredIndex) + barW / 2}
               y2={chartH - getBarH(hoveredVal) - 20}
-              stroke="#326891"
+              stroke={barColor}
               strokeWidth={1}
+              opacity={0.5}
             />
-            {/* Value label */}
+            {/* Value label — uses bar color like Datawrapper */}
             <text
               x={getBarX(hoveredIndex) + barW / 2}
               y={chartH - getBarH(hoveredVal) - 24}
-              fontFamily='"nyt-franklin", arial, sans-serif'
-              fontSize={13}
+              fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
+              fontSize={14}
               fontWeight={700}
-              fill="#326891"
+              fill={barColor}
               textAnchor="middle"
             >
               {hoveredVal}
@@ -171,17 +172,25 @@ export default function InteractiveBarChart({ data }: Props) {
           </g>
         )}
 
-        {/* Inline annotation: bold black label, positioned next to bars */}
-        <text
-          x={marginLeft + barArea * 0.4}
-          y={chartH * 0.55}
-          fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-          fontSize={14}
-          fill="#121212"
-          fontWeight={700}
-        >
-          {annotation}
-        </text>
+        {/* Inline annotation: bold black label, centered above tallest bars with cushion */}
+        {(() => {
+          // Find the max value to place label above the tallest bar with a cushion
+          const maxVal = Math.max(...values);
+          const labelY = chartH - getBarH(maxVal) - 14; // 14px cushion above tallest bar
+          return (
+            <text
+              x={marginLeft + barArea * 0.5}
+              y={labelY}
+              fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
+              fontSize={14}
+              fill="#121212"
+              fontWeight={700}
+              textAnchor="middle"
+            >
+              {annotation}
+            </text>
+          );
+        })()}
 
         {/* X-axis year labels — bold, below chart area */}
         {xLabels.map((yr, i) => {
@@ -208,9 +217,9 @@ export default function InteractiveBarChart({ data }: Props) {
       {hoveredIndex !== null && (
         <div style={{
           fontFamily: '"nyt-franklin", var(--dd-font-ui, arial), sans-serif',
-          fontSize: 13,
-          color: "#326891",
-          fontWeight: 600,
+          fontSize: 14,
+          color: barColor,
+          fontWeight: 700,
           marginTop: 4,
           height: 18,
         }}>

@@ -126,6 +126,25 @@ const refreshedBrandMatchesResponse = {
   inputHash: "live-refresh-hash",
   refreshMode: "local-rerank" as const,
   scoringMode: "visual+metadata" as const,
+  visualEvidence: {
+    status: "fresh" as const,
+    reason: "compatible-glyph-artifact" as const,
+    compatible: true,
+    generatedAt: "2026-03-22T16:00:00.000Z",
+    inputHash: "live-refresh-hash",
+  },
+};
+
+const staleBrandMatchesResponse = {
+  ...getGeneratedBrandFontMatchesApiResponse(),
+  visualEvidence: {
+    status: "stale" as const,
+    reason: "input-hash-mismatch" as const,
+    compatible: false,
+    generatedAt: "2026-03-20T16:00:00.000Z",
+    inputHash: "old-hash",
+  },
+  scoringMode: "metadata-only" as const,
 };
 
 describe("design system fonts page", () => {
@@ -231,6 +250,7 @@ describe("design system fonts page", () => {
     expect(within(ingredientListRow).getAllByText("Franklin Gothic").length).toBeGreaterThan(0);
     expect(within(ingredientListRow).getByText("Weighted score breakdown")).toBeInTheDocument();
     expect(within(ingredientListRow).getByText(/balanced-visual|explicit-mapping-visual|metadata-only/i)).toBeInTheDocument();
+    expect(within(panel).getByText("visual fresh")).toBeInTheDocument();
 
     fireEvent.click(within(ingredientListRow).getByRole("button", { name: "Compare" }));
 
@@ -271,9 +291,45 @@ describe("design system fonts page", () => {
     fireEvent.click(refreshButton);
 
     expect(await within(screen.getByTestId("brand-font-matches-panel")).findByText("local-rerank")).toBeInTheDocument();
+    expect(await within(screen.getByTestId("brand-font-matches-panel")).findByText("visual fresh")).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledWith(
       "/api/admin/design-system/brand-font-matches?refresh=1",
       expect.objectContaining({ cache: "no-store" }),
     );
+  }, 10000);
+
+  it("shows a stale visual-evidence warning when the artifact is incompatible", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/hosted-fonts.css") {
+          return new Response(hostedFontsCss, { status: 200 });
+        }
+        if (url === "/api/admin/design-system/typography") {
+          return new Response(JSON.stringify(typographyState), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url === "/api/admin/design-system/brand-font-matches?refresh=1") {
+          return new Response(JSON.stringify(staleBrandMatchesResponse), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("", { status: 404 });
+      }),
+    );
+
+    render(<DesignSystemPageClient activeTab="fonts" activeSubtab={null} />);
+
+    expect(await screen.findByText("Fonts Library")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Brand Matches" }));
+    const refreshButton = await screen.findByRole("button", { name: "Rebuild Rankings" });
+    fireEvent.click(refreshButton);
+
+    expect(await screen.findByText(/Visual evidence is stale/i)).toBeInTheDocument();
+    expect(await screen.findByText("visual stale")).toBeInTheDocument();
   }, 10000);
 });

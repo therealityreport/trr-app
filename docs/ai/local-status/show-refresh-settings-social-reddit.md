@@ -1,6 +1,6 @@
 # Show Refresh Settings + Social Reddit Provisioning
 
-Last updated: 2026-03-16
+Last updated: 2026-03-24
 
 ## Status
 - App phase complete, with one remaining broad validation gap.
@@ -28,18 +28,19 @@ Last updated: 2026-03-16
 
 ## Validation
 - Passed: targeted eslint on touched show admin and Reddit manager files
-- Did not complete in-session: `pnpm exec tsc --noEmit --pretty false` (no compiler output was returned before close-out)
+- Did not complete in-session: `pnpm exec tsc -p tsconfig.json --noEmit --pretty false` was still running without returning compiler output in a reasonable time
 
 ## Notes
 - Cast Comparison already routes through the backend SocialBlade proxy path in the app; this pass did not need a separate transport rewrite.
+- Required workspace closeout was attempted, but it failed on unrelated Codex config policy issues (`context7` tracked config and local Figma MCP enablement), not on this code change.
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-16
-  current_phase: "app complete"
-  next_action: "follow up on broad typecheck when needed"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer continuity notes if follow-up is needed"
   detail: self
 ```

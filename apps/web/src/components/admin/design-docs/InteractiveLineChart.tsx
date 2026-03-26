@@ -83,7 +83,7 @@ export default function InteractiveLineChart({ data }: Props) {
   const chartH = 320;
   const marginLeft = 36;
   const marginRight = 12;
-  const marginTop = 8;
+  const marginTop = 24; // Extra top margin for annotation labels above data
   const plotW = chartW - marginLeft - marginRight;
   const plotH = chartH - marginTop - 4;
 
@@ -240,16 +240,16 @@ export default function InteractiveLineChart({ data }: Props) {
         {/* Hover crosshair + dot + tooltip */}
         {hoveredIndex !== null && hoveredVal !== null && (
           <g>
-            {/* Vertical crosshair line */}
+            {/* Vertical crosshair line — matches Datawrapper: stroke-dasharray: 3px, 2px; opacity: 0.3 */}
             <line
               x1={getX(hoveredIndex)}
               y1={marginTop}
               x2={getX(hoveredIndex)}
               y2={chartH}
-              stroke="#326891"
+              stroke={lineColor}
               strokeWidth={1}
               strokeDasharray="3 2"
-              opacity={0.5}
+              opacity={0.3}
             />
             {/* Dot on reference line */}
             {values2 && (
@@ -271,14 +271,14 @@ export default function InteractiveLineChart({ data }: Props) {
               stroke="#fff"
               strokeWidth={2}
             />
-            {/* Value label above dot */}
+            {/* Value label above dot — uses series color like Datawrapper */}
             <text
               x={getX(hoveredIndex)}
               y={getY(hoveredVal) - 14}
-              fontFamily='"nyt-franklin", arial, sans-serif'
-              fontSize={13}
+              fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
+              fontSize={14}
               fontWeight={700}
-              fill="#326891"
+              fill={lineColor}
               textAnchor="middle"
             >
               {formatVal(hoveredVal)}
@@ -286,33 +286,51 @@ export default function InteractiveLineChart({ data }: Props) {
           </g>
         )}
 
-        {/* Inline annotation — primary series label, positioned next to line */}
-        {annotation && (
-          <text
-            x={marginLeft + annotationX * plotW}
-            y={marginTop + annotationY * plotH + 2}
-            fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-            fontSize={14}
-            fill="#121212"
-            fontWeight={700}
-          >
-            {annotation}
-          </text>
-        )}
+        {/* Inline annotation — primary series label, with cushion above data */}
+        {annotation && (() => {
+          // Find the max value in the right 40% of the chart to position label above it
+          const rightStart = Math.floor(values.length * 0.6);
+          const rightMax = Math.max(...values.slice(rightStart));
+          const maxLineY = getY(rightMax);
+          // Label goes 16px above the highest point in the right portion, clamped to marginTop
+          const ly = Math.max(marginTop - 4, maxLineY - 16);
+          const lx = marginLeft + 0.76 * plotW;
+          return (
+            <text
+              x={lx}
+              y={ly}
+              fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
+              fontSize={14}
+              fill="#121212"
+              fontWeight={700}
+            >
+              {annotation}
+            </text>
+          );
+        })()}
 
-        {/* Label for second series */}
-        {values2 && label2 && (
-          <text
-            x={marginLeft + annotationX * plotW}
-            y={marginTop + annotationY * plotH + 18}
-            fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
-            fontSize={14}
-            fill="#a8a8a8"
-            fontWeight={400}
-          >
-            {label2}
-          </text>
-        )}
+        {/* Label for second series — positioned at right side near its line, with white halo and cushion */}
+        {values2 && label2 && (() => {
+          // Position at right side, at the Y position of the secondary line's endpoint
+          const endIdx = Math.max(0, values2.length - Math.floor(pointsPerYear * 0.3));
+          const avgEndY = values2.slice(endIdx).reduce((s, v) => s + v, 0) / (values2.length - endIdx);
+          const rawY = getY(avgEndY);
+          // Ensure the label doesn't overlap: clamp between marginTop and chartH - 20
+          const labelY2 = Math.max(marginTop + 14, Math.min(rawY + 4, chartH - 20));
+          return (
+            <text
+              x={marginLeft + 0.88 * plotW}
+              y={labelY2}
+              fontFamily='"nyt-franklin", arial, helvetica, sans-serif'
+              fontSize={14}
+              fill="#a8a8a8"
+              fontWeight={400}
+              style={{ textShadow: "-2px -1px 0 #fff, -1px -1px 0 #fff, 0 -1px 2px #fff, 1px -1px 0 #fff, 2px -1px 0 #fff, -2px 0 2px #fff, -1px 0 2px #fff, 1px 0 2px #fff, 2px 0 2px #fff, -2px 1px 0 #fff, -1px 1px 0 #fff, 0 1px 2px #fff, 1px 1px 0 #fff, 2px 1px 0 #fff" }}
+            >
+              {label2}
+            </text>
+          );
+        })()}
 
         {/* X-axis year labels — bold, below chart area */}
         {xLabels.map((yr, i) => {
@@ -341,9 +359,9 @@ export default function InteractiveLineChart({ data }: Props) {
           style={{
             fontFamily:
               '"nyt-franklin", var(--dd-font-ui, arial), sans-serif',
-            fontSize: 13,
-            color: "#326891",
-            fontWeight: 600,
+            fontSize: 14,
+            color: lineColor,
+            fontWeight: 700,
             marginTop: 4,
             height: 18,
           }}

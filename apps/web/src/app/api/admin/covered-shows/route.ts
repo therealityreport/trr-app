@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import type { AuthContext } from "@/lib/server/postgres";
-import {
-  getCoveredShows,
-  addCoveredShow,
-} from "@/lib/server/admin/covered-shows-repository";
 import {
   buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
   getRouteResponseCache,
   invalidateRouteResponseCache,
   parseCacheTtlMs,
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
+import {
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+  invalidateAdminBackendCache,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 const COVERED_SHOWS_CACHE_NAMESPACE = "admin-covered-shows";
 const COVERED_SHOWS_CACHE_TTL_MS = parseCacheTtlMs(
   process.env.TRR_ADMIN_COVERED_SHOWS_CACHE_TTL_MS,
+  30_000,
 );
 
 /**
@@ -32,7 +35,7 @@ export async function GET(request: NextRequest) {
       "list",
       request.nextUrl.searchParams,
     );
-    const cachedShows = getRouteResponseCache<Awaited<ReturnType<typeof getCoveredShows>>>(
+    const cachedShows = getRouteResponseCache<Array<Record<string, unknown>>>(
       COVERED_SHOWS_CACHE_NAMESPACE,
       cacheKey,
     );
@@ -40,16 +43,38 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ shows: cachedShows }, { headers: { "x-trr-cache": "hit" } });
     }
 
-    const shows = await getCoveredShows();
-    setRouteResponseCache(COVERED_SHOWS_CACHE_NAMESPACE, cacheKey, shows, COVERED_SHOWS_CACHE_TTL_MS);
+    const shows = await getOrCreateRouteResponsePromise(
+      COVERED_SHOWS_CACHE_NAMESPACE,
+      cacheKey,
+      async () => {
+        const upstream = await fetchAdminBackendJson("/admin/covered-shows", {
+          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+          routeName: "covered-shows:list",
+        });
+        if (upstream.status !== 200) {
+          throw new Error(
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : "Failed to fetch covered shows",
+          );
+        }
+        const loadedShows = Array.isArray(upstream.data.shows)
+          ? (upstream.data.shows as Array<Record<string, unknown>>)
+          : [];
+        setRouteResponseCache(
+          COVERED_SHOWS_CACHE_NAMESPACE,
+          cacheKey,
+          loadedShows,
+          COVERED_SHOWS_CACHE_TTL_MS,
+        );
+        return loadedShows;
+      },
+    );
 
     return NextResponse.json({ shows });
   } catch (error) {
     console.error("[api] Failed to list covered shows", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
@@ -65,7 +90,6 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
-    const authContext: AuthContext = { firebaseUid: user.uid, isAdmin: true };
 
     const body = await request.json();
     const { trr_show_id, show_name } = body;
@@ -84,18 +108,49 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const show = await addCoveredShow(authContext, {
-      trr_show_id,
-      show_name,
+    const upstream = await fetchAdminBackendJson("/admin/covered-shows", {
+      method: "POST",
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "covered-shows:create",
+      headers: {
+        "Content-Type": "application/json",
+        "X-TRR-Admin-User-Uid": user.uid,
+      },
+      body: JSON.stringify({
+        trr_show_id,
+        show_name,
+      }),
     });
+    if (upstream.status === 400 || upstream.status === 404) {
+      return NextResponse.json(
+        {
+          error:
+            typeof upstream.data.detail === "string"
+              ? upstream.data.detail
+              : typeof upstream.data.error === "string"
+                ? upstream.data.error
+                : "Failed to add covered show",
+        },
+        { status: upstream.status },
+      );
+    }
+    if (upstream.status !== 200) {
+      throw new Error(
+        typeof upstream.data.error === "string"
+          ? upstream.data.error
+          : typeof upstream.data.detail === "string"
+            ? upstream.data.detail
+            : "Failed to add covered show",
+      );
+    }
     invalidateRouteResponseCache(COVERED_SHOWS_CACHE_NAMESPACE, `${user.uid}:`);
+    await invalidateAdminBackendCache("/admin/covered-shows/cache/invalidate", {
+      routeName: "covered-shows",
+    });
 
-    return NextResponse.json({ show }, { status: 201 });
+    return NextResponse.json(upstream.data, { status: 201 });
   } catch (error) {
     console.error("[api] Failed to add covered show", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

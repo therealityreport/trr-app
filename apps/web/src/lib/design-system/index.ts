@@ -57,6 +57,10 @@ export type {
   FigmaPageId,
 } from "./components";
 
+export { SAFE_AREA, SURFACE_MODES } from "./surfaces";
+
+export type { SurfaceMode, SurfaceModeId } from "./surfaces";
+
 export {
   FIGMA_VARIABLE_COLLECTIONS,
   FIGMA_VARIABLE_MAP,

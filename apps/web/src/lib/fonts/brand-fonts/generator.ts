@@ -253,5 +253,6 @@ export function buildBrandFontArtifacts(projectRoot: string): GeneratedBrandFont
     catalog: buildEnvelope(catalog, inputHash),
     matches: buildEnvelope(matchResults.matches, inputHash),
     scoringMode: matchResults.scoringMode,
+    visualEvidenceHealth: matchResults.visualEvidenceHealth,
   };
 }

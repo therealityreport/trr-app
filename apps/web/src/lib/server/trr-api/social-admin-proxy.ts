@@ -2,14 +2,18 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { getSeasonByShowAndNumber } from "@/lib/server/trr-api/trr-shows-repository";
 
 type ProxyErrorCode =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "BAD_REQUEST"
   | "SEASON_NOT_FOUND"
+  | "BACKEND_SATURATED"
   | "BACKEND_UNREACHABLE"
   | "UPSTREAM_TIMEOUT"
   | "UPSTREAM_ERROR"
@@ -88,6 +92,8 @@ const SEASON_ID_RESOLUTION_CACHE_MAX_ENTRIES = readPositiveIntEnv(
   "TRR_SOCIAL_PROXY_SEASON_ID_CACHE_MAX_ENTRIES",
   512,
 );
+const SHOW_SEASON_RESOLUTION_PAGE_SIZE = 100;
+const SHOW_SEASON_RESOLUTION_MAX_PAGES = 20;
 
 const seasonIdResolutionCache = new Map<string, { seasonId: string; expiresAt: number }>();
 const seasonIdResolutionInFlight = new Map<string, Promise<string>>();
@@ -131,6 +137,43 @@ const readUpstreamDetailCode = (data: Record<string, unknown>): string | undefin
   const detail = data.detail as Record<string, unknown>;
   if (typeof detail.code !== "string" || !detail.code.trim()) return undefined;
   return detail.code.trim();
+};
+
+const hasBackendSaturationText = (value: string): boolean => {
+  const message = value.toLowerCase();
+  return message.includes("connection pool exhausted") || message.includes("database pool initialization failed");
+};
+
+const hasBackendSaturationDetail = (detail: unknown): boolean => {
+  if (typeof detail === "string") {
+    return hasBackendSaturationText(detail);
+  }
+  if (!detail || typeof detail !== "object") {
+    return false;
+  }
+  const record = detail as Record<string, unknown>;
+  const values = [record.message, record.error, record.detail]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  return values.length > 0 && hasBackendSaturationText(values);
+};
+
+const isBackendSaturatedResponse = (options: {
+  status: number;
+  message: string;
+  detail: unknown;
+  detailCode?: string;
+}): boolean => {
+  return (
+    options.status === 503 &&
+    (hasBackendSaturationText(options.message) ||
+      hasBackendSaturationDetail(options.detail) ||
+      options.detailCode === "BACKEND_SATURATED")
+  );
+};
+
+const backendSaturatedMessage = (): string => {
+  return "Local TRR-Backend is saturated. Showing last successful data while retrying.";
 };
 
 const sleep = async (ms: number): Promise<void> => {
@@ -258,6 +301,21 @@ const appendQuery = (backendBase: string, queryString: string): string => {
   return queryString ? `${backendBase}?${queryString}` : backendBase;
 };
 
+type SeasonListItem = {
+  id?: unknown;
+  season_number?: unknown;
+};
+
+type SeasonListPayload = {
+  seasons?: unknown;
+  pagination?: unknown;
+};
+
+type SeasonListPagination = {
+  count?: unknown;
+  total?: unknown;
+};
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -291,6 +349,81 @@ const setCachedSeasonId = (cacheKey: string, seasonId: string): void => {
   for (const [key] of entriesByExpiry.slice(0, seasonIdResolutionCache.size - SEASON_ID_RESOLUTION_CACHE_MAX_ENTRIES)) {
     seasonIdResolutionCache.delete(key);
   }
+};
+
+const readSeasonListItems = (payload: Record<string, unknown>): SeasonListItem[] => {
+  return Array.isArray(payload.seasons) ? (payload.seasons as SeasonListItem[]) : [];
+};
+
+const readSeasonListPagination = (payload: Record<string, unknown>): SeasonListPagination | null => {
+  if (!payload.pagination || typeof payload.pagination !== "object") {
+    return null;
+  }
+  return payload.pagination as SeasonListPagination;
+};
+
+const readNumberField = (value: unknown): number | null => {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+};
+
+const hasAdditionalSeasonPages = (
+  payload: Record<string, unknown>,
+  offset: number,
+  pageSize: number,
+): boolean => {
+  const seasons = readSeasonListItems(payload);
+  const pagination = readSeasonListPagination(payload);
+  const total = readNumberField(pagination?.total);
+  if (total !== null) {
+    return offset + seasons.length < total;
+  }
+  const count = readNumberField(pagination?.count);
+  if (count !== null) {
+    return offset + count < pageSize;
+  }
+  return seasons.length >= pageSize;
+};
+
+const extractSeasonIdFromPayload = (
+  payload: Record<string, unknown>,
+  targetSeasonNumber: number,
+): string | null => {
+  const matchingSeason = readSeasonListItems(payload).find(
+    (season) => readNumberField(season.season_number) === targetSeasonNumber && typeof season.id === "string" && season.id.trim(),
+  );
+  return typeof matchingSeason?.id === "string" ? matchingSeason.id : null;
+};
+
+const readBackendLookupErrorMessage = (data: Record<string, unknown>, fallback: string): string => {
+  if (typeof data.error === "string" && data.error.trim()) {
+    return data.error;
+  }
+  if (typeof data.detail === "string" && data.detail.trim()) {
+    return data.detail;
+  }
+  return fallback;
+};
+
+const resolveSeasonIdFromBackend = async (showId: string, seasonNumber: number): Promise<string> => {
+  for (let pageIndex = 0; pageIndex < SHOW_SEASON_RESOLUTION_MAX_PAGES; pageIndex += 1) {
+    const offset = pageIndex * SHOW_SEASON_RESOLUTION_PAGE_SIZE;
+    const upstream = await fetchAdminBackendJson(`/admin/trr-api/shows/${showId}/seasons`, {
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      queryString: `limit=${SHOW_SEASON_RESOLUTION_PAGE_SIZE}&offset=${offset}`,
+      routeName: "social-season-resolve",
+    });
+    if (upstream.status !== 200) {
+      throw new Error(readBackendLookupErrorMessage(upstream.data, "Failed to resolve season"));
+    }
+    const seasonId = extractSeasonIdFromPayload(upstream.data, seasonNumber);
+    if (seasonId) {
+      return seasonId;
+    }
+    if (!hasAdditionalSeasonPages(upstream.data, offset, SHOW_SEASON_RESOLUTION_PAGE_SIZE)) {
+      break;
+    }
+  }
+  throw new Error("season not found");
 };
 
 type FetchWithRetryOptions = {
@@ -369,6 +502,12 @@ async function fetchBackend(
       const retryAfterSeconds = parseRetryAfterSeconds(response.headers?.get?.("retry-after") ?? null);
       const hasDnsOrTransportFault =
         hasDnsOrTransportFaultText(normalizedMessage) || hasDnsOrTransportFaultDetail(upstreamDetail);
+      const hasBackendSaturation = isBackendSaturatedResponse({
+        status: response.status,
+        message: normalizedMessage,
+        detail: upstreamDetail,
+        detailCode: upstreamDetailCode,
+      });
       const responseTraceId =
         response.headers?.get?.("x-trace-id") ?? response.headers?.get?.("x-request-id") ?? traceId;
       const proxyError = hasDnsOrTransportFault
@@ -385,6 +524,17 @@ async function fetchBackend(
               upstreamDetailCode,
             },
           )
+        : hasBackendSaturation
+          ? new SocialProxyError(backendSaturatedMessage(), {
+              status: 503,
+              code: "BACKEND_SATURATED",
+              retryable: true,
+              retryAfterSeconds: retryAfterSeconds ?? 2,
+              traceId: responseTraceId,
+              upstreamStatus: response.status,
+              upstreamDetail,
+              upstreamDetailCode,
+            })
         : new SocialProxyError(normalizedMessage, {
             status: response.status,
             code: "UPSTREAM_ERROR",
@@ -431,12 +581,9 @@ export const resolveSeasonId = async (showId: string, seasonNumberRaw: string): 
     throw new Error("seasonNumber is invalid");
   }
   const lookupPromise = (async () => {
-    const season = await getSeasonByShowAndNumber(showId, seasonNumber);
-    if (!season?.id) {
-      throw new Error("season not found");
-    }
-    setCachedSeasonId(cacheKey, season.id);
-    return season.id;
+    const seasonId = await resolveSeasonIdFromBackend(showId, seasonNumber);
+    setCachedSeasonId(cacheKey, seasonId);
+    return seasonId;
   })();
   seasonIdResolutionInFlight.set(cacheKey, lookupPromise);
   try {
@@ -447,6 +594,11 @@ export const resolveSeasonId = async (showId: string, seasonNumberRaw: string): 
       seasonIdResolutionInFlight.delete(cacheKey);
     }
   }
+};
+
+export const resetSeasonIdResolutionCacheForTests = (): void => {
+  seasonIdResolutionCache.clear();
+  seasonIdResolutionInFlight.clear();
 };
 
 export const buildSeasonBackendUrl = async (

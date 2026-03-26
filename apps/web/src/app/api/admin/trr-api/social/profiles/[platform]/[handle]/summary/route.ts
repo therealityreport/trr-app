@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  parseCacheTtlMs,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
+import {
   fetchSocialBackendJson,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
 export const dynamic = "force-dynamic";
+const SOCIAL_PROFILE_SUMMARY_CACHE_NAMESPACE = "admin-social-profile-summary";
+const SOCIAL_PROFILE_SUMMARY_CACHE_TTL_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_SOCIAL_PROFILE_SUMMARY_CACHE_TTL_MS,
+);
 
 type RouteContext = {
   params: Promise<{ platform: string; handle: string }>;
@@ -14,13 +25,41 @@ type RouteContext = {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { platform, handle } = await context.params;
-    const data = await fetchSocialBackendJson(`/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`, {
-      fallbackError: "Failed to fetch social account profile summary",
-      retries: 0,
-      timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
-    });
+    const cacheKey = buildUserScopedRouteCacheKey(
+      user.uid,
+      `${platform}:${handle}:summary`,
+      request.nextUrl.searchParams,
+    );
+    const cachedPayload = getRouteResponseCache<Record<string, unknown>>(
+      SOCIAL_PROFILE_SUMMARY_CACHE_NAMESPACE,
+      cacheKey,
+    );
+    if (cachedPayload) {
+      return NextResponse.json(cachedPayload, { headers: { "x-trr-cache": "hit" } });
+    }
+    const data = await getOrCreateRouteResponsePromise(
+      SOCIAL_PROFILE_SUMMARY_CACHE_NAMESPACE,
+      cacheKey,
+      async () => {
+        const payload = await fetchSocialBackendJson(
+          `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
+          {
+            fallbackError: "Failed to fetch social account profile summary",
+            retries: 0,
+            timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+          },
+        );
+        setRouteResponseCache(
+          SOCIAL_PROFILE_SUMMARY_CACHE_NAMESPACE,
+          cacheKey,
+          payload,
+          SOCIAL_PROFILE_SUMMARY_CACHE_TTL_MS,
+        );
+        return payload;
+      },
+    );
     return NextResponse.json(data);
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to fetch social account profile summary");

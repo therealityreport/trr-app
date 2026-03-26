@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getRedditPostDetailsByCommunityAndSeason } from "@/lib/server/admin/reddit-sources-repository";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -34,21 +38,44 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "postId is required" }, { status: 400 });
     }
 
+    const query = new URLSearchParams({ season_id: seasonId });
     const commentsLimit = parseCommentsLimit(request.nextUrl.searchParams.get("comments_limit"));
-    const post = await getRedditPostDetailsByCommunityAndSeason({
-      communityId,
-      seasonId,
-      redditPostId: normalizedPostId,
-      commentsLimit,
-    });
-    if (!post) {
-      return NextResponse.json({ error: "Post not found for community and season" }, { status: 404 });
+    if (commentsLimit) query.set("comments_limit", String(commentsLimit));
+
+    const upstream = await fetchAdminBackendJson(
+      `/admin/reddit/communities/${communityId}/posts/${encodeURIComponent(normalizedPostId)}/details?${query.toString()}`,
+      {
+        timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+        routeName: "reddit-post-detail",
+      },
+    );
+
+    if (upstream.status === 404) {
+      return NextResponse.json(
+        {
+          error:
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Post not found for community and season",
+        },
+        { status: 404 },
+      );
     }
-    return NextResponse.json({ post });
+    if (upstream.status !== 200) {
+      throw new Error(
+        typeof upstream.data.error === "string"
+          ? upstream.data.error
+          : typeof upstream.data.detail === "string"
+            ? upstream.data.detail
+            : "Failed to fetch reddit post details",
+      );
+    }
+
+    return NextResponse.json(upstream.data);
   } catch (error) {
     console.error("[api] Failed to fetch reddit post details", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

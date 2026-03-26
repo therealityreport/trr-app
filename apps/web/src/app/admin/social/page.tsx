@@ -71,6 +71,7 @@ export default function AdminSocialMediaPage() {
       setLoadError(null);
       try {
         const response = await fetchAdminWithAuth("/api/admin/covered-shows", undefined, {
+          allowDevAdminBypass: true,
           preferredUser: user,
         });
         const data = (await response.json().catch(() => ({}))) as {
@@ -108,12 +109,15 @@ export default function AdminSocialMediaPage() {
       try {
         const [sourcesResponse, runsResponse, reviewResponse] = await Promise.all([
           fetchAdminWithAuth("/api/admin/trr-api/social/shared/sources?source_scope=bravo&include_inactive=true", undefined, {
+            allowDevAdminBypass: true,
             preferredUser: user,
           }),
           fetchAdminWithAuth("/api/admin/trr-api/social/shared/runs?source_scope=bravo&limit=5", undefined, {
+            allowDevAdminBypass: true,
             preferredUser: user,
           }),
           fetchAdminWithAuth("/api/admin/trr-api/social/shared/review-queue?source_scope=bravo&review_status=open&limit=10", undefined, {
+            allowDevAdminBypass: true,
             preferredUser: user,
           }),
         ]);
@@ -174,7 +178,7 @@ export default function AdminSocialMediaPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ source_scope: "bravo" }),
         },
-        { preferredUser: user },
+        { allowDevAdminBypass: true, preferredUser: user },
       );
       const data = (await response.json().catch(() => ({}))) as { error?: string; run_id?: string; message?: string };
       if (!response.ok) {

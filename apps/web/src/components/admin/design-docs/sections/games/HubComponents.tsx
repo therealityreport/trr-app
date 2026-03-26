@@ -723,27 +723,47 @@ function FeaturedArticleSpecimen() {
 
 /* ── D. Navigation Menu Specimen ─────────────────────────────────── */
 
+/**
+ * NAV_SECTIONS — exact order and structure from live nytimes.com/crosswords
+ * nav drawer (Mar 2026). "collapsible" means the game has archive/sub-pages
+ * accessible via a pz-icon-arrow-down toggle.
+ */
 const NAV_SECTIONS = {
+  /** Game links in exact production order */
   games: [
-    { name: "Wordle", icon: "\u25A6", isNew: false },
-    { name: "The Crossword", icon: "\u254B", isNew: false },
-    { name: "The Mini", icon: "\u25A3", isNew: false },
-    { name: "The Midi", icon: "\u25A7", isNew: true },
-    { name: "Connections", icon: "\u25C8", isNew: false },
-    { name: "Crossplay", icon: "\u25CE", isNew: true },
-    { name: "Spelling Bee", icon: "\u2B21", isNew: false },
-    { name: "Strands", icon: "\u29EA", isNew: false },
-    { name: "Letter Boxed", icon: "\u25FB", isNew: false },
-    { name: "Tiles", icon: "\u25A8", isNew: false },
-    { name: "Sudoku", icon: "\u25A9", isNew: false },
-    { name: "Vertex", icon: "\u2B23", isNew: false },
-    { name: "Pips", icon: "\u2680", isNew: false },
-    { name: "Flashback", icon: "\u29D7", isNew: false },
+    { name: "Crossplay", icon: "\u25CE", href: "/games/crossplay", isNew: true, collapsible: false },
+    { name: "The Crossword", icon: "\u254B", href: "/crosswords/game/daily", isNew: false, collapsible: true },
+    { name: "The Midi", icon: "\u25A7", href: "/crosswords/game/midi", isNew: true, collapsible: true },
+    { name: "The Mini", icon: "\u25A3", href: "/crosswords/game/mini", isNew: false, collapsible: true },
+    { name: "Connections", icon: "\u25C8", href: "/games/connections", isNew: false, collapsible: true },
+    { name: "Spelling Bee", icon: "\u2B21", href: "/puzzles/spelling-bee", isNew: false, collapsible: true },
+    { name: "Wordle", icon: "\u25A6", href: "/games/wordle/index.html", isNew: false, collapsible: true },
+    { name: "Pips", icon: "\u2680", href: "/games/pips", isNew: false, collapsible: false },
+    { name: "Strands", icon: "\u29EA", href: "/games/strands", isNew: false, collapsible: true },
+    { name: "Letter Boxed", icon: "\u25FB", href: "/puzzles/letter-boxed", isNew: false, collapsible: false },
+    { name: "Tiles", icon: "\u25A8", href: "/puzzles/tiles", isNew: false, collapsible: false },
+    { name: "Sudoku", icon: "\u25A9", href: "/puzzles/sudoku", isNew: false, collapsible: false },
   ],
+  /** Tips and Tricks section */
+  tipsAndTricks: [
+    { name: "NYT Daily Wordplay Column", href: "https://www.nytimes.com/column/wordplay" },
+    { name: "Games Tips", href: "https://www.nytimes.com/spotlight/games-tips" },
+    { name: "Games Features", href: "https://www.nytimes.com/spotlight/games-feature" },
+  ],
+  /** Cross-brand links */
   crossLinks: [
-    { name: "The Athletic", icon: "\u26BD" },
-    { name: "Cooking", icon: "\u{1F373}" },
-    { name: "Wirecutter", icon: "\u2702" },
+    { name: "The Athletic", icon: "\u26BD", href: "https://www.nytimes.com/athletic/" },
+    { name: "Connections: Sports Edition", icon: "\u25C8", href: "https://www.nytimes.com/athletic/connections-sports-edition" },
+    { name: "New York Times Cooking", icon: "\u{1F373}", href: "https://cooking.nytimes.com" },
+    { name: "New York Times Wirecutter", icon: "\u2702", href: "https://www.nytimes.com/wirecutter" },
+  ],
+  /** Privacy section */
+  privacy: [
+    { name: "Privacy Policy", href: "https://www.nytimes.com/privacy/privacy-policy" },
+    { name: "Cookie Policy", href: "https://www.nytimes.com/privacy/cookie-policy" },
+    { name: "Privacy FAQ", href: "https://www.nytimes.com/privacy" },
+    { name: "Delete My Account", href: "https://www.nytimes.com/account/delete-account" },
+    { name: "Your Privacy Choices", href: "https://www.nytimes.com/privacy/your-privacy-choices" },
   ],
 };
 
@@ -914,34 +934,39 @@ function NavigationMenuSpecimen() {
 
 /* ── E. Footer Specimen ──────────────────────────────────────────── */
 
+/**
+ * FOOTER_STRUCTURE — exact links and copy from live <footer class="pz-footer">
+ * Updated Mar 2026 from nytimes.com/crosswords source.
+ */
 const FOOTER_STRUCTURE = {
   about: {
     heading: "About New York Times Games",
     description:
-      "Since 1942, The New York Times Crossword has been a beloved part of The Times. Our mission is to engage and delight solvers of all skill levels with puzzles, word games, and logic challenges.",
+      "Since the launch of the Crossword in 1942, The Times has captivated solvers by providing engaging word and logic games. In 2014, we introduced the Mini Crossword \u2014 followed by Spelling Bee, Letter Boxed, Tiles, Wordle, Connections and more. We strive to offer puzzles for all skill levels that everyone can enjoy playing every day.",
+    subscribeText: "Subscribe now",
+    subscribeHref: "https://www.nytimes.com/subscription/games?campaignId=9W9LL",
   },
   gamesCol: {
     heading: "New York Times Games",
     items: [
-      "Wordle",
-      "The Crossword",
-      "The Mini",
-      "The Midi",
-      "Connections",
-      "Spelling Bee",
-      "Strands",
-      "Letter Boxed",
-      "Tiles",
-      "Sudoku",
-      "Vertex",
       "Crossplay",
+      "The Crossword",
+      "The Midi Crossword",
+      "The Mini Crossword",
+      "Spelling Bee",
+      "Wordle",
       "Pips",
-      "Flashback",
+      "Strands",
+      "Connections",
+      "Tiles",
+      "Letter Boxed",
+      "Sudoku",
+      "All Games",
     ],
   },
   crosswordsCol: {
     heading: "Crosswords",
-    items: ["Archive", "Statistics", "Leaderboards", "Submit a Crossword"],
+    items: ["Crossword Archives", "Statistics", "Leaderboards", "Submit a Crossword"],
   },
   communityCol: {
     heading: "Community",
@@ -949,7 +974,7 @@ const FOOTER_STRUCTURE = {
   },
   learnMoreCol: {
     heading: "Learn More",
-    items: ["FAQs", "Gift Subscriptions", "Shop", "Download App"],
+    items: ["FAQs", "Gift Subscriptions", "Shop the Games Collection", "Download the App"],
   },
 };
 
@@ -1110,6 +1135,165 @@ function FooterSpecimen() {
 
 /* ── Main Export ──────────────────────────────────────────────────── */
 
+/* ── F. Header Bar Specimen ──────────────────────────────────────── */
+
+function HeaderBarSpecimen() {
+  return (
+    <div
+      style={{
+        border: "1px solid var(--dd-ink-faint)",
+        borderRadius: 8,
+        overflow: "hidden",
+        fontFamily: "var(--dd-font-ui)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 16px",
+          height: 44,
+          background: "#fff",
+          borderBottom: "1px solid #e8e8e8",
+        }}
+      >
+        {/* Left: Hamburger */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: 3, cursor: "pointer" }}
+            title="pz-nav__hamburger-squeeze"
+          >
+            <div style={{ width: 18, height: 2, background: "#000", borderRadius: 1 }} />
+            <div style={{ width: 18, height: 2, background: "#000", borderRadius: 1 }} />
+            <div style={{ width: 18, height: 2, background: "#000", borderRadius: 1 }} />
+          </div>
+
+          {/* Logo placeholder */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width={25} height={25} viewBox="0 0 25 25" style={{ flexShrink: 0 }}>
+              <circle cx={12.5} cy={12.5} r={12} fill="none" stroke="#000" strokeWidth={0.5} />
+              <text x={12.5} y={14} textAnchor="middle" fontSize={8} fontWeight={700} fontFamily="Georgia" fill="#000">
+                T
+              </text>
+            </svg>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                fontFamily: "var(--dd-font-ui)",
+                color: "#000",
+                letterSpacing: "-0.02em",
+              }}
+            >
+              Games
+            </span>
+          </div>
+        </div>
+
+        {/* Right: Subscribe */}
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            fontFamily: "var(--dd-font-ui)",
+            color: "#fff",
+            background: "#000",
+            padding: "6px 14px",
+            borderRadius: 4,
+            cursor: "pointer",
+            letterSpacing: "0.047em",
+            textTransform: "uppercase",
+          }}
+        >
+          Subscribe
+        </div>
+      </div>
+
+      {/* Class annotation */}
+      <div
+        style={{
+          padding: "6px 12px",
+          background: "var(--dd-paper-cool)",
+          display: "flex",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        {["header.pz-header", ".pz-nav", ".pz-nav__hamburger-squeeze", ".pz-nav__logo (SVG)", ".pz-nav__button"].map(
+          (cls) => (
+            <span
+              key={cls}
+              style={{
+                fontSize: 9,
+                fontFamily: "var(--dd-font-mono)",
+                color: "var(--dd-ink-light)",
+                background: "rgba(0,0,0,0.04)",
+                padding: "2px 6px",
+                borderRadius: 3,
+              }}
+            >
+              {cls}
+            </span>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── G. Crossplay CTA (Nav Drawer Hero) ─────────────────────────── */
+
+function CrossplayCTASpecimen() {
+  return (
+    <div
+      style={{
+        maxWidth: 280,
+        border: "1px solid var(--dd-ink-faint)",
+        borderRadius: 8,
+        overflow: "hidden",
+        fontFamily: "var(--dd-font-ui)",
+      }}
+    >
+      <div
+        style={{
+          background: "linear-gradient(135deg, #c8d8f5 0%, #e8edf8 100%)",
+          padding: "20px 16px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span style={{ fontSize: 20, fontWeight: 700, color: "#000" }}>Crossplay</span>
+          <span style={{ fontSize: 16 }}>&#127918;</span>
+        </div>
+        <p style={{ fontSize: 13, color: "#333", margin: "0 0 12px", lineHeight: 1.4 }}>
+          Challenge friends in this 2-player word game.
+        </p>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#346eb7",
+            cursor: "pointer",
+          }}
+        >
+          Download app
+        </span>
+      </div>
+      <div
+        style={{
+          padding: "6px 12px",
+          background: "var(--dd-paper-cool)",
+          fontSize: 9,
+          fontFamily: "var(--dd-font-mono)",
+          color: "var(--dd-ink-light)",
+        }}
+      >
+        CrossplayCTA-module_crossplayCTAContainer__TunE_
+      </div>
+    </div>
+  );
+}
+
 export default function HubComponents({ SectionLabel }: GameSectionProps) {
   return (
     <section style={{ marginBottom: 48 }}>
@@ -1125,6 +1309,42 @@ export default function HubComponents({ SectionLabel }: GameSectionProps) {
         UI patterns from the live nytimes.com/crosswords hub page. CSS-only visual mockups
         showing actual HTML class structures.
       </p>
+
+      {/* F — Header Bar */}
+      <h4 style={sectionHeadingStyle}>F. Header Bar (pz-header + pz-nav)</h4>
+      <p
+        style={{
+          fontFamily: "var(--dd-font-mono)",
+          fontSize: 11,
+          color: "var(--dd-ink-light)",
+          margin: "-6px 0 12px",
+        }}
+      >
+        header.pz-header &gt; .pz-nav &gt; .pz-nav__hamburger-squeeze | .pz-nav__logo (SVG
+        138×25) | .pz-nav__button &ldquo;Subscribe&rdquo; | Height: 44px, border-bottom: 1px
+        solid #e8e8e8
+      </p>
+      <div style={{ marginBottom: 32 }}>
+        <HeaderBarSpecimen />
+      </div>
+
+      {/* G — Crossplay CTA */}
+      <h4 style={sectionHeadingStyle}>G. Crossplay CTA (Nav Drawer Hero)</h4>
+      <p
+        style={{
+          fontFamily: "var(--dd-font-mono)",
+          fontSize: 11,
+          color: "var(--dd-ink-light)",
+          margin: "-6px 0 12px",
+        }}
+      >
+        CrossplayCTA-module_crossplayCTAContainer — appears at top of nav drawer with
+        &ldquo;Download app&rdquo; CTA. Geo-locked (NZ/AU) via GAMES_geoLockedCrossPlayCTA_0714
+        Abra flag.
+      </p>
+      <div style={{ marginBottom: 32 }}>
+        <CrossplayCTASpecimen />
+      </div>
 
       {/* A — Game Card */}
       <h4 style={sectionHeadingStyle}>A. Game Card Specimen (hub-game-card)</h4>
@@ -1171,7 +1391,7 @@ export default function HubComponents({ SectionLabel }: GameSectionProps) {
       </div>
 
       {/* D — Navigation Menu */}
-      <h4 style={sectionHeadingStyle}>D. Navigation Menu (pz-icon system)</h4>
+      <h4 style={sectionHeadingStyle}>D. Navigation Drawer (pz-nav-drawer)</h4>
       <p
         style={{
           fontFamily: "var(--dd-font-mono)",
@@ -1180,16 +1400,17 @@ export default function HubComponents({ SectionLabel }: GameSectionProps) {
           margin: "-6px 0 12px",
         }}
       >
-        pz-icon (background-image SVGs) | pz-icon-arrow-down toggles | PillGrey
-        &ldquo;NEW&rdquo; badges | Cross-links: Athletic, Cooking, Wirecutter | +Expand All
-        toggle
+        CSS Modules: CustomNav-module, LinkGroup-module, DirectLink-module,
+        CollapsibleLink-module, ExpansionButton-module | Groups: News, Games (12 links), Tips
+        &amp; Tricks, Cross-brand (Athletic, Sports Connections, Cooking, Wirecutter), Privacy |
+        +Expand All toggle | Account: Subscribe / 75% off / Log In / Log Out
       </p>
       <div style={{ marginBottom: 32 }}>
         <NavigationMenuSpecimen />
       </div>
 
       {/* E — Footer */}
-      <h4 style={sectionHeadingStyle}>E. Footer Specimen (4-column)</h4>
+      <h4 style={sectionHeadingStyle}>E. Footer (pz-footer, 4-column)</h4>
       <p
         style={{
           fontFamily: "var(--dd-font-mono)",
@@ -1198,8 +1419,10 @@ export default function HubComponents({ SectionLabel }: GameSectionProps) {
           margin: "-6px 0 12px",
         }}
       >
-        About | Crosswords (Archive, Statistics, Leaderboards, Submit) | Community
-        (Gameplay Stories, Forums) | Learn More (FAQs, Gift Subs, Shop, App) | Copyright bar
+        footer.pz-footer &gt; .pz-footer__wrapper | About (nyt-cheltenham 300/20px) | Games
+        (13 links, Crossplay first) | Crosswords (Archives, Stats, Leaderboards, Submit) |
+        Community (Gameplay Stories, SB Forum, Games Threads) | Learn More (FAQs, Gift, Shop,
+        App) | Legal section portal
       </p>
       <div style={{ marginBottom: 16 }}>
         <FooterSpecimen />

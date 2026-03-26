@@ -204,7 +204,7 @@ export default function GameStrands({ SectionLabel }: GameSectionProps) {
         <li>Theme words: blue background ({STRANDS.theme}), white text</li>
         <li>Spangram: yellow background ({STRANDS.spangram}), spans full row</li>
         <li>Default cells: warm paper background</li>
-        <li>Font: Franklin Gothic 15px bold</li>
+        <li>Font: nyt-franklin (NYTFranklin) 15px bold</li>
       </ul>
     </section>
   );

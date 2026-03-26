@@ -1,5 +1,11 @@
 import "server-only";
 
+import {
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  invalidateRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 import { query } from "@/lib/server/postgres";
 import { buildSeededTypographyState, buildTypographyStateSnapshot } from "@/lib/server/admin/typography-seed";
 import { normalizeRoleConfig } from "@/lib/typography/runtime";
@@ -36,6 +42,11 @@ type TypographyAssignmentRow = {
 
 let schemaEnsured = false;
 let schemaEnsuring: Promise<void> | null = null;
+const TYPOGRAPHY_STATE_CACHE_NAMESPACE = "typography-state";
+const TYPOGRAPHY_STATE_CACHE_KEY = "state";
+const TYPOGRAPHY_STATE_CACHE_TTL_MS = 30_000;
+const SEEDED_SNAPSHOT = buildTypographyStateSnapshot();
+const SEEDED_SET_ID_TO_SLUG = new Map(SEEDED_SNAPSHOT.sets.map((set) => [set.id, set.slug]));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -87,6 +98,10 @@ function isConcurrentUpdateError(error: unknown): boolean {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function invalidateTypographyStateCache(): void {
+  invalidateRouteResponseCache(TYPOGRAPHY_STATE_CACHE_NAMESPACE, TYPOGRAPHY_STATE_CACHE_KEY);
 }
 
 async function ensureTypographySchema(): Promise<void> {
@@ -216,39 +231,97 @@ async function seedTypographyIfMissing(): Promise<void> {
   }
 }
 
-export async function getTypographyState(): Promise<TypographyState> {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      await seedTypographyIfMissing();
-      const [setsResult, assignmentsResult] = await Promise.all([
-        query<TypographySetRow>(
-          `SELECT id, slug, name, area, seed_source, roles, created_at, updated_at
-           FROM site_typography_sets
-           ORDER BY area ASC, name ASC`
-        ),
-        query<TypographyAssignmentRow>(
-          `SELECT id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at
-           FROM site_typography_assignments
-           ORDER BY area ASC, page_key ASC NULLS FIRST, instance_key ASC NULLS FIRST, source_path ASC`
-        ),
-      ]);
+function isMissingTypographyTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown };
+  if (record.code !== "42P01") return false;
+  return String(record.message ?? "").toLowerCase().includes("site_typography_");
+}
 
-      if (setsResult.rows.length > 0 || assignmentsResult.rows.length > 0) {
-        return {
-          sets: setsResult.rows.map(mapSet),
-          assignments: assignmentsResult.rows.map(mapAssignment),
-        };
-      }
-    } catch (error) {
-      if (!isConcurrentUpdateError(error) || attempt === 3) {
-        throw error;
-      }
-    }
+async function resolveTypographySetId(setId: string): Promise<string> {
+  await seedTypographyIfMissing();
 
-    await sleep(50 * attempt);
+  const seededSlug = SEEDED_SET_ID_TO_SLUG.get(setId);
+  if (!seededSlug) {
+    return setId;
   }
 
-  return buildTypographyStateSnapshot();
+  const resolved = await query<{ id: string }>(
+    `SELECT id
+     FROM site_typography_sets
+     WHERE slug = $1
+     LIMIT 1`,
+    [seededSlug],
+  );
+  return resolved.rows[0]?.id ?? setId;
+}
+
+async function readPersistedTypographyState(): Promise<TypographyState | null> {
+  try {
+    const [setsResult, assignmentsResult] = await Promise.all([
+      query<TypographySetRow>(
+        `SELECT id, slug, name, area, seed_source, roles, created_at, updated_at
+         FROM site_typography_sets
+         ORDER BY area ASC, name ASC`
+      ),
+      query<TypographyAssignmentRow>(
+        `SELECT id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at
+         FROM site_typography_assignments
+         ORDER BY area ASC, page_key ASC NULLS FIRST, instance_key ASC NULLS FIRST, source_path ASC`
+      ),
+    ]);
+
+    if (setsResult.rows.length === 0 && assignmentsResult.rows.length === 0) {
+      return null;
+    }
+
+    return {
+      sets: setsResult.rows.map(mapSet),
+      assignments: assignmentsResult.rows.map(mapAssignment),
+    };
+  } catch (error) {
+    if (isMissingTypographyTableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getTypographyState(): Promise<TypographyState> {
+  const cached = getRouteResponseCache<TypographyState>(TYPOGRAPHY_STATE_CACHE_NAMESPACE, TYPOGRAPHY_STATE_CACHE_KEY);
+  if (cached) {
+    return cached;
+  }
+
+  return getOrCreateRouteResponsePromise(TYPOGRAPHY_STATE_CACHE_NAMESPACE, TYPOGRAPHY_STATE_CACHE_KEY, async () => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const state = (await readPersistedTypographyState()) ?? SEEDED_SNAPSHOT;
+        setRouteResponseCache(
+          TYPOGRAPHY_STATE_CACHE_NAMESPACE,
+          TYPOGRAPHY_STATE_CACHE_KEY,
+          state,
+          TYPOGRAPHY_STATE_CACHE_TTL_MS,
+        );
+        return state;
+      } catch (error) {
+        if (!isConcurrentUpdateError(error) || attempt === 3) {
+          throw error;
+        }
+      }
+
+      await sleep(50 * attempt);
+    }
+
+    const fallback = SEEDED_SNAPSHOT;
+    setRouteResponseCache(
+      TYPOGRAPHY_STATE_CACHE_NAMESPACE,
+      TYPOGRAPHY_STATE_CACHE_KEY,
+      fallback,
+      TYPOGRAPHY_STATE_CACHE_TTL_MS,
+    );
+    return fallback;
+  });
 }
 
 export interface CreateTypographySetInput {
@@ -271,6 +344,7 @@ export async function createTypographySet(input: CreateTypographySetInput): Prom
      RETURNING id, slug, name, area, seed_source, roles, created_at, updated_at`,
     [slug, input.name.trim(), input.area, input.seedSource.trim(), JSON.stringify(input.roles)],
   );
+  invalidateTypographyStateCache();
   return mapSet(result.rows[0]!);
 }
 
@@ -282,7 +356,7 @@ export interface UpdateTypographySetInput {
 }
 
 export async function updateTypographySet(setId: string, input: UpdateTypographySetInput): Promise<TypographySet | null> {
-  await seedTypographyIfMissing();
+  const resolvedSetId = await resolveTypographySetId(setId);
   const updates: string[] = [];
   const values: unknown[] = [];
   let index = 1;
@@ -306,10 +380,10 @@ export async function updateTypographySet(setId: string, input: UpdateTypography
 
   if (updates.length === 0) {
     const state = await getTypographyState();
-    return state.sets.find((set) => set.id === setId) ?? null;
+    return state.sets.find((set) => set.id === setId || set.id === resolvedSetId) ?? null;
   }
 
-  values.push(setId);
+  values.push(resolvedSetId);
   const result = await query<TypographySetRow>(
     `UPDATE site_typography_sets
      SET ${updates.join(", ")}
@@ -317,21 +391,27 @@ export async function updateTypographySet(setId: string, input: UpdateTypography
      RETURNING id, slug, name, area, seed_source, roles, created_at, updated_at`,
     values,
   );
+  if (result.rows[0]) {
+    invalidateTypographyStateCache();
+  }
   return result.rows[0] ? mapSet(result.rows[0]) : null;
 }
 
 export async function deleteTypographySet(setId: string): Promise<"deleted" | "in-use" | "missing"> {
-  await seedTypographyIfMissing();
+  const resolvedSetId = await resolveTypographySetId(setId);
   const assignments = await query<{ count: string }>(
     `SELECT count(*)::text AS count
      FROM site_typography_assignments
      WHERE set_id = $1`,
-    [setId],
+    [resolvedSetId],
   );
   if (Number(assignments.rows[0]?.count ?? "0") > 0) {
     return "in-use";
   }
-  const result = await query(`DELETE FROM site_typography_sets WHERE id = $1`, [setId]);
+  const result = await query(`DELETE FROM site_typography_sets WHERE id = $1`, [resolvedSetId]);
+  if ((result.rowCount ?? 0) > 0) {
+    invalidateTypographyStateCache();
+  }
   return (result.rowCount ?? 0) > 0 ? "deleted" : "missing";
 }
 
@@ -345,7 +425,7 @@ export interface UpdateTypographyAssignmentInput {
 }
 
 export async function upsertTypographyAssignment(input: UpdateTypographyAssignmentInput): Promise<TypographyAssignment> {
-  await seedTypographyIfMissing();
+  const resolvedSetId = await resolveTypographySetId(input.setId);
   const existing = await query<TypographyAssignmentRow>(
     `SELECT id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at
      FROM site_typography_assignments
@@ -361,8 +441,9 @@ export async function upsertTypographyAssignment(input: UpdateTypographyAssignme
        SET set_id = $1, source_path = $2, notes = $3
        WHERE id = $4
        RETURNING id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at`,
-      [input.setId, input.sourcePath.trim(), input.notes ?? null, existing.rows[0].id],
+      [resolvedSetId, input.sourcePath.trim(), input.notes ?? null, existing.rows[0].id],
     );
+    invalidateTypographyStateCache();
     return mapAssignment(updated.rows[0]!);
   }
 
@@ -370,7 +451,8 @@ export async function upsertTypographyAssignment(input: UpdateTypographyAssignme
     `INSERT INTO site_typography_assignments (area, page_key, instance_key, set_id, source_path, notes)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id, area, page_key, instance_key, set_id, source_path, notes, created_at, updated_at`,
-    [input.area, input.pageKey ?? null, input.instanceKey ?? null, input.setId, input.sourcePath.trim(), input.notes ?? null],
+    [input.area, input.pageKey ?? null, input.instanceKey ?? null, resolvedSetId, input.sourcePath.trim(), input.notes ?? null],
   );
+  invalidateTypographyStateCache();
   return mapAssignment(inserted.rows[0]!);
 }

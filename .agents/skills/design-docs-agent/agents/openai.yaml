@@ -1,0 +1,9 @@
+interface:
+  display_name: "Design Docs Agent (TRR-APP)"
+  short_description: "Generate or update TRR design-docs brand and article pages from source HTML."
+  default_prompt: "Use $design-docs-agent to ingest articleUrl and sourceHtml, extract structure/tokens/media, and generate or update the matching TRR design-docs pages."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "chrome-devtools"
+      description: "Optional browser extraction for embeds, CSS discovery, and computed-style verification"

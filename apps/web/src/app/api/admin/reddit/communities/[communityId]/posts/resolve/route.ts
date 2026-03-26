@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { resolveRedditPostDetailBySlug } from "@/lib/server/admin/reddit-sources-repository";
+import {
+  buildUserScopedRouteCacheKey,
+  getCachedStableRead,
+  REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
+  REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/reddit-stable-route-cache";
+import { loadStableRedditRead } from "@/lib/server/trr-api/reddit-stable-read";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -32,54 +39,88 @@ const normalizeDetailPart = (value: string | null): string | null => {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { communityId } = await params;
     if (!communityId || !isValidUuid(communityId)) {
       return NextResponse.json({ error: "communityId must be a valid UUID" }, { status: 400 });
     }
 
-    const seasonId = request.nextUrl.searchParams.get("season_id");
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+    const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    searchParams.delete("refresh");
+
+    const seasonId = searchParams.get("season_id");
     if (!seasonId || !isValidUuid(seasonId)) {
       return NextResponse.json({ error: "season_id must be a valid UUID" }, { status: 400 });
     }
 
-    const containerKey = resolveContainerKeyFromWindowToken(request.nextUrl.searchParams.get("window_key"));
+    const containerKey = resolveContainerKeyFromWindowToken(searchParams.get("window_key"));
     if (!containerKey) {
       return NextResponse.json({ error: "window_key is required" }, { status: 400 });
     }
 
-    const titleSlug = normalizeDetailPart(request.nextUrl.searchParams.get("slug"));
-    const authorSlug = normalizeDetailPart(request.nextUrl.searchParams.get("author"));
-    const redditPostId = String(request.nextUrl.searchParams.get("post_id") ?? "").trim() || null;
+    const titleSlug = normalizeDetailPart(searchParams.get("slug"));
+    const authorSlug = normalizeDetailPart(searchParams.get("author"));
+    const redditPostId = String(searchParams.get("post_id") ?? "").trim() || null;
 
     if (!redditPostId && (!titleSlug || !authorSlug)) {
       return NextResponse.json({ error: "slug and author are required when post_id is omitted" }, { status: 400 });
     }
 
-    const resolved = await resolveRedditPostDetailBySlug({
-      communityId,
-      seasonId,
-      containerKey,
-      titleSlug,
-      authorSlug,
-      redditPostId,
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `reddit-post-resolve:${communityId}`, searchParams);
+    const { payload, cacheHit } = await getCachedStableRead({
+      namespace: REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
+      cacheKey,
+      promiseKey: forceRefresh ? `${cacheKey}:refresh` : cacheKey,
+      ttlMs: REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
+      forceRefresh,
+      loader: async () => {
+        const query = new URLSearchParams();
+        query.set("season_id", seasonId);
+        query.set("window_key", searchParams.get("window_key") ?? "");
+        if (titleSlug) query.set("slug", titleSlug);
+        if (authorSlug) query.set("author", authorSlug);
+        if (redditPostId) query.set("post_id", redditPostId);
+
+        const resolved = await loadStableRedditRead<Record<string, unknown>>({
+          backendPath: `/admin/reddit/communities/${communityId}/posts/resolve`,
+          routeName: "reddit-post-resolve",
+          queryString: query.toString(),
+          allowFallbackStatusCodes: [501],
+          fallback: async () => {
+            const fallback = await resolveRedditPostDetailBySlug({
+              communityId,
+              seasonId,
+              containerKey,
+              titleSlug,
+              authorSlug,
+              redditPostId,
+            });
+            return fallback
+              ? {
+                  reddit_post_id: fallback.reddit_post_id,
+                  detail_slug: fallback.detail_slug,
+                  collision: fallback.collision,
+                  post: {
+                    title: fallback.title,
+                    author: fallback.author,
+                    posted_at: fallback.posted_at,
+                    url: fallback.url,
+                    permalink: fallback.permalink,
+                  },
+                }
+              : {};
+          },
+        });
+        return resolved.payload;
+      },
     });
-    if (!resolved) {
+
+    if (!payload || !payload.reddit_post_id) {
       return NextResponse.json({ error: "Post not found for community, season, and window" }, { status: 404 });
     }
 
-    return NextResponse.json({
-      reddit_post_id: resolved.reddit_post_id,
-      detail_slug: resolved.detail_slug,
-      collision: resolved.collision,
-      post: {
-        title: resolved.title,
-        author: resolved.author,
-        posted_at: resolved.posted_at,
-        url: resolved.url,
-        permalink: resolved.permalink,
-      },
-    });
+    return NextResponse.json(payload, cacheHit ? { headers: { "x-trr-cache": "hit" } } : undefined);
   } catch (error) {
     console.error("[api] Failed to resolve reddit post detail slug", error);
     const message = error instanceof Error ? error.message : "failed";

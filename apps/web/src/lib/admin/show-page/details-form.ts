@@ -1,13 +1,26 @@
+import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import { slugifyToken } from "@/lib/slugify";
 
 export type ShowDetailsSource = {
   name?: string | null;
   slug?: string | null;
+  canonical_slug?: string | null;
   alternative_names?: string[] | null;
 };
 
-export const deriveShowDetailsNickname = (show: ShowDetailsSource | null | undefined): string =>
-  typeof show?.slug === "string" ? show.slug.trim() : "";
+export const deriveShowDetailsNickname = (show: ShowDetailsSource | null | undefined): string => {
+  if (!show) return "";
+  const hasSlugCandidate =
+    typeof show.slug === "string" ||
+    typeof show.canonical_slug === "string" ||
+    Array.isArray(show.alternative_names);
+  if (!hasSlugCandidate) return "";
+  return resolvePreferredShowRouteSlug({
+    alternativeNames: show.alternative_names,
+    canonicalSlug: show.canonical_slug,
+    slug: show.slug,
+  });
+};
 
 export const deriveShowDetailsAlternativeNames = (show: ShowDetailsSource | null | undefined): string[] => {
   const nickname = deriveShowDetailsNickname(show).toLowerCase();

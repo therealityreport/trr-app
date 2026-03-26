@@ -4,9 +4,13 @@ import { NextRequest } from "next/server";
 const {
   requireAdminMock,
   getStoredWindowPostsByCommunityAndSeasonMock,
+  getCachedStableReadMock,
+  loadStableRedditReadMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getStoredWindowPostsByCommunityAndSeasonMock: vi.fn(),
+  getCachedStableReadMock: vi.fn(async ({ loader }) => ({ payload: await loader(), cacheHit: false })),
+  loadStableRedditReadMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -15,6 +19,20 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   getStoredWindowPostsByCommunityAndSeason: getStoredWindowPostsByCommunityAndSeasonMock,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-route-cache", () => ({
+  buildUserScopedRouteCacheKey: vi.fn(
+    (userId: string, scope: string, searchParams?: URLSearchParams) =>
+      `${userId}:${scope}:${searchParams?.toString() ?? ""}`,
+  ),
+  getCachedStableRead: getCachedStableReadMock,
+  REDDIT_STABLE_DETAIL_CACHE_NAMESPACE: "admin-reddit-stable-detail",
+  REDDIT_STABLE_DETAIL_CACHE_TTL_MS: 10_000,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-read", () => ({
+  loadStableRedditRead: loadStableRedditReadMock,
 }));
 
 import { GET } from "@/app/api/admin/reddit/communities/[communityId]/stored-posts/route";
@@ -26,7 +44,13 @@ describe("/api/admin/reddit/communities/[communityId]/stored-posts route", () =>
   beforeEach(() => {
     requireAdminMock.mockReset();
     getStoredWindowPostsByCommunityAndSeasonMock.mockReset();
+    getCachedStableReadMock.mockReset();
+    loadStableRedditReadMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
+    getCachedStableReadMock.mockImplementation(async ({ loader }) => ({
+      payload: await loader(),
+      cacheHit: false,
+    }));
   });
 
   it("returns stored window posts for a canonical container", async () => {
@@ -55,6 +79,10 @@ describe("/api/admin/reddit/communities/[communityId]/stored-posts route", () =>
         },
       ],
     });
+    loadStableRedditReadMock.mockImplementation(async ({ fallback }) => ({
+      payload: await fallback(),
+      source: "local",
+    }));
 
     const request = new NextRequest(
       `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/stored-posts?season_id=${SEASON_ID}&container_key=episode-1&page=1&per_page=200`,
@@ -75,6 +103,38 @@ describe("/api/admin/reddit/communities/[communityId]/stored-posts route", () =>
       "episode-1",
       1,
       200,
+    );
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: `/admin/reddit/communities/${COMMUNITY_ID}/stored-posts`,
+        routeName: "reddit-stored-posts",
+      }),
+    );
+  });
+
+  it("routes through backend stable read payloads when available", async () => {
+    loadStableRedditReadMock.mockResolvedValue({
+      payload: {
+        pagination: { page: 1, per_page: 200, total_count: 1 },
+        posts: [],
+      },
+      source: "backend",
+    });
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/stored-posts?season_id=${SEASON_ID}&container_key=episode-1&page=1&per_page=200`,
+      { method: "GET" },
+    );
+    const response = await GET(request, {
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: `/admin/reddit/communities/${COMMUNITY_ID}/stored-posts`,
+        routeName: "reddit-stored-posts",
+      }),
     );
   });
 

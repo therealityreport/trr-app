@@ -1,25 +1,10 @@
 "use client";
 
-import AIIllustration, { type IllustrationPrompts } from "../AIIllustration";
-import allPrompts from "../illustration-prompts.json";
-import {
-  GameWordle,
-  GameSpellingBee,
-  GameConnections,
-  GameTiles,
-  GameMiniCrossword,
-  GameLetterBoxed,
-  GameStrands,
-  GameSudoku,
-  GameVertex,
-  GameFlashback,
-  GameCrossplay,
-  GamePips,
-  GameTheMidi,
-  HubComponents,
-} from "./games";
+// Per-game design systems moved to individual article pages
+import { HubComponents } from "./games";
+import { TECH_STACK, AB_TESTS } from "./games/game-palettes";
 
-const PROMPTS = allPrompts["nyt-games"] as Record<string, IllustrationPrompts>;
+// PROMPTS removed — AI Illustrations section removed
 
 /* ------------------------------------------------------------------ */
 /*  NYT Games Brand Section — Wordle, Connections, Strands, Spelling  */
@@ -54,10 +39,10 @@ const COLORS = [
   { name: "Dark BG", hex: "#121213", use: "Game board" },
   { name: "Tile Border", hex: "#D3D6DA", use: "Empty tile" },
   { name: "Key BG", hex: "#818384", use: "Keyboard key" },
-  { name: "Categories Purple", hex: "#b4a8ff", use: "Connections category" },
-  { name: "Categories Blue", hex: "#6AACE3", use: "Connections category" },
-  { name: "Categories Green", hex: "#78B159", use: "Connections category" },
-  { name: "Categories Yellow", hex: "#F9DF6D", use: "Connections category" },
+  { name: "Categories Yellow", hex: "#f9df6d", use: "Connections — Easiest" },
+  { name: "Categories Green", hex: "#a0c35a", use: "Connections — Medium" },
+  { name: "Categories Blue", hex: "#b0c4ef", use: "Connections — Hard" },
+  { name: "Categories Purple", hex: "#b4a8ff", use: "Connections — Hardest" },
 ] as const;
 
 const TYPE_SCALE = [
@@ -85,10 +70,10 @@ const TILE_COLORS: Record<string, string> = {
 };
 
 const CONNECTIONS_GRID = [
-  { words: ["TRICKY", "CRAFTY", "SNEAKY", "SLY"], color: "#b4a8ff", label: "Purple — Revealed", revealed: true },
-  { words: ["BASS", "DRUM", "GUITAR", "KEYS"], color: "#6AACE3", label: "Blue", revealed: false },
-  { words: ["STORM", "BLAZE", "FROST", "GALE"], color: "#78B159", label: "Green", revealed: false },
-  { words: ["APPLE", "MANGO", "PEACH", "PLUM"], color: "#F9DF6D", label: "Yellow", revealed: false },
+  { words: ["APPLE", "MANGO", "PEACH", "PLUM"], color: "#f9df6d", label: "Yellow — Easiest", revealed: true },
+  { words: ["STORM", "BLAZE", "FROST", "GALE"], color: "#a0c35a", label: "Green", revealed: false },
+  { words: ["BASS", "DRUM", "GUITAR", "KEYS"], color: "#b0c4ef", label: "Blue", revealed: false },
+  { words: ["TRICKY", "CRAFTY", "SNEAKY", "SLY"], color: "#b4a8ff", label: "Purple — Hardest", revealed: false },
 ] as const;
 
 const KEYBOARD_ROWS = [
@@ -117,22 +102,25 @@ const RADIUS_TOKENS = [
   { label: "Hub Game Cards", value: "8px" },
 ] as const;
 
+/**
+ * GAME_PORTFOLIO — ordered to match the live nav drawer (Mar 2026).
+ * Vertex and Flashback are not in the live nav/footer but remain documented.
+ */
 const GAME_PORTFOLIO = [
+  { name: "Crossplay", desc: "2-player word game", badge: "New", badgeColor: "#6aaa64", topColor: "#6366f1" },
   { name: "The Crossword", desc: "Daily puzzles since 1942", badge: "Original", badgeColor: "#787C7E", topColor: "#121213" },
-  { name: "The Mini", desc: "5\u00d75 quick crossword", badge: "Original", badgeColor: "#787C7E", topColor: "#121213" },
-  { name: "Wordle", desc: "Five-letter word puzzle", badge: "Core", badgeColor: "#4f85e5", topColor: "#6aaa64" },
-  { name: "Spelling Bee", desc: "Hexagon word game", badge: "Core", badgeColor: "#4f85e5", topColor: "#f7da21" },
+  { name: "The Midi", desc: "9\u201311\u00d79\u201311 themed crossword", badge: "New", badgeColor: "#6aaa64", topColor: "#7ca8f0" },
+  { name: "The Mini", desc: "5\u00d75 quick crossword", badge: "Original", badgeColor: "#787C7E", topColor: "#95befa" },
   { name: "Connections", desc: "Group related words", badge: "Core", badgeColor: "#4f85e5", topColor: "#b4a8ff" },
-  { name: "Strands", desc: "Word search gameplay", badge: "Core", badgeColor: "#4f85e5", topColor: "#4f85e5" },
-  { name: "Letter Boxed", desc: "Grid-based word game", badge: "Core", badgeColor: "#4f85e5", topColor: "#4f85e5" },
-  { name: "Tiles", desc: "Match colorful tiles", badge: "Core", badgeColor: "#4f85e5", topColor: "#2860d8" },
-  { name: "Sudoku", desc: "Logic puzzle game", badge: "Core", badgeColor: "#4f85e5", topColor: "#4f85e5" },
-  { name: "Crossplay", desc: "2-player word game", badge: "New", badgeColor: "#6aaa64", topColor: "#6aaa64" },
-  { name: "Pips", desc: "Domino placement", badge: "New", badgeColor: "#6aaa64", topColor: "#6aaa64" },
-  { name: "The Midi", desc: "10\u00d710 crossword", badge: "New", badgeColor: "#6aaa64", topColor: "#6aaa64" },
-  { name: "Vertex", desc: "Polygon art game", badge: "Special", badgeColor: "#ba81c5", topColor: "#ba81c5" },
-  { name: "Flashback", desc: "History timeline quiz", badge: "Special", badgeColor: "#ba81c5", topColor: "#ba81c5" },
-  { name: "Monthly Bonus", desc: "Rotating premium games", badge: "Special", badgeColor: "#ba81c5", topColor: "#ba81c5" },
+  { name: "Spelling Bee", desc: "Hexagon word game", badge: "Core", badgeColor: "#4f85e5", topColor: "#f7da21" },
+  { name: "Wordle", desc: "Five-letter word puzzle", badge: "Core", badgeColor: "#4f85e5", topColor: "#6aaa64" },
+  { name: "Pips", desc: "Domino placement puzzle", badge: "Core", badgeColor: "#4f85e5", topColor: "#9251ca" },
+  { name: "Strands", desc: "Theme word pathfinding", badge: "Core", badgeColor: "#4f85e5", topColor: "#b2ded8" },
+  { name: "Letter Boxed", desc: "Square letter connections", badge: "Core", badgeColor: "#4f85e5", topColor: "#fc716b" },
+  { name: "Tiles", desc: "Visual pattern matching", badge: "Core", badgeColor: "#4f85e5", topColor: "#b5e352" },
+  { name: "Sudoku", desc: "Logic number puzzle", badge: "Core", badgeColor: "#4f85e5", topColor: "#fb9b00" },
+  { name: "Vertex", desc: "Polygon art game", badge: "Unlisted", badgeColor: "#ba81c5", topColor: "#29566c" },
+  { name: "Flashback", desc: "History timeline quiz", badge: "Unlisted", badgeColor: "#ba81c5", topColor: "#c2593a" },
 ] as const;
 
 const DARK_THEME_TONES = [
@@ -190,7 +178,7 @@ const KEYFRAMES = `
 
 export default function BrandNYTGamesSection() {
   return (
-    <div>
+    <div className="nytg-scope">
       <style dangerouslySetInnerHTML={{ __html: KEYFRAMES }} />
 
       <div className="dd-section-label">Brand Reference</div>
@@ -480,7 +468,7 @@ export default function BrandNYTGamesSection() {
       <div id="typography" />
       <SectionLabel>Typography</SectionLabel>
 
-      {/* Primary Display — Hamburg Serial Bold */}
+      {/* Primary Display — nyt-franklin (NYTFranklin) Bold */}
       <div
         style={{
           background: "var(--dd-paper-white)",
@@ -501,7 +489,7 @@ export default function BrandNYTGamesSection() {
             marginBottom: 12,
           }}
         >
-          Primary Display &mdash; Hamburg Serial Bold
+          Primary Display &mdash; nyt-franklin Bold
         </div>
         <div
           style={{
@@ -534,11 +522,11 @@ export default function BrandNYTGamesSection() {
             marginTop: 8,
           }}
         >
-          Hamburg Serial Bold | 32px titles, 24px secondary | Game titles, headers
+          nyt-franklin Bold (NYTFranklin) | 32px titles, 24px secondary | Game titles, headers
         </div>
       </div>
 
-      {/* Secondary Display — Stymie Bold */}
+      {/* Secondary Display — nyt-stymie Bold */}
       <div
         style={{
           background: "var(--dd-paper-white)",
@@ -559,7 +547,7 @@ export default function BrandNYTGamesSection() {
             marginBottom: 12,
           }}
         >
-          Secondary Display &mdash; Stymie Bold
+          Secondary Display &mdash; nyt-stymie Bold
         </div>
         <div
           style={{
@@ -592,11 +580,11 @@ export default function BrandNYTGamesSection() {
             marginTop: 8,
           }}
         >
-          Stymie Bold | 28px / 20px | Decorative accents, category labels
+          nyt-stymie Bold | 28px / 20px | Decorative accents, category labels
         </div>
       </div>
 
-      {/* Body / UI — Hamburg Serial Regular */}
+      {/* Body / UI — nyt-franklin Regular */}
       <div
         style={{
           background: "var(--dd-paper-white)",
@@ -617,7 +605,7 @@ export default function BrandNYTGamesSection() {
             marginBottom: 12,
           }}
         >
-          Body / UI &mdash; Hamburg Serial Regular
+          Body / UI &mdash; nyt-franklin Regular
         </div>
         <div
           style={{
@@ -639,11 +627,11 @@ export default function BrandNYTGamesSection() {
             marginTop: 8,
           }}
         >
-          Hamburg Serial Regular | 16px body | Instructions, menus, UI copy
+          nyt-franklin Regular (NYTFranklin) | 16px body | Instructions, menus, UI copy
         </div>
       </div>
 
-      {/* Tile Letters — Hamburg Serial Black */}
+      {/* Tile Letters — Clear Sans / nyt-franklin Black */}
       <div
         style={{
           background: "var(--dd-paper-white)",
@@ -664,7 +652,7 @@ export default function BrandNYTGamesSection() {
             marginBottom: 12,
           }}
         >
-          Tile Letters &mdash; Hamburg Serial Black
+          Tile Letters &mdash; Clear Sans / nyt-franklin Black
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {"ABCDE".split("").map((ch) => (
@@ -696,7 +684,7 @@ export default function BrandNYTGamesSection() {
             marginTop: 8,
           }}
         >
-          Hamburg Serial Black | 40px | Individual letter tiles
+          Clear Sans / nyt-franklin Black | 40px | Individual letter tiles
         </div>
       </div>
 
@@ -1108,83 +1096,14 @@ export default function BrandNYTGamesSection() {
       <div id="hub-components" />
       <SectionLabel>Hub Page Components</SectionLabel>
       <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 24, lineHeight: 1.6 }}>
-        UI patterns from the live nytimes.com/crosswords hub page — game cards, progress tracker, featured promo, navigation menu, and icon system.
+        UI patterns from the live nytimes.com/crosswords hub page (commit f1a6f14) &mdash;
+        header bar, Crossplay CTA, game cards, progress tracker, featured promo, navigation
+        drawer (CSS Modules), and 4-column footer. All specimens verified from production HTML.
       </p>
       <HubComponents SectionLabel={SectionLabel} />
 
-      {/* ── Per-Game Design Systems ──────────────────────────── */}
-      <SectionLabel>Per-Game Design Systems</SectionLabel>
-      <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 24, lineHeight: 1.6 }}>
-        Individual design specifications for each game — palettes, typography, component specimens, layout specs, and animation patterns. All colors verified from live nytimes.com CSS custom properties.
-      </p>
-
-      <div id="game-wordle" />
-      <GameWordle SectionLabel={SectionLabel} />
-
-      <div id="game-spelling-bee" />
-      <GameSpellingBee SectionLabel={SectionLabel} />
-
-      <div id="game-connections" />
-      <GameConnections SectionLabel={SectionLabel} />
-
-      <div id="game-tiles" />
-      <GameTiles SectionLabel={SectionLabel} />
-
-      <div id="game-mini-crossword" />
-      <GameMiniCrossword SectionLabel={SectionLabel} />
-
-      <div id="game-letter-boxed" />
-      <GameLetterBoxed SectionLabel={SectionLabel} />
-
-      <div id="game-strands" />
-      <GameStrands SectionLabel={SectionLabel} />
-
-      <div id="game-sudoku" />
-      <GameSudoku SectionLabel={SectionLabel} />
-
-      <div id="game-vertex" />
-      <GameVertex SectionLabel={SectionLabel} />
-
-      <div id="game-flashback" />
-      <GameFlashback SectionLabel={SectionLabel} />
-
-      <div id="game-crossplay" />
-      <GameCrossplay SectionLabel={SectionLabel} />
-
-      <div id="game-pips" />
-      <GamePips SectionLabel={SectionLabel} />
-
-      <div id="game-the-midi" />
-      <GameTheMidi SectionLabel={SectionLabel} />
-
-      {/* AI-Generated Illustrations */}
-      <div id="ai-illustrations" />
-      <div className="dd-section-label" style={{ color: "#6AAA64", marginTop: 48 }}>AI-Generated Illustrations</div>
-      <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 24 }}>
-        Compare icon and illustration styles across AI models. Click to generate.
-      </p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 48 }}>
-        <AIIllustration
-          prompts={PROMPTS["word-game-icon"]}
-          brandAccent="#6AAA64"
-          height={240}
-        />
-        <AIIllustration
-          prompts={PROMPTS["connections-icon"]}
-          brandAccent="#b4a8ff"
-          height={240}
-        />
-        <AIIllustration
-          prompts={PROMPTS["spelling-bee-icon"]}
-          brandAccent="#F9DF6D"
-          height={240}
-        />
-        <AIIllustration
-          prompts={PROMPTS["crossword-icon"]}
-          brandAccent="#121213"
-          height={240}
-        />
-      </div>
+      {/* Per-game design systems moved to individual article pages at
+          /admin/design-docs/nyt-games-articles/{gameId} */}
 
       {/* ── 5. Layout Patterns ────────────────────────────── */}
       <div id="layout" />
@@ -1686,6 +1605,157 @@ export default function BrandNYTGamesSection() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ── Tech Stack ───────────────────────────────────────── */}
+      <div id="tech-stack" />
+      <SectionLabel>Production Tech Stack</SectionLabel>
+      <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 16, lineHeight: 1.6 }}>
+        Infrastructure inventory extracted from live nytimes.com/crosswords source (commit {TECH_STACK.build.commit}, Mar 2026).
+      </p>
+
+      {/* Build */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 13, fontWeight: 700, color: "var(--dd-ink-black)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Build &amp; Assets
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+          {[
+            { label: "Commit", value: TECH_STACK.build.commit },
+            { label: "Page", value: TECH_STACK.build.pageName },
+            { label: "Source App", value: TECH_STACK.build.sourceApp },
+            { label: "CSS Chunks", value: String(TECH_STACK.build.cssChunks.length) },
+            { label: "JS Chunks", value: String(TECH_STACK.build.jsChunks) },
+            { label: "Cache Safe", value: String(TECH_STACK.build.cacheSafe) },
+          ].map((item) => (
+            <div key={item.label} style={{ background: "var(--dd-paper-cool)", borderRadius: 6, padding: "8px 12px" }}>
+              <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "var(--dd-ink-light)", marginBottom: 2 }}>{item.label}</div>
+              <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 13, color: "var(--dd-ink-black)", fontWeight: 600 }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Analytics */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 13, fontWeight: 700, color: "var(--dd-ink-black)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Analytics &amp; Monitoring
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+          {[
+            { service: "GTM", detail: TECH_STACK.analytics.gtm.map((g) => g.id).join(", ") },
+            { service: "Datadog RUM", detail: `App: ${TECH_STACK.analytics.datadogRum.applicationId.slice(0, 8)}...` },
+            { service: "Sentry", detail: `Env: ${TECH_STACK.analytics.sentry.environment}, Rate: ${TECH_STACK.analytics.sentry.sampleRate}` },
+            { service: "Chartbeat Video", detail: "Enabled" },
+            { service: "ComScore", detail: `ID: ${TECH_STACK.analytics.comscore.id}` },
+            { service: "Brand Metrics", detail: `Site: ${TECH_STACK.analytics.brandMetrics.siteId.slice(0, 8)}...` },
+            { service: "Iterate HQ", detail: "User feedback surveys" },
+          ].map((item) => (
+            <div key={item.service} style={{ background: "var(--dd-paper-white)", border: "1px solid var(--dd-paper-grey)", borderRadius: 6, padding: "8px 12px" }}>
+              <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 12, fontWeight: 700, color: "var(--dd-ink-black)" }}>{item.service}</div>
+              <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "var(--dd-ink-light)", marginTop: 2 }}>{item.detail}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Ads */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 13, fontWeight: 700, color: "var(--dd-ink-black)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Advertising Stack
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+          {[
+            { label: "Framework", value: TECH_STACK.ads.framework },
+            { label: "Prebid", value: `v${TECH_STACK.ads.prebid.version} (${TECH_STACK.ads.prebid.bidders.length} bidders)` },
+            { label: "Amazon A9", value: `Pub: ${TECH_STACK.ads.amazon.pubId}` },
+            { label: "MediaNet", value: `CID: ${TECH_STACK.ads.mediaNet.cid}` },
+            { label: "GeoEdge", value: "Ad quality monitoring" },
+            { label: "Positions", value: TECH_STACK.ads.positions.join(", ") },
+          ].map((item) => (
+            <div key={item.label} style={{ background: "var(--dd-paper-cool)", borderRadius: 6, padding: "8px 12px" }}>
+              <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "var(--dd-ink-light)", marginBottom: 2 }}>{item.label}</div>
+              <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 12, color: "var(--dd-ink-black)", fontWeight: 600 }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Privacy */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 13, fontWeight: 700, color: "var(--dd-ink-black)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Privacy &amp; Consent
+        </div>
+        <div style={{ background: "var(--dd-paper-white)", border: "1px solid var(--dd-paper-grey)", borderRadius: 8, padding: 16 }}>
+          <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 12, color: "var(--dd-ink-black)", marginBottom: 8 }}>
+            <strong>PURR Cookie</strong> &mdash; {TECH_STACK.privacy.purrCookie}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {TECH_STACK.privacy.directives.map((d) => (
+              <span key={d} style={{ fontSize: 10, fontFamily: "var(--dd-font-mono)", background: "var(--dd-paper-cool)", borderRadius: 4, padding: "3px 8px", color: "var(--dd-ink-soft)" }}>
+                {d}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Feature Flags */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 13, fontWeight: 700, color: "var(--dd-ink-black)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Feature Flags &amp; Experimentation
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 8 }}>
+          <div style={{ background: "var(--dd-paper-white)", border: "1px solid var(--dd-paper-grey)", borderRadius: 6, padding: "8px 12px" }}>
+            <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 12, fontWeight: 700, color: "var(--dd-ink-black)" }}>Statsig</div>
+            <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "var(--dd-ink-light)", marginTop: 2 }}>Tier: {TECH_STACK.featureFlags.statsig.tier}</div>
+          </div>
+          <div style={{ background: "var(--dd-paper-white)", border: "1px solid var(--dd-paper-grey)", borderRadius: 6, padding: "8px 12px" }}>
+            <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 12, fontWeight: 700, color: "var(--dd-ink-black)" }}>Abra</div>
+            <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "var(--dd-ink-light)", marginTop: 2 }}>v{TECH_STACK.featureFlags.abra.version} — client-side A/B</div>
+          </div>
+          <div style={{ background: "var(--dd-paper-white)", border: "1px solid var(--dd-paper-grey)", borderRadius: 6, padding: "8px 12px" }}>
+            <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 12, fontWeight: 700, color: "var(--dd-ink-black)" }}>Samizdat GraphQL</div>
+            <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "var(--dd-ink-light)", marginTop: 2 }}>{TECH_STACK.data.samizdat.appType}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── A/B Tests ─────────────────────────────────────────── */}
+      <div id="ab-tests" />
+      <SectionLabel>Active A/B Tests</SectionLabel>
+      <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 16, lineHeight: 1.6 }}>
+        Categorized experiments from the Abra config (v{TECH_STACK.featureFlags.abra.version}). These control dark mode rollout, game features, paywall behavior, and ad placement.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 32 }}>
+        {(Object.entries(AB_TESTS) as [string, { description: string; tests: readonly { key: string; scope: string }[] }][]).map(
+          ([category, data]) => (
+            <div
+              key={category}
+              style={{
+                background: "var(--dd-paper-white)",
+                border: "1px solid var(--dd-paper-grey)",
+                borderRadius: 8,
+                padding: 16,
+              }}
+            >
+              <div style={{ fontFamily: "var(--dd-font-ui)", fontSize: 13, fontWeight: 700, color: "var(--dd-ink-black)", marginBottom: 4, textTransform: "capitalize" }}>
+                {category.replace(/([A-Z])/g, " $1").trim()}
+              </div>
+              <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 11, color: "var(--dd-ink-light)", marginBottom: 10 }}>
+                {data.description}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {data.tests.map((t) => (
+                  <div key={t.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                    <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 9, color: "var(--dd-ink-soft)", wordBreak: "break-all" as const }}>{t.key}</span>
+                    <span style={{ fontFamily: "var(--dd-font-sans)", fontSize: 9, color: "var(--dd-ink-light)", whiteSpace: "nowrap" as const, textAlign: "right" as const, flexShrink: 0 }}>{t.scope}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ),
+        )}
       </div>
     </div>
   );

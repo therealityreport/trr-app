@@ -31,6 +31,11 @@ import {
   type AdminOperationSessionRecord,
 } from "@/lib/admin/operation-session";
 import {
+  GettyLocalPrefetchError,
+  prefetchGettyLocallyForPerson,
+  type GettyLocalPrefetchProgressState,
+} from "@/lib/admin/getty-local-prefetch";
+import {
   buildPersonAdminUrl,
   buildPersonRouteSlug,
   buildSeasonAdminUrl,
@@ -140,6 +145,7 @@ import {
   createPersonRefreshPipelineSteps,
   createSyncProgressTracker,
   finalizePersonRefreshPipelineSteps,
+  formatGettySubtaskCountLabel,
   formatRefreshExecutionBackendLabel,
   formatRefreshExecutionOwnerLabel,
   formatPersonRefreshPhaseLabel,
@@ -156,6 +162,23 @@ import {
   updatePersonRefreshPipelineSteps,
 } from "./refresh-progress";
 
+const GETTY_RESULTS_PER_PAGE = 60;
+
+function estimateGettyPageTotal(siteImageTotal: number | null | undefined): number {
+  if (typeof siteImageTotal !== "number" || !Number.isFinite(siteImageTotal) || siteImageTotal <= 0) {
+    return 0;
+  }
+  return Math.max(1, Math.ceil(siteImageTotal / GETTY_RESULTS_PER_PAGE));
+}
+
+function readGettySummaryNumber(
+  entry: Record<string, unknown>,
+  key: string,
+): number {
+  const value = entry[key];
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 // Types
 interface TrrPerson {
   id: string;
@@ -169,7 +192,7 @@ interface TrrPerson {
   place_of_birth?: Record<string, unknown>;
   homepage?: Record<string, unknown>;
   profile_image_url?: Record<string, unknown>;
-  alternative_names?: Record<string, string[]>;
+  alternative_names?: Record<string, string[]> | string[];
   created_at: string;
   updated_at: string;
 }
@@ -184,8 +207,8 @@ type ResolvedField = {
 const DEFAULT_CANONICAL_SOURCE_ORDER = ["imdb", "tmdb", "fandom", "manual"] as const;
 type CanonicalSource = (typeof DEFAULT_CANONICAL_SOURCE_ORDER)[number];
 type CanonicalSourceOrder = CanonicalSource[];
-type BackendGetImagesSource = "nbcumv" | "bravotv" | "imdb" | "tmdb";
-type GetImagesSourceSelection = "all" | "getty" | "imdb" | "tmdb";
+type BackendGetImagesSource = "getty" | "nbcumv" | "bravotv" | "imdb" | "tmdb";
+type GetImagesSourceSelection = "all" | "getty" | "getty_nbcumv" | "imdb" | "tmdb";
 type PersonPipelineOperationType = "admin_person_refresh_images" | "admin_person_reprocess_images";
 type AdminOperationHealthEntry = {
   id: string;
@@ -253,6 +276,13 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
 const normalizeStringListMap = (value: unknown): Record<string, string[]> => {
+  if (Array.isArray(value)) {
+    const values = value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    return values.length > 0 ? { tmdb: values } : {};
+  }
   const record = asRecord(value);
   if (!record) return {};
   const normalized: Record<string, string[]> = {};
@@ -408,6 +438,11 @@ const GET_IMAGES_SOURCE_OPTIONS: Array<{
   },
   {
     value: "getty",
+    label: "Getty",
+    description: "Runs Getty-only discovery/import and skips NBCUMV-only supplementing.",
+  },
+  {
+    value: "getty_nbcumv",
     label: "Getty / NBCUMV",
     description: "Runs the fused Getty / NBCUMV path.",
   },
@@ -417,7 +452,8 @@ const GET_IMAGES_SOURCE_OPTIONS: Array<{
 
 const GET_IMAGES_SOURCE_SELECTION_MAP: Record<GetImagesSourceSelection, BackendGetImagesSource[]> = {
   all: ["nbcumv", "imdb", "tmdb"],
-  getty: ["nbcumv"],
+  getty: ["getty"],
+  getty_nbcumv: ["nbcumv"],
   imdb: ["imdb"],
   tmdb: ["tmdb"],
 };
@@ -438,6 +474,10 @@ const getReprocessSourcesForGetImagesSelection = (
       expanded.add("getty");
       expanded.add("nbcumv");
       expanded.add("bravotv");
+      continue;
+    }
+    if (source === "getty") {
+      expanded.add("getty");
       continue;
     }
     if (source === "bravotv") {
@@ -1066,6 +1106,8 @@ const PERSON_PAGE_STREAM_START_DEADLINE_MS = 120_000;
 const PERSON_PIPELINE_SWITCH_TO_OPERATION_MONITOR_PREFIX = "__person_pipeline_switch_to_operation_monitor__:";
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
+const PERSON_GALLERY_PAGE_SIZE = 120;
+const PERSON_GALLERY_VISIBLE_INCREMENT = 120;
 const BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 const NEWS_LOAD_TIMEOUT_MS = 45_000;
 const NEWS_SYNC_TIMEOUT_MS = 60_000;
@@ -1083,6 +1125,74 @@ const NEWS_OPERATION_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000, 15_000] as co
 const NEWS_PAGE_SIZE = 50;
 const MAX_PHOTO_FETCH_PAGES = 30;
 const TEXT_OVERLAY_DETECT_CONCURRENCY = 4;
+
+type PersonGalleryPagination = {
+  count: number;
+  limit: number;
+  offset: number;
+  next_offset: number;
+  has_more: boolean;
+};
+
+const mergePersonPhotoPages = (
+  existing: TrrPersonPhoto[],
+  incoming: TrrPersonPhoto[]
+): TrrPersonPhoto[] => {
+  if (existing.length === 0) return incoming;
+  if (incoming.length === 0) return existing;
+  const merged = new Map<string, TrrPersonPhoto>();
+  for (const photo of existing) {
+    merged.set(photo.id, photo);
+  }
+  for (const photo of incoming) {
+    merged.set(photo.id, photo);
+  }
+  return [...merged.values()];
+};
+
+const readPersonGalleryPagination = (
+  value: unknown,
+  {
+    fallbackOffset,
+    fallbackLimit,
+    pageCount,
+  }: {
+    fallbackOffset: number;
+    fallbackLimit: number;
+    pageCount: number;
+  }
+): PersonGalleryPagination => {
+  const fallbackNextOffset = fallbackOffset + pageCount;
+  if (!value || typeof value !== "object") {
+    return {
+      count: pageCount,
+      limit: fallbackLimit,
+      offset: fallbackOffset,
+      next_offset: fallbackNextOffset,
+      has_more: pageCount >= fallbackLimit,
+    };
+  }
+  const entry = value as Record<string, unknown>;
+  const normalizeInt = (candidate: unknown, fallback: number): number => {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return Math.max(0, Math.floor(candidate));
+    }
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      const parsed = Number.parseInt(candidate, 10);
+      if (Number.isFinite(parsed)) {
+        return Math.max(0, parsed);
+      }
+    }
+    return fallback;
+  };
+  return {
+    count: normalizeInt(entry.count, pageCount),
+    limit: normalizeInt(entry.limit, fallbackLimit),
+    offset: normalizeInt(entry.offset, fallbackOffset),
+    next_offset: normalizeInt(entry.next_offset, fallbackNextOffset),
+    has_more: Boolean(entry.has_more),
+  };
+};
 
 const EMPTY_NEWS_FACETS: UnifiedNewsFacets = {
   sources: [],
@@ -1492,14 +1602,29 @@ function RefreshProgressBar({
     return "Pending";
   };
 
-  const formatGettyCounts = (subtask: PersonGettyProgressState["subtasks"][number]): string | null => {
-    if (subtask.total > 0) {
-      return `${subtask.current.toLocaleString()}/${subtask.total.toLocaleString()}`;
+  const formatGettyQueryMeta = (
+    subtask: PersonGettyProgressState["subtasks"][number]
+  ): string | null => {
+    const parts: string[] = [];
+    if (typeof subtask.siteImageTotal === "number" && subtask.siteImageTotal > 0) {
+      parts.push(`${subtask.siteImageTotal.toLocaleString()} Getty images`);
+    }
+    if (typeof subtask.siteEventTotal === "number" && subtask.siteEventTotal > 0) {
+      parts.push(`${subtask.siteEventTotal.toLocaleString()} events`);
+    }
+    if (typeof subtask.siteVideoTotal === "number" && subtask.siteVideoTotal > 0) {
+      parts.push(`${subtask.siteVideoTotal.toLocaleString()} videos`);
     }
     if (subtask.candidatesFound > 0) {
-      return `${subtask.candidatesFound.toLocaleString()} found`;
+      parts.push(`${subtask.candidatesFound.toLocaleString()} fetched`);
     }
-    return null;
+    if (subtask.usableAfterDedupeTotal > 0) {
+      parts.push(`${subtask.usableAfterDedupeTotal.toLocaleString()} usable`);
+    }
+    if (subtask.overlapCount > 0) {
+      parts.push(`${subtask.overlapCount.toLocaleString()} overlap`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : null;
   };
 
   const gettyBreakdownEntries = gettyState
@@ -1767,6 +1892,11 @@ function RefreshProgressBar({
                   {gettyState.phase.replace(/_/g, " ")}
                 </p>
               )}
+              {gettyState.authMode && (
+                <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                  {gettyState.authMode.replace(/_/g, " ")}
+                </p>
+              )}
               <span
                 className={`rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
                   gettyState.status === "completed"
@@ -1831,12 +1961,27 @@ function RefreshProgressBar({
                             : "text-zinc-500"
                       }`}
                     >
-                      {formatGettyCounts(subtask) ?? renderGettyStatus(subtask.status)}
+                      {formatGettySubtaskCountLabel(subtask) ?? renderGettyStatus(subtask.status)}
                     </p>
                   </div>
                   {subtask.query && (
                     <p className="mt-0.5 pl-2.5 text-[10px] leading-tight text-zinc-600">
                       &ldquo;{subtask.query}&rdquo;
+                    </p>
+                  )}
+                  {subtask.queryUrl && (
+                    <a
+                      href={subtask.queryUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-0.5 block pl-2.5 text-[10px] leading-tight text-sky-500 hover:text-sky-400"
+                    >
+                      Open Getty search
+                    </a>
+                  )}
+                  {formatGettyQueryMeta(subtask) && (
+                    <p className="mt-0.5 pl-2.5 text-[10px] leading-tight text-zinc-500">
+                      {formatGettyQueryMeta(subtask)}
                     </p>
                   )}
                   {subtask.message && (
@@ -3345,7 +3490,10 @@ export default function PersonProfilePage() {
   const [canonicalSourceOrderError, setCanonicalSourceOrderError] = useState<string | null>(null);
   const [canonicalSourceOrderNotice, setCanonicalSourceOrderNotice] = useState<string | null>(null);
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
-  const [photosVisibleCount, setPhotosVisibleCount] = useState(120);
+  const [photosVisibleCount, setPhotosVisibleCount] = useState(PERSON_GALLERY_VISIBLE_INCREMENT);
+  const [photosHasMore, setPhotosHasMore] = useState(false);
+  const [photosNextOffset, setPhotosNextOffset] = useState(0);
+  const [photosLoadingMore, setPhotosLoadingMore] = useState(false);
   const [showBrokenRows, setShowBrokenRows] = useState(false);
   const [galleryFallbackTelemetry, setGalleryFallbackTelemetry] = useState({
     fallbackRecoveredCount: 0,
@@ -3475,6 +3623,11 @@ export default function PersonProfilePage() {
   const resumedProfileRefreshRef = useRef(false);
   const textOverlayDetectControllerRef = useRef<AbortController | null>(null);
   const showBrokenRowsRef = useRef(showBrokenRows);
+  const photosRef = useRef<TrrPersonPhoto[]>(photos);
+  const photosNextOffsetRef = useRef(photosNextOffset);
+  const photosRequestKeyRef = useRef<string | null>(null);
+  const photosInFlightRef = useRef<Promise<TrrPersonPhoto[]> | null>(null);
+  const showBrokenPhotoRefetchInitializedRef = useRef(false);
   const recentViewRequestKeyRef = useRef<string | null>(null);
 
   const appendRefreshLog = useCallback(
@@ -4398,6 +4551,14 @@ export default function PersonProfilePage() {
     showBrokenRowsRef.current = showBrokenRows;
   }, [showBrokenRows]);
 
+  useEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
+
+  useEffect(() => {
+    photosNextOffsetRef.current = photosNextOffset;
+  }, [photosNextOffset]);
+
   const setTab = useCallback(
     (tab: TabId) => {
       setActiveTab(tab);
@@ -4619,6 +4780,82 @@ export default function PersonProfilePage() {
     hasUnknownShowMatches,
     hasNonThisShowMatches,
   } = mediaViewAvailability;
+
+  const galleryFilterCounts = useMemo(() => {
+    const counts = {
+      all: photos.length,
+      thisShow: 0,
+      wwhl: 0,
+      bravocon: 0,
+      events: 0,
+      unsorted: 0,
+      otherShowByKey: new Map<string, number>(),
+      eventSubcategoryByKey: new Map<string, number>(),
+    };
+    for (const photo of photos) {
+      const bucketMatches = computePersonPhotoShowBuckets({
+        photo,
+        showIdForApi,
+        activeShowName,
+        activeShowAcronym,
+        allKnownShowNameMatches,
+        allKnownShowAcronymMatches,
+        allKnownShowIds,
+        otherShowNameMatches,
+        otherShowAcronymMatches,
+        selectedOtherShow,
+      });
+      if (bucketMatches.matchesThisShow) counts.thisShow += 1;
+      if (bucketMatches.matchesWwhl) counts.wwhl += 1;
+      if (bucketMatches.matchesBravocon) counts.bravocon += 1;
+      if (bucketMatches.matchesEvents) counts.events += 1;
+      if (bucketMatches.matchesUnknownShows) counts.unsorted += 1;
+      if (bucketMatches.matchesSelectedOtherShow && selectedOtherShow?.key) {
+        counts.otherShowByKey.set(
+          selectedOtherShow.key,
+          (counts.otherShowByKey.get(selectedOtherShow.key) ?? 0) + 1,
+        );
+      }
+      for (const option of showIdParam ? otherKnownShowOptions : knownShowOptions) {
+        const optionMatches = computePersonPhotoShowBuckets({
+          photo,
+          showIdForApi,
+          activeShowName,
+          activeShowAcronym,
+          allKnownShowNameMatches,
+          allKnownShowAcronymMatches,
+          allKnownShowIds,
+          otherShowNameMatches,
+          otherShowAcronymMatches,
+          selectedOtherShow: option,
+        });
+        if (optionMatches.matchesSelectedOtherShow) {
+          counts.otherShowByKey.set(option.key, (counts.otherShowByKey.get(option.key) ?? 0) + 1);
+        }
+      }
+      for (const eventSubcategoryKey of bucketMatches.eventSubcategoryKeys) {
+        counts.eventSubcategoryByKey.set(
+          eventSubcategoryKey,
+          (counts.eventSubcategoryByKey.get(eventSubcategoryKey) ?? 0) + 1,
+        );
+      }
+    }
+    return counts;
+  }, [
+    activeShowAcronym,
+    activeShowName,
+    allKnownShowAcronymMatches,
+    allKnownShowIds,
+    allKnownShowNameMatches,
+    knownShowOptions,
+    otherKnownShowOptions,
+    otherShowAcronymMatches,
+    otherShowNameMatches,
+    photos,
+    selectedOtherShow,
+    showIdForApi,
+    showIdParam,
+  ]);
 
   useEffect(() => {
     if (eventSubcategoryOptions.length === 0) {
@@ -5035,34 +5272,13 @@ export default function PersonProfilePage() {
     getPhotoSortDate,
   ]);
 
-  const { mainGalleryPhotos, otherEventCovers } = useMemo(() => {
-    const main: TrrPersonPhoto[] = [];
-    const otherCovers: TrrPersonPhoto[] = [];
-    const seenOtherEventKeys = new Set<string>();
-
-    for (const photo of filteredPhotos) {
-      const metadata = (photo.metadata ?? {}) as Record<string, unknown>;
-      const scope = typeof metadata.source_query_scope === "string"
-        ? metadata.source_query_scope
-        : null;
-
-      if (scope === "broad") {
-        const eventKey =
-          (typeof metadata.getty_event_id === "string" ? metadata.getty_event_id : null) ??
-          (typeof metadata.getty_event_title === "string" ? metadata.getty_event_title : null) ??
-          photo.source_image_id ??
-          photo.id;
-        if (!seenOtherEventKeys.has(String(eventKey))) {
-          seenOtherEventKeys.add(String(eventKey));
-          otherCovers.push(photo);
-        }
-      } else {
-        main.push(photo);
-      }
-    }
-
-    return { mainGalleryPhotos: main, otherEventCovers: otherCovers };
-  }, [filteredPhotos]);
+  const { mainGalleryPhotos, otherEventCovers } = useMemo(
+    () => ({
+      mainGalleryPhotos: filteredPhotos,
+      otherEventCovers: [] as TrrPersonPhoto[],
+    }),
+    [filteredPhotos],
+  );
 
   const scopedStageTargets = useMemo(() => buildStageTargetsFromPhotos(filteredPhotos), [filteredPhotos]);
   const fullStageTargets = useMemo(() => buildStageTargetsFromPhotos(photos), [photos]);
@@ -5095,7 +5311,7 @@ export default function PersonProfilePage() {
   }, [filteredPhotos]);
 
   useEffect(() => {
-    setPhotosVisibleCount(120);
+    setPhotosVisibleCount(PERSON_GALLERY_VISIBLE_INCREMENT);
   }, [galleryShowFilter, selectedOtherShowKey, selectedEventBucketKey, advancedFilters]);
 
   // Helper to get auth headers
@@ -5566,81 +5782,155 @@ export default function PersonProfilePage() {
   }, []);
 
   // Fetch photos
-  const fetchPhotos = useCallback(async (options?: { signal?: AbortSignal; includeBroken?: boolean }): Promise<TrrPersonPhoto[]> => {
+  const fetchPhotos = useCallback(async (options?: {
+    signal?: AbortSignal;
+    includeBroken?: boolean;
+    append?: boolean;
+    ensurePhotoId?: string | null;
+    loadAll?: boolean;
+  }): Promise<TrrPersonPhoto[]> => {
     if (!personId) return [];
     const signal = options?.signal;
     const includeBroken = options?.includeBroken ?? showBrokenRowsRef.current;
+    const append = options?.append === true;
+    const loadAll = options?.loadAll === true;
+    const ensurePhotoId =
+      typeof options?.ensurePhotoId === "string" && options.ensurePhotoId.trim().length > 0
+        ? options.ensurePhotoId.trim()
+        : null;
     if (signal?.aborted) return [];
-    try {
-      const headers = await getAuthHeaders();
-      const pageSize = 500;
-      const fetchedPhotos: TrrPersonPhoto[] = [];
-      let offset = 0;
-      let pageCount = 0;
-      while (true) {
-        if (signal?.aborted) return [];
-        pageCount += 1;
-        if (pageCount > MAX_PHOTO_FETCH_PAGES) {
-          throw new Error("Photo pagination exceeded safety limit.");
-        }
-        let response: Response;
-        try {
-          const params = new URLSearchParams({
-            limit: String(pageSize),
-            offset: String(offset),
-          });
-          if (includeBroken) {
-            params.set("include_broken", "true");
+    const requestStartOffset = append ? Math.max(0, photosNextOffsetRef.current) : 0;
+    const requestKey = [
+      personId,
+      includeBroken ? "broken" : "clean",
+      append ? "append" : "replace",
+      loadAll ? "all" : "page",
+      ensurePhotoId ?? "",
+      requestStartOffset,
+    ].join(":");
+    if (photosRequestKeyRef.current === requestKey && photosInFlightRef.current) {
+      return photosInFlightRef.current;
+    }
+
+    const requestPromise = (async (): Promise<TrrPersonPhoto[]> => {
+      try {
+        const headers = await getAuthHeaders();
+        const pageSize = PERSON_GALLERY_PAGE_SIZE;
+        const fetchedPhotos: TrrPersonPhoto[] = append ? [...photosRef.current] : [];
+        let offset = requestStartOffset;
+        let pageCount = 0;
+        while (true) {
+          if (signal?.aborted) return [];
+          pageCount += 1;
+          if (pageCount > MAX_PHOTO_FETCH_PAGES) {
+            throw new Error("Photo pagination exceeded safety limit.");
           }
-          response = await fetchWithTimeout(
-            `/api/admin/trr-api/people/${personId}/photos?${params.toString()}`,
-            { headers },
-            PHOTO_LIST_LOAD_TIMEOUT_MS,
-            signal
-          );
-        } catch (error) {
-          if (signal?.aborted || isSignalAbortedWithoutReasonError(error)) {
-            return [];
-          }
-          if (isAbortError(error)) {
-            throw new Error(
-              `Timed out loading person photos after ${Math.round(PHOTO_LIST_LOAD_TIMEOUT_MS / 1000)}s.`
+          let response: Response;
+          try {
+            const params = new URLSearchParams({
+              limit: String(pageSize),
+              offset: String(offset),
+            });
+            if (includeBroken) {
+              params.set("include_broken", "true");
+            }
+            response = await fetchWithTimeout(
+              `/api/admin/trr-api/people/${personId}/photos?${params.toString()}`,
+              { headers },
+              PHOTO_LIST_LOAD_TIMEOUT_MS,
+              signal
             );
+          } catch (error) {
+            if (signal?.aborted || isSignalAbortedWithoutReasonError(error)) {
+              return append ? photosRef.current : [];
+            }
+            if (isAbortError(error)) {
+              throw new Error(
+                `Timed out loading person photos after ${Math.round(PHOTO_LIST_LOAD_TIMEOUT_MS / 1000)}s.`
+              );
+            }
+            throw error;
           }
-          throw error;
+          if (signal?.aborted) return [];
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const message =
+              data.error && data.detail
+                ? `${data.error}: ${data.detail}`
+                : data.error || "Failed to fetch photos";
+            throw new Error(message);
+          }
+          const pagePhotos = Array.isArray(data.photos) ? (data.photos as TrrPersonPhoto[]) : [];
+          const pagination = readPersonGalleryPagination(data.pagination, {
+            fallbackOffset: offset,
+            fallbackLimit: pageSize,
+            pageCount: pagePhotos.length,
+          });
+          const nextPhotos = append ? mergePersonPhotoPages(fetchedPhotos, pagePhotos) : pagePhotos;
+          fetchedPhotos.splice(0, fetchedPhotos.length, ...nextPhotos);
+          setPhotosHasMore(pagination.has_more);
+          setPhotosNextOffset(pagination.next_offset);
+          const foundEnsuredPhoto = ensurePhotoId
+            ? fetchedPhotos.some((candidate) => candidate.id === ensurePhotoId)
+            : false;
+          if (!pagination.has_more) {
+            break;
+          }
+          if (!loadAll && !ensurePhotoId) {
+            break;
+          }
+          if (ensurePhotoId && foundEnsuredPhoto) {
+            break;
+          }
+          offset = pagination.next_offset;
         }
         if (signal?.aborted) return [];
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const message =
-            data.error && data.detail
-              ? `${data.error}: ${data.detail}`
-              : data.error || "Failed to fetch photos";
-          throw new Error(message);
+        setGalleryFallbackTelemetry({
+          fallbackRecoveredCount: 0,
+          allCandidatesFailedCount: 0,
+          totalImageAttempts: 0,
+        });
+        setPhotos([...fetchedPhotos]);
+        setPhotosError(null);
+        return [...fetchedPhotos];
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err) || isSignalAbortedWithoutReasonError(err)) {
+          return append ? photosRef.current : [];
         }
-        const pagePhotos = Array.isArray(data.photos) ? (data.photos as TrrPersonPhoto[]) : [];
-        fetchedPhotos.push(...pagePhotos);
-        if (pagePhotos.length < pageSize) break;
-        offset += pageSize;
+        console.error("Failed to fetch photos:", err);
+        setPhotosError(err instanceof Error ? err.message : "Failed to fetch photos");
+        return append ? photosRef.current : [];
       }
-      if (signal?.aborted) return [];
-      setGalleryFallbackTelemetry({
-        fallbackRecoveredCount: 0,
-        allCandidatesFailedCount: 0,
-        totalImageAttempts: 0,
-      });
-      setPhotos(fetchedPhotos);
-      setPhotosError(null);
-      return fetchedPhotos;
-    } catch (err) {
-      if (signal?.aborted || isAbortError(err) || isSignalAbortedWithoutReasonError(err)) {
-        return [];
+    })();
+
+    photosRequestKeyRef.current = requestKey;
+    photosInFlightRef.current = requestPromise;
+    try {
+      return await requestPromise;
+    } finally {
+      if (photosInFlightRef.current === requestPromise) {
+        photosInFlightRef.current = null;
+        photosRequestKeyRef.current = null;
       }
-      console.error("Failed to fetch photos:", err);
-      setPhotosError(err instanceof Error ? err.message : "Failed to fetch photos");
-      return [];
     }
   }, [personId, getAuthHeaders]);
+
+  const handleLoadMorePhotos = useCallback(async () => {
+    if (photosVisibleCount < mainGalleryPhotos.length) {
+      setPhotosVisibleCount((prev) => prev + PERSON_GALLERY_VISIBLE_INCREMENT);
+      return;
+    }
+    if (!photosHasMore || photosLoadingMore) return;
+    setPhotosLoadingMore(true);
+    try {
+      const loadedPhotos = await fetchPhotos({ append: true, includeBroken: showBrokenRows });
+      if (loadedPhotos.length > mainGalleryPhotos.length) {
+        setPhotosVisibleCount((prev) => prev + PERSON_GALLERY_VISIBLE_INCREMENT);
+      }
+    } finally {
+      setPhotosLoadingMore(false);
+    }
+  }, [fetchPhotos, mainGalleryPhotos.length, photosHasMore, photosLoadingMore, photosVisibleCount, showBrokenRows]);
 
   const detectTextOverlayForUnknown = useCallback(async () => {
     textOverlayDetectControllerRef.current?.abort();
@@ -6777,7 +7067,7 @@ export default function PersonProfilePage() {
         }
       }
 
-      const refreshedPhotos = await fetchPhotos();
+      const refreshedPhotos = await fetchPhotos({ ensurePhotoId: photo.id });
       const refreshedPhoto = refreshedPhotos.find((candidate) => candidate.id === photo.id) ?? null;
       if (refreshedPhoto) {
         setThumbnailCropPreview(buildThumbnailCropPreview(refreshedPhoto));
@@ -6886,7 +7176,7 @@ export default function PersonProfilePage() {
         }
       }
 
-      const refreshedAfterCount = await fetchPhotos();
+      const refreshedAfterCount = await fetchPhotos({ ensurePhotoId: photo.id });
       const latestPhoto =
         refreshedAfterCount.find((candidate) => candidate.id === photo.id) ?? photo;
       const cropPayload = buildThumbnailCropPayloadWithFallback(latestPhoto);
@@ -6924,7 +7214,7 @@ export default function PersonProfilePage() {
         logStep("error", runLabel, "Crop variants failed.", detail);
       }
 
-      const refreshedPhotos = await fetchPhotos();
+      const refreshedPhotos = await fetchPhotos({ ensurePhotoId: photo.id });
       const refreshedPhoto = refreshedPhotos.find((candidate) => candidate.id === photo.id) ?? null;
       if (refreshedPhoto) {
         setThumbnailCropPreview(buildThumbnailCropPreview(refreshedPhoto));
@@ -7245,6 +7535,10 @@ export default function PersonProfilePage() {
       });
     }
 
+    let gettyEnrichmentPromise: Promise<void> | null = null;
+    let startGettyEnrichment: (() => Promise<void>) | null = null;
+    let gettyEnrichmentError: string | null = null;
+
     // ── GETTY LOCAL PREFETCH ──────────────────────────────────────────
     // Getty blocks cloud IPs (Modal).  When the user selects a source
     // set that includes Getty/NBCUMV, scrape Getty images and events
@@ -7252,92 +7546,269 @@ export default function PersonProfilePage() {
     // in the pipeline request so Modal can skip the (blocked) live
     // Getty search and go straight to R2 upload + Supabase persistence.
     const gettySourcesRequested =
-      mode === "full" && (requestedGetImagesSources?.includes("nbcumv") ?? false);
+      mode === "full" &&
+      ((requestedGetImagesSources?.includes("nbcumv") ?? false) ||
+        (requestedGetImagesSources?.includes("getty") ?? false));
     if (gettySourcesRequested && person?.full_name) {
+      const updateGettyDiscoveryProgress = (progress: GettyLocalPrefetchProgressState) => {
+        const activeLabel =
+          progress.activeQuery && typeof progress.activeQuery.label === "string"
+            ? progress.activeQuery.label
+            : null;
+        const activeScope =
+          progress.activeQuery && typeof progress.activeQuery.scope === "string"
+            ? progress.activeQuery.scope
+            : null;
+        const activePhrase =
+          progress.activeQuery && typeof progress.activeQuery.phrase === "string"
+            ? progress.activeQuery.phrase
+            : null;
+        const pageNumber =
+          typeof progress.currentPage === "number" && progress.currentPage > 0
+            ? progress.currentPage
+            : typeof progress.requestedPage === "number" && progress.requestedPage > 0
+              ? progress.requestedPage
+              : null;
+        const heartbeatAgeSeconds = progress.heartbeatAt
+          ? Math.max(0, Math.round((Date.now() - new Date(progress.heartbeatAt).getTime()) / 1000))
+          : null;
+        const activeQueryAlreadyCounted = progress.querySummariesLive.some((summary) => {
+          const summaryScope = typeof summary.scope === "string" ? summary.scope : null;
+          const summaryLabel = typeof summary.label === "string" ? summary.label : null;
+          return (
+            (activeScope && summaryScope === activeScope) ||
+            (activeLabel && summaryLabel === activeLabel)
+          );
+        });
+        const completedImageTotal = progress.querySummariesLive.reduce(
+          (sum, summary) => sum + readGettySummaryNumber(summary, "site_image_total"),
+          0,
+        );
+        const completedEventTotal = progress.querySummariesLive.reduce(
+          (sum, summary) => sum + readGettySummaryNumber(summary, "site_event_total"),
+          0,
+        );
+        const completedPageTotal = progress.querySummariesLive.reduce(
+          (sum, summary) =>
+            sum + estimateGettyPageTotal(readGettySummaryNumber(summary, "site_image_total")),
+          0,
+        );
+        const activeImageTotal =
+          !activeQueryAlreadyCounted && typeof progress.siteImageTotal === "number"
+            ? progress.siteImageTotal
+            : 0;
+        const activeEventTotal =
+          !activeQueryAlreadyCounted && typeof progress.siteEventTotal === "number"
+            ? progress.siteEventTotal
+            : 0;
+        const activePageTotal =
+          !activeQueryAlreadyCounted ? estimateGettyPageTotal(progress.siteImageTotal) : 0;
+        const totalImageCount = completedImageTotal + activeImageTotal;
+        const totalEventCount = completedEventTotal + activeEventTotal;
+        const totalPageCount = completedPageTotal + activePageTotal;
+        const completedPageCount =
+          completedPageTotal +
+          Math.max(0, Math.min(activePageTotal, pageNumber ?? 0));
+        const liveCountDetail =
+          typeof progress.fetchedCandidatesTotal === "number" && progress.fetchedCandidatesTotal > 0
+            ? ` ${progress.fetchedCandidatesTotal} candidates discovered so far.`
+            : "";
+        const heartbeatDetail =
+          heartbeatAgeSeconds !== null
+            ? ` Last heartbeat ${heartbeatAgeSeconds}s ago.`
+            : "";
+        const paginationDetail =
+          progress.terminationReason === "pagination_rewrite" &&
+          typeof progress.requestedPage === "number" &&
+          typeof progress.currentPage === "number"
+            ? ` Getty rewrote page ${progress.requestedPage} to page ${progress.currentPage}.`
+            : progress.terminationReason === "session_truncated"
+              ? " Getty session appears truncated after page 3."
+              : progress.terminationReason === "duplicate_page"
+                ? " Getty repeated a prior results page."
+                : "";
+        const authDetail = progress.authWarning?.trim()
+          ? progress.authWarning.trim()
+          : progress.lastErrorCode === "getty_profile_not_authenticated"
+            ? "Getty profile is not authenticated."
+            : null;
+        const detailParts = [
+          progress.progressMessage,
+          activeLabel
+            ? `${activeLabel}${activePhrase ? ` (“${activePhrase}”)` : ""}${pageNumber ? ` page ${pageNumber}` : ""}.`
+            : null,
+          totalImageCount > 0 || totalEventCount > 0 || totalPageCount > 0
+            ? `${totalImageCount.toLocaleString()} images · ${totalEventCount.toLocaleString()} events · ${totalPageCount.toLocaleString()} pages discovered.`
+            : null,
+          liveCountDetail.trim() || null,
+          paginationDetail.trim() || null,
+          authDetail,
+          heartbeatDetail.trim() || null,
+        ].filter((value): value is string => Boolean(value && value.trim()));
+        const detailMessage =
+          detailParts.join(" ").trim() ||
+          `Fetching Getty search candidates for "${person.full_name}" via the codex Chrome profile...`;
+        setRefreshProgress((prev) =>
+          prev
+            ? {
+              ...prev,
+              phase: PERSON_REFRESH_PHASES.gettyDiscovery,
+              current: totalPageCount > 0 ? completedPageCount : null,
+              total: totalPageCount > 0 ? totalPageCount : null,
+              message:
+                progress.status === "completed"
+                  ? "Getty discovery complete."
+                    : progress.status === "failed"
+                      ? "Getty discovery failed."
+                      : "Running Getty discovery locally...",
+                detailMessage,
+                lastEventAt: Date.now(),
+              }
+            : prev
+        );
+      };
+      Object.assign(refreshBody, {
+        getty_prefetch_attempted: true,
+        getty_prefetch_succeeded: false,
+      });
       setRefreshProgress((prev) =>
         prev
           ? {
               ...prev,
-              phase: "GETTY LOCAL",
-              message: "Scraping Getty images locally...",
-              detailMessage: `Fetching all Getty editorial images and events for "${person.full_name}" via local residential IP...`,
+              phase: PERSON_REFRESH_PHASES.gettyDiscovery,
+              message: "Running Getty discovery locally...",
+              detailMessage: `Fetching Getty search candidates for "${person.full_name}" via the codex Chrome profile...`,
             }
           : prev
       );
       appendRefreshLog({
         source: "page_refresh",
-        stage: "getty_local_scrape",
-        message: "Starting local Getty scrape (residential IP required for Getty access)...",
+        stage: "getty_discovery",
+        message: "Starting Getty discovery via local Chrome-backed Getty session...",
         level: "info",
         runId: requestId,
       });
       try {
-        const gettyResp = await fetch("/api/admin/getty-local/scrape", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ person_name: person.full_name }),
-          signal: AbortSignal.timeout(600_000), // 10 min — large catalogs
+        const gettyPrefetch = await prefetchGettyLocallyForPerson(
+          person.full_name,
+          effectiveGalleryImportContext.showName ?? undefined,
+          { mode: "discovery", onProgress: updateGettyDiscoveryProgress }
+        );
+        Object.assign(refreshBody, gettyPrefetch.bodyPatch);
+        const discoveryToken =
+          typeof gettyPrefetch.bodyPatch.getty_prefetch_token === "string"
+            ? gettyPrefetch.bodyPatch.getty_prefetch_token
+            : null;
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "getty_discovery",
+          message: `Getty discovery complete: ${gettyPrefetch.candidateManifestTotal} candidates (${gettyPrefetch.elapsedSeconds ?? "?"}s). Starting pipeline...`,
+          detail:
+            gettyPrefetch.querySummaries.length > 0
+              ? `${gettyPrefetch.querySummaries.length} query summaries captured`
+              : undefined,
+          level: "info",
+          runId: requestId,
         });
-        if (gettyResp.ok) {
-          const gettyData = (await gettyResp.json()) as {
-            merged?: unknown[];
-            merged_total?: number;
-            merged_events?: unknown[];
-            merged_events_total?: number;
-            elapsed_seconds?: number;
-          };
-          const mergedAssets = Array.isArray(gettyData.merged) ? gettyData.merged : [];
-          const mergedEvents = Array.isArray(gettyData.merged_events) ? gettyData.merged_events : [];
-          Object.assign(refreshBody, {
-            getty_prefetched_assets: mergedAssets,
-            getty_prefetched_events: mergedEvents,
-          });
-          appendRefreshLog({
-            source: "page_refresh",
-            stage: "getty_local_scrape",
-            message: `Getty local scrape complete: ${mergedAssets.length} images, ${mergedEvents.length} events (${gettyData.elapsed_seconds ?? "?"}s). Sending to pipeline...`,
-            level: "info",
-            runId: requestId,
-          });
-          setRefreshProgress((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  detailMessage: `Getty: ${mergedAssets.length} images, ${mergedEvents.length} events scraped locally. Connecting to pipeline...`,
+        setRefreshProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                detailMessage: `Getty discovery found ${gettyPrefetch.candidateManifestTotal} candidates. Connecting to pipeline...`,
+              }
+            : prev
+        );
+
+        if (discoveryToken && gettyPrefetch.enrichmentPending) {
+          startGettyEnrichment = async () =>
+            (async () => {
+              appendRefreshLog({
+                source: "page_refresh",
+                stage: "getty_enrichment",
+                message: "Starting background Getty enrichment...",
+                detail: `${gettyPrefetch.detailEnrichmentTotal} editorial ids queued`,
+                level: "info",
+                runId: requestId,
+              });
+              const fullPrefetch = await prefetchGettyLocallyForPerson(
+                person.full_name,
+                effectiveGalleryImportContext.showName ?? undefined,
+                {
+                  mode: "full",
+                  prefetchToken: discoveryToken,
                 }
-              : prev
-          );
-        } else {
-          const errBody = await gettyResp.json().catch(() => ({ error: "unknown" })) as {
-            error?: string;
-            hint?: string;
-          };
-          appendRefreshLog({
-            source: "page_refresh",
-            stage: "getty_local_scrape",
-            message: `Getty local scrape failed (${gettyResp.status}): ${errBody.error ?? "unknown"}. ${errBody.hint ?? "Pipeline will attempt live Getty search (likely blocked on Modal)."}`,
-            level: "error",
-            runId: requestId,
-          });
+              );
+              const enrichmentResponse = await fetch(
+                `/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    getty_prefetch_token: discoveryToken,
+                    show_id: effectiveGalleryImportContext.showId ?? undefined,
+                    show_name: effectiveGalleryImportContext.showName ?? undefined,
+                  }),
+                }
+              );
+              const enrichmentData = (await enrichmentResponse
+                .json()
+                .catch(() => ({ error: "Getty enrichment failed" }))) as {
+                error?: string;
+                detail?: string;
+                getty_enrichment_completed?: number;
+                getty_enrichment_failed?: number;
+                cast_photos_mirrored?: number;
+                media_assets_mirrored?: number;
+              };
+              if (!enrichmentResponse.ok) {
+                throw new Error(
+                  enrichmentData.detail ||
+                    enrichmentData.error ||
+                    `Getty enrichment failed (${enrichmentResponse.status})`
+                );
+              }
+              appendRefreshLog({
+                source: "page_refresh",
+                stage: "getty_enrichment",
+                message: `Getty enrichment complete: ${enrichmentData.getty_enrichment_completed ?? 0} editorial ids updated.`,
+                detail: `Mirrored ${(enrichmentData.cast_photos_mirrored ?? 0) + (enrichmentData.media_assets_mirrored ?? 0)} hosted assets after enrichment. Full prefetch mode: ${fullPrefetch.prefetchMode ?? "full"}.`,
+                level: "success",
+                runId: requestId,
+              });
+            })().catch((error) => {
+              gettyEnrichmentError = error instanceof Error ? error.message : String(error);
+              appendRefreshLog({
+                source: "page_refresh",
+                stage: "getty_enrichment",
+                message: "Getty enrichment failed",
+                detail: gettyEnrichmentError,
+                level: "error",
+                runId: requestId,
+              });
+            });
         }
       } catch (gettyErr) {
+        Object.assign(refreshBody, {
+          getty_prefetch_error_code:
+            gettyErr instanceof GettyLocalPrefetchError ? gettyErr.code : "UNREACHABLE",
+        });
         const errMsg = gettyErr instanceof Error ? gettyErr.message : String(gettyErr);
-        const isTimeout = errMsg.includes("timeout") || errMsg.includes("abort");
         appendRefreshLog({
           source: "page_refresh",
           stage: "getty_local_scrape",
-          message: isTimeout
-            ? "Getty local scrape timed out (10 min). Pipeline will attempt live Getty search (likely blocked on Modal)."
-            : `Getty local server unreachable: ${errMsg}. Start it with: make getty-server`,
+          message: `${errMsg} Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.`,
           level: "error",
           runId: requestId,
         });
+        throw new Error(`${errMsg} Getty/NBCUMV refresh was not started.`);
       }
       // Restore progress phase to syncing for the pipeline stream
       setRefreshProgress((prev) =>
         prev
           ? {
               ...prev,
+              current: null,
+              total: null,
               phase: PERSON_REFRESH_PHASES.syncing,
               message: "Connecting to pipeline...",
             }
@@ -8045,9 +8516,15 @@ export default function PersonProfilePage() {
       };
 
       let streamError: string | null = null;
+      let gettyEnrichmentStarted = false;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          await runStreamAttempt();
+          const streamAttemptPromise = runStreamAttempt();
+          if (!gettyEnrichmentStarted && startGettyEnrichment) {
+            gettyEnrichmentStarted = true;
+            gettyEnrichmentPromise = startGettyEnrichment();
+          }
+          await streamAttemptPromise;
           if (attempt > 1) {
             appendRefreshLog({
               source: "page_refresh",
@@ -8142,6 +8619,20 @@ export default function PersonProfilePage() {
         }
       }
 
+      if (gettyEnrichmentPromise) {
+        setRefreshProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                phase: PERSON_REFRESH_PHASES.gettyEnrichment,
+                message: "Applying Getty enrichment...",
+                detailMessage: "Finalizing Getty detail/event enrichment and canonical image repairs...",
+              }
+            : prev
+        );
+        await gettyEnrichmentPromise;
+      }
+
       await Promise.all([
         fetchPerson(),
         fetchCredits(),
@@ -8151,6 +8642,9 @@ export default function PersonProfilePage() {
         fetchCoverPhoto(),
       ]);
       refreshedPhotosAfterRun = await fetchPhotos();
+      if (gettyEnrichmentError) {
+        setRefreshNotice(`Images refreshed. Getty enrichment warning: ${gettyEnrichmentError}`);
+      }
       if (mode === "full" && options?.openFollowUpPrompt !== false) {
         setGetImagesFollowUpPromptOpen(true);
       }
@@ -8210,6 +8704,7 @@ export default function PersonProfilePage() {
     effectiveGalleryImportContext.showName,
     effectiveGalleryImportSuffix,
     getImagesSourceSelection,
+    person?.full_name,
     scopedStageTargets,
   ]);
 
@@ -9488,26 +9983,31 @@ export default function PersonProfilePage() {
   useEffect(() => {
     if (!hasAccess) return;
     if (!personId) return;
+    showBrokenPhotoRefetchInitializedRef.current = false;
     let cancelled = false;
     const controller = new AbortController();
     const { signal } = controller;
 
     const loadData = async () => {
       setLoading(true);
+      let personLoaded = false;
       try {
         const fetchedPerson = await fetchPerson({ signal });
         if (signal.aborted) return;
-        await Promise.all([
-          fetchExternalIds({ signal, fallbackPerson: fetchedPerson }),
-          fetchPhotos({ signal }),
-          fetchCredits({ signal }),
-          fetchCoverPhoto({ signal }),
-        ]);
+        if (fetchedPerson) {
+          personLoaded = true;
+          if (!cancelled) {
+            setLoading(false);
+          }
+        }
+        await fetchPhotos({ signal });
+        if (signal.aborted) return;
+        await fetchCoverPhoto({ signal });
       } catch (err) {
         if (signal.aborted) return;
         console.error("Failed to load person page data:", err);
       } finally {
-        if (!cancelled) {
+        if (!cancelled && !personLoaded) {
           setLoading(false);
         }
       }
@@ -9518,7 +10018,27 @@ export default function PersonProfilePage() {
       cancelled = true;
       controller.abort();
     };
-  }, [hasAccess, fetchCredits, fetchCoverPhoto, fetchExternalIds, fetchPerson, fetchPhotos, personId]);
+  }, [hasAccess, fetchCoverPhoto, fetchPerson, fetchPhotos, personId]);
+
+  useEffect(() => {
+    if (activeTab !== "settings") return;
+    if (!hasAccess || !personId || externalIdsLoading || externalIdDrafts.length > 0) return;
+    const controller = new AbortController();
+    void fetchExternalIds({ signal: controller.signal, fallbackPerson: person });
+    return () => {
+      controller.abort();
+    };
+  }, [activeTab, externalIdDrafts.length, externalIdsLoading, fetchExternalIds, hasAccess, person, personId]);
+
+  useEffect(() => {
+    if (activeTab !== "credits") return;
+    if (!hasAccess || !personId || creditsLoading || credits.length > 0) return;
+    const controller = new AbortController();
+    void fetchCredits({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
+  }, [activeTab, credits.length, creditsLoading, fetchCredits, hasAccess, personId]);
 
   useEffect(() => {
     if (activeTab !== "videos") return;
@@ -9533,12 +10053,27 @@ export default function PersonProfilePage() {
   useEffect(() => {
     if (!hasAccess || !personId) return;
     if (loading) return;
+    if (!showBrokenPhotoRefetchInitializedRef.current) {
+      showBrokenPhotoRefetchInitializedRef.current = true;
+      return;
+    }
     const controller = new AbortController();
     void fetchPhotos({ signal: controller.signal, includeBroken: showBrokenRows });
     return () => {
       controller.abort();
     };
   }, [fetchPhotos, hasAccess, loading, personId, showBrokenRows]);
+
+  useEffect(() => {
+    if (!hasAccess || !personId) return;
+    if (effectiveOperationStatus !== "running" && effectiveOperationStatus !== "queued") return;
+
+    const controller = new AbortController();
+    void fetchPhotos({ signal: controller.signal, includeBroken: showBrokenRows });
+    return () => {
+      controller.abort();
+    };
+  }, [effectiveOperationStatus, fetchPhotos, hasAccess, personId, showBrokenRows]);
 
   useEffect(() => {
     if (activeTab !== "news") return;
@@ -10897,7 +11432,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        All Media
+                        All Media ({galleryFilterCounts.all})
                       </button>
                     )}
                     {showIdParam && (
@@ -10910,7 +11445,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        {activeShowChipLabel}
+                        {activeShowChipLabel} ({galleryFilterCounts.thisShow})
                       </button>
                     )}
                     {(showIdParam ? otherKnownShowOptions : knownShowOptions).map((option) => (
@@ -10927,7 +11462,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        {getShowDisplayLabel(option.showName) ?? option.showName}
+                        {(getShowDisplayLabel(option.showName) ?? option.showName)} ({galleryFilterCounts.otherShowByKey.get(option.key) ?? 0})
                       </button>
                     ))}
                     {(hasWwhlMatches || hasWwhlCredit) && (
@@ -10940,7 +11475,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                          {WWHL_LABEL}
+                          {WWHL_LABEL} ({galleryFilterCounts.wwhl})
                       </button>
                     )}
                     {hasBravoconMatches && (
@@ -10953,7 +11488,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        {BRAVOCON_LABEL}
+                        {BRAVOCON_LABEL} ({galleryFilterCounts.bravocon})
                       </button>
                     )}
                     {hasEventMatches && (
@@ -10977,10 +11512,10 @@ export default function PersonProfilePage() {
                               galleryShowFilter === "events" ? "text-white" : "text-zinc-700"
                             }`}
                           >
-                            <option value="all">Events</option>
+                            <option value="all">Events ({galleryFilterCounts.events})</option>
                             {eventSubcategoryOptions.map((option) => (
                               <option key={option.key} value={option.key}>
-                                {option.label}
+                                {option.label} ({galleryFilterCounts.eventSubcategoryByKey.get(option.key) ?? 0})
                               </option>
                             ))}
                           </select>
@@ -11009,7 +11544,7 @@ export default function PersonProfilePage() {
                             : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        {UNSORTED_LABEL}
+                        {UNSORTED_LABEL} ({galleryFilterCounts.unsorted})
                       </button>
                     )}
                   </div>
@@ -11018,7 +11553,8 @@ export default function PersonProfilePage() {
 
               <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-zinc-500">
-                  Showing {filteredPhotos.length} of {photos.length} photos
+                  Showing {filteredPhotos.length} of {photos.length}
+                  {photosHasMore ? "+" : ""} loaded photos
                 </p>
                 <p className="text-xs text-zinc-500">
                   Fallback diagnostics: {galleryFallbackTelemetry.fallbackRecoveredCount} recovered,{" "}
@@ -11127,14 +11663,19 @@ export default function PersonProfilePage() {
                   </section>
                 )}
               </div>
-              {mainGalleryPhotos.length > photosVisibleCount && (
+              {(mainGalleryPhotos.length > photosVisibleCount || photosHasMore) && (
                 <div className="mt-4 flex justify-center">
                   <button
                     type="button"
-                    onClick={() => setPhotosVisibleCount((prev) => prev + 120)}
+                    onClick={() => void handleLoadMorePhotos()}
+                    disabled={photosLoadingMore}
                     className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                   >
-                    Load More Photos
+                    {photosLoadingMore
+                      ? "Loading More..."
+                      : mainGalleryPhotos.length > photosVisibleCount
+                        ? "Load More Photos"
+                        : "Load More From Server"}
                   </button>
                 </div>
               )}

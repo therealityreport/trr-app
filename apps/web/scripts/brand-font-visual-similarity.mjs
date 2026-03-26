@@ -7,6 +7,12 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 import { buildHostedFontUrl } from "../src/lib/fonts/hosted-fonts.ts";
+import {
+  readHostedFamilyMap,
+  resolveFontAsset,
+  resolveSourceHostedFamily,
+  resolveHostedFamily,
+} from "../src/lib/fonts/brand-fonts/asset-resolution.ts";
 import { buildBrandFontArtifacts } from "../src/lib/fonts/brand-fonts/generator.ts";
 import { BRAND_FONT_MATCH_RULES } from "../src/lib/fonts/brand-fonts/seed.ts";
 import { rankBrandFontCandidates } from "../src/lib/fonts/brand-fonts/scoring.ts";
@@ -119,6 +125,10 @@ function defaultPreviewText(record) {
   return record.sourceFontFamily;
 }
 
+function requestedWidth(record) {
+  return record.sourceWidthNormalized[0] ?? "normal";
+}
+
 function buildReviewTemplate(record, rankedVisualMatches) {
   const topFamilies = rankedVisualMatches.slice(0, 3).map((match) => match.familyName);
   return {
@@ -133,7 +143,7 @@ function buildReviewTemplate(record, rankedVisualMatches) {
   };
 }
 
-async function compareCandidates({ candidates, specimenDataUrl, text, fontSize, fontStyle, fontWeight }) {
+async function compareCandidates({ candidates, specimenDataUrl, text, fontSize }) {
   const browser = await chromium.launch({ headless: true });
 
   try {
@@ -145,7 +155,7 @@ async function compareCandidates({ candidates, specimenDataUrl, text, fontSize, 
     });
 
     return await page.evaluate(
-      async ({ evalCandidates, evalSpecimenDataUrl, evalText, evalFontSize, evalFontStyle, evalFontWeight }) => {
+      async ({ evalCandidates, evalSpecimenDataUrl, evalText, evalFontSize }) => {
         function loadImage(src) {
           return new Promise((resolveImage, rejectImage) => {
             const image = new Image();
@@ -173,76 +183,238 @@ async function compareCandidates({ candidates, specimenDataUrl, text, fontSize, 
           context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
         }
 
-        function drawTextCandidate(context, familyName, width, height) {
-          context.fillStyle = "#ffffff";
-          context.fillRect(0, 0, width, height);
+        function renderTextImageData({ familyName, width, height, fontStyle, fontWeight, text }) {
+          const canvas = createCanvas(width, height);
+          const context = canvas.getContext("2d");
+          if (!context) {
+            throw new Error("candidate-canvas-context-unavailable");
+          }
+          context.clearRect(0, 0, width, height);
           context.fillStyle = "#111111";
           context.textAlign = "center";
           context.textBaseline = "middle";
-          context.font = `${evalFontStyle} ${evalFontWeight} ${evalFontSize}px "${familyName}"`;
-          context.fillText(evalText, width / 2, height / 2, width * 0.88);
+          context.font = `${fontStyle} ${fontWeight} ${evalFontSize}px "${familyName}"`;
+          context.fillText(text, width / 2, height / 2, width * 0.88);
+          return context.getImageData(0, 0, width, height);
         }
 
-        function meanAbsoluteDifference(leftData, rightData) {
-          let total = 0;
-          for (let index = 0; index < leftData.length; index += 4) {
-            const left = (leftData[index] + leftData[index + 1] + leftData[index + 2]) / 3;
-            const right = (rightData[index] + rightData[index + 1] + rightData[index + 2]) / 3;
-            total += Math.abs(left - right);
+        function extractSpecimenMask(imageData) {
+          const mask = new Array(imageData.width * imageData.height);
+          for (let index = 0; index < mask.length; index += 1) {
+            const offset = index * 4;
+            const luminance = (
+              imageData.data[offset] +
+              imageData.data[offset + 1] +
+              imageData.data[offset + 2]
+            ) / (3 * 255);
+            const darkness = Math.max(0, 1 - luminance - 0.04);
+            mask[index] = darkness;
           }
-          return total / (leftData.length / 4) / 255;
+          return mask;
+        }
+
+        function extractAlphaMask(imageData) {
+          const mask = new Array(imageData.width * imageData.height);
+          for (let index = 0; index < mask.length; index += 1) {
+            mask[index] = imageData.data[index * 4 + 3] / 255;
+          }
+          return mask;
+        }
+
+        function findMaskBounds(mask, width, height) {
+          let minX = width;
+          let minY = height;
+          let maxX = -1;
+          let maxY = -1;
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const value = mask[y * width + x];
+              if (value <= 0.03) continue;
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x);
+              maxY = Math.max(maxY, y);
+            }
+          }
+          if (maxX < minX || maxY < minY) return null;
+          return {
+            minX: Math.max(0, minX - 8),
+            minY: Math.max(0, minY - 8),
+            maxX: Math.min(width - 1, maxX + 8),
+            maxY: Math.min(height - 1, maxY + 8),
+          };
+        }
+
+        function normalizeMask(mask, width, height, targetWidth, targetHeight) {
+          const bounds = findMaskBounds(mask, width, height);
+          if (!bounds) return null;
+
+          const cropWidth = bounds.maxX - bounds.minX + 1;
+          const cropHeight = bounds.maxY - bounds.minY + 1;
+          const cropCanvas = createCanvas(cropWidth, cropHeight);
+          const cropContext = cropCanvas.getContext("2d");
+          if (!cropContext) {
+            throw new Error("mask-crop-context-unavailable");
+          }
+
+          const cropImage = cropContext.createImageData(cropWidth, cropHeight);
+          for (let y = 0; y < cropHeight; y += 1) {
+            for (let x = 0; x < cropWidth; x += 1) {
+              const value = mask[(bounds.minY + y) * width + (bounds.minX + x)];
+              const alpha = Math.max(0, Math.min(255, Math.round(value * 255)));
+              const offset = (y * cropWidth + x) * 4;
+              cropImage.data[offset] = 0;
+              cropImage.data[offset + 1] = 0;
+              cropImage.data[offset + 2] = 0;
+              cropImage.data[offset + 3] = alpha;
+            }
+          }
+          cropContext.putImageData(cropImage, 0, 0);
+
+          const normalizedCanvas = createCanvas(targetWidth, targetHeight);
+          const normalizedContext = normalizedCanvas.getContext("2d");
+          if (!normalizedContext) {
+            throw new Error("normalized-mask-context-unavailable");
+          }
+          normalizedContext.clearRect(0, 0, targetWidth, targetHeight);
+          const scale = Math.min(targetWidth / cropWidth, targetHeight / cropHeight);
+          const drawWidth = cropWidth * scale;
+          const drawHeight = cropHeight * scale;
+          const drawX = (targetWidth - drawWidth) / 2;
+          const drawY = (targetHeight - drawHeight) / 2;
+          normalizedContext.drawImage(cropCanvas, drawX, drawY, drawWidth, drawHeight);
+
+          const normalizedImage = normalizedContext.getImageData(0, 0, targetWidth, targetHeight);
+          const alphaMask = new Array(targetWidth * targetHeight);
+          let support = 0;
+          for (let index = 0; index < alphaMask.length; index += 1) {
+            alphaMask[index] = normalizedImage.data[index * 4 + 3] / 255;
+            support += alphaMask[index];
+          }
+
+          return {
+            alphaMask,
+            aspectRatio: cropWidth / Math.max(cropHeight, 1),
+            support,
+          };
+        }
+
+        function compareMasks(leftMask, rightMask) {
+          if (!leftMask || !rightMask) return null;
+          let differenceSum = 0;
+          let supportSum = 0;
+          for (let index = 0; index < leftMask.alphaMask.length; index += 1) {
+            const left = leftMask.alphaMask[index];
+            const right = rightMask.alphaMask[index];
+            differenceSum += Math.abs(left - right);
+            supportSum += Math.max(left, right);
+          }
+          if (supportSum === 0) return null;
+          const distance = differenceSum / supportSum;
+          const similarity = Math.max(0, Math.round((1 - distance) * 100));
+          return {
+            similarity,
+            distance,
+            coverageDelta: Math.abs(leftMask.support - rightMask.support) / supportSum,
+            aspectRatioDelta: Math.abs(leftMask.aspectRatio - rightMask.aspectRatio),
+          };
         }
 
         const specimenImage = await loadImage(evalSpecimenDataUrl);
         const specimenCanvas = createCanvas(1400, 480);
         const specimenContext = specimenCanvas.getContext("2d");
-        const reducedSpecimenCanvas = createCanvas(350, 120);
-        const reducedSpecimenContext = reducedSpecimenCanvas.getContext("2d");
-        if (!specimenContext || !reducedSpecimenContext) {
+        if (!specimenContext) {
           throw new Error("canvas-context-unavailable");
         }
 
         drawContainedImage(specimenContext, specimenImage, specimenCanvas.width, specimenCanvas.height);
-        reducedSpecimenContext.drawImage(specimenCanvas, 0, 0, reducedSpecimenCanvas.width, reducedSpecimenCanvas.height);
-        const specimenPixels = reducedSpecimenContext.getImageData(
+        const specimenImageData = specimenContext.getImageData(
           0,
           0,
-          reducedSpecimenCanvas.width,
-          reducedSpecimenCanvas.height,
-        ).data;
+          specimenCanvas.width,
+          specimenCanvas.height,
+        );
+        const normalizedSpecimenMask = normalizeMask(
+          extractSpecimenMask(specimenImageData),
+          specimenCanvas.width,
+          specimenCanvas.height,
+          420,
+          140,
+        );
 
         const results = [];
         for (const candidate of evalCandidates) {
+          if (!candidate.fontDataUrl || !candidate.resolvedCandidateAsset) {
+            results.push({
+              familyName: candidate.familyName,
+              heuristicScore: candidate.heuristicScore,
+              fitForRole: candidate.fitForRole,
+              matchWarnings: candidate.matchWarnings,
+              rationaleChips: candidate.rationaleChips,
+              matchSource: candidate.matchSource,
+              sourceUrl: candidate.sourceUrl,
+              familyScore: candidate.familyScore,
+              requestedFamilyName: candidate.requestedFamilyName,
+              resolvedCandidateAsset: candidate.resolvedCandidateAsset ?? null,
+              fontLoadStatus: "degraded",
+              degradedReason: candidate.degradedReason ?? "candidate-asset-unresolved",
+              visualDistance: 1,
+              visualScore: 0,
+              combinedScore: Math.round(candidate.heuristicScore * 0.35),
+            });
+            continue;
+          }
           try {
-            const fontFace = new FontFace(candidate.familyName, `url("${candidate.fontDataUrl}")`);
+            const fontFace = new FontFace(
+              candidate.resolvedCandidateAsset.resolvedFamilyName,
+              `url("${candidate.fontDataUrl}")`,
+              {
+                style: candidate.resolvedCandidateAsset.resolvedStyle,
+                weight: String(candidate.resolvedCandidateAsset.resolvedWeight),
+              },
+            );
             await fontFace.load();
             document.fonts.add(fontFace);
-            await document.fonts.load(`${evalFontStyle} ${evalFontWeight} ${evalFontSize}px "${candidate.familyName}"`);
-
-            const candidateCanvas = createCanvas(1400, 480);
-            const candidateContext = candidateCanvas.getContext("2d");
-            const reducedCandidateCanvas = createCanvas(350, 120);
-            const reducedCandidateContext = reducedCandidateCanvas.getContext("2d");
-            if (!candidateContext || !reducedCandidateContext) {
-              throw new Error("candidate-canvas-context-unavailable");
-            }
-
-            drawTextCandidate(candidateContext, candidate.familyName, candidateCanvas.width, candidateCanvas.height);
-            reducedCandidateContext.drawImage(
-              candidateCanvas,
-              0,
-              0,
-              reducedCandidateCanvas.width,
-              reducedCandidateCanvas.height,
+            await document.fonts.load(
+              `${candidate.resolvedCandidateAsset.resolvedStyle} ${candidate.resolvedCandidateAsset.resolvedWeight} ${evalFontSize}px "${candidate.resolvedCandidateAsset.resolvedFamilyName}"`,
             );
-            const candidatePixels = reducedCandidateContext.getImageData(
+            const fontLoaded = document.fonts.check(
+              `${candidate.resolvedCandidateAsset.resolvedStyle} ${candidate.resolvedCandidateAsset.resolvedWeight} ${evalFontSize}px "${candidate.resolvedCandidateAsset.resolvedFamilyName}"`,
+            );
+
+            const candidateImageData = renderTextImageData({
+              familyName: candidate.resolvedCandidateAsset.resolvedFamilyName,
+              width: 1400,
+              height: 480,
+              fontStyle: candidate.resolvedCandidateAsset.resolvedStyle,
+              fontWeight: candidate.resolvedCandidateAsset.resolvedWeight,
+              text: evalText,
+            });
+            const normalizedCandidateMask = normalizeMask(
+              extractAlphaMask(candidateImageData),
+              1400,
+              480,
+              420,
+              140,
+            );
+            const comparison = compareMasks(normalizedSpecimenMask, normalizedCandidateMask);
+            if (!comparison) {
+              throw new Error("mask-comparison-unavailable");
+            }
+            const normalizedAspectPenalty = Math.min(2, comparison.aspectRatioDelta) * 1.5;
+            const visualScore = Math.max(
               0,
+              Math.round(
+                comparison.similarity -
+                comparison.coverageDelta * 18 -
+                normalizedAspectPenalty,
+              ),
+            );
+            const visualDistance = comparison.distance;
+            const combinedScore = Math.max(
               0,
-              reducedCandidateCanvas.width,
-              reducedCandidateCanvas.height,
-            ).data;
-            const visualDistance = meanAbsoluteDifference(specimenPixels, candidatePixels);
-            const visualScore = Math.max(0, Math.round((1 - visualDistance) * 100));
+              Math.round(candidate.heuristicScore * 0.45 + visualScore * 0.55),
+            );
 
             results.push({
               familyName: candidate.familyName,
@@ -253,9 +425,15 @@ async function compareCandidates({ candidates, specimenDataUrl, text, fontSize, 
               matchSource: candidate.matchSource,
               sourceUrl: candidate.sourceUrl,
               familyScore: candidate.familyScore,
+              requestedFamilyName: candidate.requestedFamilyName,
+              resolvedCandidateAsset: candidate.resolvedCandidateAsset,
+              fontLoadStatus: fontLoaded ? "loaded" : "degraded",
+              degradedReason: fontLoaded ? null : "font-face-check-failed",
+              aspectRatioDelta: Number(comparison.aspectRatioDelta.toFixed(4)),
+              coverageDelta: Number(comparison.coverageDelta.toFixed(4)),
               visualDistance: Number(visualDistance.toFixed(4)),
               visualScore,
-              combinedScore: Math.round(candidate.heuristicScore * 0.65 + visualScore * 0.35),
+              combinedScore,
             });
           } catch (error) {
             results.push({
@@ -267,17 +445,19 @@ async function compareCandidates({ candidates, specimenDataUrl, text, fontSize, 
               matchSource: candidate.matchSource,
               sourceUrl: candidate.sourceUrl,
               familyScore: candidate.familyScore,
+              requestedFamilyName: candidate.requestedFamilyName,
+              resolvedCandidateAsset: candidate.resolvedCandidateAsset ?? null,
+              fontLoadStatus: "degraded",
+              degradedReason: error instanceof Error ? error.message : "font-render-failed",
               visualDistance: 1,
               visualScore: 0,
-              combinedScore: Math.round(candidate.heuristicScore * 0.5),
-              error: error instanceof Error ? error.message : "font-render-failed",
+              combinedScore: Math.round(candidate.heuristicScore * 0.35),
             });
           }
         }
 
         return results.sort((left, right) => {
           if (right.combinedScore !== left.combinedScore) return right.combinedScore - left.combinedScore;
-          if (right.visualScore !== left.visualScore) return right.visualScore - left.visualScore;
           return right.heuristicScore - left.heuristicScore;
         });
       },
@@ -286,8 +466,6 @@ async function compareCandidates({ candidates, specimenDataUrl, text, fontSize, 
         evalSpecimenDataUrl: specimenDataUrl,
         evalText: text,
         evalFontSize: fontSize,
-        evalFontStyle: fontStyle,
-        evalFontWeight: fontWeight,
       },
     );
   } finally {
@@ -316,6 +494,17 @@ async function main() {
   if (!record) {
     throw new Error(`Brand font record not found for ${options.brandId} / ${options.roleLabel}`);
   }
+  const familyMap = readHostedFamilyMap(PROJECT_ROOT);
+  const sourceFamily = resolveSourceHostedFamily(record, familyMap);
+  const sourceAsset = sourceFamily
+    ? resolveFontAsset(
+        record.sourceFontFamily,
+        sourceFamily,
+        Math.max(...record.sourceWeightsNormalized),
+        record.sourceStyles.includes("italic") ? "italic" : "normal",
+        requestedWidth(record),
+      )
+    : null;
 
   const rankedHeuristicMatches = rankBrandFontCandidates(
     record,
@@ -325,9 +514,8 @@ async function main() {
   );
   const specimenDataUrl = await loadDataUrl(options.specimen);
   const text = options.text || defaultPreviewText(record);
-  const fontWeight = Math.max(...record.sourceWeightsNormalized);
-  const fontStyle = record.sourceStyles.includes("italic") ? "italic" : "normal";
   const candidates = rankedHeuristicMatches.map((match) => ({
+    requestedFamilyName: match.familyName,
     familyName: match.familyName,
     sourceUrl: normalizeFontSourceUrl(match.sourceUrl),
     heuristicScore: match.score,
@@ -336,14 +524,31 @@ async function main() {
     rationaleChips: match.rationaleChips,
     matchSource: match.matchSource,
     familyScore: match.familyScore,
+    resolvedCandidateAsset: (() => {
+      const candidateFamily = resolveHostedFamily(match.familyName, familyMap);
+      if (!candidateFamily) return null;
+      return resolveFontAsset(
+        match.familyName,
+        candidateFamily,
+        Math.max(...record.sourceWeightsNormalized),
+        record.sourceStyles.includes("italic") ? "italic" : "normal",
+        requestedWidth(record),
+      );
+    })(),
   }));
   const hydratedCandidates = await Promise.all(
     candidates.map(async (candidate) => ({
       ...candidate,
-      fontDataUrl: await loadDataUrl(
-        candidate.sourceUrl,
-        fontContentTypeForExtension(candidate.sourceUrl),
-      ),
+      sourceUrl: candidate.resolvedCandidateAsset
+        ? normalizeFontSourceUrl(candidate.resolvedCandidateAsset.sourceUrl)
+        : candidate.sourceUrl,
+      degradedReason: candidate.resolvedCandidateAsset ? null : "candidate-asset-unresolved",
+      fontDataUrl: candidate.resolvedCandidateAsset
+        ? await loadDataUrl(
+            normalizeFontSourceUrl(candidate.resolvedCandidateAsset.sourceUrl),
+            fontContentTypeForExtension(candidate.resolvedCandidateAsset.sourceUrl),
+          )
+        : null,
     })),
   );
 
@@ -352,21 +557,22 @@ async function main() {
     specimenDataUrl,
     text,
     fontSize: DEFAULT_FONT_SIZE,
-    fontStyle,
-    fontWeight,
   });
 
   const output = {
     generatedAt: new Date().toISOString(),
-    algorithm: "canvas-visual-similarity-v1",
+    algorithm: "canvas-visual-similarity-v2",
     projectRoot: PROJECT_ROOT,
     input: {
       brandId: options.brandId,
       roleLabel: options.roleLabel,
       sourceFontFamily: record.sourceFontFamily,
+      resolvedSourceFamily: sourceFamily?.familyName ?? null,
+      resolvedSourceAsset: sourceAsset,
       specimen: options.specimen,
       text,
       limit: options.limit,
+      visualEvidenceHealth: artifacts.visualEvidenceHealth,
     },
     reviewTemplate: buildReviewTemplate(record, rankedVisualMatches),
     results: rankedVisualMatches,

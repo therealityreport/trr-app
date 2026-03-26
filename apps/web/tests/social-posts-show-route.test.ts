@@ -1,48 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const {
-  requireAdminMock,
-  getPostsByShowIdMock,
-  getPostsBySeasonIdMock,
-  createPostMock,
-  getSeasonByIdMock,
-} = vi.hoisted(() => ({
+const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  getPostsByShowIdMock: vi.fn(),
-  getPostsBySeasonIdMock: vi.fn(),
-  createPostMock: vi.fn(),
-  getSeasonByIdMock: vi.fn(),
+  fetchAdminBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
 }));
 
-vi.mock("@/lib/server/admin/social-posts-repository", () => ({
-  getPostsByShowId: getPostsByShowIdMock,
-  getPostsBySeasonId: getPostsBySeasonIdMock,
-  createPost: createPostMock,
-}));
-
-vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  getSeasonById: getSeasonByIdMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminProxyErrorResponse: (error: unknown) =>
+    NextResponse.json(
+      { error: error instanceof Error ? error.message : "failed" },
+      { status: error instanceof Error && error.message === "unauthorized" ? 401 : 500 },
+    ),
 }));
 
 import { GET, POST } from "@/app/api/admin/trr-api/shows/[showId]/social-posts/route";
 
 const SHOW_ID = "11111111-1111-4111-8111-111111111111";
 const SEASON_ID = "22222222-2222-4222-8222-222222222222";
-const OTHER_SHOW_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 describe("/api/admin/trr-api/shows/[showId]/social-posts route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    getPostsByShowIdMock.mockReset();
-    getPostsBySeasonIdMock.mockReset();
-    createPostMock.mockReset();
-    getSeasonByIdMock.mockReset();
-
+    fetchAdminBackendJsonMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
   });
 
@@ -57,7 +43,7 @@ describe("/api/admin/trr-api/shows/[showId]/social-posts route", () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toContain("showId");
-    expect(getPostsByShowIdMock).not.toHaveBeenCalled();
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 
   it("returns 400 when trr_season_id is invalid", async () => {
@@ -72,35 +58,15 @@ describe("/api/admin/trr-api/shows/[showId]/social-posts route", () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toContain("trr_season_id");
-    expect(getPostsBySeasonIdMock).not.toHaveBeenCalled();
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when season does not belong to show", async () => {
-    getSeasonByIdMock.mockResolvedValue({
-      id: SEASON_ID,
-      show_id: OTHER_SHOW_ID,
+  it("lists season posts through the backend proxy", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { posts: [{ id: "post-1" }] },
+      durationMs: 6,
     });
-
-    const request = new NextRequest(
-      `http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts?trr_season_id=${SEASON_ID}`,
-      { method: "GET" },
-    );
-    const response = await GET(request, {
-      params: Promise.resolve({ showId: SHOW_ID }),
-    });
-    const payload = await response.json();
-
-    expect(response.status).toBe(400);
-    expect(payload.error).toContain("must belong");
-    expect(getPostsBySeasonIdMock).not.toHaveBeenCalled();
-  });
-
-  it("lists season posts when season belongs to show", async () => {
-    getSeasonByIdMock.mockResolvedValue({
-      id: SEASON_ID,
-      show_id: SHOW_ID,
-    });
-    getPostsBySeasonIdMock.mockResolvedValue([{ id: "post-1" }]);
 
     const request = new NextRequest(
       `http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts?trr_season_id=${SEASON_ID}`,
@@ -113,58 +79,58 @@ describe("/api/admin/trr-api/shows/[showId]/social-posts route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.posts).toHaveLength(1);
-    expect(getPostsBySeasonIdMock).toHaveBeenCalledWith(SEASON_ID);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      `/admin/shows/${SHOW_ID}/social-posts`,
+      expect.objectContaining({
+        routeName: "social-posts:list",
+        queryString: `trr_season_id=${SEASON_ID}`,
+      }),
+    );
   });
 
-  it("rejects POST when trr_season_id belongs to another show", async () => {
-    getSeasonByIdMock.mockResolvedValue({
-      id: SEASON_ID,
-      show_id: OTHER_SHOW_ID,
+  it("maps backend 404s on GET", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 404,
+      data: { detail: "Season not found" },
+      durationMs: 3,
     });
+
     const request = new NextRequest(
-      `http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform: "instagram",
-          url: "https://example.com/post/1",
-          trr_season_id: SEASON_ID,
-        }),
-      },
+      `http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts?trr_season_id=${SEASON_ID}`,
+      { method: "GET" },
     );
-    const response = await POST(request, {
+    const response = await GET(request, {
       params: Promise.resolve({ showId: SHOW_ID }),
     });
     const payload = await response.json();
 
-    expect(response.status).toBe(400);
-    expect(payload.error).toContain("must belong");
-    expect(createPostMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(404);
+    expect(payload).toEqual({ error: "Season not found" });
   });
 
-  it("creates post when season belongs to show", async () => {
-    getSeasonByIdMock.mockResolvedValue({
-      id: SEASON_ID,
-      show_id: SHOW_ID,
-    });
-    createPostMock.mockResolvedValue({
-      id: "post-1",
-      trr_show_id: SHOW_ID,
-    });
-    const request = new NextRequest(
-      `http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform: "instagram",
-          url: "https://example.com/post/1",
+  it("creates post through the backend proxy with admin uid", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 201,
+      data: {
+        post: {
+          id: "post-1",
+          trr_show_id: SHOW_ID,
           trr_season_id: SEASON_ID,
-          title: "title",
-        }),
+        },
       },
-    );
+      durationMs: 7,
+    });
+
+    const request = new NextRequest(`http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "instagram",
+        url: "https://example.com/post/1",
+        trr_season_id: SEASON_ID,
+        title: "title",
+      }),
+    });
     const response = await POST(request, {
       params: Promise.resolve({ showId: SHOW_ID }),
     });
@@ -172,13 +138,48 @@ describe("/api/admin/trr-api/shows/[showId]/social-posts route", () => {
 
     expect(response.status).toBe(201);
     expect(payload.post.id).toBe("post-1");
-    expect(createPostMock).toHaveBeenCalledWith(
-      { firebaseUid: "admin-uid", isAdmin: true },
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      `/admin/shows/${SHOW_ID}/social-posts`,
       expect.objectContaining({
-        trr_show_id: SHOW_ID,
-        trr_season_id: SEASON_ID,
+        method: "POST",
+        routeName: "social-posts:create",
+        headers: {
+          "Content-Type": "application/json",
+          "X-TRR-Admin-User-Uid": "admin-uid",
+        },
+        body: JSON.stringify({
+          platform: "instagram",
+          url: "https://example.com/post/1",
+          trr_season_id: SEASON_ID,
+          title: "title",
+          notes: null,
+        }),
       }),
     );
   });
-});
 
+  it("returns backend validation errors on POST", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 400,
+      data: { detail: "Season does not belong to show" },
+      durationMs: 2,
+    });
+
+    const request = new NextRequest(`http://localhost/api/admin/trr-api/shows/${SHOW_ID}/social-posts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: "instagram",
+        url: "https://example.com/post/1",
+        trr_season_id: SEASON_ID,
+      }),
+    });
+    const response = await POST(request, {
+      params: Promise.resolve({ showId: SHOW_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({ error: "Season does not belong to show" });
+  });
+});

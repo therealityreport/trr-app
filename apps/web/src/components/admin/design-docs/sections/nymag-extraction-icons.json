@@ -1,0 +1,377 @@
+{
+  "$meta": {
+    "source": "nymag.com",
+    "extractedAt": "2026-03-26",
+    "method": "inline-svg-and-css-analysis",
+    "cms": "Vox Media Clay CMS",
+    "notes": "All SVGs are inlined in the HTML markup. Icon font served from fonts.nymag.com. Social icons use circle format at 38x38. Section arrows for The Cut and Curbed are embedded as CSS background-image data URIs."
+  },
+  "brandLogos": [
+    {
+      "id": "nymag-masthead",
+      "name": "NYMag Masthead",
+      "description": "Full 'New York' calligraphic logo SVG, used in header and footer",
+      "viewBox": "0 0 901.89 194.78",
+      "format": "inline-svg",
+      "locations": ["header", "footer"]
+    },
+    {
+      "id": "intelligencer-logo",
+      "name": "Intelligencer Logo",
+      "description": "Small-caps wordmark with two-dot separator",
+      "viewBox": "0 0 256 23",
+      "format": "inline-svg",
+      "brandColor": "#db2800",
+      "locations": ["section-header", "navigation"]
+    },
+    {
+      "id": "intelligencer-icon",
+      "name": "Intelligencer Icon",
+      "description": "Circle with 'I' letterform",
+      "viewBox": "0 0 180 180",
+      "format": "inline-svg",
+      "fill": "#db2800",
+      "locations": ["section-icon", "navigation"]
+    },
+    {
+      "id": "intelligencer-footer-logo",
+      "name": "Intelligencer Footer Logo",
+      "description": "Larger format wordmark for footer grid",
+      "viewBox": "0 0 598 144",
+      "format": "inline-svg",
+      "brandColor": "#db2800",
+      "locations": ["footer"]
+    },
+    {
+      "id": "the-cut-logo",
+      "name": "The Cut Logo",
+      "description": "Wordmark SVG",
+      "viewBox": "0 0 191 23",
+      "format": "inline-svg",
+      "brandColor": "#d0021b",
+      "locations": ["section-header", "navigation"]
+    },
+    {
+      "id": "the-cut-icon",
+      "name": "The Cut Icon",
+      "description": "Circle with 'C' letterform",
+      "viewBox": "0 0 30 30",
+      "format": "inline-svg",
+      "brandColor": "#d0021b",
+      "locations": ["section-icon", "navigation"]
+    },
+    {
+      "id": "the-cut-footer-logo",
+      "name": "The Cut Footer Logo",
+      "description": "Larger format wordmark for footer grid",
+      "viewBox": "0 0 208 46",
+      "format": "inline-svg",
+      "brandColor": "#d0021b",
+      "locations": ["footer"]
+    },
+    {
+      "id": "vulture-logo",
+      "name": "Vulture Logo",
+      "description": "Wordmark SVG",
+      "viewBox": "0 0 195 23",
+      "format": "inline-svg",
+      "brandColor": "#00bcf1",
+      "locations": ["section-header", "navigation"]
+    },
+    {
+      "id": "vulture-icon",
+      "name": "Vulture Icon",
+      "description": "Circle with 'V' chevron letterform",
+      "viewBox": "0 0 180 180",
+      "format": "inline-svg",
+      "fill": "#00bcf1",
+      "locations": ["section-icon", "navigation"]
+    },
+    {
+      "id": "vulture-footer-logo",
+      "name": "Vulture Footer Logo",
+      "description": "Larger format wordmark for footer grid",
+      "viewBox": "0 0 500 115",
+      "format": "inline-svg",
+      "brandColor": "#00bcf1",
+      "locations": ["footer"]
+    },
+    {
+      "id": "strategist-logo",
+      "name": "Strategist Logo",
+      "description": "Wordmark SVG",
+      "viewBox": "0 0 233 23",
+      "format": "inline-svg",
+      "brandColor": "#f55d1f",
+      "locations": ["section-header", "navigation"]
+    },
+    {
+      "id": "strategist-icon",
+      "name": "Strategist Icon",
+      "description": "Circle with 'S' letterform",
+      "viewBox": "0 0 360 360",
+      "format": "inline-svg",
+      "fill": "#f55d1f",
+      "locations": ["section-icon", "navigation"]
+    },
+    {
+      "id": "strategist-footer-logo",
+      "name": "Strategist Footer Logo",
+      "description": "Larger format wordmark for footer grid",
+      "viewBox": "0 0 539.42 132.02",
+      "format": "inline-svg",
+      "brandColor": "#f55d1f",
+      "locations": ["footer"]
+    },
+    {
+      "id": "curbed-logo",
+      "name": "Curbed Logo",
+      "description": "Wordmark SVG",
+      "viewBox": "0 0 184 23",
+      "format": "inline-svg",
+      "brandColor": "#0147a5",
+      "locations": ["section-header", "navigation"]
+    },
+    {
+      "id": "curbed-icon",
+      "name": "Curbed Icon",
+      "description": "Square icon SVG",
+      "viewBox": "0 0 22 22",
+      "format": "inline-svg",
+      "fill": "#0147a5",
+      "locations": ["section-icon", "navigation"]
+    },
+    {
+      "id": "curbed-footer-logo",
+      "name": "Curbed Footer Logo",
+      "description": "Larger format wordmark for footer grid",
+      "viewBox": "0 0 333.53 88.03",
+      "format": "inline-svg",
+      "brandColor": "#0147a5",
+      "locations": ["footer"]
+    },
+    {
+      "id": "grub-street-logo",
+      "name": "Grub Street Logo",
+      "description": "Wordmark SVG",
+      "viewBox": "0 0 247 23",
+      "format": "inline-svg",
+      "brandColor": "#acca5b",
+      "locations": ["section-header", "navigation"]
+    },
+    {
+      "id": "grub-street-icon",
+      "name": "Grub Street Icon",
+      "description": "Circle with 'GS' letterform",
+      "viewBox": "0 0 360 360",
+      "format": "inline-svg",
+      "fill": "#acca5b",
+      "locations": ["section-icon", "navigation"]
+    },
+    {
+      "id": "grub-street-footer-logo",
+      "name": "Grub Street Footer Logo",
+      "description": "Larger format wordmark for footer grid",
+      "viewBox": "0 0 421.18 56.49",
+      "format": "inline-svg",
+      "brandColor": "#acca5b",
+      "locations": ["footer"]
+    }
+  ],
+  "sectionHeaders": [
+    {
+      "id": "latest-news-header",
+      "name": "Latest News",
+      "description": "Small-caps SVG section header",
+      "viewBox": "0 0 150 23",
+      "format": "inline-svg"
+    },
+    {
+      "id": "trending-header",
+      "name": "Trending",
+      "description": "SVG section header",
+      "viewBox": "0 0 122 26",
+      "format": "inline-svg"
+    },
+    {
+      "id": "for-you-header",
+      "name": "For You",
+      "description": "SVG section header",
+      "viewBox": "0 0 102.27 25.66",
+      "format": "inline-svg"
+    },
+    {
+      "id": "more-top-stories-header",
+      "name": "More Top Stories",
+      "description": "SVG section header",
+      "viewBox": "0 0 198 22",
+      "format": "inline-svg"
+    },
+    {
+      "id": "stories-readers-liked-header",
+      "name": "Stories Readers Liked",
+      "description": "SVG section header",
+      "viewBox": "0 0 272 23",
+      "format": "inline-svg"
+    }
+  ],
+  "socialIcons": [
+    {
+      "id": "facebook-circle",
+      "name": "Facebook",
+      "description": "Dark circle with white 'f' path",
+      "format": "inline-svg",
+      "dimensions": "38x38",
+      "style": "circle-enclosed",
+      "colorScheme": "dark-bg-white-icon"
+    },
+    {
+      "id": "twitter-circle",
+      "name": "Twitter",
+      "description": "Dark circle with white bird path",
+      "format": "inline-svg",
+      "dimensions": "38x38",
+      "style": "circle-enclosed",
+      "colorScheme": "dark-bg-white-icon"
+    },
+    {
+      "id": "instagram-circle",
+      "name": "Instagram",
+      "description": "Dark circle with white camera path",
+      "format": "inline-svg",
+      "dimensions": "38x38",
+      "style": "circle-enclosed",
+      "colorScheme": "dark-bg-white-icon"
+    }
+  ],
+  "uiIcons": [
+    {
+      "id": "hamburger-menu",
+      "name": "Hamburger Menu",
+      "description": "3-line menu toggle icon",
+      "viewBox": "0 0 30 17",
+      "format": "inline-svg",
+      "locations": ["header"]
+    },
+    {
+      "id": "close-x",
+      "name": "Close X",
+      "description": "X mark for closing overlays and menus",
+      "viewBox": "0 0 30 28",
+      "format": "inline-svg",
+      "locations": ["header", "overlays"]
+    },
+    {
+      "id": "search",
+      "name": "Search",
+      "description": "Magnifying glass icon",
+      "viewBox": "0 0 16 16",
+      "format": "inline-svg",
+      "locations": ["header"]
+    },
+    {
+      "id": "arrow-right",
+      "name": "Arrow Right",
+      "description": "Right-pointing arrow, used in account dropdown",
+      "viewBox": "0 0 23 43",
+      "format": "inline-svg",
+      "locations": ["account-dropdown"]
+    },
+    {
+      "id": "vulture-arrow",
+      "name": "Vulture Arrow",
+      "description": "Custom right arrow used in TV recap feed",
+      "viewBox": "0 0 14 14",
+      "format": "inline-svg",
+      "fill": "#18BBEC",
+      "locations": ["vulture-section"]
+    },
+    {
+      "id": "curbed-arrow",
+      "name": "Curbed Arrow",
+      "description": "Section arrow embedded as CSS background-image data URI",
+      "format": "css-data-uri",
+      "locations": ["curbed-section"]
+    },
+    {
+      "id": "the-cut-arrow",
+      "name": "The Cut Arrow",
+      "description": "Section arrow embedded as CSS background-image data URI",
+      "format": "css-data-uri",
+      "locations": ["the-cut-section"]
+    },
+    {
+      "id": "clock-latest",
+      "name": "Clock / Latest Icon",
+      "description": "Circle clock face SVG with active/inactive states for the 'Latest' toggle",
+      "viewBox": "0 0 30 30",
+      "format": "inline-svg",
+      "states": ["active", "inactive"],
+      "locations": ["latest-feed-toggle"]
+    }
+  ],
+  "iconFont": {
+    "family": "Icons",
+    "src": "https://fonts.nymag.com/icons.woff",
+    "format": "woff",
+    "glyphs": [
+      {
+        "className": "glyph-arrow",
+        "codepoint": "\\e800",
+        "pseudoElement": "before",
+        "description": "Arrow glyph"
+      },
+      {
+        "className": "glyph-gallery",
+        "codepoint": "\\e801",
+        "pseudoElement": "before",
+        "description": "Gallery / photo set indicator"
+      },
+      {
+        "className": "glyph-podcast",
+        "codepoint": "\\e802",
+        "pseudoElement": "before",
+        "description": "Podcast indicator"
+      },
+      {
+        "className": "glyph-video",
+        "codepoint": "\\e803",
+        "pseudoElement": "before",
+        "description": "Video indicator"
+      }
+    ]
+  },
+  "imageCdn": {
+    "baseUrl": "https://pyxis.nymag.com/v1/imgs",
+    "pattern": "https://pyxis.nymag.com/v1/imgs/{hash}/{hash}/{filename}.{crop}.w{width}.{ext}",
+    "retinaPrefix": "2x.",
+    "cropFormats": [
+      {
+        "id": "rhorizontal",
+        "name": "Horizontal",
+        "description": "Landscape crop for standard article cards and feature images"
+      },
+      {
+        "id": "rsquare",
+        "name": "Square",
+        "description": "1:1 crop for thumbnails and sidebar items"
+      },
+      {
+        "id": "rvertical",
+        "name": "Vertical",
+        "description": "Portrait crop for tall card layouts"
+      },
+      {
+        "id": "rsquare-zoom",
+        "name": "Square Zoom",
+        "description": "Tighter square crop, zoomed into subject"
+      },
+      {
+        "id": "rdeep-vertical",
+        "name": "Deep Vertical",
+        "description": "Extra-tall portrait crop for hero and feature placements"
+      }
+    ],
+    "responsiveStrategy": "Responsive <picture> elements with multiple srcset breakpoints, retina 2x variants"
+  }
+}

@@ -46,6 +46,15 @@ describe("season cast tab quality wiring", () => {
     expect(contents).toMatch(/onClick=\{cancelSeasonCastRefresh\}/);
   });
 
+  it("requires local Getty prefetch for season cast member refresh", () => {
+    expect(contents).toMatch(/prefetchGettyLocallyForPerson\(personName,\s*show\?\.name \?\? undefined\)/);
+    expect(contents).toMatch(/getty_prefetch_attempted: true/);
+    expect(contents).toMatch(/Object\.assign\(requestBody, gettyPrefetch\.bodyPatch\)/);
+    expect(contents).toMatch(/Getty\/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty\./);
+    expect(contents).toMatch(/Getty\/NBCUMV refresh was not started\./);
+    expect(contents).toMatch(/\{ signal: runController\.signal, personName: label \}/);
+  });
+
   it("shows retry controls and filtered\\/total cast count chips", () => {
     expect(contents).toMatch(/castRoleMembersWarningWithSnapshotAge && \(/);
     expect(contents).toMatch(/onClick=\{\(\) => void fetchCastRoleMembers\(\{ force: true \}\)\}/);

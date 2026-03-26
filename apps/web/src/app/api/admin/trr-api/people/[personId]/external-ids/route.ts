@@ -8,8 +8,11 @@ import {
   isPersonExternalIdSource,
   type PersonExternalIdInput,
 } from "@/lib/admin/person-external-ids";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+import { invalidateAdminBackendCache } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
+const PERSON_DETAIL_CACHE_NAMESPACE = "admin-person-detail";
 
 interface RouteParams {
   params: Promise<{ personId: string }>;
@@ -22,7 +25,7 @@ const readPersonId = async (params: RouteParams["params"]): Promise<string> => {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const personId = await readPersonId(params);
     if (!personId) {
@@ -69,7 +72,7 @@ const parseBodyRows = (body: unknown): PersonExternalIdInput[] | null => {
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const personId = await readPersonId(params);
     if (!personId) {
@@ -86,6 +89,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const saved = await syncPersonExternalIds(personId, externalIds);
+    invalidateRouteResponseCache(PERSON_DETAIL_CACHE_NAMESPACE, `${user.uid}:person:${personId}:`);
+    await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
+      routeName: "person-detail",
+    });
     return NextResponse.json({ external_ids: saved });
   } catch (error) {
     console.error("[api] Failed to sync person external IDs", error);

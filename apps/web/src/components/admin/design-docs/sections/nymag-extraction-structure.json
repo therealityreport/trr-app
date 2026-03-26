@@ -1,0 +1,280 @@
+{
+  "$schema": "https://therealityreport.com/schemas/page-structure-extraction/v1",
+  "extractionMeta": {
+    "source": "nymag.com",
+    "extractedAt": "2026-03-26",
+    "agent": "extract-page-structure",
+    "version": "1.0.0"
+  },
+
+  "pageMetadata": {
+    "siteName": "New York Magazine",
+    "vertical": "NYMag",
+    "pageType": "Homepage",
+    "description": "New York Magazine obsessively chronicles the ideas, people, and cultural events that are forever reshaping our world.",
+    "canonicalUrl": "https://nymag.com/",
+    "favicon": "https://assets.nymag.com/media/sites/nymag/favicon.ico",
+    "appleTouchIcons": [
+      { "size": "76x76", "href": "https://assets.nymag.com/media/sites/nymag/apple-touch-icon-76x76.png" },
+      { "size": "120x120", "href": "https://assets.nymag.com/media/sites/nymag/apple-touch-icon-120x120.png" },
+      { "size": "152x152", "href": "https://assets.nymag.com/media/sites/nymag/apple-touch-icon-152x152.png" },
+      { "size": "180x180", "href": "https://assets.nymag.com/media/sites/nymag/apple-touch-icon-180x180.png" }
+    ],
+    "maskIcon": {
+      "href": "https://assets.nymag.com/media/sites/nymag/safari-pinned-tab.svg",
+      "color": "#111"
+    },
+    "social": {
+      "twitter": "@nymag",
+      "facebook": "https://www.facebook.com/nymag"
+    }
+  },
+
+  "contentBlockTypes": [
+    {
+      "id": 1,
+      "name": "global-nav",
+      "description": "Top navigation bar with vertical links and user auth controls",
+      "verticalLinks": [
+        "Intelligencer",
+        "The Cut",
+        "Vulture",
+        "Strategist",
+        "Curbed",
+        "Grub Street",
+        "Magazine",
+        "Newsletters"
+      ],
+      "authControls": ["Subscribe", "Sign In", "Account dropdown"]
+    },
+    {
+      "id": 2,
+      "name": "ad-static",
+      "description": "Concert Ads banner slots for display advertising",
+      "adSizes": ["970x250", "728x90", "1400x600"]
+    },
+    {
+      "id": 3,
+      "name": "customer-alert-banner",
+      "description": "Conditional user alerts (card expiry, past due, etc.)"
+    },
+    {
+      "id": 4,
+      "name": "nymag-header",
+      "description": "Full-width NYMag logo (SVG) with hamburger nav dropdown"
+    },
+    {
+      "id": 5,
+      "name": "nymag-lede-container",
+      "description": "3-article lede section with hero image, rubrics, headlines, and teasers"
+    },
+    {
+      "id": 6,
+      "name": "promotional-spot",
+      "description": "Inline promo banner with dotted border pattern"
+    },
+    {
+      "id": 7,
+      "name": "container-lede-sidebar",
+      "description": "Two-column layout: main content area + latest feed sidebar"
+    },
+    {
+      "id": 8,
+      "name": "nymag-latest-feed",
+      "description": "Tabbed latest news feed with 7 sub-brand tabs",
+      "tabs": [
+        "Latest",
+        "Intelligencer",
+        "The Cut",
+        "Vulture",
+        "Strategist",
+        "Curbed",
+        "Grub Street"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "nymag-well-container",
+      "description": "Featured/secondary/primary article well grid"
+    },
+    {
+      "id": 10,
+      "name": "coverlines",
+      "description": "Magazine cover display with blurbs and subscribe CTA"
+    },
+    {
+      "id": 11,
+      "name": "collection-package",
+      "description": "Sponsored/curated article carousel with title, teaser, and image thumbnails"
+    },
+    {
+      "id": 12,
+      "name": "most-popular",
+      "description": "Trending/For You article list, numbered 1 through 5"
+    },
+    {
+      "id": 13,
+      "name": "collection-articles_stories",
+      "description": "\"Stories Readers Liked\" horizontal article cards"
+    },
+    {
+      "id": 14,
+      "name": "container-section",
+      "description": "Brand section blocks for each vertical with logo SVG, nav links, lede article, feed items, and secondary articles",
+      "verticals": [
+        "Intelligencer",
+        "The Cut",
+        "Vulture",
+        "Strategist",
+        "Curbed",
+        "Grub Street"
+      ],
+      "childComponents": [
+        "logo SVG",
+        "nav links",
+        "lede article",
+        "feed items",
+        "secondary articles"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "collection-articles-lede",
+      "description": "Section lede with large image, headline, and teaser"
+    },
+    {
+      "id": 16,
+      "name": "collection-articles_feed",
+      "description": "Vertical article feed list within sections"
+    },
+    {
+      "id": 17,
+      "name": "collection-articles_secondary",
+      "description": "Side articles with image and headline within sections"
+    },
+    {
+      "id": 18,
+      "name": "collection-silo",
+      "description": "Single featured article silo within sections"
+    },
+    {
+      "id": 19,
+      "name": "tv-recap-feed",
+      "description": "Vulture TV recap carousel with show name, episode, and recap link"
+    },
+    {
+      "id": 20,
+      "name": "collection-articles_carousel",
+      "description": "Strategist horizontal product/article carousel"
+    },
+    {
+      "id": 21,
+      "name": "collection-articles_thecut-primary",
+      "description": "The Cut 3-up articles with images"
+    },
+    {
+      "id": 22,
+      "name": "collection-articles_curbed-primary",
+      "description": "Curbed 3-up articles with images"
+    },
+    {
+      "id": 23,
+      "name": "global-footer",
+      "description": "Footer with brand logos, secondary links, social links, and copyright"
+    }
+  ],
+
+  "layoutArchitecture": {
+    "approach": "Mobile-first responsive",
+    "breakpoints": {
+      "mobile": { "maxWidth": 767 },
+      "tablet": { "minWidth": 768, "maxWidth": 1179 },
+      "desktop": { "minWidth": 1180 }
+    },
+    "desktopMaxWidth": 1100,
+    "homepageLayoutClass": "layout-simple",
+    "grids": {
+      "containerLedeSidebar": {
+        "type": "CSS Grid",
+        "tablet": "1fr minmax(240px, 24%)",
+        "desktop": "1fr 240px"
+      },
+      "containerRail": {
+        "type": "Flexbox",
+        "columns": "1fr 300px"
+      },
+      "containerSection": {
+        "type": "Dual-column",
+        "tabletPlus": "lede 50% + main 50%"
+      }
+    }
+  },
+
+  "subBrands": [
+    {
+      "name": "Intelligencer",
+      "accentColor": "#db2800",
+      "colorLabel": "red"
+    },
+    {
+      "name": "The Cut",
+      "accentColor": "#949494",
+      "accentColorAlt": "#d0021b",
+      "colorLabel": "gray / red"
+    },
+    {
+      "name": "Vulture",
+      "accentColor": "#00bcf1",
+      "colorLabel": "blue"
+    },
+    {
+      "name": "The Strategist",
+      "accentColor": "#f55d1f",
+      "colorLabel": "orange"
+    },
+    {
+      "name": "Curbed",
+      "accentColor": "#0147a5",
+      "colorLabel": "blue"
+    },
+    {
+      "name": "Grub Street",
+      "accentColor": "#acca5b",
+      "colorLabel": "green"
+    }
+  ],
+
+  "techStack": {
+    "cms": {
+      "name": "Vox Media Clay CMS",
+      "signals": ["data-uri attributes", "component architecture"]
+    },
+    "adPlatform": {
+      "name": "Concert Ads",
+      "provider": "Vox Media"
+    },
+    "analytics": {
+      "gtm": {
+        "containerId": "GTM-NL7LR9Z"
+      }
+    },
+    "email": {
+      "name": "Sailthru"
+    },
+    "adTargeting": {
+      "name": "Permutive"
+    },
+    "paywall": {
+      "name": "Zephr"
+    },
+    "cookieConsent": {
+      "name": "OneTrust"
+    },
+    "adBidding": {
+      "name": "Amazon A9"
+    },
+    "authentication": {
+      "name": "Auth0"
+    }
+  }
+}

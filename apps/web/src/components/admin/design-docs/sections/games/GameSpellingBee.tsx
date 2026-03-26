@@ -283,7 +283,7 @@ export default function GameSpellingBee({ SectionLabel }: GameSectionProps) {
           Spelling Bee
         </div>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#999", marginBottom: 12 }}>
-          nyt-karnakcondensed &rarr; Rude Slab &middot; 40px / 700
+          nyt-karnakcondensed (NYTKarnak_Condensed) &middot; 40px / 700
         </div>
 
         <div
@@ -298,7 +298,7 @@ export default function GameSpellingBee({ SectionLabel }: GameSectionProps) {
           How many words can you make with 7 letters?
         </div>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#999" }}>
-          nyt-franklin &rarr; Franklin Gothic &middot; 16px / 400
+          nyt-franklin (NYTFranklin) &middot; 16px / 400
         </div>
       </div>
 

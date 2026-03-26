@@ -255,7 +255,7 @@ export default function GameConnections({ SectionLabel }: GameSectionProps) {
           Connections
         </div>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#999", marginBottom: 12 }}>
-          nyt-karnakcondensed &rarr; Rude Slab &middot; 32px / 700
+          nyt-karnakcondensed (NYTKarnak_Condensed) &middot; 32px / 700
         </div>
 
         <div
@@ -270,7 +270,7 @@ export default function GameConnections({ SectionLabel }: GameSectionProps) {
           Group the 16 words into four categories of four.
         </div>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#999" }}>
-          nyt-franklin &rarr; Franklin Gothic &middot; 16px / 400
+          nyt-franklin (NYTFranklin) &middot; 16px / 400
         </div>
       </div>
 

@@ -2,11 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { Route } from "next";
 import {
   DESIGN_DOC_GROUPS,
   DESIGN_DOC_SECTIONS,
   getBrandSubSections,
+  getParentSection,
+  getArticleSubLinks,
+  getAthleticArticleSubLinks,
+  getGameArticleSubLinks,
   isBrandSection,
   type DesignDocSectionId,
 } from "@/lib/admin/design-docs-config";
@@ -44,12 +49,18 @@ function AccordionNav({
   activeSection: DesignDocSectionId;
   onNavigate?: () => void;
 }) {
-  // Auto-expand the group that contains the active section
+  const pathname = usePathname();
+
+  // If the active section has a parent (e.g. nyt-tech-stack → brand-nyt),
+  // use the parent for group expansion and section highlighting
+  const effectiveActiveSection = getParentSection(activeSection) ?? activeSection;
+
+  // Auto-expand the group that contains the active (or parent) section
   const activeGroupIndex = useMemo(() => {
     return DESIGN_DOC_GROUPS.findIndex((g) =>
-      g.sectionIds.includes(activeSection),
+      g.sectionIds.includes(effectiveActiveSection),
     );
-  }, [activeSection]);
+  }, [effectiveActiveSection]);
 
   const [expanded, setExpanded] = useState<Set<number>>(() => {
     const initial = new Set<number>();
@@ -85,7 +96,7 @@ function AccordionNav({
     <div className="flex flex-col gap-1">
       {DESIGN_DOC_GROUPS.map((group, groupIdx) => {
         const isExpanded = expanded.has(groupIdx);
-        const hasActive = group.sectionIds.includes(activeSection);
+        const hasActive = group.sectionIds.includes(effectiveActiveSection);
 
         return (
           <div key={group.label}>
@@ -121,7 +132,7 @@ function AccordionNav({
             {isExpanded && (
               <ul className="mb-1 ml-1 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
                 {group.sectionIds.map((sectionId) => {
-                  const isActive = sectionId === activeSection;
+                  const isActive = sectionId === activeSection || sectionId === effectiveActiveSection;
                   const label =
                     sectionLabelMap.get(sectionId) ?? sectionId;
                   const showSubLinks =
@@ -143,20 +154,114 @@ function AccordionNav({
                         {label}
                       </Link>
 
-                      {/* Brand sub-section anchor links */}
+                      {/* Game sub-links directly under "Games" section */}
+                      {sectionId === "nyt-games-articles" && isActive && (
+                        <ul className="mb-1 ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-300 pl-2">
+                          {getGameArticleSubLinks().map((game) => {
+                            const isGameActive = pathname === `/admin/design-docs/nyt-games-articles/${game.slug}`;
+                            return (
+                              <li key={game.slug}>
+                                <Link
+                                  href={`/admin/design-docs/nyt-games-articles/${game.slug}` as Route}
+                                  onClick={onNavigate}
+                                  className={`block rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                                    isGameActive
+                                      ? "bg-zinc-100 text-zinc-900"
+                                      : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                                  }`}
+                                >
+                                  {game.label}
+                                </Link>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+
+                      {/* Brand sub-section links (anchors or page links) */}
                       {showSubLinks && (
                         <ul className="mb-1 ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-300 pl-2">
-                          {getBrandSubSections(sectionId).map((sub) => (
-                            <li key={sub.anchor}>
-                              <a
-                                href={`#${sub.anchor}`}
-                                onClick={onNavigate}
-                                className="block rounded px-2 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
-                              >
-                                {sub.label}
-                              </a>
-                            </li>
-                          ))}
+                          {getBrandSubSections(sectionId).map((sub) => {
+                            const isSubActive = sub.href
+                              ? pathname.startsWith(sub.href)
+                              : false;
+
+                            return (
+                              <li key={sub.anchor}>
+                                {sub.href ? (
+                                  <Link
+                                    href={sub.href as Route}
+                                    onClick={onNavigate}
+                                    className={`block rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                                      isSubActive
+                                        ? "bg-zinc-100 text-zinc-900"
+                                        : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                                    }`}
+                                  >
+                                    {sub.label}
+                                  </Link>
+                                ) : (
+                                  <a
+                                    href={`#${sub.anchor}`}
+                                    onClick={onNavigate}
+                                    className="block rounded px-2 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+                                  >
+                                    {sub.label}
+                                  </a>
+                                )}
+
+                                {/* Nested article sub-links under "Pages" */}
+                                {sub.href === "/admin/design-docs/nyt-articles" && isSubActive && (
+                                  <ul className="ml-2 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
+                                    {getArticleSubLinks().map((article) => {
+                                      const isArticleActive = pathname === `/admin/design-docs/nyt-articles/${article.slug}`;
+                                      return (
+                                        <li key={article.slug}>
+                                          <Link
+                                            href={`/admin/design-docs/nyt-articles/${article.slug}` as Route}
+                                            onClick={onNavigate}
+                                            className={`block rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                                              isArticleActive
+                                                ? "bg-zinc-100 text-zinc-900"
+                                                : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                                            }`}
+                                          >
+                                            {article.label.length > 45 ? `${article.label.slice(0, 45)}…` : article.label}
+                                          </Link>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+
+                                {/* Nested Athletic article sub-links under "Pages" */}
+                                {sub.href === "/admin/design-docs/athletic-articles" && isSubActive && (
+                                  <ul className="ml-2 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
+                                    {getAthleticArticleSubLinks().map((article) => {
+                                      const isArticleActive = pathname === `/admin/design-docs/athletic-articles/${article.slug}`;
+                                      return (
+                                        <li key={article.slug}>
+                                          <Link
+                                            href={`/admin/design-docs/athletic-articles/${article.slug}` as Route}
+                                            onClick={onNavigate}
+                                            className={`block rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                                              isArticleActive
+                                                ? "bg-zinc-100 text-zinc-900"
+                                                : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                                            }`}
+                                          >
+                                            {article.label.length > 45 ? `${article.label.slice(0, 45)}…` : article.label}
+                                          </Link>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+
+                                {/* Game article sub-links moved to top-level "Games" section */}
+                              </li>
+                            );
+                          })}
                         </ul>
                       )}
                     </li>

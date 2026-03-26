@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { GENERATED_GLYPH_COMPARISON_ARTIFACT } from "@/lib/fonts/brand-fonts/glyph-comparison.ts";
+import type { ResolvedFontAsset } from "@/lib/fonts/brand-fonts/types";
 
 const SAMPLE_TEXT_HEADING = "The Reality Report";
 const SAMPLE_TEXT_BODY =
@@ -49,6 +50,12 @@ function closestWeight(pair: (typeof GENERATED_GLYPH_COMPARISON_ARTIFACT.pairs)[
       return right.overallScore - left.overallScore;
     })[0]?.weight ?? pair.perWeight[0]?.weight ?? 400
   );
+}
+
+function formatResolvedAsset(asset?: ResolvedFontAsset): string | null {
+  if (!asset) return null;
+  const width = asset.resolvedWidth === "normal" ? "" : ` · ${asset.resolvedWidth}`;
+  return `${asset.resolvedFamilyName} · ${asset.resolvedWeight} ${asset.resolvedStyle}${width}`;
 }
 
 export default function FontPairAudit() {
@@ -161,6 +168,20 @@ export default function FontPairAudit() {
               <p className="mt-2 text-[13px] leading-relaxed text-zinc-500">
                 {pair.roleLabel} uses {referenceFamily} and is compared against {pair.candidateFamily} across the available hosted weights.
               </p>
+              {pair.resolvedSourceAsset || pair.resolvedCandidateAsset ? (
+                <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+                  {pair.resolvedSourceAsset ? (
+                    <span className="rounded-md bg-white px-2 py-0.5 font-semibold ring-1 ring-inset ring-zinc-200">
+                      source {formatResolvedAsset(pair.resolvedSourceAsset)}
+                    </span>
+                  ) : null}
+                  {pair.resolvedCandidateAsset ? (
+                    <span className="rounded-md bg-white px-2 py-0.5 font-semibold ring-1 ring-inset ring-zinc-200">
+                      candidate {formatResolvedAsset(pair.resolvedCandidateAsset)}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="flex flex-shrink-0 flex-col items-end gap-1.5 lg:min-w-[180px]">

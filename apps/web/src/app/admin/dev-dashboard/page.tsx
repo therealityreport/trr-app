@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
-import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
-import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import { DevDashboardShell } from "./_components/DevDashboardShell";
 
 // ============================================================================
 // Types (duplicated from server service; keep additive + compatible)
@@ -246,6 +245,7 @@ export default function DevDashboardPage() {
     (input: RequestInfo | URL, init?: RequestInit) =>
       fetchAdminWithAuth(input, init, {
         preferredUser: user,
+        allowDevAdminBypass: true,
       }),
     [user],
   );
@@ -360,36 +360,13 @@ export default function DevDashboardPage() {
 
   return (
     <ClientOnly>
-      <div className="min-h-screen bg-zinc-50">
-        <AdminGlobalHeader bodyClassName="px-6 py-6">
-          <div className="mx-auto flex max-w-7xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Dev Dashboard", "/admin/dev-dashboard")} className="mb-1" />
-              <div className="mt-1 flex items-center gap-3">
-                <h1 className="text-3xl font-bold text-zinc-900">Dev Dashboard</h1>
-                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-700">
-                  Dev
-                </span>
-              </div>
-              <p className="mt-2 text-sm text-zinc-500">
-                Cross-repo git state, PRs, and outstanding task signals. Refresh the browser to update.
-              </p>
-              {data?.generatedAt ? (
-                <p className="mt-1 text-xs text-zinc-400">Generated: {new Date(data.generatedAt).toLocaleString()}</p>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Link
-                href="/admin"
-                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-              >
-                Back to Admin
-              </Link>
-            </div>
-          </div>
-        </AdminGlobalHeader>
-
-        <main className="mx-auto max-w-7xl px-6 py-8">
+      <DevDashboardShell
+        activeRoute="/admin/dev-dashboard"
+        breadcrumbItems={buildAdminSectionBreadcrumb("Dev Dashboard", "/admin/dev-dashboard")}
+        title="Dev Dashboard"
+        description="Cross-repo git state, PRs, and outstanding task signals. Refresh the browser to update."
+        generatedAt={data?.generatedAt}
+      >
           {error ? (
             <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
               {error}
@@ -550,8 +527,7 @@ export default function DevDashboardPage() {
               </section>
             </>
           ) : null}
-        </main>
-      </div>
+      </DevDashboardShell>
     </ClientOnly>
   );
 }

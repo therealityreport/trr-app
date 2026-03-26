@@ -1,144 +1,84 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const { requireAdminMock, getSeasonCastWithEpisodeCountsMock, getCastByShowIdMock } = vi.hoisted(
-  () => ({
-    requireAdminMock: vi.fn(),
-    getSeasonCastWithEpisodeCountsMock: vi.fn(),
-    getCastByShowIdMock: vi.fn(),
-  })
-);
+process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+
+const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+  requireAdminMock: vi.fn(),
+  fetchAdminBackendJsonMock: vi.fn(),
+}));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
 }));
 
-vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  getSeasonCastWithEpisodeCounts: getSeasonCastWithEpisodeCountsMock,
-  getCastByShowId: getCastByShowIdMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminProxyErrorResponse: (error: unknown) =>
+    NextResponse.json({ error: error instanceof Error ? error.message : "failed" }, { status: 500 }),
 }));
 
 import { GET } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/cast/route";
 
-describe("season cast route fallback behavior", () => {
+describe("season cast route proxy parity", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    getSeasonCastWithEpisodeCountsMock.mockReset();
-    getCastByShowIdMock.mockReset();
-
-    requireAdminMock.mockResolvedValue(undefined);
-    getSeasonCastWithEpisodeCountsMock.mockResolvedValue([]);
-    getCastByShowIdMock.mockResolvedValue([]);
+    fetchAdminBackendJsonMock.mockReset();
+    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
   });
 
-  it("falls back to show-level cast when season evidence is empty", async () => {
-    getCastByShowIdMock.mockResolvedValue([
-      {
-        person_id: "p-fallback",
-        full_name: "Fallback Person",
-        cast_member_name: "Fallback Person",
-        photo_url: "https://example.com/fallback.jpg",
-        total_episodes: null,
+  it("forwards default season-cast params and preserves fallback envelope", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        cast: [{ person_id: "p-fallback", person_name: "Fallback Person", episodes_in_season: 0 }],
+        cast_source: "show_fallback",
+        eligibility_warning: "fallback",
+        pagination: { limit: 500, offset: 0, count: 1 },
+        include_archive_only: false,
       },
-    ]);
+      durationMs: 7,
+    });
 
-    const request = new NextRequest(
-      "http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast?limit=500"
-    );
+    const request = new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast");
     const response = await GET(request, {
       params: Promise.resolve({ showId: "show-1", seasonNumber: "1" }),
     });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getSeasonCastWithEpisodeCountsMock).toHaveBeenCalledWith(
-      "show-1",
-      1,
-      expect.objectContaining({
-        limit: 500,
-        offset: 0,
-        photoFallbackMode: "none",
-      })
-    );
-    expect(getCastByShowIdMock).toHaveBeenCalledWith(
-      "show-1",
-      expect.objectContaining({
-        limit: 500,
-        offset: 0,
-        photoFallbackMode: "none",
-      })
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/show-1/seasons/1/cast?limit=500&offset=0&photo_fallback=none",
+      expect.objectContaining({ routeName: "season-cast" }),
     );
     expect(payload.cast_source).toBe("show_fallback");
-    expect(typeof payload.eligibility_warning).toBe("string");
-    expect(payload.cast).toHaveLength(1);
-    expect(payload.cast[0].person_id).toBe("p-fallback");
-    expect(payload.cast[0].episodes_in_season).toBe(0);
-    expect(payload.cast[0].total_episodes).toBe(0);
   });
 
-  it("does not fallback when include_archive_only=true", async () => {
-    getCastByShowIdMock.mockResolvedValue([
-      {
-        person_id: "p-fallback",
+  it("passes include_archive_only and photo_fallback through unchanged", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        cast: [],
+        cast_source: "season_evidence",
+        eligibility_warning: null,
+        pagination: { limit: 500, offset: 0, count: 0 },
+        include_archive_only: true,
       },
-    ]);
-
-    const request = new NextRequest(
-      "http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast?limit=500&include_archive_only=true"
-    );
-    const response = await GET(request, {
-      params: Promise.resolve({ showId: "show-1", seasonNumber: "1" }),
+      durationMs: 4,
     });
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(getCastByShowIdMock).not.toHaveBeenCalled();
-    expect(payload.cast).toHaveLength(0);
-    expect(payload.cast_source).toBe("season_evidence");
-    expect(payload.eligibility_warning).toBeNull();
-  });
-
-  it("passes through photo_fallback=bravo", async () => {
-    getSeasonCastWithEpisodeCountsMock.mockResolvedValue([
-      {
-        person_id: "p1",
-        person_name: "Person One",
-        episodes_in_season: 1,
-        total_episodes: 3,
-        photo_url: null,
-      },
-    ]);
 
     const request = new NextRequest(
-      "http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast?photo_fallback=bravo"
+      "http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast?include_archive_only=true&photo_fallback=bravo",
     );
     const response = await GET(request, {
       params: Promise.resolve({ showId: "show-1", seasonNumber: "1" }),
     });
 
     expect(response.status).toBe(200);
-    expect(getSeasonCastWithEpisodeCountsMock).toHaveBeenCalledWith(
-      "show-1",
-      1,
-      expect.objectContaining({ photoFallbackMode: "bravo" })
-    );
-  });
-
-  it("coerces invalid photo_fallback values to none", async () => {
-    getSeasonCastWithEpisodeCountsMock.mockResolvedValue([]);
-
-    const request = new NextRequest(
-      "http://localhost/api/admin/trr-api/shows/show-1/seasons/1/cast?photo_fallback=bad-value"
-    );
-    const response = await GET(request, {
-      params: Promise.resolve({ showId: "show-1", seasonNumber: "1" }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(getSeasonCastWithEpisodeCountsMock).toHaveBeenCalledWith(
-      "show-1",
-      1,
-      expect.objectContaining({ photoFallbackMode: "none" })
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/show-1/seasons/1/cast?limit=500&offset=0&photo_fallback=bravo&include_archive_only=true",
+      expect.objectContaining({ routeName: "season-cast" }),
     );
   });
 });

@@ -4,6 +4,7 @@ import catalogArtifact from "@/lib/fonts/brand-fonts/generated/normalized-r2-fon
 import matchesArtifact from "@/lib/fonts/brand-fonts/generated/brand-font-match-results.json";
 import glyphComparisonArtifact from "@/lib/fonts/brand-fonts/generated/glyph-comparison-results.json";
 import { BRAND_FONT_MATCH_RULES } from "./seed.ts";
+import { buildGlyphComparisonLookup } from "./glyph-comparison.ts";
 import { buildBrandFontMatchResults } from "./scoring.ts";
 import type {
   BrandFontMatchesApiResponse,
@@ -34,10 +35,18 @@ function inferScoringMode(matches: readonly BrandFontMatchResult[]): ScoringMode
     : "metadata-only";
 }
 
+function inferGeneratedVisualEvidenceHealth() {
+  return buildGlyphComparisonLookup(
+    GENERATED_GLYPH_COMPARISON_ARTIFACT,
+    GENERATED_BRAND_FONT_MATCHES.inputHash,
+  ).health;
+}
+
 export function buildBrandFontMatchesApiResponse(
   matchesEnvelope: GeneratedArtifactEnvelope<BrandFontMatchResult[]>,
   source: BrandFontMatchesApiResponse["source"],
   scoringMode: ScoringMode = inferScoringMode(matchesEnvelope.data),
+  visualEvidence = inferGeneratedVisualEvidenceHealth(),
   counts: { registryCount: number; catalogCount: number } = {
     registryCount: GENERATED_BRAND_FONT_REGISTRY.data.length,
     catalogCount: GENERATED_BRAND_FONT_CATALOG.data.length,
@@ -47,6 +56,7 @@ export function buildBrandFontMatchesApiResponse(
     source,
     refreshMode: source === "live-regenerated" ? "local-rerank" : "artifact",
     scoringMode,
+    visualEvidence,
     schemaVersion: matchesEnvelope.schemaVersion,
     scoringConfigVersion: matchesEnvelope.scoringConfigVersion,
     inputHash: matchesEnvelope.inputHash,
@@ -59,13 +69,19 @@ export function buildBrandFontMatchesApiResponse(
 }
 
 export function buildBrandFontMatchesApiResponseFromArtifacts(
-  artifacts: Pick<GeneratedBrandFontArtifacts, "registry" | "catalog" | "matches" | "scoringMode">,
+  artifacts: Pick<GeneratedBrandFontArtifacts, "registry" | "catalog" | "matches" | "scoringMode" | "visualEvidenceHealth">,
   source: BrandFontMatchesApiResponse["source"],
 ): BrandFontMatchesApiResponse {
-  return buildBrandFontMatchesApiResponse(artifacts.matches, source, artifacts.scoringMode, {
-    registryCount: artifacts.registry.data.length,
-    catalogCount: artifacts.catalog.data.length,
-  });
+  return buildBrandFontMatchesApiResponse(
+    artifacts.matches,
+    source,
+    artifacts.scoringMode,
+    artifacts.visualEvidenceHealth,
+    {
+      registryCount: artifacts.registry.data.length,
+      catalogCount: artifacts.catalog.data.length,
+    },
+  );
 }
 
 export function getGeneratedBrandFontMatchesApiResponse(): BrandFontMatchesApiResponse {
@@ -75,6 +91,7 @@ export function getGeneratedBrandFontMatchesApiResponse(): BrandFontMatchesApiRe
       catalog: GENERATED_BRAND_FONT_CATALOG,
       matches: GENERATED_BRAND_FONT_MATCHES,
       scoringMode: inferScoringMode(GENERATED_BRAND_FONT_MATCHES.data),
+      visualEvidenceHealth: inferGeneratedVisualEvidenceHealth(),
     },
     "generated-artifact",
   );

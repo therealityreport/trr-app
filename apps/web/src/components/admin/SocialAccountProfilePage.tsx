@@ -8,6 +8,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import SocialAccountProfileHashtagTimelineChart from "@/components/admin/SocialAccountProfileHashtagTimelineChart";
 import {
+  type SocialAccountCatalogFreshness,
   type CatalogBackfillRequest,
   type CatalogReviewResolveRequest,
   type CatalogSyncRecentRequest,
@@ -32,7 +33,7 @@ import {
 } from "@/lib/admin/social-account-profile";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { buildSocialAccountProfileUrl } from "@/lib/admin/show-admin-routes";
-import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 type Props = {
@@ -79,15 +80,9 @@ type ShowOption = {
   show_slug?: string | null;
 };
 
-type SeasonOption = {
-  season_id: string;
-  season_number: number | null;
-};
-
 type ReviewResolutionDraft = {
   resolution_action: CatalogReviewResolveRequest["resolution_action"];
   show_id: string;
-  season_id: string;
 };
 
 type CollaboratorsTagsResponse = {
@@ -123,10 +118,31 @@ type CatalogRunProgressHandleCard = {
   stages: Array<CatalogRunProgressStageStats & { stage: string }>;
 };
 
+const socialProfileRequestInflight = new Map<string, Promise<unknown>>();
+
+const withSocialProfileRequestDedup = <T,>(key: string, loader: () => Promise<T>): Promise<T> => {
+  const existing = socialProfileRequestInflight.get(key) as Promise<T> | undefined;
+  if (existing) {
+    return existing;
+  }
+  const promise = loader().finally(() => {
+    if (socialProfileRequestInflight.get(key) === promise) {
+      socialProfileRequestInflight.delete(key);
+    }
+  });
+  socialProfileRequestInflight.set(key, promise as Promise<unknown>);
+  return promise;
+};
+
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
 const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
 const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const CATALOG_PROGRESS_POLL_INTERVAL_MS = 5_000;
+const HASHTAG_WINDOW_OPTIONS = [
+  { value: "all", label: "All Time" },
+  { value: "30d", label: "This Month" },
+  { value: "365d", label: "This Year" },
+] as const;
 const CATALOG_STAGE_SORT_ORDER: Record<string, number> = {
   posts: 0,
   comments: 1,
@@ -153,6 +169,32 @@ const formatDateTime = (value?: string | null): string => {
 
 const formatSeasonLabel = (seasonNumber?: number | null): string => {
   return seasonNumber ? `Season ${seasonNumber}` : "All seasons";
+};
+
+const formatHashtagWindowLabel = (value: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]): string => {
+  return HASHTAG_WINDOW_OPTIONS.find((option) => option.value === value)?.label ?? "All Time";
+};
+
+const getPostMatchBadge = (post: Pick<SocialAccountProfilePost, "match_mode" | "source_surface">): {
+  label: string;
+  tone: string;
+} => {
+  if (post.match_mode === "collaborator") {
+    return {
+      label: "Collaborator match",
+      tone: "border-sky-200 bg-sky-50 text-sky-700",
+    };
+  }
+  if (post.source_surface === "catalog") {
+    return {
+      label: "Catalog only",
+      tone: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+  return {
+    label: "Owned post",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  };
 };
 
 const formatRunStatusLabel = (value?: string | null): string => {
@@ -427,6 +469,19 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
 
 export default function SocialAccountProfilePage({ platform, handle, activeTab }: Props) {
   const { user, checking, hasAccess } = useAdminGuard();
+  const fetchAdminWithAuth = useCallback(
+    (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+      options?: Parameters<typeof fetchAdminWithAuthBase>[2],
+    ) =>
+      fetchAdminWithAuthBase(input, init, {
+        ...options,
+        preferredUser: options?.preferredUser ?? user,
+        allowDevAdminBypass: options?.allowDevAdminBypass ?? true,
+      }),
+    [user],
+  );
   const [summary, setSummary] = useState<SocialAccountProfileSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -457,18 +512,20 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [reviewQueueError, setReviewQueueError] = useState<string | null>(null);
   const [resolvingReviewItemId, setResolvingReviewItemId] = useState<string | null>(null);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewResolutionDraft>>({});
-  const [reviewSeasonOptionsByShow, setReviewSeasonOptionsByShow] = useState<Record<string, SeasonOption[]>>({});
-  const [reviewSeasonLoadingByShow, setReviewSeasonLoadingByShow] = useState<Record<string, boolean>>({});
 
   const [hashtags, setHashtags] = useState<SocialAccountProfileHashtag[]>([]);
   const [hashtagsLoading, setHashtagsLoading] = useState(false);
   const [hashtagsError, setHashtagsError] = useState<string | null>(null);
+  const [hashtagWindow, setHashtagWindow] = useState<(typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]>("all");
   const [savingHashtag, setSavingHashtag] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [draftAssignments, setDraftAssignments] = useState<Record<string, SocialAccountProfileHashtagAssignment[]>>({});
   const [hashtagTimeline, setHashtagTimeline] = useState<SocialAccountProfileHashtagTimeline | null>(null);
   const [hashtagTimelineLoading, setHashtagTimelineLoading] = useState(false);
   const [hashtagTimelineError, setHashtagTimelineError] = useState<string | null>(null);
+  const [catalogFreshness, setCatalogFreshness] = useState<SocialAccountCatalogFreshness | null>(null);
+  const [catalogFreshnessLoading, setCatalogFreshnessLoading] = useState(false);
+  const [catalogFreshnessError, setCatalogFreshnessError] = useState<string | null>(null);
 
   const [collaboratorsTags, setCollaboratorsTags] = useState<CollaboratorsTagsResponse | null>(null);
   const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
@@ -482,8 +539,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogProgressLastSuccessAt, setCatalogProgressLastSuccessAt] = useState<string | null>(null);
   const [catalogLogsExpanded, setCatalogLogsExpanded] = useState(false);
   const catalogTerminalSummaryRefreshRunIdRef = useRef<string | null>(null);
+  const catalogFreshnessProbeKeyRef = useRef<string | null>(null);
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
   const hasSummary = summary !== null;
+  const summaryRequestKey = `summary:${platform}:${handle}`;
+  const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}`;
+  const hashtagTimelineRequestKey = `hashtags-timeline:${platform}:${handle}:${hashtagWindow}`;
+  const collaboratorsRequestKey = `collaborators-tags:${platform}:${handle}`;
 
   useEffect(() => {
     setPage(1);
@@ -493,8 +555,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setSummaryError(null);
     setCatalogCardPreview(null);
     setReviewDrafts({});
-    setReviewSeasonOptionsByShow({});
-    setReviewSeasonLoadingByShow({});
     setCatalogProgressRunId(null);
     setCatalogRunProgress(null);
     setCatalogRunProgressError(null);
@@ -502,9 +562,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogProgressLastSuccessAt(null);
     setCatalogLogsExpanded(false);
     catalogTerminalSummaryRefreshRunIdRef.current = null;
+    catalogFreshnessProbeKeyRef.current = null;
     setHashtagTimeline(null);
     setHashtagTimelineError(null);
     setHashtagTimelineLoading(false);
+    setHashtagWindow("all");
+    setCatalogFreshness(null);
+    setCatalogFreshnessLoading(false);
+    setCatalogFreshnessError(null);
     setPostSearchExpanded(false);
     setPostSearchQuery("");
     setPostSearchResults(null);
@@ -523,18 +588,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const refreshSummary = useCallback(async () => {
     if (!user) return;
-    const response = await fetchAdminWithAuth(
-      `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
-      undefined,
-      { preferredUser: user },
-    );
-    const data = (await response.json().catch(() => ({}))) as SocialAccountProfileSummary & { error?: string };
-    if (!response.ok) {
-      throw new Error(data.error || "Failed to load social account profile summary");
-    }
+    const data = await withSocialProfileRequestDedup(summaryRequestKey, async () => {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
+        undefined,
+        { preferredUser: user },
+      );
+      const payload = (await response.json().catch(() => ({}))) as SocialAccountProfileSummary & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to load social account profile summary");
+      }
+      return payload;
+    });
     setSummary(data);
     setSummaryError(null);
-  }, [handle, platform, user]);
+  }, [fetchAdminWithAuth, handle, platform, summaryRequestKey, user]);
 
   const applyCancelledCatalogRunLocally = useCallback(
     (runId: string, cancelledAt?: string | null) => {
@@ -621,41 +689,59 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
       return false;
     },
-    [applyCancelledCatalogRunLocally, handle, platform, user],
+    [applyCancelledCatalogRunLocally, fetchAdminWithAuth, handle, platform, user],
   );
 
   const refreshHashtags = useCallback(async () => {
     if (!user) return;
-    const response = await fetchAdminWithAuth(
-      `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags`,
-      undefined,
-      { preferredUser: user },
-    );
-    const data = (await response.json().catch(() => ({}))) as HashtagsResponse & { error?: string };
-    if (!response.ok) {
-      throw new Error(data.error || "Failed to load social account profile hashtags");
+    const query = new URLSearchParams();
+    if (hashtagWindow !== "all") {
+      query.set("window", hashtagWindow);
     }
+    const data = await withSocialProfileRequestDedup(hashtagsRequestKey, async () => {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags${
+          query.size > 0 ? `?${query.toString()}` : ""
+        }`,
+        undefined,
+        { preferredUser: user },
+      );
+      const payload = (await response.json().catch(() => ({}))) as HashtagsResponse & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to load social account profile hashtags");
+      }
+      return payload;
+    });
     setHashtags(data.items ?? []);
     setDraftAssignments(
       Object.fromEntries(
         (data.items ?? []).map((item) => [item.hashtag, item.assignments?.map((assignment) => ({ ...assignment })) ?? []]),
       ),
     );
-  }, [handle, platform, user]);
+  }, [fetchAdminWithAuth, handle, hashtagWindow, hashtagsRequestKey, platform, user]);
 
   const refreshHashtagTimeline = useCallback(async () => {
     if (!user || platform !== "instagram") return;
-    const response = await fetchAdminWithAuth(
-      `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags/timeline`,
-      undefined,
-      { preferredUser: user },
-    );
-    const data = (await response.json().catch(() => ({}))) as HashtagTimelineResponse;
-    if (!response.ok) {
-      throw new Error(data.error || "Failed to load social account hashtag timeline");
+    const query = new URLSearchParams();
+    if (hashtagWindow !== "all") {
+      query.set("window", hashtagWindow);
     }
+    const data = await withSocialProfileRequestDedup(hashtagTimelineRequestKey, async () => {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags/timeline${
+          query.size > 0 ? `?${query.toString()}` : ""
+        }`,
+        undefined,
+        { preferredUser: user },
+      );
+      const payload = (await response.json().catch(() => ({}))) as HashtagTimelineResponse;
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to load social account hashtag timeline");
+      }
+      return payload;
+    });
     setHashtagTimeline(data);
-  }, [handle, platform, user]);
+  }, [fetchAdminWithAuth, handle, hashtagTimelineRequestKey, hashtagWindow, platform, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess) return;
@@ -665,15 +751,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setSummaryLoading(true);
       setSummaryError(null);
       try {
-        const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
-          undefined,
-          { preferredUser: user },
-        );
-        const data = (await response.json().catch(() => ({}))) as SocialAccountProfileSummary & { error?: string };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to load social account profile summary");
-        }
+        const data = await withSocialProfileRequestDedup(summaryRequestKey, async () => {
+          const response = await fetchAdminWithAuth(
+            `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
+            undefined,
+            { preferredUser: user },
+          );
+          const payload = (await response.json().catch(() => ({}))) as SocialAccountProfileSummary & { error?: string };
+          if (!response.ok) {
+            throw new Error(payload.error || "Failed to load social account profile summary");
+          }
+          return payload;
+        });
         if (cancelled) return;
         setSummary(data);
         setSummaryError(null);
@@ -689,7 +778,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [checking, handle, hasAccess, platform, user]);
+  }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, summaryRequestKey, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog) return;
@@ -731,6 +820,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [
     checking,
+    fetchAdminWithAuth,
     handle,
     hasAccess,
     platform,
@@ -772,7 +862,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, handle, hasAccess, page, platform, user]);
+  }, [activeTab, checking, fetchAdminWithAuth, handle, hasAccess, page, platform, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || activeTab !== "catalog" || !supportsCatalog) return;
@@ -812,10 +902,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, catalogFilter, catalogPage, checking, handle, hasAccess, platform, supportsCatalog, user]);
+  }, [activeTab, catalogFilter, catalogPage, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsCatalog, user]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || activeTab !== "hashtags") return;
+    const shouldLoadHashtags = activeTab === "hashtags" || (activeTab === "stats" && hashtagWindow !== "all");
+    if (checking || !user || !hasAccess || !shouldLoadHashtags) return;
     let cancelled = false;
 
     const loadHashtags = async () => {
@@ -836,7 +927,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, hasAccess, refreshHashtags, user]);
+  }, [activeTab, checking, hashtagWindow, hasAccess, refreshHashtags, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || activeTab !== "hashtags" || platform !== "instagram") {
@@ -901,7 +992,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, handle, hasAccess, platform, supportsCatalog, user]);
+  }, [activeTab, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsCatalog, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || activeTab !== "collaborators-tags") return;
@@ -911,15 +1002,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setCollaboratorsLoading(true);
       setCollaboratorsError(null);
       try {
-        const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/collaborators-tags`,
-          undefined,
-          { preferredUser: user },
-        );
-        const data = (await response.json().catch(() => ({}))) as CollaboratorsTagsResponse & { error?: string };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to load social account profile collaborators and tags");
-        }
+        const data = await withSocialProfileRequestDedup(collaboratorsRequestKey, async () => {
+          const response = await fetchAdminWithAuth(
+            `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/collaborators-tags`,
+            undefined,
+            { preferredUser: user },
+          );
+          const payload = (await response.json().catch(() => ({}))) as CollaboratorsTagsResponse & { error?: string };
+          if (!response.ok) {
+            throw new Error(payload.error || "Failed to load social account profile collaborators and tags");
+          }
+          return payload;
+        });
         if (cancelled) return;
         setCollaboratorsTags(data);
       } catch (error) {
@@ -936,7 +1030,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, handle, hasAccess, platform, user]);
+  }, [activeTab, checking, collaboratorsRequestKey, fetchAdminWithAuth, handle, hasAccess, platform, user]);
 
   const activeCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
     const runs = summary?.catalog_recent_runs ?? [];
@@ -947,6 +1041,68 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const runs = summary?.catalog_recent_runs ?? [];
     return runs[0] ?? null;
   }, [summary?.catalog_recent_runs]);
+
+  const displayedStatsHashtags = useMemo(() => {
+    if (hashtags.length > 0 || hashtagWindow !== "all") {
+      return hashtags;
+    }
+    return summary?.top_hashtags ?? [];
+  }, [hashtagWindow, hashtags, summary?.top_hashtags]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || !supportsCatalog || platform !== "instagram") return;
+
+    const latestStatus = normalizeCatalogRunStatus(latestCatalogRun?.status);
+    const activeStatus = normalizeCatalogRunStatus(activeCatalogRun?.status);
+    const probeKey = `${platform}:${handle}:${latestCatalogRun?.run_id ?? "none"}:${activeCatalogRun?.run_id ?? "none"}`;
+
+    if (activeCatalogRun || latestStatus !== "completed" || activeStatus) {
+      setCatalogFreshness(null);
+      setCatalogFreshnessError(null);
+      setCatalogFreshnessLoading(false);
+      catalogFreshnessProbeKeyRef.current = probeKey;
+      return;
+    }
+    if (catalogFreshnessProbeKeyRef.current === probeKey) {
+      return;
+    }
+
+    let cancelled = false;
+    catalogFreshnessProbeKeyRef.current = probeKey;
+
+    const loadCatalogFreshness = async () => {
+      setCatalogFreshnessLoading(true);
+      setCatalogFreshnessError(null);
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/freshness`,
+          {
+            method: "POST",
+          },
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as SocialAccountCatalogFreshness & { error?: string };
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to check catalog freshness");
+        }
+        if (cancelled) return;
+        setCatalogFreshness(data);
+      } catch (error) {
+        if (cancelled) return;
+        setCatalogFreshness(null);
+        setCatalogFreshnessError(error instanceof Error ? error.message : "Failed to check catalog freshness");
+      } finally {
+        if (!cancelled) {
+          setCatalogFreshnessLoading(false);
+        }
+      }
+    };
+
+    void loadCatalogFreshness();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCatalogRun, checking, fetchAdminWithAuth, handle, hasAccess, latestCatalogRun?.run_id, latestCatalogRun?.status, platform, supportsCatalog, user]);
 
   const trimmedPostSearchQuery = useMemo(() => postSearchQuery.trim(), [postSearchQuery]);
 
@@ -1003,7 +1159,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [checking, handle, hasAccess, platform, postSearchExpanded, trimmedPostSearchQuery, user]);
+  }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, postSearchExpanded, trimmedPostSearchQuery, user]);
 
   const selectedCatalogRunId = useMemo(() => {
     const normalized = String(catalogProgressRunId || "").trim();
@@ -1193,7 +1349,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         window.clearTimeout(timeoutId);
       }
     };
-  }, [backgroundCatalogRunId, checking, handle, hasAccess, platform, supportsCatalog, user]);
+  }, [backgroundCatalogRunId, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsCatalog, user]);
 
   useEffect(() => {
     const runId = String(catalogRunProgress?.run_id || "").trim();
@@ -1203,52 +1359,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogTerminalSummaryRefreshRunIdRef.current = runId;
     void refreshSummary().catch(() => {});
   }, [catalogRunProgress?.run_id, catalogRunProgress?.run_status, refreshSummary]);
-
-  useEffect(() => {
-    if (checking || !user || !hasAccess || !supportsCatalog || !backgroundCatalogRunIsActive) return;
-    let cancelled = false;
-    let timeoutId: number | null = null;
-
-    const refreshLiveAccountState = async () => {
-      try {
-        await refreshSummary();
-        if (!cancelled && activeTab === "hashtags") {
-          await refreshHashtags();
-          if (platform === "instagram") {
-            await refreshHashtagTimeline();
-          }
-        }
-      } catch {
-        // The progress poll already surfaces run-level failures; keep live-summary refresh best effort.
-      }
-      if (cancelled) return;
-      timeoutId = window.setTimeout(() => {
-        void refreshLiveAccountState();
-      }, CATALOG_PROGRESS_POLL_INTERVAL_MS);
-    };
-
-    timeoutId = window.setTimeout(() => {
-      void refreshLiveAccountState();
-    }, CATALOG_PROGRESS_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [
-    activeTab,
-    backgroundCatalogRunIsActive,
-    checking,
-    hasAccess,
-    platform,
-    refreshHashtagTimeline,
-    refreshHashtags,
-    refreshSummary,
-    supportsCatalog,
-    user,
-  ]);
 
   const catalogStageEntries = useMemo(() => {
     return Object.entries(catalogRunProgress?.stages ?? {})
@@ -1292,7 +1402,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const rawCompleted = Number(payload.completed_posts ?? 0);
     const completed = rawCompleted > 0 ? rawCompleted : Number(catalogProgressSummary.items ?? 0);
     const matched = Number(payload.matched_posts ?? 0);
-    const fallbackTotal = Number(summary?.total_posts ?? 0);
+    const fallbackTotal = Number(summary?.live_total_posts ?? summary?.total_posts ?? 0);
     const total = Number(payload.total_posts ?? 0) || fallbackTotal;
     const pct = total > 0 ? Math.round((completed / total) * 100) : catalogProgressSummary.pct;
     return {
@@ -1303,7 +1413,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       hasTotal: total > 0,
       hasCompleted: completed > 0,
     };
-  }, [catalogProgressSummary.items, catalogProgressSummary.pct, catalogRunProgress?.post_progress, summary?.total_posts]);
+  }, [
+    catalogProgressSummary.items,
+    catalogProgressSummary.pct,
+    catalogRunProgress?.post_progress,
+    summary?.live_total_posts,
+    summary?.total_posts,
+  ]);
 
   const catalogTerminalCoverageMessage = useMemo(() => {
     const status = displayedCatalogRunStatus;
@@ -1378,6 +1494,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     summary?.live_catalog_total_posts,
     supportsCatalog,
   ]);
+
+  const displayTotalPosts = useMemo(() => {
+    if (Number(summary?.live_total_posts ?? 0) > 0) {
+      return Number(summary?.live_total_posts ?? 0);
+    }
+    return Number(summary?.total_posts ?? 0);
+  }, [summary?.live_total_posts, summary?.total_posts]);
 
   const catalogHandleCards = useMemo((): CatalogRunProgressHandleCard[] => {
     const frontierMode =
@@ -1490,21 +1613,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }));
   }, [summary?.per_show_counts]);
 
-  const seasonOptionsByShow = useMemo(() => {
-    const next = new Map<string, SeasonOption[]>();
-    for (const season of summary?.per_season_counts ?? []) {
-      if (!season.show_id || !season.season_id) continue;
-      const existing = next.get(season.show_id) ?? [];
-      existing.push({
-        season_id: season.season_id,
-        season_number: season.season_number ?? null,
-      });
-      existing.sort((a, b) => Number(a.season_number ?? 0) - Number(b.season_number ?? 0));
-      next.set(season.show_id, existing);
-    }
-    return next;
-  }, [summary?.per_season_counts]);
-
   const reviewShowOptionsByItem = useMemo<Record<string, ShowOption[]>>(() => {
     const optionsByItem: Record<string, ShowOption[]> = {};
     for (const item of reviewQueue) {
@@ -1525,39 +1633,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return optionsByItem;
   }, [reviewQueue, showOptions]);
 
-  const mergedSeasonOptionsByShow = useMemo<Record<string, SeasonOption[]>>(() => {
-    const showIds = new Set<string>([
-      ...Array.from(seasonOptionsByShow.keys()),
-      ...Object.keys(reviewSeasonOptionsByShow),
-    ]);
-    const next: Record<string, SeasonOption[]> = {};
-    for (const showId of showIds) {
-      const merged = new Map<string, SeasonOption>();
-      for (const option of seasonOptionsByShow.get(showId) ?? []) {
-        merged.set(option.season_id, option);
-      }
-      for (const option of reviewSeasonOptionsByShow[showId] ?? []) {
-        merged.set(option.season_id, option);
-      }
-      next[showId] = Array.from(merged.values()).sort(
-        (left, right) => Number(left.season_number ?? 0) - Number(right.season_number ?? 0),
-      );
-    }
-    return next;
-  }, [reviewSeasonOptionsByShow, seasonOptionsByShow]);
-
   const buildReviewResolutionDraft = useCallback((
     item: SocialAccountCatalogReviewItem,
     itemShowOptions: ShowOption[],
   ): ReviewResolutionDraft => {
     const fallbackShowId = item.suggested_shows?.[0]?.show_id ?? itemShowOptions[0]?.show_id ?? "";
-    const fallbackSeasonId = fallbackShowId ? mergedSeasonOptionsByShow[fallbackShowId]?.[0]?.season_id ?? "" : "";
     return {
       resolution_action: "assign_show",
       show_id: fallbackShowId,
-      season_id: fallbackSeasonId,
     };
-  }, [mergedSeasonOptionsByShow]);
+  }, []);
 
   useEffect(() => {
     setReviewDrafts((current) => {
@@ -1569,46 +1654,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       return next;
     });
   }, [buildReviewResolutionDraft, reviewQueue, reviewShowOptionsByItem]);
-
-  const loadReviewSeasonOptions = useCallback(async (showId: string) => {
-    if (!user || !showId) return;
-    if ((mergedSeasonOptionsByShow[showId] ?? []).length > 0) return;
-    if (reviewSeasonLoadingByShow[showId]) return;
-    setReviewSeasonLoadingByShow((current) => ({ ...current, [showId]: true }));
-    try {
-      const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/shows/${encodeURIComponent(showId)}/seasons?limit=50&include_episode_signal=true`,
-        undefined,
-        { preferredUser: user },
-      );
-      const data = (await response.json().catch(() => ({}))) as {
-        seasons?: Array<{ id?: string | null; season_number?: number | null }>;
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to load seasons for review queue");
-      }
-      const items = (data.seasons ?? [])
-        .filter((season) => season.id)
-        .map((season) => ({
-          season_id: season.id as string,
-          season_number: season.season_number ?? null,
-        }));
-      setReviewSeasonOptionsByShow((current) => ({ ...current, [showId]: items }));
-    } catch {
-      setReviewSeasonOptionsByShow((current) => ({ ...current, [showId]: [] }));
-    } finally {
-      setReviewSeasonLoadingByShow((current) => ({ ...current, [showId]: false }));
-    }
-  }, [mergedSeasonOptionsByShow, reviewSeasonLoadingByShow, user]);
-
-  useEffect(() => {
-    for (const draft of Object.values(reviewDrafts)) {
-      if (draft.resolution_action !== "assign_season" || !draft.show_id) continue;
-      if ((mergedSeasonOptionsByShow[draft.show_id] ?? []).length > 0 || reviewSeasonLoadingByShow[draft.show_id]) continue;
-      void loadReviewSeasonOptions(draft.show_id);
-    }
-  }, [loadReviewSeasonOptions, mergedSeasonOptionsByShow, reviewDrafts, reviewSeasonLoadingByShow]);
 
   const updateReviewDraft = (itemId: string, updates: Partial<ReviewResolutionDraft>) => {
     setReviewDrafts((current) => {
@@ -1622,19 +1667,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           return {
             resolution_action: "assign_show",
             show_id: "",
-            season_id: "",
           };
         })();
       const nextDraft = { ...currentDraft, ...updates };
-      if (updates.show_id && updates.show_id !== currentDraft.show_id) {
-        nextDraft.season_id = mergedSeasonOptionsByShow[updates.show_id]?.[0]?.season_id ?? "";
-      }
-      if (nextDraft.resolution_action === "assign_show") {
-        nextDraft.season_id = "";
-      }
       if (nextDraft.resolution_action === "mark_non_show") {
         nextDraft.show_id = "";
-        nextDraft.season_id = "";
       }
       return { ...current, [itemId]: nextDraft };
     });
@@ -1648,7 +1685,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const addHashtagAssignmentRow = (hashtag: string) => {
     const fallbackShow = showOptions[0];
     if (!fallbackShow) return;
-    const nextAssignments = [...(draftAssignments[hashtag] ?? []), { show_id: fallbackShow.show_id, season_id: null }];
+    const nextAssignments = [...(draftAssignments[hashtag] ?? []), { show_id: fallbackShow.show_id }];
     updateHashtagAssignments(hashtag, nextAssignments);
   };
 
@@ -1658,7 +1695,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       .filter((assignment) => assignment.show_id)
       .map((assignment) => ({
         show_id: assignment.show_id,
-        season_id: null,
       }));
 
     setSavingHashtag(hashtag);
@@ -1698,6 +1734,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (!user) return;
     setRunningCatalogAction(action);
     setCatalogActionMessage(null);
+    setCatalogFreshness(null);
+    setCatalogFreshnessError(null);
     try {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/${
@@ -1846,23 +1884,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         const reviewData = (await reviewResponse.json().catch(() => ({}))) as CatalogReviewQueueResponse;
         setReviewQueue(reviewData.items ?? []);
       }
-      const hashtagResponse = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags`,
-        undefined,
-        { preferredUser: user },
-      );
-      if (hashtagResponse.ok) {
-        const hashtagData = (await hashtagResponse.json().catch(() => ({}))) as HashtagsResponse;
-        setHashtags(hashtagData.items ?? []);
-        setDraftAssignments(
-          Object.fromEntries(
-            (hashtagData.items ?? []).map((item) => [
-              item.hashtag,
-              item.assignments?.map((assignment) => ({ ...assignment })) ?? [],
-            ]),
-          ),
-        );
-      }
+      await refreshHashtags().catch(() => {});
       await refreshSummary();
     } catch (error) {
       setCatalogActionMessage(error instanceof Error ? error.message : "Failed to resolve catalog review item");
@@ -1940,7 +1962,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         disabled={catalogActionsBlocked}
                         className="inline-flex rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {runningCatalogAction === "backfill" ? "Queueing Post Backfill…" : "Backfill Posts"}
+                        {runningCatalogAction === "backfill" ? "Queueing Post Update…" : "Update Posts"}
                       </button>
                       <button
                         type="button"
@@ -1983,11 +2005,44 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   )}
                 </div>
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
+                {supportsCatalog && platform === "instagram" ? (
+                  <div className="mt-3 space-y-2">
+                    {catalogFreshnessLoading ? (
+                      <p className="text-sm text-zinc-500">Checking whether the catalog is up to date…</p>
+                    ) : null}
+                    {catalogFreshnessError ? <p className="text-sm text-red-700">{catalogFreshnessError}</p> : null}
+                    {catalogFreshness && catalogFreshness.eligible ? (
+                      <div
+                        className={`rounded-xl border px-3 py-3 text-sm ${
+                          catalogFreshness.needs_recent_sync
+                            ? "border-amber-200 bg-amber-50 text-amber-800"
+                            : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        }`}
+                      >
+                        <p className="font-semibold">
+                          {catalogFreshness.needs_recent_sync
+                            ? `${formatInteger(catalogFreshness.delta_posts)} newer post${
+                                catalogFreshness.delta_posts === 1 ? "" : "s"
+                              } detected`
+                            : "Catalog is up to date"}
+                        </p>
+                        <p className="mt-1 text-xs">
+                          Stored {formatInteger(catalogFreshness.stored_total_posts)} posts
+                          {catalogFreshness.live_total_posts_current !== null &&
+                          catalogFreshness.live_total_posts_current !== undefined
+                            ? ` · live profile shows ${formatInteger(catalogFreshness.live_total_posts_current)}`
+                            : ""}
+                          {catalogFreshness.checked_at ? ` · checked ${formatDateTime(catalogFreshness.checked_at)}` : ""}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className={`grid min-w-[220px] gap-3 ${supportsCatalog ? "grid-cols-3" : "grid-cols-2"}`}>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Posts</p>
-                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(summary?.total_posts)}</p>
+                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayTotalPosts)}</p>
                 </div>
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Engagement</p>
@@ -2023,6 +2078,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <Link
                     key={tab}
                     href={buildSocialAccountProfileUrl({ platform, handle, tab }) as Route}
+                    prefetch={false}
                     className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                       isActive
                         ? "border-zinc-900 bg-zinc-900 text-white"
@@ -2091,6 +2147,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <div className="flex items-start justify-between gap-3">
                             <div className="max-w-3xl">
                               <p className="font-semibold text-zinc-900">{item.title || item.excerpt || "Untitled post"}</p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {(() => {
+                                  const badge = getPostMatchBadge(item);
+                                  return (
+                                    <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${badge.tone}`}>
+                                      {badge.label}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
                               {item.content ? <p className="mt-2 text-sm leading-6 text-zinc-600">{item.content}</p> : null}
                               <p className="mt-2 text-xs text-zinc-500">
                                 {item.show_name ?? "Unassigned"} · {formatSeasonLabel(item.season_number)} · {formatDateTime(item.posted_at)}
@@ -2454,16 +2520,45 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 ) : null}
 
                 <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                  <h2 className="text-lg font-semibold text-zinc-900">Top Hashtags</h2>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-semibold text-zinc-900">Top Hashtags</h2>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Ranked for {formatHashtagWindowLabel(hashtagWindow).toLowerCase()}.
+                      </p>
+                    </div>
+                    <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                      Window
+                      <select
+                        value={hashtagWindow}
+                        onChange={(event) =>
+                          setHashtagWindow(event.target.value as (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"])
+                        }
+                        className="mt-1 block rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                      >
+                        {HASHTAG_WINDOW_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                   <div className="mt-4 space-y-2">
-                    {(summary?.top_hashtags ?? []).length === 0 ? (
+                    {hashtagsLoading ? (
+                      <p className="text-sm text-zinc-500">Loading hashtags…</p>
+                    ) : hashtagsError ? (
+                      <p className="text-sm text-red-700">{hashtagsError}</p>
+                    ) : displayedStatsHashtags.length === 0 ? (
                       <p className="text-sm text-zinc-500">No hashtags found yet.</p>
                     ) : (
-                      (summary?.top_hashtags ?? []).map((item) => (
+                      displayedStatsHashtags.slice(0, 10).map((item) => (
                         <div key={item.hashtag} className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3">
                           <div>
                             <p className="font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
-                            <p className="text-xs text-zinc-500">{item.assignments?.length ?? 0} assignments</p>
+                            <p className="text-xs text-zinc-500">
+                              First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.latest_seen_at)}
+                            </p>
                           </div>
                           <span className="text-sm font-semibold text-zinc-700">{formatInteger(item.usage_count)}</span>
                         </div>
@@ -2674,7 +2769,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold text-zinc-900">Posts</h2>
-                  <p className="text-sm text-zinc-500">All materialized posts for @{handle} across every show and season.</p>
+                  <p className="text-sm text-zinc-500">
+                    Every post touching @{handle}, including owned posts, collaborator matches, and catalog-only history.
+                  </p>
                 </div>
                 <div className="text-sm text-zinc-500">
                   Page {posts?.pagination.page ?? page} of {posts?.pagination.total_pages ?? 1}
@@ -2708,6 +2805,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               <td className="py-4 pr-4 align-top">
                                 <div className="max-w-xl">
                                   <p className="font-semibold text-zinc-900">{item.title || item.excerpt || "Untitled post"}</p>
+                                  <div className="mt-2">
+                                    {(() => {
+                                      const badge = getPostMatchBadge(item);
+                                      return (
+                                        <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${badge.tone}`}>
+                                          {badge.label}
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
                                   {item.url ? (
                                     <a href={item.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline">
                                       Open post
@@ -2765,12 +2872,30 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 />
               ) : null}
               <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-2">
-                  <h2 className="text-lg font-semibold text-zinc-900">Hashtags</h2>
-                  <p className="text-sm text-zinc-500">
-                    Each hashtag shows show-level assignments plus the show and season contexts observed on this account’s posts.
-                  </p>
-                  {saveMessage ? <p className="text-sm text-zinc-600">{saveMessage}</p> : null}
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-zinc-900">Hashtags</h2>
+                    <p className="text-sm text-zinc-500">
+                      Show-level assignments only. Season context below is observed from post dates, not manually assigned.
+                    </p>
+                    {saveMessage ? <p className="mt-2 text-sm text-zinc-600">{saveMessage}</p> : null}
+                  </div>
+                  <label className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                    Window
+                    <select
+                      value={hashtagWindow}
+                      onChange={(event) =>
+                        setHashtagWindow(event.target.value as (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"])
+                      }
+                      className="mt-1 block rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    >
+                      {HASHTAG_WINDOW_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 {hashtagsLoading ? <p className="mt-4 text-sm text-zinc-500">Loading hashtags…</p> : null}
                 {hashtagsError ? <p className="mt-4 text-sm text-red-700">{hashtagsError}</p> : null}
@@ -2787,7 +2912,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               <div>
                                 <p className="text-lg font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
                                 <p className="text-xs text-zinc-500">
-                                  {formatInteger(item.usage_count)} uses · Last seen {formatDateTime(item.latest_seen_at)}
+                                  {formatInteger(item.usage_count)} uses · First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.latest_seen_at)}
                                 </p>
                                 <p className="mt-2 text-xs text-zinc-500">
                                   Observed on {(item.observed_shows ?? []).map((show) => show.show_name).filter(Boolean).join(", ") || "no assigned shows yet"}
@@ -2830,7 +2955,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                             updateHashtagAssignments(
                                               item.hashtag,
                                               assignments.map((entry, entryIndex) =>
-                                                entryIndex === index ? { ...entry, show_id: nextShowId, season_id: null } : entry,
+                                                entryIndex === index ? { ...entry, show_id: nextShowId } : entry,
                                               ),
                                             );
                                           }}
@@ -2886,14 +3011,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         reviewQueue.map((item) => {
                           const draft = reviewDrafts[item.id] ?? buildReviewResolutionDraft(item, reviewShowOptionsByItem[item.id] ?? []);
                           const itemShowOptions = reviewShowOptionsByItem[item.id] ?? [];
-                          const availableSeasonOptions = draft.show_id ? (mergedSeasonOptionsByShow[draft.show_id] ?? []) : [];
-                          const isAssigningToSeason = draft.resolution_action === "assign_season";
                           const canResolve =
                             draft.resolution_action === "mark_non_show" ||
-                            (draft.resolution_action === "assign_show" && Boolean(draft.show_id)) ||
-                            (draft.resolution_action === "assign_season" &&
-                              Boolean(draft.show_id) &&
-                              Boolean(draft.season_id));
+                            (draft.resolution_action === "assign_show" && Boolean(draft.show_id));
                           return (
                             <div key={item.id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-4">
                               <div className="flex flex-col gap-4">
@@ -2901,7 +3021,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   <div>
                                     <p className="font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
                                     <p className="text-xs text-zinc-500">
-                                      {formatInteger(item.usage_count)} uses · Last seen {formatDateTime(item.last_seen_at)}
+                                      {formatInteger(item.usage_count)} uses · First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.last_seen_at)}
                                     </p>
                                   </div>
                                   <button
@@ -2912,10 +3032,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                         resolution_action: draft.resolution_action,
                                         show_id:
                                           draft.resolution_action === "mark_non_show" ? undefined : draft.show_id || undefined,
-                                        season_id:
-                                          draft.resolution_action === "assign_season"
-                                            ? draft.season_id || undefined
-                                            : undefined,
                                       })
                                     }
                                     className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -2934,17 +3050,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                     <select
                                       aria-label={`Resolution for ${item.display_hashtag ?? `#${item.hashtag}`}`}
                                       value={draft.resolution_action}
-                                      onChange={(event) => {
-                                        const nextAction = event.target.value as CatalogReviewResolveRequest["resolution_action"];
-                                        updateReviewDraft(item.id, { resolution_action: nextAction });
-                                        if (nextAction === "assign_season" && draft.show_id) {
-                                          void loadReviewSeasonOptions(draft.show_id);
-                                        }
-                                      }}
+                                      onChange={(event) =>
+                                        updateReviewDraft(item.id, {
+                                          resolution_action: event.target.value as CatalogReviewResolveRequest["resolution_action"],
+                                        })
+                                      }
                                       className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
                                     >
                                       <option value="assign_show">Assign To Show</option>
-                                      <option value="assign_season">Assign To Season</option>
                                       <option value="mark_non_show">Not A Show Hashtag</option>
                                     </select>
                                   </label>
@@ -2955,13 +3068,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                       <select
                                         aria-label={`Show for ${item.display_hashtag ?? `#${item.hashtag}`}`}
                                         value={draft.show_id}
-                                        onChange={(event) => {
-                                          const nextShowId = event.target.value;
-                                          updateReviewDraft(item.id, { show_id: nextShowId });
-                                          if (draft.resolution_action === "assign_season" && nextShowId) {
-                                            void loadReviewSeasonOptions(nextShowId);
-                                          }
-                                        }}
+                                        onChange={(event) => updateReviewDraft(item.id, { show_id: event.target.value })}
                                         className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
                                       >
                                         <option value="">Select a show</option>
@@ -2975,37 +3082,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   ) : (
                                     <div className="hidden lg:block" />
                                   )}
-
-                                  {isAssigningToSeason ? (
-                                    <label className="text-sm font-medium text-zinc-700">
-                                      Season
-                                      <select
-                                        aria-label={`Season for ${item.display_hashtag ?? `#${item.hashtag}`}`}
-                                        value={draft.season_id}
-                                        onChange={(event) => updateReviewDraft(item.id, { season_id: event.target.value })}
-                                        disabled={!draft.show_id || reviewSeasonLoadingByShow[draft.show_id]}
-                                        className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        <option value="">
-                                          {reviewSeasonLoadingByShow[draft.show_id] ? "Loading seasons…" : "Select a season"}
-                                        </option>
-                                        {availableSeasonOptions.map((season) => (
-                                          <option key={season.season_id} value={season.season_id}>
-                                            {formatSeasonLabel(season.season_number)}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
-                                  ) : (
-                                    <div className="hidden lg:block" />
-                                  )}
+                                  <div className="hidden lg:block" />
                                 </div>
                               </div>
-                              {isAssigningToSeason && draft.show_id && !reviewSeasonLoadingByShow[draft.show_id] && availableSeasonOptions.length === 0 ? (
-                                <p className="text-xs text-amber-700">
-                                  No seasons are loaded for the selected show yet. Pick a different show or resolve at the show level.
-                                </p>
-                              ) : null}
                             </div>
                           );
                         })

@@ -13,6 +13,10 @@ import SocialAdminPageHeader from "@/components/admin/SocialAdminPageHeader";
 import { buildSeasonBreadcrumb, buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
+import {
+  GettyLocalPrefetchError,
+  prefetchGettyLocallyForPerson,
+} from "@/lib/admin/getty-local-prefetch";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
 import { GalleryAssetEditTools } from "@/components/admin/GalleryAssetEditTools";
 import { ImageScrapeDrawer } from "@/components/admin/ImageScrapeDrawer";
@@ -3141,12 +3145,53 @@ export default function SeasonDetailPage() {
     async (
       personId: string,
       onProgress?: (progress: RefreshProgressState) => void,
-      options?: { signal?: AbortSignal }
+      options?: { signal?: AbortSignal; personName?: string }
     ) => {
       const headers = await getAuthHeaders();
       const externalSignal = options?.signal;
+      const personName = options?.personName?.trim() || "";
       if (externalSignal?.aborted) {
         throw new Error("Season cast refresh canceled.");
+      }
+      const requestBody: Record<string, unknown> = {
+        skip_mirror: false,
+        show_id: showId,
+        show_name: show?.name ?? undefined,
+      };
+      if (personName) {
+        Object.assign(requestBody, {
+          getty_prefetch_attempted: true,
+          getty_prefetch_succeeded: false,
+        });
+        onProgress?.({
+          stage: "Getty Local",
+          message: `Scraping Getty locally for ${personName}...`,
+          current: null,
+          total: null,
+        });
+        try {
+          const gettyPrefetch = await prefetchGettyLocallyForPerson(personName, show?.name ?? undefined);
+          Object.assign(requestBody, gettyPrefetch.bodyPatch);
+          onProgress?.({
+            stage: "Getty Local",
+            message: `Getty local scrape complete: ${gettyPrefetch.mergedAssetCount} images, ${gettyPrefetch.mergedEventCount} events.`,
+            current: gettyPrefetch.mergedAssetCount,
+            total: gettyPrefetch.mergedAssetCount,
+          });
+        } catch (error) {
+          Object.assign(requestBody, {
+            getty_prefetch_error_code:
+              error instanceof GettyLocalPrefetchError ? error.code : "UNREACHABLE",
+          });
+          const message = error instanceof Error ? error.message : String(error);
+          onProgress?.({
+            stage: "Getty Local",
+            message: `${message} Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.`,
+            current: null,
+            total: null,
+          });
+          throw new Error(`${message} Getty/NBCUMV refresh was not started.`);
+        }
       }
       const streamController = new AbortController();
       const forwardExternalAbort = () => streamController.abort();
@@ -3177,11 +3222,7 @@ export default function SeasonDetailPage() {
           {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              skip_mirror: false,
-              show_id: showId,
-              show_name: show?.name ?? undefined,
-            }),
+            body: JSON.stringify(requestBody),
             timeoutMs: SEASON_PERSON_STREAM_MAX_DURATION_MS,
             externalSignal: streamController.signal,
             onEvent: async ({ event, payload }) => {
@@ -3599,7 +3640,7 @@ export default function SeasonDetailPage() {
               [personId]: progress,
             }));
           },
-          { signal: runController.signal }
+          { signal: runController.signal, personName: label }
         );
         await Promise.all([fetchCastRoleMembers({ force: true }), fetchShowCastForBrand()]);
         setCastRefreshNotice(`Refreshed person for ${label}.`);

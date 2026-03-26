@@ -7,12 +7,17 @@ type CacheEntry = {
 
 declare global {
   var __trrAdminRouteCache: Map<string, CacheEntry> | undefined;
+  var __trrAdminRouteInFlight: Map<string, Promise<unknown>> | undefined;
 }
 
 const CACHE_MAX_ENTRIES = 1_000;
 const CACHE = globalThis.__trrAdminRouteCache ?? new Map<string, CacheEntry>();
 if (!globalThis.__trrAdminRouteCache) {
   globalThis.__trrAdminRouteCache = CACHE;
+}
+const IN_FLIGHT = globalThis.__trrAdminRouteInFlight ?? new Map<string, Promise<unknown>>();
+if (!globalThis.__trrAdminRouteInFlight) {
+  globalThis.__trrAdminRouteInFlight = IN_FLIGHT;
 }
 
 export const DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS = 10_000;
@@ -93,6 +98,32 @@ export function setRouteResponseCache<T>(
   pruneCache();
 }
 
+export async function getOrCreateRouteResponsePromise<T>(
+  namespace: string,
+  key: string,
+  factory: () => Promise<T>
+): Promise<T> {
+  if (CACHE_DISABLED) {
+    return factory();
+  }
+
+  const storeKey = makeStoreKey(namespace, key);
+  const existing = IN_FLIGHT.get(storeKey);
+  if (existing) {
+    return (await existing) as T;
+  }
+
+  const promise = factory();
+  IN_FLIGHT.set(storeKey, promise);
+  try {
+    return await promise;
+  } finally {
+    if (IN_FLIGHT.get(storeKey) === promise) {
+      IN_FLIGHT.delete(storeKey);
+    }
+  }
+}
+
 export function invalidateRouteResponseCache(namespace: string, keyPrefix?: string): void {
   if (CACHE_DISABLED) return;
   const namespacePrefix = `${namespace}:`;
@@ -100,6 +131,11 @@ export function invalidateRouteResponseCache(namespace: string, keyPrefix?: stri
   for (const key of CACHE.keys()) {
     if (key.startsWith(prefix)) {
       CACHE.delete(key);
+    }
+  }
+  for (const key of IN_FLIGHT.keys()) {
+    if (key.startsWith(prefix)) {
+      IN_FLIGHT.delete(key);
     }
   }
 }
