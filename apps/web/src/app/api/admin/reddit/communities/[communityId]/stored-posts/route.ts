@@ -70,7 +70,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
               containerKey,
               Number.isFinite(pageParam) ? pageParam : 1,
               Number.isFinite(perPageParam) ? perPageParam : 200,
-            ),
+            ) as unknown as Record<string, unknown>,
         });
         return resolved.payload;
       },
