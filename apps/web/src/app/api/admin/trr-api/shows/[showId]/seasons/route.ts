@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getSeasonsByShowId } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 import {
   buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
   getRouteResponseCache,
-  parseCacheTtlMs,
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
+import {
+  TRR_SHOW_SEASONS_CACHE_NAMESPACE,
+  TRR_SHOW_SEASONS_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/trr-show-read-route-cache";
 
 export const dynamic = "force-dynamic";
-const SHOW_SEASONS_CACHE_NAMESPACE = "admin-show-seasons";
-const SHOW_SEASONS_CACHE_TTL_MS = parseCacheTtlMs(
-  process.env.TRR_ADMIN_SHOW_SEASONS_CACHE_TTL_MS,
-);
 
 interface RouteParams {
   params: Promise<{ showId: string }>;
@@ -57,31 +61,46 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       `${showId}:list`,
       request.nextUrl.searchParams,
     );
-    const cached = getRouteResponseCache<{
-      seasons: Awaited<ReturnType<typeof getSeasonsByShowId>>;
-      pagination: { limit: number; offset: number; count: number };
-    }>(SHOW_SEASONS_CACHE_NAMESPACE, cacheKey);
+    const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOW_SEASONS_CACHE_NAMESPACE, cacheKey);
     if (cached) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
     }
 
-    const seasons = await getSeasonsByShowId(showId, { limit, offset, includeEpisodeSignal });
-    const payload = {
-      seasons,
-      pagination: {
-        limit,
-        offset,
-        count: seasons.length,
+    const payload = await getOrCreateRouteResponsePromise(
+      TRR_SHOW_SEASONS_CACHE_NAMESPACE,
+      cacheKey,
+      async () => {
+        const upstreamParams = new URLSearchParams({
+          limit: String(limit),
+          offset: String(offset),
+        });
+        if (includeEpisodeSignal) {
+          upstreamParams.set("include_episode_signal", "true");
+        }
+        const upstream = await fetchAdminBackendJson(
+          `/admin/trr-api/shows/${showId}/seasons?${upstreamParams.toString()}`,
+          {
+            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+            routeName: "show-seasons",
+          },
+        );
+        if (upstream.status !== 200) {
+          throw new Error(
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Failed to get TRR seasons",
+          );
+        }
+        setRouteResponseCache(TRR_SHOW_SEASONS_CACHE_NAMESPACE, cacheKey, upstream.data, TRR_SHOW_SEASONS_CACHE_TTL_MS);
+        return upstream.data;
       },
-    };
-    setRouteResponseCache(SHOW_SEASONS_CACHE_NAMESPACE, cacheKey, payload, SHOW_SEASONS_CACHE_TTL_MS);
+    );
 
     return NextResponse.json(payload);
   } catch (error) {
     console.error("[api] Failed to get TRR seasons", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

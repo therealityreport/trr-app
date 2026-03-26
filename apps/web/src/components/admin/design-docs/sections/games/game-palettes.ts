@@ -5,13 +5,16 @@
  *   1. Live nytimes.com CSS custom properties (AUTHORITATIVE)
  *   2. nyt-games-design-system.html reference (secondary)
  *
- * Font mapping (NYT → TRR R2 CDN):
- *   nyt-franklin        → Hamburg Serial       (var(--dd-font-ui))
- *   nyt-karnakcondensed → Cheltenham           (var(--dd-font-headline))
- *   nyt-karnak          → Gloucester           (var(--dd-font-serif))
- *   nyt-stymie          → "Stymie"             (var(--dd-font-slab))
- *   nyt-cheltenham      → "Cheltenham"         (var(--dd-font-headline))
- *   Clear Sans (Wordle) → "Hamburg Serial"      (var(--dd-font-ui))  [closest match]
+ * Font rendering (design docs use ACTUAL NYT fonts via .nytg-scope):
+ *   nyt-franklin        → NYTFranklin           (R2 CDN, loaded via /hosted-fonts.css)
+ *   nyt-karnakcondensed → NYTKarnak_Condensed   (R2 CDN, loaded via /hosted-fonts.css)
+ *   nyt-karnak          → KarnakPro-Book        (R2 CDN, loaded via /hosted-fonts.css)
+ *   nyt-stymie          → Stymie                (R2 CDN, same family)
+ *   nyt-cheltenham      → NYTKarnak_Condensed   (closest match — condensed display serif)
+ *   Clear Sans (Wordle) → system fallback chain  (not hosted; --nytg-font-wordle)
+ *
+ * The .nytg-scope CSS class (design-docs.css) overrides --dd-font-* variables
+ * so all var() references resolve to the actual NYT typefaces, not TRR substitutes.
  */
 
 /* ------------------------------------------------------------------ */
@@ -468,7 +471,7 @@ export const THE_MIDI = {
 export interface GameMeta {
   id: string;
   name: string;
-  status: "Original" | "Core" | "New" | "Special";
+  status: "Original" | "Core" | "New" | "Special" | "Unlisted";
   color: string;
   navBorder?: string;
   coverBg?: string;
@@ -476,21 +479,22 @@ export interface GameMeta {
   description: string;
 }
 
+/** Ordered to match live nav drawer (Mar 2026). Vertex & Flashback are not in the live nav. */
 export const GAME_META: readonly GameMeta[] = [
-  { id: "wordle", name: "Wordle", status: "Core", color: "#6aaa64", navBorder: "#d3d6da", coverBg: "#d3d6da", interface: "5×6 Grid", description: "Five-letter word puzzle" },
+  { id: "crossplay", name: "Crossplay", status: "New", color: "#6366f1", navBorder: "#4076c6", coverBg: "#c8d8f5", interface: "15×15 Board", description: "Multiplayer crossword" },
   { id: "crossword", name: "The Crossword", status: "Original", color: "#000000", navBorder: "#6493e6", interface: "15×15 / 21×21", description: "Flagship daily puzzle" },
   { id: "midi", name: "The Midi", status: "New", color: "#000000", navBorder: "#7ca8f0", interface: "9×9 to 11×11", description: "Smaller themed crossword" },
   { id: "mini", name: "The Mini", status: "Original", color: "#f7da21", navBorder: "#95befa", coverBg: "#95befa", interface: "5×5 Grid", description: "Quick 5×5 crossword" },
-  { id: "spelling-bee", name: "Spelling Bee", status: "Core", color: "#f7da21", navBorder: "#f7da21", coverBg: "#f7da21", interface: "Honeycomb", description: "Hexagon word game" },
   { id: "connections", name: "Connections", status: "Core", color: "#b4a8ff", navBorder: "#b4a8ff", coverBg: "#b4a8ff", interface: "4×4 Grid", description: "Find four-word groups" },
+  { id: "spelling-bee", name: "Spelling Bee", status: "Core", color: "#f7da21", navBorder: "#f7da21", coverBg: "#f7da21", interface: "Honeycomb", description: "Hexagon word game" },
+  { id: "wordle", name: "Wordle", status: "Core", color: "#6aaa64", navBorder: "#d3d6da", coverBg: "#d3d6da", interface: "5×6 Grid", description: "Five-letter word puzzle" },
+  { id: "pips", name: "Pips", status: "Core", color: "#9251ca", navBorder: "#daa8d0", coverBg: "#daa8d0", interface: "Constraint Grid", description: "Domino placement puzzle" },
   { id: "strands", name: "Strands", status: "Core", color: "#b2ded8", navBorder: "#b2ded8", coverBg: "#c0ddd9", interface: "6×8 Board", description: "Theme word pathfinding" },
   { id: "letter-boxed", name: "Letter Boxed", status: "Core", color: "#fc716b", navBorder: "#fc716b", coverBg: "#fc716b", interface: "12 Letters", description: "Square letter connections" },
   { id: "tiles", name: "Tiles", status: "Core", color: "#b5e352", navBorder: "#b5e352", coverBg: "#b5e352", interface: "Colored Grid", description: "Visual pattern matching" },
   { id: "sudoku", name: "Sudoku", status: "Core", color: "#fb9b00", navBorder: "#fb9b00", coverBg: "#fb9b00", interface: "9×9 Grid", description: "Logic number puzzle" },
-  { id: "vertex", name: "Vertex", status: "Special", color: "#29566c", interface: "Polygon Grid", description: "Geometric mesh puzzle" },
-  { id: "crossplay", name: "Crossplay", status: "New", color: "#6366f1", navBorder: "#4076c6", coverBg: "#c8d8f5", interface: "15×15 Board", description: "Multiplayer crossword" },
-  { id: "pips", name: "Pips", status: "New", color: "#9251ca", navBorder: "#daa8d0", coverBg: "#daa8d0", interface: "Constraint Grid", description: "Domino placement puzzle" },
-  { id: "flashback", name: "Flashback", status: "Special", color: "#c2593a", interface: "8 Cards", description: "Historical timeline puzzle" },
+  { id: "vertex", name: "Vertex", status: "Unlisted", color: "#29566c", interface: "Polygon Grid", description: "Geometric mesh puzzle" },
+  { id: "flashback", name: "Flashback", status: "Unlisted", color: "#c2593a", interface: "8 Cards", description: "Historical timeline puzzle" },
 ] as const;
 
 /* ------------------------------------------------------------------ */
@@ -533,6 +537,168 @@ export const HUB = {
   footer: {
     bg: "rgb(250, 250, 250)",
     padding: "20px 0 42px",
+    sectionHeaderFont: "nyt-franklin",
+    sectionHeaderSize: "12px",
+    sectionHeaderWeight: 700,
+    sectionHeaderLetterSpacing: "0.75px",
+    sectionHeaderTransform: "uppercase" as const,
+    linkFont: "nyt-franklin",
+    linkSize: "15px",
+    linkWeight: 400,
+    linkLetterSpacing: "0.5px",
+    legalFont: "nyt-franklin",
+    legalSize: "11px",
+    legalLineHeight: "16px",
+    aboutTextFont: "nyt-cheltenham",
+    aboutTextSize: "20px",
+    aboutTextWeight: 300,
+    aboutTextLineHeight: "28px",
+    columns: ["Games List", "Crosswords", "Community", "Learn More"],
+  },
+
+  /** Header bar — from live <header class="pz-header"> */
+  header: {
+    className: "pz-header",
+    navClassName: "pz-nav",
+    height: "44px",
+    bg: "#fff",
+    borderBottom: "1px solid #e8e8e8",
+    logoWidth: 138,
+    logoHeight: 25,
+    hamburgerClass: "pz-nav__hamburger-squeeze",
+    subscribeButtonClass: "pz-nav__button",
+    subscribeText: "Subscribe",
+    subscribeCampaignId: "4QHQ8",
+  },
+
+  /** Navigation drawer — from live <div class="pz-nav-drawer"> */
+  navDrawer: {
+    className: "pz-nav-drawer",
+    cssModules: {
+      container: "CustomNav-module_customNav__RX0TG",
+      crossplayCTA: "CrossplayCTA-module_crossplayCTAContainer__TunE_",
+      linkGroup: "LinkGroup-module_linkGroup__jAkmD",
+      linkGroupHeader: "LinkGroup-module_linkGroup__header__e8tYm",
+      link: "LinkGroup-module_link__wwRAz",
+      directLink: "DirectLink-module_directLink__kSggP",
+      directLinkBold: "DirectLink-module_directLink--boldText__OqQFI",
+      directLinkPill: "DirectLink-module_directLink__pill__lFxm9",
+      collapsibleLink: "CollapsibleLink-module_collapsibleLink__NvSrT",
+      collapsibleButton: "CollapsibleLink-module_collapsibleLink__button__qtjQx",
+      expansionButton: "ExpansionButton-module_ExpansionButton__lqTjh",
+    },
+    groups: [
+      {
+        label: "News",
+        links: [
+          { name: "The New York Times", href: "https://www.nytimes.com", icon: "pz-icon-nyt" },
+        ],
+      },
+      {
+        label: "New York Times Games",
+        links: [
+          { name: "Crossplay", href: "/games/crossplay", icon: "pz-icon-crossplay", badge: "NEW", collapsible: false },
+          { name: "The Crossword", href: "/crosswords/game/daily", icon: "pz-icon-daily", collapsible: true },
+          { name: "The Midi", href: "/crosswords/game/midi", icon: "pz-icon-midi", badge: "NEW", collapsible: true },
+          { name: "The Mini", href: "/crosswords/game/mini", icon: "pz-icon-mini", collapsible: true },
+          { name: "Connections", href: "/games/connections", icon: "pz-icon-connections", collapsible: true },
+          { name: "Spelling Bee", href: "/puzzles/spelling-bee", icon: "pz-icon-spelling-bee", collapsible: true },
+          { name: "Wordle", href: "/games/wordle/index.html", icon: "pz-icon-wordle", collapsible: true },
+          { name: "Pips", href: "/games/pips", icon: "pz-icon-pips", collapsible: false },
+          { name: "Strands", href: "/games/strands", icon: "pz-icon-strands", collapsible: true },
+          { name: "Letter Boxed", href: "/puzzles/letter-boxed", icon: "pz-icon-letter-boxed", collapsible: false },
+          { name: "Tiles", href: "/puzzles/tiles", icon: "pz-icon-tiles", collapsible: false },
+          { name: "Sudoku", href: "/puzzles/sudoku", icon: "pz-icon-sudoku", collapsible: false },
+          { name: "View all Games", href: "/puzzles", collapsible: false },
+        ],
+      },
+      {
+        label: "Tips and Tricks",
+        links: [
+          { name: "NYT Daily Wordplay Column", href: "https://www.nytimes.com/column/wordplay" },
+          { name: "Games Tips", href: "https://www.nytimes.com/spotlight/games-tips" },
+          { name: "Games Features", href: "https://www.nytimes.com/spotlight/games-feature" },
+        ],
+      },
+      {
+        label: undefined, /* Cross-brand links (no header) */
+        links: [
+          { name: "The Athletic", href: "https://www.nytimes.com/athletic/", icon: "pz-icon-athletic" },
+          { name: "Connections: Sports Edition", href: "https://www.nytimes.com/athletic/connections-sports-edition", icon: "pz-icon-sports-connections" },
+          { name: "New York Times Cooking", href: "https://cooking.nytimes.com", icon: "pz-icon-cooking" },
+          { name: "New York Times Wirecutter", href: "https://www.nytimes.com/wirecutter", icon: "pz-icon-wirecutter" },
+        ],
+      },
+      {
+        label: "Privacy Settings",
+        links: [
+          { name: "Privacy Policy", href: "https://www.nytimes.com/privacy/privacy-policy" },
+          { name: "Cookie Policy", href: "https://www.nytimes.com/privacy/cookie-policy" },
+          { name: "Privacy FAQ", href: "https://www.nytimes.com/privacy" },
+          { name: "Delete My Account", href: "https://www.nytimes.com/account/delete-account" },
+          { name: "Your Privacy Choices", href: "https://www.nytimes.com/privacy/your-privacy-choices" },
+        ],
+      },
+    ],
+    accountActions: {
+      subscribe: { text: "Subscribe", campaignId: "4QHQ8" },
+      saleVariant: { text: "75% off", campaignId: "4QHQ8" },
+      login: { text: "Log In", client: "games", application: "crosswords" },
+      logout: { text: "Log Out" },
+    },
+  },
+
+  /** Footer sections — from live <footer class="pz-footer"> */
+  footerSections: {
+    about: {
+      heading: "About New York Times Games",
+      text: "Since the launch of the Crossword in 1942, The Times has captivated solvers by providing engaging word and logic games. In 2014, we introduced the Mini Crossword — followed by Spelling Bee, Letter Boxed, Tiles, Wordle, Connections and more.",
+      cta: { text: "Subscribe now", href: "https://www.nytimes.com/subscription/games?campaignId=9W9LL" },
+    },
+    gamesCol: {
+      heading: "New York Times Games",
+      links: [
+        { name: "Crossplay", href: "/games/crossplay" },
+        { name: "The Crossword", href: "/crosswords/game/daily" },
+        { name: "The Midi Crossword", href: "/crosswords/game/midi" },
+        { name: "The Mini Crossword", href: "/crosswords/game/mini" },
+        { name: "Spelling Bee", href: "/puzzles/spelling-bee" },
+        { name: "Wordle", href: "/games/wordle/index.html" },
+        { name: "Pips", href: "/games/pips" },
+        { name: "Strands", href: "/games/strands" },
+        { name: "Connections", href: "/games/connections" },
+        { name: "Tiles", href: "/puzzles/tiles" },
+        { name: "Letter Boxed", href: "/puzzles/letter-boxed" },
+        { name: "Sudoku", href: "/puzzles/sudoku" },
+        { name: "All Games", href: "/crosswords" },
+      ],
+    },
+    crosswordsCol: {
+      heading: "Crosswords",
+      links: [
+        { name: "Crossword Archives", href: "/crosswords/archive" },
+        { name: "Statistics", href: "/puzzles/stats" },
+        { name: "Leaderboards", href: "/puzzles/leaderboards" },
+        { name: "Submit a Crossword", href: "https://nytimes.com/article/submit-crossword-puzzles-the-new-york-times.html" },
+      ],
+    },
+    communityCol: {
+      heading: "Community",
+      links: [
+        { name: "Gameplay Stories", href: "https://www.nytimes.com/column/wordplay" },
+        { name: "Spelling Bee Forum", href: "https://www.nytimes.com/spotlight/spelling-bee-forum" },
+        { name: "Games Threads", href: "https://www.threads.net/@nytgames" },
+      ],
+    },
+    learnMoreCol: {
+      heading: "Learn More",
+      links: [
+        { name: "FAQs", href: "https://help.nytimes.com/hc/en-us/sections/360011158491-NYT-Games" },
+        { name: "Gift Subscriptions", href: "https://www.nytimes.com/subscription/games/gift" },
+        { name: "Shop the Games Collection", href: "https://store.nytimes.com/collections/games" },
+        { name: "Download the App", href: "/crosswords/apps" },
+      ],
+    },
   },
 } as const;
 
@@ -920,5 +1086,168 @@ export const FOUNDATION = {
     contentBg: "rgba(255,255,255,0.85)",
     borderRadius: "7px",
     shadow: "0 4px 23px rgba(0,0,0,0.08)",
+  },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  Tech Stack — extracted from live nytimes.com/crosswords (Mar 2026) */
+/* ------------------------------------------------------------------ */
+export const TECH_STACK = {
+  /** Build metadata from <meta> tags */
+  build: {
+    commit: "f1a6f14",
+    pageName: "hub",
+    CG: "Crosswords/Games",
+    PT: "puzzle hub",
+    sourceApp: "games-crosswords",
+    cacheSafe: true,
+    assetBase: "https://www.nytimes.com/games-assets/v2",
+    cssChunks: [
+      "5401.95f6943559c35f1f9a76.css",
+      "9236.9cff01cea7c2e4b748ea.css",
+      "5282.135255377a0b31955461.css",
+      "hub.15dced5b24f937724a34.css",
+    ],
+    jsChunks: 24, /* Number of deferred JS bundles for hub page */
+  },
+
+  /** Analytics & monitoring */
+  analytics: {
+    gtm: [
+      { id: "GTM-P528B3", env: "env-130", purpose: "Games GTM container" },
+      { id: "GTM-N5P6T9S", purpose: "Secondary container (DC-5290727)" },
+    ],
+    datadogRum: {
+      applicationId: "0d77619c-b426-4593-bbc9-d52dcc596b96",
+      environment: "prod",
+    },
+    sentry: {
+      dsn: "https://...@o82024.ingest.sentry.io/5839863",
+      sampleRate: "1",
+      environment: "prod",
+    },
+    chartbeat: true,
+    comscore: { id: "3005403" },
+    brandMetrics: { siteId: "4486dfe2-780e-4dfa-a60a-2a948887658f" },
+    iterateHQ: true,
+  },
+
+  /** Advertising infrastructure */
+  ads: {
+    framework: "AdSlot4",
+    prebid: { version: "9.26.0", bidders: ["criteo", "rubicon", "openx", "triplelift", "pubmatic", "ix", "medianet"] },
+    amazon: { pubId: "3030", deals: true },
+    mediaNet: { cid: "8CU36S2OB" },
+    geoEdge: { key: "b3960cc6-bfd2-4adc-910c-6e917e8a6a0e" },
+    gpt: "securepubads.g.doubleclick.net",
+    adUnitPath: "crosswords",
+    positions: ["top", "mid1", "bottom", "intsl"],
+  },
+
+  /** Privacy & consent */
+  privacy: {
+    fidesTCF: "Transparency & Consent Framework (loads conditionally from PURR cookie)",
+    fidesGPP: "Global Privacy Platform (loads conditionally from PURR cookie)",
+    purrCookie: "nyt-purr — 22-character directive string controlling ad config, opt-out UI, TCF, GPP, TOS blocker",
+    directives: [
+      "PURR_DataSaleOptOutUI_v2",
+      "PURR_CaliforniaNoticesUI",
+      "PURR_AdConfiguration_v3",
+      "PURR_LimitSensitivePI",
+      "PURR_FidesTCF",
+      "PURR_TOSBlocker_Versioned",
+      "PURR_LoadGPP",
+    ],
+    liveramp: "ats-wrapper (identity resolution)",
+  },
+
+  /** Feature flags & experimentation */
+  featureFlags: {
+    statsig: {
+      tier: "production",
+      specsUrl: "https://static01.nyt.com/statsig/config/...",
+    },
+    abra: {
+      version: 29498,
+      description: "NYT internal A/B test framework — client-side partition on agent_id or regi_id",
+    },
+  },
+
+  /** Data layer */
+  data: {
+    samizdat: {
+      host: "https://samizdat-graphql.nytimes.com",
+      appType: "games-phoenix",
+      appVersion: "1.0.0",
+    },
+  },
+} as const;
+
+/* ------------------------------------------------------------------ */
+/*  Active A/B Tests — categorized from window.abra (Mar 2026)        */
+/* ------------------------------------------------------------------ */
+export const AB_TESTS = {
+  darkMode: {
+    description: "Phased dark mode rollout across all games",
+    tests: [
+      { key: "GAMES_darkMode_holdout", scope: "Global holdout — 5% control, 95% dark mode audience" },
+      { key: "GAMES_tilesDarkMode_0125", scope: "Tiles" },
+      { key: "GAMES_strandsDarkMode_0916", scope: "Strands" },
+      { key: "GAMES_connectionsDarkMode_0926", scope: "Connections" },
+      { key: "GAMES_lbDarkMode_1112", scope: "Letter Boxed" },
+      { key: "GAMES_deviceDefaultDarkMode_0225", scope: "Device-default (regi_id targeted)" },
+      { key: "GAMES_darkMode_android_1120", scope: "Android app" },
+    ],
+  },
+  gameFeatures: {
+    description: "Game-specific feature flags",
+    tests: [
+      { key: "GAMES_tilesTilesetModal_0125", scope: "Tiles tileset selection modal" },
+      { key: "GAMES_pipsReveal_0525", scope: "Pips reveal mechanic" },
+      { key: "GAMES_pipsBetaTakedownWarning_0625", scope: "Pips beta takedown warning" },
+      { key: "GAMES_createWordle_puzzles_0425", scope: "Create Wordle — custom puzzles" },
+      { key: "GAMES_connectionsSportsLinks_0924", scope: "Connections sports edition links" },
+      { key: "GAMES_geoLockedCrossPlayCTA_0714", scope: "Crossplay CTA — geo-locked to NZ/AU" },
+      { key: "GAMES_appConnectionsBot_0425_v2", scope: "Connections bot (app)" },
+    ],
+  },
+  archives: {
+    description: "Archive access rollouts",
+    tests: [
+      { key: "GAMES_strands_archive_0710", scope: "Strands archive" },
+      { key: "GAMES_androidConnectionsArchive_0924", scope: "Connections archive (Android)" },
+    ],
+  },
+  badges: {
+    description: "Achievement badge system",
+    tests: [
+      { key: "GAMES_badges_regi_0925", scope: "Badge system (regi_id partitioned)" },
+      { key: "GAMES_strandsBadges_1225", scope: "Strands-specific badges" },
+      { key: "GAMES_badges_anon_ios_0925", scope: "Badge regiwall for anon iOS users" },
+    ],
+  },
+  monetization: {
+    description: "Paywall, OMA, and ad experiments",
+    tests: [
+      { key: "GAMES_salePaywallGood_0325", scope: "Sale paywall variant" },
+      { key: "GAMES_subForNoAds_0325", scope: "Subscribe for no ads" },
+      { key: "GAMES_omaWelcomeCTA_1125", scope: "OMA welcome CTA" },
+      { key: "OMA_PAYWALL_SPELLING_BEE", scope: "Spelling Bee paywall" },
+      { key: "OMA_METER_BEHIND_OMA_SPELLING_BEE_WEB_ONLY", scope: "Spelling Bee meter-behind-OMA" },
+      { key: "GAMES_PurrTOSBlocker_1024", scope: "PURR TOS blocker" },
+    ],
+  },
+  adExperiments: {
+    description: "DFP ad placement and refresh experiments",
+    tests: [
+      { key: "DFP_WordleSkipFade_0524", scope: "Wordle ad skip with fade" },
+      { key: "DFP_WordleMobile_0423", scope: "Wordle mobile interstitial" },
+      { key: "DFP_WordleAdRefresh", scope: "Wordle ad refresh (31s interval)" },
+      { key: "DFP_StrandsMobileWeb", scope: "Strands mobile web ads" },
+      { key: "DFP_SpellingBeeSkip", scope: "Spelling Bee ad skip" },
+      { key: "DFP_SpellingBeeMobile", scope: "Spelling Bee mobile ads" },
+      { key: "DFP_MiniSkip", scope: "Mini crossword ad skip" },
+      { key: "DFP_GamesPrebid_1025", scope: "Prebid vs MediaNet (50/50)" },
+    ],
   },
 } as const;

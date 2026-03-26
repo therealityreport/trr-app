@@ -365,6 +365,14 @@ function parseSocialAccountProfilePath(pathname: string): {
 }
 
 function mapLegacyAdminSocialPath(pathname: string, searchParams?: URLSearchParams): string | null {
+  if (
+    pathname === "/social/reddit" ||
+    pathname === "/admin/social/reddit" ||
+    pathname === "/social/official/reddit" ||
+    pathname === "/admin/social/official/reddit"
+  ) {
+    return appendSearch("/admin/social", searchParams);
+  }
   if (pathname === "/social-media" || pathname === "/admin/social-media") {
     return appendSearch("/admin/social", searchParams);
   }
@@ -386,6 +394,25 @@ function parseShortSeasonSocialWeekPath(segments: string[]): {
     if (showSegment && isSeasonToken(seasonToken ?? "") &&
         (socialSegment ?? "").trim().toLowerCase() === "social" &&
         isWeekToken(weekToken ?? "")) {
+      const subTab = resolveSocialWeekSubTab(subTabSegment);
+      if (segments.length === 5 && !subTab) return null;
+      return {
+        showSegment,
+        seasonNumber: (seasonToken ?? "").slice(1),
+        weekNumber: (weekToken ?? "").slice(1),
+        subTab,
+      };
+    }
+  }
+  // Legacy root-show alias form: /:showId/social/s:season/w:week[/:platform|/details]
+  if (segments.length >= 4 && segments.length <= 5) {
+    const [showSegment, socialSegment, seasonToken, weekToken, subTabSegment] = segments;
+    if (
+      showSegment &&
+      (socialSegment ?? "").trim().toLowerCase() === "social" &&
+      isSeasonToken(seasonToken ?? "") &&
+      isWeekToken(weekToken ?? "")
+    ) {
       const subTab = resolveSocialWeekSubTab(subTabSegment);
       if (segments.length === 5 && !subTab) return null;
       return {
@@ -873,7 +900,8 @@ export function proxy(request: NextRequest): NextResponse {
   if (onCanonicalAdminHost) {
     if (!isInternalAdminRewrite) {
       const canonicalPath = mapCanonicalAdminUiRedirect(pathname, request.nextUrl.searchParams);
-      if (canonicalPath) {
+      const currentPath = appendSearch(pathname, request.nextUrl.searchParams);
+      if (canonicalPath && canonicalPath !== currentPath) {
         return NextResponse.redirect(new URL(canonicalPath, request.nextUrl.origin), 307);
       }
     }

@@ -14,18 +14,55 @@ import {
   type DesignDocSectionId,
 } from "@/lib/admin/design-docs-config";
 import DesignDocsSidebar from "./DesignDocsSidebar";
+import ArticleDetailPage from "./ArticleDetailPage";
 import "./design-docs.css";
 
 const LoadingFallback = () => (
   <div className="py-16 text-center text-sm text-zinc-400">Loading section...</div>
 );
 
+const GameArticleDetailPage = dynamic(() => import("./GameArticleDetailPage"), {
+  loading: LoadingFallback,
+});
+
 const load = (path: string) =>
   dynamic(() => import(`./sections/${path}`), { loading: LoadingFallback });
+
+/* Brand tab components — dynamically imported per tab */
+const nytTabComponents: Record<string, ComponentType> = {
+  typography: load("brand-nyt/BrandNYTTypography"),
+  colors: load("brand-nyt/BrandNYTColors"),
+  layout: load("brand-nyt/BrandNYTLayout"),
+  architecture: load("brand-nyt/BrandNYTArchitecture"),
+  charts: load("brand-nyt/BrandNYTCharts"),
+  components: load("brand-nyt/BrandNYTComponents"),
+  resources: load("brand-nyt/BrandNYTResources"),
+};
+
+const athleticTabComponents: Record<string, ComponentType> = {
+  typography: load("brand-athletic/BrandAthleticTypography"),
+  colors: load("brand-athletic/BrandAthleticColors"),
+  components: load("brand-athletic/BrandAthleticComponents"),
+  icons: load("brand-athletic/BrandAthleticIcons"),
+  layouts: load("brand-athletic/BrandAthleticLayouts"),
+  layout: load("brand-athletic/BrandAthleticLayout"),
+  shapes: load("brand-athletic/BrandAthleticShapes"),
+  resources: load("brand-athletic/BrandAthleticResources"),
+};
+
+const nymagTabComponents: Record<string, ComponentType> = {
+  typography: load("brand-nymag/BrandNYMagTypography"),
+  colors: load("brand-nymag/BrandNYMagColors"),
+  components: load("brand-nymag/BrandNYMagComponents"),
+  layout: load("brand-nymag/BrandNYMagLayout"),
+  shapes: load("brand-nymag/BrandNYMagShapes"),
+  resources: load("brand-nymag/BrandNYMagResources"),
+};
 
 const sectionComponents: Record<DesignDocSectionId, ComponentType> = {
   overview: load("OverviewSection"),
   "app-styles": load("AppStylesSection"),
+  "gpt54-delightful-frontends": load("Gpt54DelightfulFrontendsSection"),
   heroes: load("HeroesSection"),
   typography: load("TypographySection"),
   "fonts-showcase": load("FontsShowcaseSection"),
@@ -49,6 +86,7 @@ const sectionComponents: Record<DesignDocSectionId, ComponentType> = {
   responsive: load("ResponsiveSection"),
   newsletters: load("NewslettersSection"),
   patterns: load("PatternsSection"),
+  "brand-nyt": load("BrandNYTSection"),
   "brand-nyt-games": load("BrandNYTGamesSection"),
   "brand-nyt-magazine": load("BrandNYTMagazineSection"),
   "brand-wirecutter": load("BrandWirecutterSection"),
@@ -57,14 +95,22 @@ const sectionComponents: Record<DesignDocSectionId, ComponentType> = {
   "brand-nyt-cooking": load("BrandNYTCookingSection"),
   "brand-nyt-style": load("BrandNYTStyleSection"),
   "brand-nyt-store": load("BrandNYTStoreSection"),
+  "brand-nymag": load("BrandNYMagSection"),
+  "athletic-articles": load("AthleticArticlesSection"),
   "nyt-articles": load("NYTArticlesSection"),
+  "nyt-tech-stack": load("NytTechStackSection"),
+  "nyt-games-articles": load("NYTGamesArticlesSection"),
 };
 
 interface Props {
   activeSection: DesignDocSectionId;
+  /** When set, renders ArticleDetailPage inside the shell instead of the section component */
+  articleSlug?: string;
+  /** When set, renders a specific brand tab page instead of the full brand section */
+  brandTab?: string;
 }
 
-export default function DesignDocsPageClient({ activeSection }: Props) {
+export default function DesignDocsPageClient({ activeSection, articleSlug, brandTab }: Props) {
   const { user, checking, hasAccess } = useAdminGuard();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -87,7 +133,7 @@ export default function DesignDocsPageClient({ activeSection }: Props) {
 
   return (
     <ClientOnly>
-      <div className="min-h-screen bg-zinc-50">
+      <div className="min-h-screen bg-white">
         <AdminGlobalHeader bodyClassName="px-6 py-4">
           <AdminBreadcrumbs items={breadcrumbs} />
           <div className="mt-2 flex items-start justify-between gap-4">
@@ -139,9 +185,30 @@ export default function DesignDocsPageClient({ activeSection }: Props) {
 
           <main className="min-w-0 flex-1 px-6 py-8">
             <div className="design-docs mx-auto max-w-4xl">
-              <Suspense fallback={<LoadingFallback />}>
-                <ActiveComponent />
-              </Suspense>
+              {articleSlug && activeSection === "nyt-games-articles" ? (
+                <GameArticleDetailPage gameId={articleSlug} />
+              ) : articleSlug ? (
+                <ArticleDetailPage articleId={articleSlug} />
+              ) : brandTab ? (
+                <Suspense fallback={<LoadingFallback />}>
+                  {(() => {
+                    const tabMap =
+                      activeSection === "brand-nyt"
+                        ? nytTabComponents
+                        : activeSection === "brand-the-athletic"
+                          ? athleticTabComponents
+                          : activeSection === "brand-nymag"
+                            ? nymagTabComponents
+                            : null;
+                    const TabComponent = tabMap?.[brandTab];
+                    return TabComponent ? <TabComponent /> : <ActiveComponent />;
+                  })()}
+                </Suspense>
+              ) : (
+                <Suspense fallback={<LoadingFallback />}>
+                  <ActiveComponent />
+                </Suspense>
+              )}
             </div>
           </main>
         </div>

@@ -304,7 +304,7 @@ export default function GameWordle({ SectionLabel }: GameSectionProps) {
           Wordle
         </div>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#999", marginBottom: 12 }}>
-          nyt-karnakcondensed &rarr; Rude Slab &middot; 50px / 700
+          nyt-karnakcondensed (NYTKarnak_Condensed) &middot; 50px / 700
         </div>
 
         <div
@@ -319,7 +319,7 @@ export default function GameWordle({ SectionLabel }: GameSectionProps) {
           Get 6 chances to guess
         </div>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#999", marginBottom: 12 }}>
-          nyt-karnak &rarr; Stymie &middot; 38px / 400
+          nyt-karnak (KarnakPro-Book) &middot; 38px / 400
         </div>
 
         <div
@@ -334,7 +334,7 @@ export default function GameWordle({ SectionLabel }: GameSectionProps) {
           Guess the WORDLE in 6 tries. Each guess must be a valid 5-letter word.
         </div>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#999" }}>
-          Clear Sans &rarr; Hamburg Serial &middot; 16px / 400 &middot; body font
+          Clear Sans (system fallback) &middot; 16px / 400 &middot; body font
         </div>
       </div>
 

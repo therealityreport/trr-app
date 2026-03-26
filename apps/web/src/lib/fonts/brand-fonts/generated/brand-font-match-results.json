@@ -1,7 +1,7 @@
 {
   "schemaVersion": "2026-03-23.v2",
   "inputHash": "cf742cb0bba31a68ffd0f12278388e0707d43f559df67da12489d97a97cd6383",
-  "generatedAt": "2026-03-23T23:00:37.249Z",
+  "generatedAt": "2026-03-24T16:55:39.192Z",
   "scoringConfigVersion": "2026-03-23.score.v3",
   "data": [
     {
@@ -435,12 +435,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 86,
+          "score": 91,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -456,24 +457,23 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 12.5,
+            "visualAffinity": 17.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 12.5,
+            "visualTotal": 17.5,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 91
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Magnus",
-          "score": 71,
+          "familyName": "Plymouth Serial",
+          "score": 73,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
-            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -487,16 +487,16 @@
             "width": 14,
             "weightCoverage": 10,
             "styleSupport": 6,
-            "traitCompatibility": 0,
+            "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 16,
+            "visualAffinity": 15.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 54.7,
+            "structuralTotal": 56.7,
             "identityTotal": 0,
-            "visualTotal": 16,
+            "visualTotal": 15.8,
             "penaltyTotal": 0,
-            "total": 71
+            "total": 73
           },
           "scoringMode": "visual+metadata"
         }
@@ -688,12 +688,11 @@
         },
         {
           "familyName": "Gloucester",
-          "score": 78,
+          "score": 75,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
-            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -709,20 +708,20 @@
             "styleSupport": 6,
             "traitCompatibility": 3.5,
             "familyName": 0,
-            "visualAffinity": 18,
+            "visualAffinity": 14.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 59.9,
             "identityTotal": 0,
-            "visualTotal": 18,
+            "visualTotal": 14.8,
             "penaltyTotal": 0,
-            "total": 78
+            "total": 75
           },
           "scoringMode": "visual+metadata"
         },
         {
           "familyName": "Stafford Serial",
-          "score": 70,
+          "score": 74,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
@@ -742,14 +741,14 @@
             "styleSupport": 6,
             "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 11.8,
+            "visualAffinity": 15.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 58.4,
             "identityTotal": 0,
-            "visualTotal": 11.8,
+            "visualTotal": 15.8,
             "penaltyTotal": 0,
-            "total": 70
+            "total": 74
           },
           "scoringMode": "visual+metadata"
         }
@@ -776,43 +775,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -834,51 +798,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -976,8 +973,8 @@
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Futura Now Headline",
-          "score": 78,
+          "familyName": "Futura Now Display",
+          "score": 79,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
@@ -998,14 +995,14 @@
             "styleSupport": 6,
             "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 16.3,
+            "visualAffinity": 16.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 62,
             "identityTotal": 0,
-            "visualTotal": 16.3,
+            "visualTotal": 16.5,
             "penaltyTotal": 0,
-            "total": 78
+            "total": 79
           },
           "scoringMode": "visual+metadata"
         }
@@ -1069,7 +1066,7 @@
         },
         {
           "familyName": "Stymie Extra Bold",
-          "score": 79,
+          "score": 75,
           "fitForRole": "acceptable",
           "matchWarnings": [
             "partial-weight-coverage"
@@ -1077,7 +1074,6 @@
           "rationaleChips": [
             "classification-match",
             "family-affinity",
-            "visual-affinity",
             "role-match",
             "width-match",
             "display-capable"
@@ -1092,14 +1088,14 @@
             "styleSupport": 6,
             "traitCompatibility": 3.5,
             "familyName": 8,
-            "visualAffinity": 17.3,
+            "visualAffinity": 13.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 53.5,
             "identityTotal": 8,
-            "visualTotal": 17.3,
+            "visualTotal": 13.8,
             "penaltyTotal": 0,
-            "total": 79
+            "total": 75
           },
           "scoringMode": "visual+metadata"
         },
@@ -1574,7 +1570,7 @@
         },
         {
           "familyName": "Beton",
-          "score": 71,
+          "score": 73,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
@@ -1594,14 +1590,14 @@
             "styleSupport": 4,
             "traitCompatibility": 2.1,
             "familyName": 0,
-            "visualAffinity": 31.9,
+            "visualAffinity": 34.1,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 39.1,
             "identityTotal": 0,
-            "visualTotal": 31.9,
+            "visualTotal": 34.1,
             "penaltyTotal": 0,
-            "total": 71
+            "total": 73
           },
           "scoringMode": "visual+metadata"
         }
@@ -1665,12 +1661,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 72,
+          "score": 83,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -1686,48 +1683,48 @@
             "styleSupport": 4,
             "traitCompatibility": 3,
             "familyName": 4.5,
-            "visualAffinity": 27.5,
+            "visualAffinity": 38.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 40,
             "identityTotal": 4.5,
-            "visualTotal": 27.5,
+            "visualTotal": 38.5,
             "penaltyTotal": 0,
-            "total": 72
+            "total": 83
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Gloucester",
-          "score": 68,
+          "familyName": "Velino Compressed Text",
+          "score": 62,
           "fitForRole": "risky",
-          "matchWarnings": [],
+          "matchWarnings": [
+            "width-mismatch"
+          ],
           "rationaleChips": [
             "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "width-match",
+            "role-match",
             "full-weight-coverage",
-            "body-safe"
+            "display-capable"
           ],
           "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "explicit-mapping-visual",
             "classification": 6,
-            "role": 6,
-            "width": 10,
+            "role": 10,
+            "width": 0,
             "weightCoverage": 7,
             "styleSupport": 4,
-            "traitCompatibility": 2.1,
-            "familyName": 3.5,
-            "visualAffinity": 39.6,
+            "traitCompatibility": 1.2,
+            "familyName": 2,
+            "visualAffinity": 31.9,
             "ruleBonus": 0,
-            "riskPenalty": -10,
-            "structuralTotal": 35.1,
-            "identityTotal": 3.5,
-            "visualTotal": 39.6,
-            "penaltyTotal": -10,
-            "total": 68
+            "riskPenalty": 0,
+            "structuralTotal": 28.2,
+            "identityTotal": 2,
+            "visualTotal": 31.9,
+            "penaltyTotal": 0,
+            "total": 62
           },
           "scoringMode": "visual+metadata"
         }
@@ -3130,8 +3127,8 @@
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "ITC Franklin Gothic LT",
-          "score": 92,
+          "familyName": "News Gothic",
+          "score": 89,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -3152,20 +3149,20 @@
             "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 8,
-            "visualAffinity": 23,
+            "familyName": 9,
+            "visualAffinity": 18.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
-            "identityTotal": 8,
-            "visualTotal": 23,
+            "identityTotal": 9,
+            "visualTotal": 18.8,
             "penaltyTotal": 0,
-            "total": 92
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "News Gothic",
+          "familyName": "Hamburg Serial",
           "score": 88,
           "fitForRole": "strong",
           "matchWarnings": [],
@@ -3188,12 +3185,12 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 17.3,
+            "visualAffinity": 18,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 17.3,
+            "visualTotal": 18,
             "penaltyTotal": 0,
             "total": 88
           },
@@ -3515,12 +3512,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 86,
+          "score": 91,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -3536,24 +3534,23 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 12.5,
+            "visualAffinity": 17.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 12.5,
+            "visualTotal": 17.5,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 91
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Magnus",
-          "score": 71,
+          "familyName": "Plymouth Serial",
+          "score": 73,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
-            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -3567,16 +3564,16 @@
             "width": 14,
             "weightCoverage": 10,
             "styleSupport": 6,
-            "traitCompatibility": 0,
+            "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 16,
+            "visualAffinity": 15.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 54.7,
+            "structuralTotal": 56.7,
             "identityTotal": 0,
-            "visualTotal": 16,
+            "visualTotal": 15.8,
             "penaltyTotal": 0,
-            "total": 71
+            "total": 73
           },
           "scoringMode": "visual+metadata"
         }
@@ -3854,43 +3851,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -3912,51 +3874,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -4276,12 +4271,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 86,
+          "score": 91,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4297,24 +4293,23 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 12.5,
+            "visualAffinity": 17.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 12.5,
+            "visualTotal": 17.5,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 91
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Magnus",
-          "score": 71,
+          "familyName": "Plymouth Serial",
+          "score": 73,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
-            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4328,16 +4323,16 @@
             "width": 14,
             "weightCoverage": 10,
             "styleSupport": 6,
-            "traitCompatibility": 0,
+            "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 16,
+            "visualAffinity": 15.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 54.7,
+            "structuralTotal": 56.7,
             "identityTotal": 0,
-            "visualTotal": 16,
+            "visualTotal": 15.8,
             "penaltyTotal": 0,
-            "total": 71
+            "total": 73
           },
           "scoringMode": "visual+metadata"
         }
@@ -4402,12 +4397,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 85,
+          "score": 91,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4424,21 +4420,21 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 12.3,
+            "visualAffinity": 17.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 12.3,
+            "visualTotal": 17.5,
             "penaltyTotal": 0,
-            "total": 85
+            "total": 91
           },
           "scoringMode": "visual+metadata"
         },
         {
           "familyName": "Plymouth Serial",
-          "score": 69,
-          "fitForRole": "risky",
+          "score": 72,
+          "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
             "role-match",
@@ -4457,14 +4453,14 @@
             "styleSupport": 6,
             "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 12.3,
+            "visualAffinity": 14.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 56.7,
             "identityTotal": 0,
-            "visualTotal": 12.3,
+            "visualTotal": 14.8,
             "penaltyTotal": 0,
-            "total": 69
+            "total": 72
           },
           "scoringMode": "visual+metadata"
         }
@@ -4614,43 +4610,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -4672,51 +4633,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -4780,12 +4774,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 86,
+          "score": 91,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4801,24 +4796,23 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 12.5,
+            "visualAffinity": 17.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 12.5,
+            "visualTotal": 17.5,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 91
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Magnus",
-          "score": 71,
+          "familyName": "Plymouth Serial",
+          "score": 73,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
-            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -4832,16 +4826,16 @@
             "width": 14,
             "weightCoverage": 10,
             "styleSupport": 6,
-            "traitCompatibility": 0,
+            "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 16,
+            "visualAffinity": 15.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 54.7,
+            "structuralTotal": 56.7,
             "identityTotal": 0,
-            "visualTotal": 16,
+            "visualTotal": 15.8,
             "penaltyTotal": 0,
-            "total": 71
+            "total": 73
           },
           "scoringMode": "visual+metadata"
         }
@@ -4868,43 +4862,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -4926,51 +4885,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -4997,43 +4989,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -5055,51 +5012,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -5126,43 +5116,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -5184,51 +5139,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -5541,8 +5529,8 @@
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "ITC Franklin Gothic LT",
-          "score": 92,
+          "familyName": "News Gothic",
+          "score": 89,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -5563,20 +5551,20 @@
             "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 8,
-            "visualAffinity": 23,
+            "familyName": 9,
+            "visualAffinity": 18.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
-            "identityTotal": 8,
-            "visualTotal": 23,
+            "identityTotal": 9,
+            "visualTotal": 18.8,
             "penaltyTotal": 0,
-            "total": 92
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "News Gothic",
+          "familyName": "Hamburg Serial",
           "score": 88,
           "fitForRole": "strong",
           "matchWarnings": [],
@@ -5599,12 +5587,12 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 17.3,
+            "visualAffinity": 18,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 17.3,
+            "visualTotal": 18,
             "penaltyTotal": 0,
             "total": 88
           },
@@ -5924,12 +5912,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 85,
+          "score": 91,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -5946,21 +5935,21 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 12.3,
+            "visualAffinity": 17.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 12.3,
+            "visualTotal": 17.5,
             "penaltyTotal": 0,
-            "total": 85
+            "total": 91
           },
           "scoringMode": "visual+metadata"
         },
         {
           "familyName": "Plymouth Serial",
-          "score": 69,
-          "fitForRole": "risky",
+          "score": 72,
+          "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
             "role-match",
@@ -5979,14 +5968,14 @@
             "styleSupport": 6,
             "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 12.3,
+            "visualAffinity": 14.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 56.7,
             "identityTotal": 0,
-            "visualTotal": 12.3,
+            "visualTotal": 14.8,
             "penaltyTotal": 0,
-            "total": 69
+            "total": 72
           },
           "scoringMode": "visual+metadata"
         }
@@ -6301,12 +6290,13 @@
         },
         {
           "familyName": "ITC Cheltenham",
-          "score": 86,
+          "score": 91,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
+            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -6322,24 +6312,23 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 12.5,
+            "visualAffinity": 17.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 12.5,
+            "visualTotal": 17.5,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 91
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Magnus",
-          "score": 71,
+          "familyName": "Plymouth Serial",
+          "score": 73,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
-            "visual-affinity",
             "role-match",
             "width-match",
             "full-weight-coverage",
@@ -6353,16 +6342,16 @@
             "width": 14,
             "weightCoverage": 10,
             "styleSupport": 6,
-            "traitCompatibility": 0,
+            "traitCompatibility": 2,
             "familyName": 0,
-            "visualAffinity": 16,
+            "visualAffinity": 15.8,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 54.7,
+            "structuralTotal": 56.7,
             "identityTotal": 0,
-            "visualTotal": 16,
+            "visualTotal": 15.8,
             "penaltyTotal": 0,
-            "total": 71
+            "total": 73
           },
           "scoringMode": "visual+metadata"
         }
@@ -6390,8 +6379,8 @@
       "matches": [
         {
           "familyName": "Franklin Gothic Raw",
-          "score": 84,
-          "fitForRole": "acceptable",
+          "score": 86,
+          "fitForRole": "strong",
           "matchWarnings": [
             "partial-weight-coverage"
           ],
@@ -6413,20 +6402,20 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 21.3,
+            "visualAffinity": 23,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 55,
             "identityTotal": 8,
-            "visualTotal": 21.3,
+            "visualTotal": 23,
             "penaltyTotal": 0,
-            "total": 84
+            "total": 86
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Hamburg Serial",
-          "score": 74,
+          "familyName": "News Gothic No. 2",
+          "score": 77,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
@@ -6447,50 +6436,48 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.8,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": -10,
             "structuralTotal": 57.8,
             "identityTotal": 9,
-            "visualTotal": 16.8,
+            "visualTotal": 20,
             "penaltyTotal": -10,
-            "total": 74
+            "total": 77
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 73,
+          "familyName": "Hamburg Serial",
+          "score": 76,
           "fitForRole": "acceptable",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 10.8,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": -10,
-            "structuralTotal": 47.8,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 57.8,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": -10,
-            "total": 73
+            "total": 76
           },
           "scoringMode": "visual+metadata"
         }
@@ -6517,43 +6504,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -6575,51 +6527,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -6646,43 +6631,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -6704,51 +6654,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }
@@ -7027,8 +7010,8 @@
       "matches": [
         {
           "familyName": "Franklin Gothic Raw",
-          "score": 84,
-          "fitForRole": "acceptable",
+          "score": 86,
+          "fitForRole": "strong",
           "matchWarnings": [
             "partial-weight-coverage"
           ],
@@ -7050,20 +7033,20 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 21.3,
+            "visualAffinity": 23,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 55,
             "identityTotal": 8,
-            "visualTotal": 21.3,
+            "visualTotal": 23,
             "penaltyTotal": 0,
-            "total": 84
+            "total": 86
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Hamburg Serial",
-          "score": 74,
+          "familyName": "News Gothic No. 2",
+          "score": 77,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
@@ -7084,50 +7067,48 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.8,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": -10,
             "structuralTotal": 57.8,
             "identityTotal": 9,
-            "visualTotal": 16.8,
+            "visualTotal": 20,
             "penaltyTotal": -10,
-            "total": 74
+            "total": 77
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 73,
+          "familyName": "Hamburg Serial",
+          "score": 76,
           "fitForRole": "acceptable",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 10.8,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": -10,
-            "structuralTotal": 47.8,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 57.8,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": -10,
-            "total": 73
+            "total": 76
           },
           "scoringMode": "visual+metadata"
         }
@@ -7155,7 +7136,7 @@
       "matches": [
         {
           "familyName": "Franklin Gothic Raw",
-          "score": 90,
+          "score": 95,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -7177,14 +7158,14 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 8,
-            "visualAffinity": 16.8,
+            "visualAffinity": 21.5,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 65,
             "identityTotal": 8,
-            "visualTotal": 16.8,
+            "visualTotal": 21.5,
             "penaltyTotal": 0,
-            "total": 90
+            "total": 95
           },
           "scoringMode": "visual+metadata"
         },
@@ -7225,7 +7206,7 @@
         },
         {
           "familyName": "News Gothic",
-          "score": 74,
+          "score": 76,
           "fitForRole": "acceptable",
           "matchWarnings": [],
           "rationaleChips": [
@@ -7246,14 +7227,14 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 17.3,
+            "visualAffinity": 18.8,
             "ruleBonus": 0,
             "riskPenalty": -10,
             "structuralTotal": 57.8,
             "identityTotal": 9,
-            "visualTotal": 17.3,
+            "visualTotal": 18.8,
             "penaltyTotal": -10,
-            "total": 74
+            "total": 76
           },
           "scoringMode": "visual+metadata"
         }
@@ -7408,43 +7389,8 @@
       },
       "matches": [
         {
-          "familyName": "Hamburg Serial",
-          "score": 87,
-          "fitForRole": "strong",
-          "matchWarnings": [],
-          "rationaleChips": [
-            "classification-match",
-            "family-affinity",
-            "visual-affinity",
-            "role-match",
-            "width-match",
-            "full-weight-coverage",
-            "body-safe"
-          ],
-          "matchSource": "heuristic",
-          "scoreBreakdown": {
-            "profile": "balanced-visual",
-            "classification": 12,
-            "role": 14.4,
-            "width": 14,
-            "weightCoverage": 10,
-            "styleSupport": 6,
-            "traitCompatibility": 5,
-            "familyName": 9,
-            "visualAffinity": 16.8,
-            "ruleBonus": 0,
-            "riskPenalty": 0,
-            "structuralTotal": 61.4,
-            "identityTotal": 9,
-            "visualTotal": 16.8,
-            "penaltyTotal": 0,
-            "total": 87
-          },
-          "scoringMode": "visual+metadata"
-        },
-        {
           "familyName": "News Gothic No. 2",
-          "score": 87,
+          "score": 90,
           "fitForRole": "strong",
           "matchWarnings": [],
           "rationaleChips": [
@@ -7466,51 +7412,84 @@
             "styleSupport": 6,
             "traitCompatibility": 5,
             "familyName": 9,
-            "visualAffinity": 16.3,
+            "visualAffinity": 20,
             "ruleBonus": 0,
             "riskPenalty": 0,
             "structuralTotal": 61.4,
             "identityTotal": 9,
-            "visualTotal": 16.3,
+            "visualTotal": 20,
             "penaltyTotal": 0,
-            "total": 87
+            "total": 90
           },
           "scoringMode": "visual+metadata"
         },
         {
-          "familyName": "Franklin Gothic",
-          "score": 86,
+          "familyName": "Hamburg Serial",
+          "score": 90,
           "fitForRole": "strong",
-          "matchWarnings": [
-            "partial-weight-coverage"
-          ],
+          "matchWarnings": [],
           "rationaleChips": [
             "classification-match",
             "family-affinity",
             "visual-affinity",
             "role-match",
             "width-match",
-            "current-substitute",
+            "full-weight-coverage",
             "body-safe"
           ],
-          "matchSource": "current-substitute",
+          "matchSource": "heuristic",
           "scoreBreakdown": {
             "profile": "balanced-visual",
             "classification": 12,
             "role": 14.4,
             "width": 14,
-            "weightCoverage": 0,
+            "weightCoverage": 10,
             "styleSupport": 6,
             "traitCompatibility": 5,
-            "familyName": 10,
-            "visualAffinity": 25,
+            "familyName": 9,
+            "visualAffinity": 19.3,
             "ruleBonus": 0,
             "riskPenalty": 0,
-            "structuralTotal": 51.4,
-            "identityTotal": 10,
-            "visualTotal": 25,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19.3,
             "penaltyTotal": 0,
-            "total": 86
+            "total": 90
+          },
+          "scoringMode": "visual+metadata"
+        },
+        {
+          "familyName": "News Gothic",
+          "score": 89,
+          "fitForRole": "strong",
+          "matchWarnings": [],
+          "rationaleChips": [
+            "classification-match",
+            "family-affinity",
+            "visual-affinity",
+            "role-match",
+            "width-match",
+            "full-weight-coverage",
+            "body-safe"
+          ],
+          "matchSource": "heuristic",
+          "scoreBreakdown": {
+            "profile": "balanced-visual",
+            "classification": 12,
+            "role": 14.4,
+            "width": 14,
+            "weightCoverage": 10,
+            "styleSupport": 6,
+            "traitCompatibility": 5,
+            "familyName": 9,
+            "visualAffinity": 19,
+            "ruleBonus": 0,
+            "riskPenalty": 0,
+            "structuralTotal": 61.4,
+            "identityTotal": 9,
+            "visualTotal": 19,
+            "penaltyTotal": 0,
+            "total": 89
           },
           "scoringMode": "visual+metadata"
         }

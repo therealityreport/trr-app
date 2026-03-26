@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { upsertTypographyAssignment } from "@/lib/server/admin/typography-repository";
+import { invalidateTypographyRouteCaches } from "@/lib/server/admin/typography-route-cache";
 import {
   parseOptionalString,
   parseRequiredString,
@@ -35,6 +36,7 @@ export async function PUT(request: NextRequest) {
       sourcePath: parseRequiredString(body?.sourcePath, "sourcePath"),
       notes: parseOptionalString(body?.notes),
     });
+    invalidateTypographyRouteCaches();
     return NextResponse.json({ assignment });
   } catch (error) {
     console.error("[api] Failed to upsert typography assignment", error);

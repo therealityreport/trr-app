@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getAssetsByShowId } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 const FULL_FETCH_LIMIT = 5000;
@@ -36,32 +40,32 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
       .map((value) => value.trim())
       .filter(Boolean);
 
-    const requestLimit = full ? FULL_FETCH_LIMIT + 1 : limit;
-    const requestOffset = full ? 0 : offset;
-    const rawAssets = await getAssetsByShowId(showId, {
-      limit: requestLimit,
-      offset: requestOffset,
-      sources,
-      full,
+    const upstreamParams = new URLSearchParams({
+      limit: String(full ? FULL_FETCH_LIMIT + 1 : limit),
+      offset: String(full ? 0 : offset),
     });
-    const truncated = full && rawAssets.length > FULL_FETCH_LIMIT;
-    const assets = truncated ? rawAssets.slice(0, FULL_FETCH_LIMIT) : rawAssets;
+    if (full) upstreamParams.set("full", "true");
+    if (sources.length > 0) upstreamParams.set("sources", sources.join(","));
 
-    return NextResponse.json({
-      assets,
-      pagination: {
-        limit: full ? FULL_FETCH_LIMIT : limit,
-        offset: requestOffset,
-        count: assets.length,
-        truncated,
-        full,
+    const upstream = await fetchAdminBackendJson(
+      `/admin/trr-api/shows/${showId}/assets?${upstreamParams.toString()}`,
+      {
+        timeoutMs: ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
+        routeName: "show-assets",
       },
-    });
+    );
+    if (upstream.status !== 200) {
+      throw new Error(
+        typeof upstream.data.error === "string"
+          ? upstream.data.error
+          : typeof upstream.data.detail === "string"
+            ? upstream.data.detail
+            : "Failed to fetch show assets",
+      );
+    }
+    return NextResponse.json(upstream.data);
   } catch (error) {
     console.error("[api] Failed to fetch show assets", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

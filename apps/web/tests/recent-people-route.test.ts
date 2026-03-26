@@ -1,19 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const { requireAdminMock, getRecentPeopleViewsMock, recordRecentPersonViewMock } = vi.hoisted(() => ({
+const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  getRecentPeopleViewsMock: vi.fn(),
-  recordRecentPersonViewMock: vi.fn(),
+  fetchAdminBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
 }));
 
-vi.mock("@/lib/server/admin/recent-people-repository", () => ({
-  getRecentPeopleViews: getRecentPeopleViewsMock,
-  recordRecentPersonView: recordRecentPersonViewMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminProxyErrorResponse: (error: unknown) =>
+    NextResponse.json(
+      { error: error instanceof Error ? error.message : "failed" },
+      { status: error instanceof Error && error.message === "unauthorized" ? 401 : 500 },
+    ),
 }));
 
 import { GET, POST } from "@/app/api/admin/recent-people/route";
@@ -21,27 +25,42 @@ import { GET, POST } from "@/app/api/admin/recent-people/route";
 describe("/api/admin/recent-people", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    getRecentPeopleViewsMock.mockReset();
-    recordRecentPersonViewMock.mockReset();
+    fetchAdminBackendJsonMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "firebase-admin-1" });
   });
 
   it("returns recent people scoped to current admin", async () => {
-    getRecentPeopleViewsMock.mockResolvedValue([
-      {
-        person_id: "11111111-2222-3333-4444-555555555555",
-        full_name: "Alan Cumming",
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        people: [
+          {
+            person_id: "11111111-2222-3333-4444-555555555555",
+            full_name: "Alan Cumming",
+          },
+        ],
+        pagination: { limit: 5 },
       },
-    ]);
+      durationMs: 5,
+    });
 
     const request = new NextRequest("http://localhost/api/admin/recent-people?limit=5");
     const response = await GET(request);
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getRecentPeopleViewsMock).toHaveBeenCalledWith("firebase-admin-1", { limit: 5 });
     expect(payload.people).toHaveLength(1);
     expect(payload.pagination.limit).toBe(5);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/recent-people",
+      expect.objectContaining({
+        routeName: "recent-people:list",
+        queryString: "limit=5",
+        headers: {
+          "X-TRR-Admin-User-Uid": "firebase-admin-1",
+        },
+      }),
+    );
   });
 
   it("validates personId on POST", async () => {
@@ -56,11 +75,17 @@ describe("/api/admin/recent-people", () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toContain("personId");
-    expect(recordRecentPersonViewMock).not.toHaveBeenCalled();
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 
   it("records recent person views and keeps show context", async () => {
     const personId = "11111111-2222-3333-4444-555555555555";
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { ok: true },
+      durationMs: 4,
+    });
+
     const request = new NextRequest("http://localhost/api/admin/recent-people", {
       method: "POST",
       body: JSON.stringify({ personId, showId: "the-traitors-us" }),
@@ -72,10 +97,17 @@ describe("/api/admin/recent-people", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
-    expect(recordRecentPersonViewMock).toHaveBeenCalledWith(
-      { firebaseUid: "firebase-admin-1", isAdmin: true },
-      { personId, showContext: "the-traitors-us" },
-      { cap: 20 },
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/recent-people",
+      expect.objectContaining({
+        method: "POST",
+        routeName: "recent-people:record",
+        headers: {
+          "Content-Type": "application/json",
+          "X-TRR-Admin-User-Uid": "firebase-admin-1",
+        },
+        body: JSON.stringify({ personId, showId: "the-traitors-us" }),
+      }),
     );
   });
 });

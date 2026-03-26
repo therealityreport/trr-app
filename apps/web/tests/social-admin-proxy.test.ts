@@ -1,21 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getBackendApiUrlMock, getSeasonByShowAndNumberMock } = vi.hoisted(() => ({
+const { getBackendApiUrlMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   getBackendApiUrlMock: vi.fn(),
-  getSeasonByShowAndNumberMock: vi.fn(),
+  fetchAdminBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
-vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  getSeasonByShowAndNumber: getSeasonByShowAndNumberMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
 }));
 
 import {
   fetchSocialBackendJson,
   fetchSeasonBackendJson,
+  resetSeasonIdResolutionCacheForTests,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
@@ -25,8 +27,17 @@ describe("social-admin-proxy", () => {
     vi.unstubAllGlobals();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-token";
-    getSeasonByShowAndNumberMock.mockResolvedValue({ id: "season-1" });
+    fetchAdminBackendJsonMock.mockReset();
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        seasons: [{ id: "season-1", season_number: 6 }],
+        pagination: { count: 1 },
+      },
+      durationMs: 1,
+    });
     getBackendApiUrlMock.mockReturnValue("http://backend.local/api/v1/admin/socials/seasons/season-1/analytics");
+    resetSeasonIdResolutionCacheForTests();
   });
 
   it("retries transient upstream failures and succeeds", async () => {
@@ -56,6 +67,10 @@ describe("social-admin-proxy", () => {
     });
 
     expect(payload).toEqual({ ok: true });
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/show-1/seasons",
+      expect.objectContaining({ routeName: "social-season-resolve" }),
+    );
     const backendCalls = fetchMock.mock.calls.filter(
       (call) => String(call[0]) === "http://backend.local/api/v1/admin/socials/seasons/season-1/analytics",
     );
@@ -115,6 +130,48 @@ describe("social-admin-proxy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("maps backend pool saturation to retryable 503 metadata", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: { get: () => null },
+      json: async () => ({
+        detail: "connection pool exhausted",
+      }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    let thrown: unknown;
+    try {
+      await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+        fallbackError: "Failed to fetch social analytics",
+        retries: 0,
+        timeoutMs: 1000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const response = socialProxyErrorResponse(thrown, "[test] saturation");
+    const payload = (await response.json()) as {
+      error: string;
+      code?: string;
+      retryable?: boolean;
+      retry_after_seconds?: number;
+      upstream_status?: number;
+      upstream_detail?: unknown;
+    };
+
+    expect(response.status).toBe(503);
+    expect(payload.code).toBe("BACKEND_SATURATED");
+    expect(payload.retryable).toBe(true);
+    expect(payload.retry_after_seconds).toBe(2);
+    expect(payload.error).toMatch(/backend is saturated/i);
+    expect(payload.upstream_status).toBe(503);
+    expect(payload.upstream_detail).toBe("connection pool exhausted");
+    expect(response.headers.get("retry-after")).toBe("2");
+  });
+
   it("uses seasonIdHint directly when it is a valid UUID (skips canonical lookup)", async () => {
     const hintedSeasonId = "11111111-1111-4111-8111-111111111111";
     getBackendApiUrlMock.mockImplementation(
@@ -137,7 +194,7 @@ describe("social-admin-proxy", () => {
     });
 
     expect(payload).toEqual({ ok: true });
-    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(0);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics?source_scope=bravo`);
   });
@@ -162,12 +219,19 @@ describe("social-admin-proxy", () => {
       timeoutMs: 1000,
     });
 
-    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(0);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(0);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(`/seasons/${hintedSeasonId}/analytics`);
   });
 
   it("falls back to season lookup when seasonIdHint is invalid", async () => {
-    getSeasonByShowAndNumberMock.mockResolvedValue({ id: "resolved-season-id" });
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        seasons: [{ id: "resolved-season-id", season_number: 9 }],
+        pagination: { count: 1 },
+      },
+      durationMs: 1,
+    });
     getBackendApiUrlMock.mockImplementation(
       (path: string) => `http://backend.local/api/v1${path}`,
     );
@@ -186,7 +250,7 @@ describe("social-admin-proxy", () => {
       timeoutMs: 1000,
     });
 
-    expect(getSeasonByShowAndNumberMock).toHaveBeenCalledTimes(1);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(1);
   });
 
   it("normalizes DNS and SSL transport detail responses to BACKEND_UNREACHABLE", async () => {

@@ -210,6 +210,17 @@ describe("social week detail wiring", () => {
     expect(seasonContents).toMatch(/const refreshInterval = DEV_LOW_HEAT_MODE\s*\? DEV_VISIBLE_POLL_INTERVAL_MS/s);
   });
 
+  it("does not keep polling manual attach runs while the week detail screen is idle", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/void fetchManualAttachRunCandidates\(\);/);
+    expect(contents).not.toMatch(/setInterval\(\(\) => \{\s*void fetchManualAttachRunCandidates\(\);\s*\}, 20_000\)/s);
+  });
+
   it("surfaces worker-health blocking and sync-session diagnostics in the week sync UI", () => {
     const filePath = path.resolve(
       __dirname,

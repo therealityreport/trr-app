@@ -11,9 +11,9 @@ anyio==4.12.1
     #   watchfiles
 beautifulsoup4==4.14.3
     # via -r requirements.in
-boto3==1.42.60
+boto3==1.42.74
     # via -r requirements.in
-botocore==1.42.60
+botocore==1.42.74
     # via
     #   boto3
     #   s3transfer
@@ -42,9 +42,9 @@ deprecation==2.1.0
     # via
     #   postgrest
     #   storage3
-fastapi==0.135.1
+fastapi==0.135.2
     # via -r requirements.in
-firebase-admin==7.2.0
+firebase-admin==7.3.0
     # via -r requirements.in
 fsspec==2026.2.0
     # via pyiceberg
@@ -59,9 +59,9 @@ google-api-core==2.30.0
     #   google-cloud-firestore
     #   google-cloud-storage
     #   google-generativeai
-google-api-python-client==2.191.0
+google-api-python-client==2.193.0
     # via google-generativeai
-google-auth==2.48.0
+google-auth==2.49.1
     # via
     #   -r requirements.in
     #   google-ai-generativelanguage
@@ -84,9 +84,9 @@ google-cloud-core==2.5.0
     # via
     #   google-cloud-firestore
     #   google-cloud-storage
-google-cloud-firestore==2.23.0
+google-cloud-firestore==2.26.0
     # via firebase-admin
-google-cloud-storage==3.9.0
+google-cloud-storage==3.10.1
     # via firebase-admin
 google-crc32c==1.8.0
     # via
@@ -103,6 +103,7 @@ googleapis-common-protos==1.72.0
 grpcio==1.78.0
     # via
     #   google-api-core
+    #   google-cloud-firestore
     #   grpcio-status
 grpcio-status==1.71.2
     # via google-api-core
@@ -167,7 +168,7 @@ pillow==12.1.1
     # via -r requirements.in
 pluggy==1.6.0
     # via pytest
-postgrest==2.28.0
+postgrest==2.28.3
     # via supabase
 propcache==0.4.1
     # via yarl
@@ -188,9 +189,7 @@ protobuf==5.29.6
 psycopg2-binary==2.9.11
     # via -r requirements.in
 pyasn1==0.6.2
-    # via
-    #   pyasn1-modules
-    #   rsa
+    # via pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.0
@@ -235,7 +234,7 @@ python-dotenv==1.2.2
     #   uvicorn
 pyyaml==6.0.3
     # via uvicorn
-realtime==2.28.0
+realtime==2.28.3
     # via supabase
 requests==2.32.5
     # via
@@ -249,8 +248,6 @@ requests-oauthlib==2.0.0
     # via google-auth-oauthlib
 rich==14.3.3
     # via pyiceberg
-rsa==4.9.1
-    # via google-auth
 s3transfer==0.16.0
     # via boto3
 six==1.17.0
@@ -259,17 +256,17 @@ soupsieve==2.8.3
     # via beautifulsoup4
 starlette==0.52.1
     # via fastapi
-storage3==2.28.0
+storage3==2.28.3
     # via supabase
 strenum==0.4.15
     # via supabase-functions
 strictyaml==1.7.3
     # via pyiceberg
-supabase==2.28.0
+supabase==2.28.3
     # via -r requirements.in
-supabase-auth==2.28.0
+supabase-auth==2.28.3
     # via supabase
-supabase-functions==2.28.0
+supabase-functions==2.28.3
     # via supabase
 tenacity==9.1.4
     # via

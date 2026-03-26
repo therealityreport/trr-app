@@ -23,6 +23,18 @@ export type ScoringMode = "metadata-only" | "visual+metadata";
 export type RefreshMode = "artifact" | "local-rerank";
 export type CandidateSource = "metadata" | "current-substitute";
 export type ScoreBreakdownProfile = "explicit-mapping-visual" | "balanced-visual" | "metadata-only";
+export type VisualEvidenceStatus = "fresh" | "stale" | "missing";
+export type VisualEvidenceReason =
+  | "compatible-glyph-artifact"
+  | "input-hash-mismatch"
+  | "missing-artifact"
+  | "empty-artifact";
+export type FontAssetResolutionReason =
+  | "exact"
+  | "nearest-weight"
+  | "style-fallback"
+  | "stretch-fallback"
+  | "family-alias";
 
 export type TraitToken =
   | "body-safe"
@@ -96,6 +108,20 @@ export interface KerningAnalysis {
   recommendedLetterSpacingEm: number;
 }
 
+export interface ResolvedFontAsset {
+  requestedFamilyName: string;
+  resolvedFamilyName: string;
+  requestedWeight: number;
+  requestedStyle: BrandFontStyle;
+  requestedWidth: BrandFontWidth;
+  resolvedWeight: number;
+  resolvedStyle: BrandFontStyle;
+  resolvedWidth: BrandFontWidth;
+  sourceUrl: string;
+  assetPath: string | null;
+  resolutionReason: FontAssetResolutionReason;
+}
+
 export interface GlyphComparisonPair {
   brandId: string;
   brandLabel: string;
@@ -107,6 +133,8 @@ export interface GlyphComparisonPair {
   currentReferenceSubstitute?: string;
   candidateFamily: string;
   candidateSource: CandidateSource;
+  resolvedSourceAsset?: ResolvedFontAsset;
+  resolvedCandidateAsset?: ResolvedFontAsset;
   aggregateVisualAffinity: number;
   perWeight: WeightComparison[];
   kerning: KerningAnalysis;
@@ -139,6 +167,21 @@ export interface ScoreBreakdown {
   visualTotal: number;
   penaltyTotal: number;
   total: number;
+}
+
+export interface VisualMatchDiagnostics {
+  aggregateVisualAffinity: number;
+  resolvedSourceFamily?: string;
+  sourceAsset?: ResolvedFontAsset;
+  candidateAsset?: ResolvedFontAsset;
+}
+
+export interface VisualEvidenceHealth {
+  status: VisualEvidenceStatus;
+  reason: VisualEvidenceReason;
+  compatible: boolean;
+  generatedAt: string | null;
+  inputHash: string | null;
 }
 
 export type EvidencePath =
@@ -231,6 +274,7 @@ export interface BrandFontMatch {
   matchSource: MatchSource;
   scoreBreakdown: ScoreBreakdown;
   scoringMode: ScoringMode;
+  visualDiagnostics?: VisualMatchDiagnostics;
 }
 
 export interface BrandFontMatchResult {
@@ -265,12 +309,14 @@ export interface GeneratedBrandFontArtifacts {
   catalog: GeneratedArtifactEnvelope<NormalizedR2FontRecord[]>;
   matches: GeneratedArtifactEnvelope<BrandFontMatchResult[]>;
   scoringMode: ScoringMode;
+  visualEvidenceHealth: VisualEvidenceHealth;
 }
 
 export interface BrandFontMatchesApiResponse {
   source: "generated-artifact" | "live-regenerated";
   refreshMode: RefreshMode;
   scoringMode: ScoringMode;
+  visualEvidence: VisualEvidenceHealth;
   schemaVersion: string;
   scoringConfigVersion: string;
   inputHash: string;

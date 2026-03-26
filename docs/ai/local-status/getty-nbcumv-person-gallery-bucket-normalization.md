@@ -1,15 +1,15 @@
 # Getty/NBCUMV person-gallery bucket normalization
 
-Last updated: 2026-03-20
+Last updated: 2026-03-24
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: active
-  last_updated: 2026-03-20
-  current_phase: "Gallery normalization remains in place, and the latest follow-up now constrains Get Images source selection to All/Getty/IMDb/TMDb while exposing manual Google reverse-search links for Getty fallback rows"
-  next_action: "Run one live person-gallery Get Images pass if needed to confirm Run All skips Fandom, Getty maps to the fused Getty/NBCUMV path, and the lightbox shows the Google reverse-search link on Getty fallback rows; otherwise archive this handoff in the next cleanup pass"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer continuity notes if follow-up is needed"
   detail: self
 ```
 

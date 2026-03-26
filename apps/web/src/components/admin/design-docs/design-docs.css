@@ -5,6 +5,9 @@
  */
 
 .design-docs {
+  /* Page background — white across all design docs pages */
+  background-color: #FFFFFF;
+
   /* Ink & Paper */
   --dd-ink-black: #121212;
   --dd-ink-dark: #1a1a1a;
@@ -268,6 +271,33 @@
   color: var(--dd-ink-black);
   line-height: 1;
   letter-spacing: -0.02em;
+}
+
+/* ── NYT Games Scope ──────────────────────────────────────────────────
+ * Overrides generic --dd-font-* variables so every specimen inside the
+ * NYT Games brand section renders in the ACTUAL NYT typefaces
+ * (loaded globally via /hosted-fonts.css → realitease-fonts.css).
+ *
+ * Font mapping:
+ *   nyt-franklin        → NYTFranklin (R2 CDN)
+ *   nyt-karnakcondensed → NYTKarnak_Condensed (R2 CDN)
+ *   nyt-karnak          → KarnakPro-Book (R2 CDN)
+ *   nyt-stymie          → Stymie (R2 CDN, same family name)
+ *   Clear Sans (Wordle) → fallback chain only (not hosted)
+ */
+.design-docs .nytg-scope {
+  --dd-font-ui: "NYTFranklin", "nyt-franklin", "Helvetica Neue", Arial, sans-serif;
+  --dd-font-sans: "NYTFranklin", "nyt-franklin", "Helvetica Neue", Arial, sans-serif;
+  --dd-font-headline: "NYTKarnak_Condensed", "nyt-karnakcondensed", Georgia, serif;
+  --dd-font-display: "KarnakPro-Book", "nyt-karnak", Georgia, serif;
+  --dd-font-body: "NYTFranklin", "nyt-franklin", "Helvetica Neue", Arial, sans-serif;
+  --dd-font-slab: "Stymie", "nyt-stymie", "Rockwell", serif;
+  --dd-font-data: "NYTFranklin", "nyt-franklin", "Helvetica Neue", Arial, sans-serif;
+
+  /* Wordle-specific: Clear Sans for tile letters and body text.
+     Not hosted on R2, so we use the system fallback chain that
+     matches the live nytimes.com Wordle <head> font stack. */
+  --nytg-font-wordle: "Clear Sans", "Helvetica Neue", Arial, sans-serif;
 }
 
 /* Responsive */

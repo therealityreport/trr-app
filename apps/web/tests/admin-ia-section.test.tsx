@@ -18,6 +18,10 @@ describe("AdminIASection", () => {
     expect(screen.getAllByText("/[show]/s#/assets/[subtab]").length).toBeGreaterThan(0);
     expect(screen.getAllByText("/[show]/s#/social/[w#]/[platform]").length).toBeGreaterThan(0);
     expect(screen.getAllByText("/admin/social-media").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("/screenlaytics").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Historical typo alias retained for compatibility; the canonical spelling remains /screenalytics."),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Wrong order").length).toBeGreaterThan(0);
   });
 });

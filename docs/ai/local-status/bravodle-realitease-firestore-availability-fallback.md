@@ -1,15 +1,15 @@
 # Bravodle and Realitease Firestore availability fallback
 
-Last updated: 2026-03-18
+Last updated: 2026-03-26
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-18
+  include: false
+  state: archived
+  last_updated: 2026-03-26
   current_phase: "complete"
-  next_action: "Monitor the Bravodle and Realitease cover/play routes in a Firestore-disabled environment and confirm they now render fallback messaging instead of crashing"
+  next_action: "None"
   detail: self
 ```
 

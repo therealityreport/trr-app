@@ -9,6 +9,7 @@ import type {
   BrandFontMatchResult,
   ConfidenceLevel,
   Provenance,
+  ResolvedFontAsset,
   ScoreBreakdown,
   ScoreBreakdownProfile,
   ScoringMode,
@@ -218,6 +219,18 @@ function profileMaxima(profile: ScoreBreakdownProfile): Record<string, number> {
   };
 }
 
+function visualEvidenceTone(status: BrandFontMatchesApiResponse["visualEvidence"]["status"]): string {
+  if (status === "fresh") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  if (status === "stale") return "bg-amber-50 text-amber-800 ring-amber-200";
+  return "bg-rose-50 text-rose-800 ring-rose-200";
+}
+
+function formatResolvedAsset(asset?: ResolvedFontAsset): string | null {
+  if (!asset) return null;
+  const width = asset.resolvedWidth === "normal" ? "" : ` · ${asset.resolvedWidth}`;
+  return `${asset.resolvedFamilyName} · ${asset.resolvedWeight} ${asset.resolvedStyle}${width}`;
+}
+
 function sectionToneClass(tone: "zinc" | "emerald" | "sky" | "rose", negative = false): string {
   if (negative || tone === "rose") return "bg-rose-400";
   if (tone === "emerald") return "bg-emerald-500";
@@ -404,6 +417,10 @@ export default function BrandFontMatchesPanel({
             <span className="text-zinc-300">·</span>
             <span>{scoringModeLabel(matchesResponse.scoringMode)}</span>
             <span className="text-zinc-300">·</span>
+            <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset ${visualEvidenceTone(matchesResponse.visualEvidence.status)}`}>
+              visual {matchesResponse.visualEvidence.status}
+            </span>
+            <span className="text-zinc-300">·</span>
             <span>{formatGeneratedAt(matchesResponse.generatedAt)}</span>
             {isRefreshing ? (
               <span className="ml-1 rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 ring-1 ring-inset ring-sky-200">
@@ -416,6 +433,12 @@ export default function BrandFontMatchesPanel({
         {refreshError ? (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
             Refresh failed, still showing the last available results. {refreshError}
+          </div>
+        ) : null}
+
+        {matchesResponse.visualEvidence.status !== "fresh" ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+            Visual evidence is {matchesResponse.visualEvidence.status}. Rebuild Rankings only reranks locally; it does not regenerate glyph comparison. Current reason: {matchesResponse.visualEvidence.reason}.
           </div>
         ) : null}
 
@@ -617,6 +640,20 @@ export default function BrandFontMatchesPanel({
                           {scoringModeLabel(topMatch.scoringMode)}
                         </span>
                       </div>
+                      {topMatch.visualDiagnostics?.candidateAsset ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-zinc-500">
+                          <span className="rounded-md bg-white px-2 py-0.5 font-semibold ring-1 ring-inset ring-zinc-200">
+                            source {formatResolvedAsset(topMatch.visualDiagnostics.sourceAsset) ?? "unresolved"}
+                          </span>
+                          <span className="rounded-md bg-white px-2 py-0.5 font-semibold ring-1 ring-inset ring-zinc-200">
+                            candidate {formatResolvedAsset(topMatch.visualDiagnostics.candidateAsset) ?? "unresolved"}
+                          </span>
+                        </div>
+                      ) : topMatch.scoringMode === "metadata-only" ? (
+                        <div className="mt-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900 ring-1 ring-inset ring-amber-200">
+                          Metadata-only ranking. No compatible visual evidence is attached to this match.
+                        </div>
+                      ) : null}
                       {/* Font name rendered in its own typeface */}
                       <div
                         className="text-xl tracking-tight text-zinc-950"
@@ -769,6 +806,11 @@ export default function BrandFontMatchesPanel({
                             <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200">
                               {scoringModeLabel(match.scoringMode)}
                             </span>
+                            {match.visualDiagnostics?.candidateAsset ? (
+                              <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200">
+                                {formatResolvedAsset(match.visualDiagnostics.candidateAsset)}
+                              </span>
+                            ) : null}
                             {match.rationaleChips.slice(0, 3).map((chip) => (
                               <span
                                 key={chip}

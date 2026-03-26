@@ -378,14 +378,17 @@ export default function AdminNetworksPage() {
     [user],
   );
 
-  const loadNetworksStreamingSummary = useCallback(async (options?: { silent?: boolean }) => {
+  const loadNetworksStreamingSummary = useCallback(async (options?: { force?: boolean; silent?: boolean }) => {
     const silent = options?.silent === true;
     if (!silent) {
       setSummaryLoading(true);
     }
     setSummaryError(null);
     try {
-      const response = await fetchWithAuth("/api/admin/networks-streaming/summary", {
+      const summaryUrl = options?.force
+        ? `/api/admin/networks-streaming/summary?refresh=${Date.now()}`
+        : "/api/admin/networks-streaming/summary";
+      const response = await fetchWithAuth(summaryUrl, {
         method: "GET",
         cache: "no-store",
       });
@@ -466,12 +469,43 @@ export default function AdminNetworksPage() {
   useEffect(() => {
     if (!syncing || checking || !userIdentity || !hasAccess) return;
 
-    const pollSummary = () => {
-      void loadNetworksStreamingSummary({ silent: true });
+    let timeoutId: number | null = null;
+
+    const clearPendingPoll = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
     };
-    pollSummary();
-    const intervalId = window.setInterval(pollSummary, 3500);
-    return () => window.clearInterval(intervalId);
+
+    const scheduleNextPoll = () => {
+      clearPendingPoll();
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        void loadNetworksStreamingSummary({ silent: true });
+        scheduleNextPoll();
+      }, 15_000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        clearPendingPoll();
+        return;
+      }
+      void loadNetworksStreamingSummary({ silent: true });
+      scheduleNextPoll();
+    };
+
+    void loadNetworksStreamingSummary({ silent: true });
+    scheduleNextPoll();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearPendingPoll();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [checking, hasAccess, loadNetworksStreamingSummary, syncing, userIdentity]);
 
   const onSyncNetworksStreaming = useCallback(
@@ -593,7 +627,7 @@ export default function AdminNetworksPage() {
           );
         }
 
-        await loadNetworksStreamingSummary();
+        await loadNetworksStreamingSummary({ force: true });
         await loadOverrides();
         setShowUnresolved(Boolean((kickoffResult.unresolved_logos_count ?? 0) > 0));
       } catch (error) {
@@ -611,7 +645,7 @@ export default function AdminNetworksPage() {
     const refreshSummary = async () => {
       setShowCompletionProgress(true);
       try {
-        await loadNetworksStreamingSummary();
+        await loadNetworksStreamingSummary({ force: true });
       } finally {
         setShowCompletionProgress(false);
       }
@@ -1414,7 +1448,7 @@ export default function AdminNetworksPage() {
             targetKey={logoPickerState.targetKey}
             targetLabel={logoPickerState.targetLabel}
             onSaved={async () => {
-              await loadNetworksStreamingSummary({ silent: false });
+              await loadNetworksStreamingSummary({ force: true, silent: false });
               await loadOverrides();
             }}
           />

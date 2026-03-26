@@ -8,6 +8,8 @@ const {
   createRedditCommunityMock,
   normalizeSubredditMock,
   isValidSubredditMock,
+  getCachedStableReadMock,
+  loadStableRedditReadMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   listRedditCommunitiesMock: vi.fn(),
@@ -15,6 +17,8 @@ const {
   createRedditCommunityMock: vi.fn(),
   normalizeSubredditMock: vi.fn((value: string) => value.replace(/^r\//i, "")),
   isValidSubredditMock: vi.fn(() => true),
+  getCachedStableReadMock: vi.fn(async ({ loader }) => ({ payload: await loader(), cacheHit: false })),
+  loadStableRedditReadMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -27,6 +31,20 @@ vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   createRedditCommunity: createRedditCommunityMock,
   normalizeSubreddit: normalizeSubredditMock,
   isValidSubreddit: isValidSubredditMock,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-route-cache", () => ({
+  buildUserScopedRouteCacheKey: vi.fn(
+    (userId: string, scope: string, searchParams?: URLSearchParams) =>
+      `${userId}:${scope}:${searchParams?.toString() ?? ""}`,
+  ),
+  getCachedStableRead: getCachedStableReadMock,
+  REDDIT_STABLE_LIST_CACHE_NAMESPACE: "admin-reddit-stable-list",
+  REDDIT_STABLE_LIST_CACHE_TTL_MS: 5_000,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-read", () => ({
+  loadStableRedditRead: loadStableRedditReadMock,
 }));
 
 import { GET, POST } from "@/app/api/admin/reddit/communities/route";
@@ -42,12 +60,22 @@ describe("/api/admin/reddit/communities route", () => {
     createRedditCommunityMock.mockReset();
     normalizeSubredditMock.mockClear();
     isValidSubredditMock.mockReset();
+    getCachedStableReadMock.mockReset();
+    loadStableRedditReadMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
     isValidSubredditMock.mockReturnValue(true);
+    getCachedStableReadMock.mockImplementation(async ({ loader }) => ({
+      payload: await loader(),
+      cacheHit: false,
+    }));
   });
 
   it("returns communities list with season-aware filters", async () => {
+    loadStableRedditReadMock.mockImplementation(async ({ fallback }) => ({
+      payload: await fallback(),
+      source: "local",
+    }));
     listRedditCommunitiesMock.mockResolvedValue([
       {
         id: "community-1",
@@ -78,9 +106,30 @@ describe("/api/admin/reddit/communities route", () => {
       includeInactive: false,
     });
     expect(listRedditCommunitiesWithThreadsMock).not.toHaveBeenCalled();
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: "/admin/reddit/communities",
+        routeName: "reddit-communities:list",
+      }),
+    );
   });
 
   it("includes assigned threads when include_assigned_threads=1", async () => {
+    loadStableRedditReadMock.mockResolvedValue({
+      payload: {
+        communities: [
+          {
+            id: "community-1",
+            subreddit: "BravoRealHousewives",
+            post_flairs: ["Episode Discussion"],
+            post_flairs_updated_at: "2026-02-17T00:00:00.000Z",
+            assigned_thread_count: 1,
+            assigned_threads: [{ id: "thread-1", title: "Episode Thread" }],
+          },
+        ],
+      },
+      source: "backend",
+    });
     listRedditCommunitiesWithThreadsMock.mockResolvedValue([
       {
         id: "community-1",
@@ -102,12 +151,13 @@ describe("/api/admin/reddit/communities route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.communities[0]?.assigned_thread_count).toBe(1);
-    expect(listRedditCommunitiesWithThreadsMock).toHaveBeenCalledWith({
-      trrShowId: SHOW_ID,
-      trrSeasonId: SEASON_ID,
-      includeInactive: false,
-      includeGlobalThreadsForSeason: true,
-    });
+    expect(listRedditCommunitiesWithThreadsMock).not.toHaveBeenCalled();
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: "/admin/reddit/communities",
+        routeName: "reddit-communities:list",
+      }),
+    );
   });
 
   it("returns 400 for invalid UUID query filters", async () => {

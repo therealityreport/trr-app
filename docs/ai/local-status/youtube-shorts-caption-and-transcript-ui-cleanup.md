@@ -1,15 +1,15 @@
 # YouTube Shorts caption and transcript UI cleanup
 
-Last updated: 2026-03-16
+Last updated: 2026-03-24
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-16
-  current_phase: "week-detail UI cleanup complete"
-  next_action: "Use managed Chrome to verify the YouTube Shorts drawer shows caption-only text and friendly transcript fallback messaging against live RHOSLC week data"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer continuity notes if follow-up is needed"
   detail: self
 ```
 

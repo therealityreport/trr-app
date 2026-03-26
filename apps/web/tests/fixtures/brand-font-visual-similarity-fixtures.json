@@ -1,0 +1,10 @@
+[
+  {
+    "id": "nyt-games-wordle-primary-display",
+    "brandId": "brand-nyt-games",
+    "roleLabel": "Primary Display",
+    "specimen": "public/design-docs/nyt-games/wordle-card.svg",
+    "text": "WORDLE",
+    "limit": 6
+  }
+]

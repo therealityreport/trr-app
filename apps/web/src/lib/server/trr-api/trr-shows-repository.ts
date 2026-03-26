@@ -441,6 +441,37 @@ export const toPersonSlug = (value: string): string => {
   return slugifyToken(value);
 };
 
+const dedupeTextValues = (values: Array<string | null | undefined>): string[] => {
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const value of values) {
+    const normalized = String(value ?? "").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    items.push(normalized);
+  }
+  return items;
+};
+
+const buildCandidatePersonFullNames = (slug: string): string[] => {
+  const tokens = slug
+    .split("-")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return [];
+
+  const titleCase = (token: string): string => token.charAt(0).toUpperCase() + token.slice(1);
+  const titledTokens = tokens.map(titleCase);
+  const ampersandTokens = titledTokens.map((token) => (token.toLowerCase() === "and" ? "&" : token));
+
+  return dedupeTextValues([
+    titledTokens.join(" "),
+    titledTokens.join("-"),
+    ampersandTokens.join(" "),
+    ampersandTokens.join("-"),
+  ]);
+};
+
 const buildShowSlugCandidates = (rawSlug: string): string[] => {
   const normalized = toShowSlug(rawSlug);
   if (!normalized) return [];
@@ -616,6 +647,59 @@ export async function resolvePersonSlug(
   const baseSlug = normalizedInput;
 
   const resolvedShowId = options?.showId?.trim() || null;
+  const candidateFullNames = buildCandidatePersonFullNames(baseSlug);
+
+  if (candidateFullNames.length > 0) {
+    const exactRows = await pgQuery<{ id: string; full_name: string | null; on_show: boolean }>(
+      `SELECT
+         p.id::text AS id,
+         p.full_name,
+         CASE
+           WHEN $2::uuid IS NOT NULL AND EXISTS (
+             SELECT 1
+             FROM core.show_cast AS sc
+             WHERE sc.person_id = p.id
+               AND sc.show_id = $2::uuid
+           )
+             THEN true
+           ELSE false
+         END AS on_show
+       FROM core.people AS p
+       WHERE p.full_name = ANY($1::text[])
+       ORDER BY on_show DESC, p.id ASC`,
+      [candidateFullNames, resolvedShowId]
+    );
+
+    if (exactRows.rows.length > 0) {
+      const preferredExactRows =
+        resolvedShowId && exactRows.rows.some((row) => row.on_show)
+          ? exactRows.rows.filter((row) => row.on_show)
+          : exactRows.rows;
+
+      let selectedExactRow: { id: string; full_name: string | null; on_show: boolean } | undefined;
+      if (requestedPrefix) {
+        selectedExactRow = preferredExactRows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix));
+        if (!selectedExactRow) {
+          selectedExactRow = exactRows.rows.find((row) => row.id.toLowerCase().startsWith(requestedPrefix));
+        }
+      } else {
+        selectedExactRow = preferredExactRows[0];
+      }
+
+      const exactFullName = selectedExactRow?.full_name?.trim();
+      if (selectedExactRow && exactFullName) {
+        const hasExactCollision = exactRows.rows.length > 1;
+        return {
+          person_id: selectedExactRow.id,
+          slug: baseSlug,
+          canonical_slug: hasExactCollision
+            ? `${baseSlug}--${selectedExactRow.id.slice(0, 8).toLowerCase()}`
+            : baseSlug,
+          full_name: exactFullName,
+        };
+      }
+    }
+  }
 
   const rows = await pgQuery<{ id: string; full_name: string | null; on_show: boolean }>(
     `SELECT
@@ -2945,258 +3029,126 @@ export async function getPhotosByPersonId(
 ): Promise<TrrPersonPhoto[]> {
   const { limit, offset } = normalizePagination(options);
   const includeBroken = options?.includeBroken === true;
+  const normalizedSources = new Set(
+    (options?.sources ?? [])
+      .map((source) => source.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const requestedSources = normalizedSources.size > 0 ? Array.from(normalizedSources) : null;
   const isMarkedBroken = (metadataValue: unknown): boolean => {
     if (!metadataValue || typeof metadataValue !== "object") return false;
     const status = (metadataValue as Record<string, unknown>).gallery_status;
     return typeof status === "string" && status.trim().toLowerCase() === "broken_unreachable";
   };
 
-  const person = await getPersonById(personId);
-  const fullName = person?.full_name?.trim() ?? null;
-  const manualTagPhotoIds = await getPhotoIdsByPersonId(personId);
-
-  // Query 1: Get photos from cast_photos table
-  const castPhotosByPersonResult = await pgQuery<
-    Pick<
-      TrrPersonPhoto,
-      | "id"
-      | "person_id"
-      | "source"
-      | "source_image_id"
-      | "url"
-      | "hosted_url"
-      | "hosted_sha256"
-      | "hosted_content_type"
-      | "caption"
-      | "width"
-      | "height"
-      | "context_section"
-      | "context_type"
-      | "season"
-      | "source_page_url"
-      | "people_names"
-      | "title_names"
-      | "metadata"
-      | "fetched_at"
+  let fullName: string | null = null;
+  let fullNameLoaded = false;
+  const ensureExpectedPersonName = async (): Promise<string | null> => {
+    if (fullNameLoaded) {
+      return fullName;
+    }
+    fullNameLoaded = true;
+    const person = await getPersonById(personId);
+    fullName = person?.full_name?.trim() ?? null;
+    return fullName;
+  };
+  const photoSetIncludesFandomSources = (
+    photos: Array<Pick<TrrPersonPhoto, "source">>,
+  ): boolean =>
+    photos.some((photo) => {
+      const source = (photo.source ?? "").trim().toLowerCase();
+      return source === "fandom" || source === "fandom-gallery";
+    });
+  const mapCastPhotoRows = (
+    rows: Array<
+      Pick<
+        TrrPersonPhoto,
+        | "id"
+        | "person_id"
+        | "source"
+        | "source_image_id"
+        | "url"
+        | "hosted_url"
+        | "hosted_sha256"
+        | "hosted_content_type"
+        | "caption"
+        | "width"
+        | "height"
+        | "context_section"
+        | "context_type"
+        | "season"
+        | "source_page_url"
+        | "people_names"
+        | "title_names"
+        | "metadata"
+        | "fetched_at"
+      >
     >
-  >(
-    `SELECT
-       id,
-       person_id,
-       source,
-       source_image_id,
-       url,
-       hosted_url,
-       hosted_sha256,
-       hosted_content_type,
-       caption,
-       width,
-       height,
-       context_section,
-       context_type,
-       season,
-       source_page_url,
-       people_names,
-       title_names,
-       metadata,
-       fetched_at
-     FROM core.cast_photos
-     WHERE person_id = $1::uuid
-       AND hosted_url IS NOT NULL
-     ORDER BY source ASC, gallery_index ASC NULLS LAST`,
-    [personId]
-  );
-
-  let castPhotosByName: TrrPersonPhoto[] = [];
-  if (fullName) {
-    try {
-      const nameResult = await pgQuery<
-        Pick<
-          TrrPersonPhoto,
-          | "id"
-          | "person_id"
-          | "source"
-          | "source_image_id"
-          | "url"
-          | "hosted_url"
-          | "hosted_sha256"
-          | "hosted_content_type"
-          | "caption"
-          | "width"
-          | "height"
-          | "context_section"
-          | "context_type"
-          | "season"
-          | "source_page_url"
-          | "people_names"
-          | "title_names"
-          | "metadata"
-          | "fetched_at"
-        >
-      >(
-        `SELECT
-           id,
-           person_id,
-           source,
-           source_image_id,
-           url,
-           hosted_url,
-           hosted_sha256,
-           hosted_content_type,
-           caption,
-           width,
-           height,
-           context_section,
-           context_type,
-           season,
-           source_page_url,
-           people_names,
-           title_names,
-           metadata,
-           fetched_at
-         FROM core.cast_photos
-         WHERE people_names @> ARRAY[$1]::text[]
-           AND hosted_url IS NOT NULL
-         ORDER BY source ASC, gallery_index ASC NULLS LAST`,
-        [fullName]
+  ): TrrPersonPhoto[] =>
+    rows.map((photo) => {
+      const normalizedScrape = normalizeScrapeSource(
+        photo.source,
+        photo.url,
+        photo.metadata
       );
-      castPhotosByName = nameResult.rows as unknown as TrrPersonPhoto[];
-    } catch (error) {
-      console.warn("[trr-shows-repository] getPhotosByPersonId cast_photos name lookup failed", error);
-    }
-  }
-
-  let castPhotosByManualTags: TrrPersonPhoto[] = [];
-  if (manualTagPhotoIds.length > 0) {
-    try {
-      const manualResult = await pgQuery<
-        Pick<
-          TrrPersonPhoto,
-          | "id"
-          | "person_id"
-          | "source"
-          | "source_image_id"
-          | "url"
-          | "hosted_url"
-          | "hosted_sha256"
-          | "hosted_content_type"
-          | "caption"
-          | "width"
-          | "height"
-          | "context_section"
-          | "context_type"
-          | "season"
-          | "source_page_url"
-          | "people_names"
-          | "title_names"
-          | "metadata"
-          | "fetched_at"
-        >
-      >(
-        `SELECT
-           id,
-           person_id,
-           source,
-           source_image_id,
-           url,
-           hosted_url,
-           hosted_sha256,
-           hosted_content_type,
-           caption,
-           width,
-           height,
-           context_section,
-           context_type,
-           season,
-           source_page_url,
-           people_names,
-           title_names,
-           metadata,
-           fetched_at
-         FROM core.cast_photos
-         WHERE id = ANY($1::uuid[])
-           AND hosted_url IS NOT NULL
-         ORDER BY source ASC, gallery_index ASC NULLS LAST`,
-        [manualTagPhotoIds]
+      const mergedMetadata = {
+        ...(photo.metadata ?? {}),
+        ...(photo.source_page_url
+          ? { source_page_url: photo.source_page_url }
+          : null),
+      };
+      const normalizedFandom = normalizeFandomSource(
+        normalizedScrape,
+        mergedMetadata
       );
-      castPhotosByManualTags = manualResult.rows as unknown as TrrPersonPhoto[];
-    } catch (error) {
-      console.warn(
-        "[trr-shows-repository] getPhotosByPersonId cast_photos manual tag lookup failed",
-        error
+      const md = (normalizedFandom.metadata ?? {}) as Record<string, unknown>;
+      const mdPeopleCountRaw = md.people_count;
+      const mdPeopleCount =
+        typeof mdPeopleCountRaw === "number" && Number.isFinite(mdPeopleCountRaw)
+          ? Math.max(0, Math.floor(mdPeopleCountRaw))
+          : typeof mdPeopleCountRaw === "string" && mdPeopleCountRaw.trim()
+            ? Number.parseInt(mdPeopleCountRaw, 10)
+            : null;
+      const mdPeopleCountSourceRaw = md.people_count_source;
+      const mdPeopleCountSource =
+        typeof mdPeopleCountSourceRaw === "string" ? mdPeopleCountSourceRaw : null;
+      const faceBoxes = toFaceBoxes(md.face_boxes);
+      const faceCrops = toFaceCrops(md.face_crops);
+      const thumbnailCropFields = toThumbnailCropFields(md.thumbnail_crop);
+      const variantUrls = resolvePersonPhotoVariantUrls(
+        normalizedFandom.metadata,
+        {
+          hostedUrl: photo.hosted_url,
+          originalUrl: readMetadataOriginalUrl(normalizedFandom.metadata),
+          sourceUrl: photo.url,
+        }
       );
-    }
-  }
-
-  const castPhotos = [
-    ...(castPhotosByPersonResult.rows as unknown as TrrPersonPhoto[]),
-    ...castPhotosByName,
-    ...castPhotosByManualTags,
-  ].map((photo) => {
-    const normalizedScrape = normalizeScrapeSource(
-      photo.source,
-      photo.url,
-      photo.metadata
-    );
-    const mergedMetadata = {
-      ...(photo.metadata ?? {}),
-      ...(photo.source_page_url
-        ? { source_page_url: photo.source_page_url }
-        : null),
-    };
-    const normalizedFandom = normalizeFandomSource(
-      normalizedScrape,
-      mergedMetadata
-    );
-    const md = (normalizedFandom.metadata ?? {}) as Record<string, unknown>;
-    const mdPeopleCountRaw = md.people_count;
-    const mdPeopleCount =
-      typeof mdPeopleCountRaw === "number" && Number.isFinite(mdPeopleCountRaw)
-        ? Math.max(0, Math.floor(mdPeopleCountRaw))
-        : typeof mdPeopleCountRaw === "string" && mdPeopleCountRaw.trim()
-          ? Number.parseInt(mdPeopleCountRaw, 10)
-          : null;
-    const mdPeopleCountSourceRaw = md.people_count_source;
-    const mdPeopleCountSource =
-      typeof mdPeopleCountSourceRaw === "string" ? mdPeopleCountSourceRaw : null;
-    const faceBoxes = toFaceBoxes(md.face_boxes);
-    const faceCrops = toFaceCrops(md.face_crops);
-    const thumbnailCropFields = toThumbnailCropFields(md.thumbnail_crop);
-    const variantUrls = resolvePersonPhotoVariantUrls(
-      normalizedFandom.metadata,
-      {
-        hostedUrl: photo.hosted_url,
-        originalUrl: readMetadataOriginalUrl(normalizedFandom.metadata),
-        sourceUrl: photo.url,
-      }
-    );
-    return {
-      ...photo,
-      source: normalizedFandom.source,
-      metadata: normalizedFandom.metadata,
-      created_at: (photo as { created_at?: string | null }).created_at ?? photo.fetched_at ?? null,
-      bucket_type: (getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_type") as TrrPersonPhoto["bucket_type"]) ?? null,
-      bucket_key: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_key"),
-      bucket_label: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_label"),
-      resolved_show_id: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_id"),
-      resolved_show_name: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_name"),
-      getty_event_group_title: getGalleryBucketMetadataValue(normalizedFandom.metadata, "getty_event_group_title"),
-      people_ids: null,
-      people_count: mdPeopleCount,
-      people_count_source: mdPeopleCountSource as "auto" | "manual" | null,
-      face_boxes: faceBoxes,
-      face_crops: faceCrops,
-      ingest_status: null,
-      origin: "cast_photos" as const,
-      link_id: null,
-      media_asset_id: null,
-      facebank_seed: false,
-      ...variantUrls,
-      ...thumbnailCropFields,
-    };
-  });
-
-  const castPhotosFiltered = castPhotos.filter((photo) =>
+      return {
+        ...photo,
+        source: normalizedFandom.source,
+        metadata: normalizedFandom.metadata,
+        created_at: (photo as { created_at?: string | null }).created_at ?? photo.fetched_at ?? null,
+        bucket_type: (getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_type") as TrrPersonPhoto["bucket_type"]) ?? null,
+        bucket_key: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_key"),
+        bucket_label: getGalleryBucketMetadataValue(normalizedFandom.metadata, "bucket_label"),
+        resolved_show_id: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_id"),
+        resolved_show_name: getGalleryBucketMetadataValue(normalizedFandom.metadata, "resolved_show_name"),
+        getty_event_group_title: getGalleryBucketMetadataValue(normalizedFandom.metadata, "getty_event_group_title"),
+        people_ids: null,
+        people_count: mdPeopleCount,
+        people_count_source: mdPeopleCountSource as "auto" | "manual" | null,
+        face_boxes: faceBoxes,
+        face_crops: faceCrops,
+        ingest_status: null,
+        origin: "cast_photos" as const,
+        link_id: null,
+        media_asset_id: null,
+        facebank_seed: false,
+        ...variantUrls,
+        ...thumbnailCropFields,
+      };
+    });
+  const isExpectedGalleryPhoto = (photo: Pick<TrrPersonPhoto, "source" | "source_page_url" | "url" | "metadata" | "people_names" | "hosted_content_type" | "hosted_url">): boolean =>
     (includeBroken || !isMarkedBroken(photo.metadata)) &&
     isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
     isFandomPhotoOwnedByExpectedPerson({
@@ -3206,79 +3158,29 @@ export async function getPhotosByPersonId(
       metadata: photo.metadata,
       peopleNames: photo.people_names,
       expectedPersonName: fullName,
-    })
-  );
-
-  const tagRows = await getTagsByPhotoIds(
-    castPhotosFiltered.map((photo) => photo.id)
-  );
-  const castPhotosWithTags = castPhotosFiltered.map((photo) => {
-    const tagRow = tagRows.get(photo.id);
-    if (!tagRow) return photo;
-    return {
-      ...photo,
-      people_names: tagRow.people_names ?? photo.people_names,
-      people_ids: tagRow.people_ids ?? null,
-      people_count: tagRow.people_count ?? null,
-      people_count_source: tagRow.people_count_source ?? null,
-    } as TrrPersonPhoto;
-  });
-
-  // Query 2: Get photos from media_links joined with media_assets
-  // Use a join so the ordering matches link.position and we only fetch assets with hosted_url.
-  let mediaPhotos: TrrPersonPhoto[] = [];
-  try {
-    const joined = await pgQuery<{
-      link_id: string;
-      media_asset_id: string;
-      facebank_seed: boolean | null;
-      context: Record<string, unknown> | null;
-      link_created_at: string;
-      source: string | null;
-      source_asset_id: string | null;
-      source_url: string | null;
-      hosted_url: string | null;
-      hosted_sha256: string | null;
-      hosted_content_type: string | null;
-      caption: string | null;
-      width: number | null;
-      height: number | null;
-      metadata: Record<string, unknown> | null;
-      fetched_at: string | null;
-      asset_created_at: string | null;
-      ingest_status: string | null;
-    }>(
-      `SELECT
-         ml.id AS link_id,
-         ml.media_asset_id,
-         ml.facebank_seed,
-         ml.context,
-         ml.created_at AS link_created_at,
-         ma.source,
-         ma.source_asset_id,
-         ma.source_url,
-         ma.hosted_url,
-         ma.hosted_sha256,
-         ma.hosted_content_type,
-         ma.caption,
-         ma.width,
-         ma.height,
-         ma.metadata,
-         ma.fetched_at,
-         ma.created_at AS asset_created_at,
-         ma.ingest_status
-       FROM core.media_links AS ml
-       JOIN core.media_assets AS ma
-         ON ma.id = ml.media_asset_id
-       WHERE ml.entity_type = 'person'
-         AND ml.entity_id = $1::uuid
-         AND ml.kind = 'gallery'
-         AND ma.hosted_url IS NOT NULL
-       ORDER BY ml.position ASC NULLS LAST`,
-      [personId]
-    );
-
-    mediaPhotos = joined.rows
+    });
+  type MediaLinkGalleryRow = {
+    link_id: string;
+    media_asset_id: string;
+    facebank_seed: boolean | null;
+    context: Record<string, unknown> | null;
+    link_created_at: string;
+    source: string | null;
+    source_asset_id: string | null;
+    source_url: string | null;
+    hosted_url: string | null;
+    hosted_sha256: string | null;
+    hosted_content_type: string | null;
+    caption: string | null;
+    width: number | null;
+    height: number | null;
+    metadata: Record<string, unknown> | null;
+    fetched_at: string | null;
+    asset_created_at: string | null;
+    ingest_status: string | null;
+  };
+  const mapMediaLinkGalleryRows = (rows: MediaLinkGalleryRow[]): TrrPersonPhoto[] =>
+    rows
       .map((row) => {
         if (!row.hosted_url) return null;
         const context = row.context;
@@ -3418,24 +3320,391 @@ export async function getPhotosByPersonId(
           ...effectiveThumbnailCropFields,
         } as TrrPersonPhoto;
       })
-      .filter((p): p is TrrPersonPhoto => p !== null);
-  } catch (error) {
-    console.warn("[trr-shows-repository] getPhotosByPersonId media_links/assets lookup failed", error);
+      .filter((photo): photo is TrrPersonPhoto => photo !== null)
+      .filter((photo) => isExpectedGalleryPhoto(photo));
+
+  const pagedCastPhotosByPersonResult = await pgQuery<
+    Pick<
+      TrrPersonPhoto,
+      | "id"
+      | "person_id"
+      | "source"
+      | "source_image_id"
+      | "url"
+      | "hosted_url"
+      | "hosted_sha256"
+      | "hosted_content_type"
+      | "caption"
+      | "width"
+      | "height"
+      | "context_section"
+      | "context_type"
+      | "season"
+      | "source_page_url"
+      | "people_names"
+      | "title_names"
+      | "metadata"
+      | "fetched_at"
+    >
+  >(
+    `SELECT
+       id,
+       person_id,
+       source,
+       source_image_id,
+       url,
+       hosted_url,
+       hosted_sha256,
+       hosted_content_type,
+       caption,
+       width,
+       height,
+       context_section,
+       context_type,
+       season,
+       source_page_url,
+       people_names,
+       title_names,
+       metadata,
+       fetched_at
+     FROM core.cast_photos
+     WHERE person_id = $1::uuid
+       AND hosted_url IS NOT NULL
+       AND ($2::text[] IS NULL OR lower(source) = ANY($2::text[]))
+     ORDER BY gallery_index ASC NULLS LAST, source ASC
+     LIMIT $3::int
+     OFFSET $4::int`,
+    [personId, requestedSources, limit, offset]
+  );
+
+  const pagedCastPhotos = mapCastPhotoRows(
+    pagedCastPhotosByPersonResult.rows as unknown as TrrPersonPhoto[]
+  );
+
+  let pagedCastPhotosWithTags = pagedCastPhotos;
+  if (pagedCastPhotos.length > 0) {
+    const tagRows = await getTagsByPhotoIds(
+      pagedCastPhotos.map((photo) => photo.id)
+    );
+    pagedCastPhotosWithTags = pagedCastPhotos.map((photo) => {
+      const tagRow = tagRows.get(photo.id);
+      if (!tagRow) return photo;
+      return {
+        ...photo,
+        people_names: tagRow.people_names ?? photo.people_names,
+        people_ids: tagRow.people_ids ?? null,
+        people_count: tagRow.people_count ?? null,
+        people_count_source: tagRow.people_count_source ?? null,
+      } as TrrPersonPhoto;
+    });
   }
 
-  if (mediaPhotos.length > 0) {
-    mediaPhotos = mediaPhotos.filter((photo) =>
-      (includeBroken || !isMarkedBroken(photo.metadata)) &&
-      isLikelyImage(photo.hosted_content_type, photo.hosted_url) &&
-      isFandomPhotoOwnedByExpectedPerson({
-        source: photo.source,
-        sourcePageUrl: photo.source_page_url,
-        sourceUrl: photo.url,
-        metadata: photo.metadata,
-        peopleNames: photo.people_names,
-        expectedPersonName: fullName,
-      })
+  if (offset === 0) {
+    let pagedMediaPhotos: TrrPersonPhoto[] = [];
+    try {
+      const pagedJoined = await pgQuery<MediaLinkGalleryRow>(
+        `SELECT
+           ml.id AS link_id,
+           ml.media_asset_id,
+           ml.facebank_seed,
+           ml.context,
+           ml.created_at AS link_created_at,
+           ma.source,
+           ma.source_asset_id,
+           ma.source_url,
+           ma.hosted_url,
+           ma.hosted_sha256,
+           ma.hosted_content_type,
+           ma.caption,
+           ma.width,
+           ma.height,
+           ma.metadata,
+           ma.fetched_at,
+           ma.created_at AS asset_created_at,
+           ma.ingest_status
+         FROM core.media_links AS ml
+         JOIN core.media_assets AS ma
+           ON ma.id = ml.media_asset_id
+         WHERE ml.entity_type = 'person'
+           AND ml.entity_id = $1::uuid
+           AND ml.kind = 'gallery'
+           AND ma.hosted_url IS NOT NULL
+           AND ($2::text[] IS NULL OR lower(coalesce(ma.source, '')) = ANY($2::text[]))
+         ORDER BY ml.position ASC NULLS LAST
+         LIMIT $3::int
+         OFFSET $4::int`,
+        [personId, requestedSources, limit, offset]
+      );
+      pagedMediaPhotos = mapMediaLinkGalleryRows(pagedJoined.rows);
+    } catch (error) {
+      console.warn("[trr-shows-repository] getPhotosByPersonId paged media_links/assets lookup failed", error);
+    }
+
+    let fastPathCastPhotos = pagedCastPhotosWithTags;
+    let fastPathMediaPhotos = pagedMediaPhotos;
+    if (photoSetIncludesFandomSources([...fastPathCastPhotos, ...fastPathMediaPhotos])) {
+      await ensureExpectedPersonName();
+      fastPathCastPhotos = fastPathCastPhotos.filter((photo) => isExpectedGalleryPhoto(photo));
+      fastPathMediaPhotos = fastPathMediaPhotos.filter((photo) => isExpectedGalleryPhoto(photo));
+    }
+
+    const fastPathPhotos = dedupePhotosByCanonicalKeysPreferMediaLinks([
+      ...fastPathCastPhotos,
+      ...fastPathMediaPhotos,
+    ]);
+    const sourceFilteredFastPath =
+      normalizedSources.size > 0
+        ? fastPathPhotos.filter((photo) =>
+            normalizedSources.has((photo.source ?? "").trim().toLowerCase())
+          )
+        : fastPathPhotos;
+    if (sourceFilteredFastPath.length > 0) {
+      return sourceFilteredFastPath.slice(0, limit);
+    }
+  } else if (pagedCastPhotosWithTags.length > 0) {
+    if (photoSetIncludesFandomSources(pagedCastPhotosWithTags)) {
+      await ensureExpectedPersonName();
+      return pagedCastPhotosWithTags.filter((photo) => isExpectedGalleryPhoto(photo));
+    }
+    return pagedCastPhotosWithTags;
+  }
+
+  const fallbackFullName = await ensureExpectedPersonName();
+  const manualTagPhotoIds = await getPhotoIdsByPersonId(personId);
+
+  // Query 1: Get photos from cast_photos table
+  const castPhotosByPersonResult = await pgQuery<
+    Pick<
+      TrrPersonPhoto,
+      | "id"
+      | "person_id"
+      | "source"
+      | "source_image_id"
+      | "url"
+      | "hosted_url"
+      | "hosted_sha256"
+      | "hosted_content_type"
+      | "caption"
+      | "width"
+      | "height"
+      | "context_section"
+      | "context_type"
+      | "season"
+      | "source_page_url"
+      | "people_names"
+      | "title_names"
+      | "metadata"
+      | "fetched_at"
+    >
+  >(
+    `SELECT
+       id,
+       person_id,
+       source,
+       source_image_id,
+       url,
+       hosted_url,
+       hosted_sha256,
+       hosted_content_type,
+       caption,
+       width,
+       height,
+       context_section,
+       context_type,
+       season,
+       source_page_url,
+       people_names,
+       title_names,
+       metadata,
+       fetched_at
+     FROM core.cast_photos
+     WHERE person_id = $1::uuid
+       AND hosted_url IS NOT NULL
+     ORDER BY source ASC, gallery_index ASC NULLS LAST`,
+    [personId]
+  );
+
+  let castPhotosByName: TrrPersonPhoto[] = [];
+  if (fallbackFullName) {
+    try {
+      const nameResult = await pgQuery<
+        Pick<
+          TrrPersonPhoto,
+          | "id"
+          | "person_id"
+          | "source"
+          | "source_image_id"
+          | "url"
+          | "hosted_url"
+          | "hosted_sha256"
+          | "hosted_content_type"
+          | "caption"
+          | "width"
+          | "height"
+          | "context_section"
+          | "context_type"
+          | "season"
+          | "source_page_url"
+          | "people_names"
+          | "title_names"
+          | "metadata"
+          | "fetched_at"
+        >
+      >(
+        `SELECT
+           id,
+           person_id,
+           source,
+           source_image_id,
+           url,
+           hosted_url,
+           hosted_sha256,
+           hosted_content_type,
+           caption,
+           width,
+           height,
+           context_section,
+           context_type,
+           season,
+           source_page_url,
+           people_names,
+           title_names,
+           metadata,
+           fetched_at
+         FROM core.cast_photos
+         WHERE people_names @> ARRAY[$1]::text[]
+           AND hosted_url IS NOT NULL
+         ORDER BY source ASC, gallery_index ASC NULLS LAST`,
+        [fallbackFullName]
+      );
+      castPhotosByName = nameResult.rows as unknown as TrrPersonPhoto[];
+    } catch (error) {
+      console.warn("[trr-shows-repository] getPhotosByPersonId cast_photos name lookup failed", error);
+    }
+  }
+
+  let castPhotosByManualTags: TrrPersonPhoto[] = [];
+  if (manualTagPhotoIds.length > 0) {
+    try {
+      const manualResult = await pgQuery<
+        Pick<
+          TrrPersonPhoto,
+          | "id"
+          | "person_id"
+          | "source"
+          | "source_image_id"
+          | "url"
+          | "hosted_url"
+          | "hosted_sha256"
+          | "hosted_content_type"
+          | "caption"
+          | "width"
+          | "height"
+          | "context_section"
+          | "context_type"
+          | "season"
+          | "source_page_url"
+          | "people_names"
+          | "title_names"
+          | "metadata"
+          | "fetched_at"
+        >
+      >(
+        `SELECT
+           id,
+           person_id,
+           source,
+           source_image_id,
+           url,
+           hosted_url,
+           hosted_sha256,
+           hosted_content_type,
+           caption,
+           width,
+           height,
+           context_section,
+           context_type,
+           season,
+           source_page_url,
+           people_names,
+           title_names,
+           metadata,
+           fetched_at
+         FROM core.cast_photos
+         WHERE id = ANY($1::uuid[])
+           AND hosted_url IS NOT NULL
+         ORDER BY source ASC, gallery_index ASC NULLS LAST`,
+        [manualTagPhotoIds]
+      );
+      castPhotosByManualTags = manualResult.rows as unknown as TrrPersonPhoto[];
+    } catch (error) {
+      console.warn(
+        "[trr-shows-repository] getPhotosByPersonId cast_photos manual tag lookup failed",
+        error
+      );
+    }
+  }
+
+  const castPhotos = mapCastPhotoRows([
+    ...(castPhotosByPersonResult.rows as unknown as TrrPersonPhoto[]),
+    ...castPhotosByName,
+    ...castPhotosByManualTags,
+  ]);
+
+  const castPhotosFiltered = castPhotos.filter((photo) => isExpectedGalleryPhoto(photo));
+
+  const tagRows = await getTagsByPhotoIds(
+    castPhotosFiltered.map((photo) => photo.id)
+  );
+  const castPhotosWithTags = castPhotosFiltered.map((photo) => {
+    const tagRow = tagRows.get(photo.id);
+    if (!tagRow) return photo;
+    return {
+      ...photo,
+      people_names: tagRow.people_names ?? photo.people_names,
+      people_ids: tagRow.people_ids ?? null,
+      people_count: tagRow.people_count ?? null,
+      people_count_source: tagRow.people_count_source ?? null,
+    } as TrrPersonPhoto;
+  });
+
+  // Query 2: Get photos from media_links joined with media_assets
+  // Use a join so the ordering matches link.position and we only fetch assets with hosted_url.
+  let mediaPhotos: TrrPersonPhoto[] = [];
+  try {
+    const joined = await pgQuery<MediaLinkGalleryRow>(
+      `SELECT
+         ml.id AS link_id,
+         ml.media_asset_id,
+         ml.facebank_seed,
+         ml.context,
+         ml.created_at AS link_created_at,
+         ma.source,
+         ma.source_asset_id,
+         ma.source_url,
+         ma.hosted_url,
+         ma.hosted_sha256,
+         ma.hosted_content_type,
+         ma.caption,
+         ma.width,
+         ma.height,
+         ma.metadata,
+         ma.fetched_at,
+         ma.created_at AS asset_created_at,
+         ma.ingest_status
+       FROM core.media_links AS ml
+       JOIN core.media_assets AS ma
+         ON ma.id = ml.media_asset_id
+       WHERE ml.entity_type = 'person'
+         AND ml.entity_id = $1::uuid
+         AND ml.kind = 'gallery'
+         AND ma.hosted_url IS NOT NULL
+       ORDER BY ml.position ASC NULLS LAST`,
+      [personId]
     );
+    mediaPhotos = mapMediaLinkGalleryRows(joined.rows);
+  } catch (error) {
+    console.warn("[trr-shows-repository] getPhotosByPersonId media_links/assets lookup failed", error);
   }
 
   // Merge both sources, cast_photos first then media_links
@@ -3445,11 +3714,6 @@ export async function getPhotosByPersonId(
   // preferring the row with the best renderable URL set on collisions.
   const dedupedPhotos = dedupePhotosByCanonicalKeysPreferMediaLinks(allPhotos);
 
-  const normalizedSources = new Set(
-    (options?.sources ?? [])
-      .map((source) => source.trim().toLowerCase())
-      .filter(Boolean)
-  );
   const sourceFilteredPhotos =
     normalizedSources.size > 0
       ? dedupedPhotos.filter((photo) =>

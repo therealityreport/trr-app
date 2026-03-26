@@ -1,15 +1,15 @@
 # Typography runtime fallback hardening
 
-Last updated: 2026-03-16
+Last updated: 2026-03-24
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-16
-  current_phase: "client runtime typography restored"
-  next_action: "Use managed Chrome to verify live admin assignment changes repaint target pages without a full browser reload"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer continuity notes if follow-up is needed"
   detail: self
 ```
 

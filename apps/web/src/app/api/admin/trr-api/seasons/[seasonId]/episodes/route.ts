@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getEpisodesBySeasonId } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  TRR_SEASON_EPISODES_CACHE_NAMESPACE,
+  TRR_SEASON_EPISODES_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/trr-show-read-route-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -8,48 +22,64 @@ interface RouteParams {
   params: Promise<{ seasonId: string }>;
 }
 
-/**
- * GET /api/admin/trr-api/seasons/[seasonId]/episodes
- *
- * List episodes for a season from TRR Core API.
- * Ordered by episode_number ASC.
- *
- * Query params:
- * - limit: max results (default 20, max 100)
- * - offset: pagination offset (default 0)
- */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const { seasonId } = await params;
-
     if (!seasonId) {
-      return NextResponse.json(
-        { error: "seasonId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "seasonId is required" }, { status: 400 });
     }
 
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get("limit") ?? "20", 10);
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const cacheKey = buildUserScopedRouteCacheKey(
+      user.uid,
+      `season-episodes:${seasonId}`,
+      request.nextUrl.searchParams,
+    );
+    const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SEASON_EPISODES_CACHE_NAMESPACE, cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+    }
 
-    const episodes = await getEpisodesBySeasonId(seasonId, { limit, offset });
-
-    return NextResponse.json({
-      episodes,
-      pagination: {
-        limit,
-        offset,
-        count: episodes.length,
+    const payload = await getOrCreateRouteResponsePromise(
+      TRR_SEASON_EPISODES_CACHE_NAMESPACE,
+      cacheKey,
+      async () => {
+        const upstream = await fetchAdminBackendJson(
+          `/admin/trr-api/seasons/${seasonId}/episodes?${new URLSearchParams({
+            limit: String(limit),
+            offset: String(offset),
+          }).toString()}`,
+          {
+            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+            routeName: "season-episodes",
+          },
+        );
+        if (upstream.status !== 200) {
+          throw new Error(
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Failed to get TRR episodes",
+          );
+        }
+        setRouteResponseCache(
+          TRR_SEASON_EPISODES_CACHE_NAMESPACE,
+          cacheKey,
+          upstream.data,
+          TRR_SEASON_EPISODES_CACHE_TTL_MS,
+        );
+        return upstream.data;
       },
-    });
+    );
+
+    return NextResponse.json(payload);
   } catch (error) {
     console.error("[api] Failed to get TRR episodes", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

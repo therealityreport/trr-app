@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { invalidateTypographyRouteCaches } from "@/lib/server/admin/typography-route-cache";
 import {
   deleteTypographySet,
   updateTypographySet,
@@ -46,6 +47,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Typography set not found" }, { status: 404 });
     }
 
+    invalidateTypographyRouteCaches();
     return NextResponse.json({ set: updated });
   } catch (error) {
     console.error("[api] Failed to update typography set", error);
@@ -66,6 +68,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (outcome === "in-use") {
       return NextResponse.json({ error: "Typography set is still assigned" }, { status: 409 });
     }
+    invalidateTypographyRouteCaches();
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[api] Failed to delete typography set", error);

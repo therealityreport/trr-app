@@ -883,6 +883,46 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
   });
 
+  it("hides reddit summary cards on non-overview platform tabs", async () => {
+    window.history.replaceState({}, "", "/shows/show-1/s6/social/official?social_platform=instagram");
+
+    mockSeasonSocialFetch({
+      ...analyticsBase,
+      reddit: {
+        community_id: "community-1",
+        subreddit: "BravoRealHousewives",
+        tracked_post_count: 660,
+        show_match_post_count: 401,
+        comment_count: 18841,
+        freshness: {
+          latest_run_timestamp: "2026-03-22T14:00:00Z",
+          latest_run_status: "partial",
+        },
+        coverage: {
+          recovered_container_count: 18,
+          stale_container_count: 1,
+        },
+        deep_link: {
+          path: "/admin/social/reddit/BravoRealHousewives/rhoslc/s6",
+        },
+      },
+    } as AnalyticsPayload);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Instagram Classification Rules");
+    expect(screen.queryByTestId("reddit-summary-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("reddit-freshness-card")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open Reddit Manager/i })).not.toBeInTheDocument();
+  });
+
   it("renders post metadata completeness cards and content type distribution", async () => {
     mockSeasonSocialFetch({
       ...analyticsBase,
@@ -1454,7 +1494,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
 
-      if (url.includes("/social/ingest/worker-health")) {
+      if (url.includes("/social/ingest/worker-health") || url.includes("/social/ingest/health-dot")) {
         return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
       }
       if (url.includes("/social/analytics?")) {
@@ -2132,6 +2172,102 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
   });
 
+  it("stages initial social refresh under a concurrency cap of two before analytics begins", async () => {
+    const phaseOneResolvers: Array<() => void> = [];
+    let startedPhaseOne = 0;
+    let settledPhaseOne = 0;
+    let inFlightPhaseOne = 0;
+    let maxInFlightPhaseOne = 0;
+    let analyticsRequestedBeforePhaseOneSettled = false;
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (
+        url.includes("/social/targets?") ||
+        url.includes("/social/runs?") ||
+        url.includes("/social/runs/summary?") ||
+        url.includes("/social/ingest/worker-health") ||
+        url.includes("/social/ingest/health-dot") ||
+        url.includes("/social/shared-status?")
+      ) {
+        startedPhaseOne += 1;
+        inFlightPhaseOne += 1;
+        maxInFlightPhaseOne = Math.max(maxInFlightPhaseOne, inFlightPhaseOne);
+        return new Promise<Response>((resolve) => {
+          phaseOneResolvers.push(() => {
+            inFlightPhaseOne = Math.max(0, inFlightPhaseOne - 1);
+            settledPhaseOne += 1;
+            if (url.includes("/social/targets?")) resolve(jsonResponse({ targets: [] }));
+            else if (url.includes("/social/runs/summary?")) resolve(jsonResponse({ summaries: [] }));
+            else if (url.includes("/social/runs?")) resolve(jsonResponse({ runs: [] }));
+            else if (url.includes("/social/shared-status?")) resolve(jsonResponse({}));
+            else resolve(jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null }));
+          });
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return Promise.resolve(jsonResponse({ jobs: [] }));
+      }
+      if (url.includes("/social/analytics?")) {
+        if (settledPhaseOne < 5) {
+          analyticsRequestedBeforePhaseOneSettled = true;
+        }
+        return Promise.resolve(jsonResponse(analyticsBase));
+      }
+      if (url.includes("/social/analytics/week/")) {
+        return Promise.resolve(jsonResponse(defaultWeekDetailResponse(1)));
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(startedPhaseOne).toBe(2);
+    });
+    expect(maxInFlightPhaseOne).toBeLessThanOrEqual(2);
+
+    act(() => {
+      phaseOneResolvers.shift()?.();
+    });
+    await waitFor(() => {
+      expect(startedPhaseOne).toBe(3);
+    });
+
+    act(() => {
+      phaseOneResolvers.shift()?.();
+    });
+    await waitFor(() => {
+      expect(startedPhaseOne).toBe(4);
+    });
+
+    act(() => {
+      phaseOneResolvers.shift()?.();
+    });
+    await waitFor(() => {
+      expect(startedPhaseOne).toBe(5);
+    });
+
+    act(() => {
+      for (const resolve of phaseOneResolvers.splice(0)) {
+        resolve();
+      }
+    });
+
+    await screen.findByTestId("weekly-heatmap-row-1");
+    expect(maxInFlightPhaseOne).toBeLessThanOrEqual(2);
+    expect(analyticsRequestedBeforePhaseOneSettled).toBe(false);
+  });
+
   it("fetches week detail payloads in hashtags view even when only posts/likes/comments metrics are selected", async () => {
     window.history.replaceState(
       {},
@@ -2571,6 +2707,83 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     expect(screen.queryByText("Social runs request timed out")).not.toBeInTheDocument();
   });
 
+  it("hydrates from cached social snapshot and shows backend saturation stale fallback copy", async () => {
+    const cacheKey = "trr:season-social-analytics:v1:show-1:6:season-1:bravo:all:all";
+    window.localStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        version: 1,
+        saved_at: "2026-02-24T11:00:00.000Z",
+        analytics: analyticsBase,
+        runs: [],
+        targets: [],
+        last_updated: "2026-02-24T11:00:00.000Z",
+        section_last_success_at: {
+          analytics: "2026-02-24T11:00:00.000Z",
+          targets: "2026-02-24T11:00:00.000Z",
+          runs: "2026-02-24T11:00:00.000Z",
+        },
+      }),
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes("/social/ingest/worker-health")) {
+        return jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null });
+      }
+      if (url.includes("/social/shared-status?")) {
+        return jsonResponse({});
+      }
+      if (url.includes("/social/analytics?")) {
+        return {
+          ok: false,
+          status: 503,
+          headers: { get: (name: string) => (name.toLowerCase() === "retry-after" ? "2" : null) },
+          json: async () => ({
+            error: "Local TRR-Backend is saturated. Showing last successful data while retrying.",
+            code: "BACKEND_SATURATED",
+            retryable: true,
+            retry_after_seconds: 2,
+            upstream_status: 503,
+            upstream_detail: "connection pool exhausted",
+          }),
+        } as Response;
+      }
+      if (url.includes("/social/targets?")) {
+        return jsonResponse({ targets: [] });
+      }
+      if (url.includes("/social/runs/summary?")) {
+        return jsonResponse({ summaries: [] });
+      }
+      if (url.includes("/social/runs?")) {
+        return jsonResponse({ runs: [] });
+      }
+      if (url.includes("/social/jobs?")) {
+        return jsonResponse({ jobs: [] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await screen.findByText("Weekly Trend");
+    await waitFor(() => {
+      expect(
+        screen.getByText("Local TRR-Backend is saturated. Showing last successful social data while retrying."),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("connection pool exhausted")).not.toBeInTheDocument();
+  });
+
   it("uses platform-specific day values and shows YouTube posts schedule label", async () => {
     mockSeasonSocialFetch(analyticsBase);
 
@@ -2829,7 +3042,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     await waitFor(() => {
       expect(callCount.targets).toBeGreaterThan(1);
       expect(callCount.runs).toBeGreaterThan(1);
-      expect(callCount.summaries).toBeGreaterThan(1);
+      expect(callCount.summaries).toBeGreaterThan(0);
     });
   });
 

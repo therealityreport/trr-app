@@ -419,6 +419,8 @@ type IngestProxyErrorPayload = {
   error?: string;
   detail?: string;
   code?: string;
+  retryable?: boolean;
+  retry_after_seconds?: number;
   upstream_status?: number;
   upstream_detail?: unknown;
   upstream_detail_code?: string;
@@ -1231,9 +1233,11 @@ const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;
 const ANALYTICS_POLL_REFRESH_MS = 60_000;
 const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 4_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
+const INITIAL_SOCIAL_REFRESH_CONCURRENCY = 2;
 const WEEK_DETAIL_FETCH_CONCURRENCY = 2;
 const WEEK_DETAIL_TARGETS_PAGE_LIMIT = 100;
 const WEEK_DETAIL_TARGETS_MAX_PAGES = 20;
+const BACKEND_SATURATION_MESSAGE = "Local TRR-Backend is saturated. Showing last successful data while retrying.";
 
 export const POLL_FAILURES_BEFORE_RETRY_BANNER = 2;
 export const shouldSetPollingRetry = (consecutiveFailures: number): boolean =>
@@ -1345,11 +1349,67 @@ const isTransientBackendSectionError = (message: string | null | undefined): boo
   const normalized = String(message ?? "").toLowerCase();
   if (!normalized) return false;
   return (
+    normalized.includes("backend is saturated") ||
+    normalized.includes("connection pool exhausted") ||
+    normalized.includes("database pool initialization failed") ||
     normalized.includes("timed out") ||
     normalized.includes("could not reach trr-backend") ||
     normalized.includes("headers timeout") ||
     normalized.includes("fetch failed")
   );
+};
+
+const isBackendSaturationSectionError = (message: string | null | undefined): boolean => {
+  const normalized = String(message ?? "").toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized.includes("backend is saturated") ||
+    normalized.includes("connection pool exhausted") ||
+    normalized.includes("database pool initialization failed")
+  );
+};
+
+const readProxyErrorText = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const record = value as Record<string, unknown>;
+  return [record.message, record.error, record.detail]
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .join(" ");
+};
+
+const settleWithConcurrencyLimit = async <T,>(
+  operations: Array<() => Promise<T>>,
+  concurrency: number,
+): Promise<Array<PromiseSettledResult<T>>> => {
+  const results: Array<PromiseSettledResult<T>> = new Array(operations.length);
+  let nextIndex = 0;
+
+  const runWorker = async (): Promise<void> => {
+    while (nextIndex < operations.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      try {
+        results[currentIndex] = {
+          status: "fulfilled",
+          value: await operations[currentIndex](),
+        };
+      } catch (error) {
+        results[currentIndex] = {
+          status: "rejected",
+          reason: error,
+        };
+      }
+    }
+  };
+
+  const workerCount = Math.max(1, Math.min(concurrency, operations.length));
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
 };
 
 const TRANSIENT_DEV_RESTART_PATTERNS = [
@@ -2460,10 +2520,16 @@ export default function SeasonSocialAnalyticsSection({
   );
 
   const readErrorMessage = useCallback(async (response: Response, fallback: string): Promise<string> => {
-    const data = (await response.json().catch(() => ({}))) as {
-      error?: string;
-      detail?: string;
-    };
+    const data = (await response.json().catch(() => ({}))) as IngestProxyErrorPayload;
+    const upstreamDetailText = readProxyErrorText(data.upstream_detail);
+    if (
+      data.code === "BACKEND_SATURATED" ||
+      isBackendSaturationSectionError(data.error) ||
+      isBackendSaturationSectionError(data.detail) ||
+      isBackendSaturationSectionError(upstreamDetailText)
+    ) {
+      return BACKEND_SATURATION_MESSAGE;
+    }
     return data.error ?? data.detail ?? fallback;
   }, []);
 
@@ -3042,12 +3108,16 @@ export default function SeasonSocialAnalyticsSection({
         setSharedStatusError(null);
       }
       return data;
-    } catch {
+    } catch (sharedStatusFetchError) {
+      const message =
+        sharedStatusFetchError instanceof Error
+          ? sharedStatusFetchError.message
+          : "Failed to load shared social pipeline status";
       if (isActiveView(analyticsView)) {
         setSharedStatus(null);
-        setSharedStatusError(null);
+        setSharedStatusError(message);
       }
-      return null;
+      throw sharedStatusFetchError;
     }
   }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, scope, seasonId, seasonNumber, showId]);
 
@@ -3477,13 +3547,17 @@ export default function SeasonSocialAnalyticsSection({
         jobs: null as string | null,
       };
 
-      const [targetsResult, runsResult, runSummariesResult, workerHealthResult, sharedStatusResult] = await Promise.allSettled([
-        fetchTargets(),
-        fetchRuns(),
-        fetchRunSummaries(),
-        fetchWorkerHealth(),
-        fetchSharedStatus(),
-      ]);
+      const [targetsResult, runsResult, runSummariesResult, workerHealthResult, sharedStatusResult] =
+        await settleWithConcurrencyLimit(
+          [
+            () => fetchTargets() as Promise<unknown>,
+            () => fetchRuns() as Promise<unknown>,
+            () => fetchRunSummaries() as Promise<unknown>,
+            () => fetchWorkerHealth() as Promise<unknown>,
+            () => fetchSharedStatus() as Promise<unknown>,
+          ],
+          INITIAL_SOCIAL_REFRESH_CONCURRENCY,
+        );
 
       if (!isCurrentRequest()) {
         return;
@@ -3496,7 +3570,7 @@ export default function SeasonSocialAnalyticsSection({
 
       let runIdToLoad = selectedRunId;
       if (runsResult.status === "fulfilled") {
-        const loadedRuns = runsResult.value;
+        const loadedRuns = runsResult.value as SocialRun[];
         const activeRun = loadedRuns.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
         if (activeRun) {
           setActiveRunId(activeRun.id);
@@ -5127,6 +5201,14 @@ export default function SeasonSocialAnalyticsSection({
     }
     return map;
   }, [analytics]);
+  const hasActiveBackendSaturationError = useMemo(() => {
+    return (
+      Object.values(sectionErrors).some((message) => isBackendSaturationSectionError(message)) ||
+      isBackendSaturationSectionError(runSummaryError) ||
+      isBackendSaturationSectionError(workerHealthError) ||
+      isBackendSaturationSectionError(sharedStatusError)
+    );
+  }, [runSummaryError, sectionErrors, sharedStatusError, workerHealthError]);
 
   useEffect(() => {
     const activeWeeks = new Set(weeklyPlatformRows.map((row) => row.week_index));
@@ -5150,6 +5232,7 @@ export default function SeasonSocialAnalyticsSection({
   useEffect(() => {
     const requiresTokenMetrics = needsWeekDetailTokenMetrics && (analyticsView === "bravo" || analyticsView === "advanced");
     if (!requiresTokenMetrics && !needsWeekDetailHashtagAnalytics) return;
+    if (hasActiveBackendSaturationError) return;
     if (weeklyPlatformRows.length === 0) return;
     const abortControllers = weekDetailAbortControllersRef.current;
 
@@ -5251,6 +5334,7 @@ export default function SeasonSocialAnalyticsSection({
   }, [
     analyticsView,
     fetchWeekDetail,
+    hasActiveBackendSaturationError,
     needsWeekDetailHashtagAnalytics,
     needsWeekDetailTokenMetrics,
     platformFilter,
@@ -5295,6 +5379,12 @@ export default function SeasonSocialAnalyticsSection({
     );
     return { sectionErrorItems: surfaced, staleFallbackItems: staleFallback };
   }, [sectionErrors, sectionLastSuccessAt]);
+  const staleFallbackMessage = useMemo(() => {
+    if (staleFallbackItems.some((item) => isBackendSaturationSectionError(item.message))) {
+      return "Local TRR-Backend is saturated. Showing last successful social data while retrying.";
+    }
+    return "Showing last successful social data while live refresh retries.";
+  }, [staleFallbackItems]);
   const weeklyDailyActivityRows = useMemo(
     () => analytics?.weekly_daily_activity ?? [],
     [analytics],
@@ -6449,7 +6539,7 @@ export default function SeasonSocialAnalyticsSection({
                 )}
                 {staleFallbackItems.length > 0 && (
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-                    Showing last successful social data while live refresh retries.
+                    {staleFallbackMessage}
                   </div>
                 )}
                 {sectionErrorItems.map((item) => (
@@ -7069,7 +7159,7 @@ export default function SeasonSocialAnalyticsSection({
               </p>
               <p className="mt-1 text-xs text-zinc-500">Cross-platform interactions</p>
             </article>
-            {analytics?.reddit && (
+            {platformTab === "overview" && analytics?.reddit && (
               <article className="rounded-2xl border border-orange-200 bg-orange-50/40 p-5 shadow-sm" data-testid="reddit-summary-card">
                 <p className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-600">Reddit Coverage</p>
                 <p className="mt-2 text-3xl font-bold text-zinc-900">
@@ -7089,7 +7179,7 @@ export default function SeasonSocialAnalyticsSection({
                 )}
               </article>
             )}
-            {analytics?.reddit && (
+            {platformTab === "overview" && analytics?.reddit && (
               <article className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm" data-testid="reddit-freshness-card">
                 <p className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-600">Reddit Freshness</p>
                 <p className="mt-2 text-3xl font-bold text-zinc-900">

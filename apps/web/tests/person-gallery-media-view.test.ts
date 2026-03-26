@@ -731,6 +731,39 @@ describe("person gallery media view helpers", () => {
     expect(buckets.matchesUnknownShows).toBe(true);
   });
 
+  it("keeps explicit Getty event buckets in Events even when the event title mentions the active show", () => {
+    const buckets = computePersonPhotoShowBuckets({
+      photo: makePhoto({
+        source: "getty",
+        bucket_type: "event",
+        bucket_key: "rhobh-season-5-premiere-party",
+        bucket_label: 'Bravo\'s "The Real Housewives of Beverly Hills" Season 5 Premiere Party',
+        resolved_show_name: null,
+        metadata: {
+          bucket_type: "event",
+          bucket_key: "rhobh-season-5-premiere-party",
+          bucket_label: 'Bravo\'s "The Real Housewives of Beverly Hills" Season 5 Premiere Party',
+          grouped_image_count: 18,
+          event_subcategory_keys: ["reality_tv_bravo_franchise"],
+          show_name: "The Real Housewives of Beverly Hills",
+        },
+      }),
+      showIdForApi: "show-rhobh",
+      activeShowName: "The Real Housewives of Beverly Hills",
+      activeShowAcronym: "RHOBH",
+      allKnownShowNameMatches: ["the real housewives of beverly hills"],
+      allKnownShowAcronymMatches: new Set(["RHOBH"]),
+      allKnownShowIds: ["show-rhobh"],
+      otherShowNameMatches: [],
+      otherShowAcronymMatches: new Set(),
+      selectedOtherShow: null,
+    });
+
+    expect(buckets.matchesEvents).toBe(true);
+    expect(buckets.matchesThisShow).toBe(false);
+    expect(buckets.eventBucketKey).toBe("rhobh-season-5-premiere-party");
+  });
+
   it("prioritizes explicit Getty/NBCUMV bucket metadata over caption heuristics", () => {
     const showBuckets = computePersonPhotoShowBuckets({
       photo: makePhoto({

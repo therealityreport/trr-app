@@ -13,6 +13,97 @@ import { checkUserExists, isFirestoreUnavailableError } from "@/lib/db/users";
 import { AuthDebugger, EnvUtils } from "@/lib/debug";
 import { buildTypographyDataAttributes } from "@/lib/typography/runtime";
 
+const COVERAGE_PILLARS = ["News", "Polls", "Surveys", "Games"] as const;
+const EDITORIAL_SIGNALS = [
+  "Bravo coverage with sharper context.",
+  "Daily games built for people who already know the cast list.",
+  "Member flows that move from headline to vote without friction.",
+] as const;
+const ACCENT = "#7A0307";
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-[0.26em]" style={{ color: ACCENT }}>
+      {children}
+    </p>
+  );
+}
+
+function EditorialAnchor() {
+  return (
+    <section
+      aria-label="The Reality Report editorial launch artwork"
+      className="rounded-[2rem] border-2 border-black bg-white px-6 py-6 text-black sm:px-8 sm:py-8"
+    >
+      <div className="flex h-full min-h-[26rem] flex-col justify-between gap-8 sm:min-h-[32rem]">
+        <div className="flex items-start justify-between gap-4">
+          <div
+            className="rounded-full border border-black px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.22em]"
+            style={{ color: ACCENT }}
+          >
+            The Reality Report
+          </div>
+          <div className="hidden text-right text-[11px] font-semibold uppercase tracking-[0.22em] text-black/60 sm:block">
+            Culture desk
+            <br />
+            March 2026
+          </div>
+        </div>
+
+        <div>
+          <div className="grid gap-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-end">
+            <div>
+              <div className="mx-auto w-full max-w-[17rem] border-b-2 border-black pb-2">
+                <Image
+                  src="/images/shows/rhoslc/season-6/Bronwyn.png"
+                  alt="Editorial cast portrait used as launch artwork"
+                  width={488}
+                  height={640}
+                  priority
+                  className="h-auto w-full object-contain"
+                />
+              </div>
+            </div>
+
+            <div className="max-w-xl">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.4em]" style={{ color: ACCENT }}>
+                Reality TV, reported with a cleaner line
+              </p>
+              <h2 className="mt-3 max-w-lg font-serif text-4xl leading-[0.95] tracking-[-0.05em] text-black sm:text-5xl lg:text-[4.4rem]">
+                Vote fast.
+                <br />
+                Read deeper.
+              </h2>
+              <p className="mt-4 max-w-md text-sm leading-7 text-black/75 sm:text-base">
+                TRR puts breaking Bravo coverage, fan surveys, and quick-hit games into one nightly rhythm.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-2">
+                {COVERAGE_PILLARS.map((pillar) => (
+                  <span
+                    key={pillar}
+                    className="rounded-full border border-black px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]"
+                    style={{ color: ACCENT }}
+                  >
+                    {pillar}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 border-t border-black pt-4 sm:grid-cols-3">
+          {EDITORIAL_SIGNALS.map((signal) => (
+            <p key={signal} className="text-sm leading-6 text-black/75">
+              {signal}
+            </p>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Page() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -22,31 +113,29 @@ export default function Page() {
       environment: EnvUtils.getEnvironmentInfo(),
     });
 
-    // initialize analytics (no-op on unsupported envs) and log a page_view
-    (async () => {
+    void (async () => {
       try {
-        const a = await initAnalytics();
-        if (a) {
-          logEvent(a, "page_view");
+        const analytics = await initAnalytics();
+        if (analytics) {
+          logEvent(analytics, "page_view");
           AuthDebugger.log("Main page: Analytics initialized and page_view logged");
         }
       } catch (error) {
-        AuthDebugger.log("Main page: Analytics init error (expected in some environments)", { error: error?.toString() });
+        AuthDebugger.log("Main page: Analytics init error (expected in some environments)", {
+          error: error?.toString(),
+        });
       }
     })();
 
     const unsub = onUser(async (currentUser) => {
-      AuthDebugger.log("Main page: User state changed", { 
-        hasUser: !!currentUser, 
+      AuthDebugger.log("Main page: User state changed", {
+        hasUser: !!currentUser,
         email: currentUser?.email,
-        uid: currentUser?.uid?.substring(0, 8) + '...',
-        environment: EnvUtils.isProduction() ? 'production' : 'local',
+        uid: currentUser?.uid?.substring(0, 8) + "...",
+        environment: EnvUtils.isProduction() ? "production" : "local",
       });
-      
+
       setUser(currentUser);
-      
-      // Don't automatically redirect - let users navigate manually to prevent glitching
-      // The hub page will handle its own authentication requirements
       AuthDebugger.log("Main page: No automatic redirects - manual navigation only");
     });
 
@@ -68,34 +157,11 @@ export default function Page() {
       router.replace("/auth/complete");
     } catch (error) {
       AuthDebugger.log("Main page: Google sign-in error", { error: error?.toString() });
-      // ignored: signInWithGoogle filters benign errors
     }
   };
 
-  // Removed unused handleApple function
-  // const handleApple = async () => {
-  //   try {
-  //     AuthDebugger.log("Main page: Starting Apple sign-in");
-  //     const provider = new OAuthProvider("apple.com");
-  //     const result = await signInWithPopup(auth, provider);
-  //     const idToken = await result.user.getIdToken();
-  //     await fetch("/api/session/login", {
-  //       method: "POST",
-  //       headers: { "content-type": "application/json" },
-  //       body: JSON.stringify({ idToken }),
-  //       credentials: "include",
-  //     });
-  //     AuthDebugger.log("Main page: Apple sign-in successful, redirecting to complete");
-  //     router.replace("/auth/complete");
-  //   } catch (error) {
-  //     AuthDebugger.log("Main page: Apple sign-in error", { error: error?.toString() });
-  //     // noop; user may cancel
-  //   }
-  // };
-
   const handleHubNavigation = () => {
     AuthDebugger.log("Main page: User clicked 'Go to Hub' button");
-    AuthDebugger.log("Main page: Attempting navigation to /hub");
     try {
       router.push("/hub");
       AuthDebugger.log("Main page: router.push('/hub') called successfully");
@@ -106,7 +172,6 @@ export default function Page() {
 
   const handleProfileNavigation = () => {
     AuthDebugger.log("Main page: User clicked 'Complete Profile' button");
-    AuthDebugger.log("Main page: Attempting navigation to /auth/finish");
     try {
       router.push("/auth/finish");
       AuthDebugger.log("Main page: router.push('/auth/finish') called successfully");
@@ -128,161 +193,238 @@ export default function Page() {
   };
 
   return (
-    <div className="min-h-screen w-full relative bg-white">
-      {/* Header → Banner */}
-      <div className="w-full h-20 border-b border-black flex items-center justify-center">
-        <Image
-          className="w-80 h-[70.2px]"
-          src="/images/logos/FullName-Black.png"
-          alt="The Reality Report"
-          width={320}
-          height={70}
-          priority
-        />
+    <main className="min-h-dvh overflow-hidden bg-white text-black">
+      <div>
+        <header className="px-5 pb-4 pt-5 sm:px-7 lg:px-10">
+          <div className="mx-auto flex w-full max-w-[88rem] items-center justify-between gap-4 border-b border-black pb-4">
+            <Link href="/" className="transition hover:opacity-80" aria-label="The Reality Report home">
+              <Image
+                className="h-auto w-[15rem] sm:w-[18rem]"
+                src="/images/logos/FullName-Black.png"
+                alt="The Reality Report"
+                width={320}
+                height={70}
+                priority
+              />
+            </Link>
+            <div className="hidden items-center gap-6 text-[11px] font-semibold uppercase tracking-[0.24em] text-black sm:flex">
+              <span>Reality TV Desk</span>
+              <Link href="/games" className="transition hover:opacity-70">
+                Games
+              </Link>
+              <Link href="/shows" className="transition hover:opacity-70">
+                Shows
+              </Link>
+            </div>
+          </div>
+        </header>
+
+        <section className="px-5 pb-8 sm:px-7 lg:px-10 lg:pb-10">
+          <div className="mx-auto grid w-full max-w-[88rem] gap-8 xl:grid-cols-[minmax(0,0.9fr)_minmax(34rem,0.95fr)] xl:items-center">
+            <div className="order-1 flex flex-col gap-8">
+              <div className="max-w-2xl">
+                <SectionLabel>Membership desk</SectionLabel>
+                <h1
+                  className="mt-4 max-w-[15ch] font-serif text-[clamp(3rem,7vw,6.4rem)] leading-[0.92] tracking-[-0.06em] text-black [text-wrap:balance]"
+                  {...buildTypographyDataAttributes({
+                    area: "user-frontend",
+                    pageKey: "home",
+                    instanceKey: "landing-shell",
+                    role: "heroTitle",
+                  })}
+                >
+                  Reality TV, reported with a sharper eye.
+                </h1>
+                <p
+                  className="mt-5 max-w-[34rem] text-base leading-8 text-black/75 sm:text-lg"
+                  {...buildTypographyDataAttributes({
+                    area: "user-frontend",
+                    pageKey: "home",
+                    instanceKey: "landing-shell",
+                    role: "body",
+                  })}
+                >
+                  Get into TRR for fast reads, sharper polls, and daily games built for people who already know the cast list.
+                </p>
+              </div>
+
+              {user ? (
+                <section className="max-w-xl rounded-[2rem] border-2 border-black bg-white p-6 sm:p-7">
+                  <SectionLabel>Signed in</SectionLabel>
+                  <p className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-black">
+                    Welcome back.
+                  </p>
+                  <p className="mt-2 text-sm leading-7 text-black/75">
+                    You&apos;re signed in as <span className="font-semibold text-black">{user.email}</span>.
+                  </p>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                    <button
+                      onClick={handleHubNavigation}
+                      className="inline-flex min-h-14 items-center justify-center rounded-full bg-black px-6 text-sm font-semibold uppercase tracking-[0.18em] text-white transition duration-200 hover:opacity-85"
+                      {...buildTypographyDataAttributes({
+                        area: "user-frontend",
+                        pageKey: "home",
+                        instanceKey: "landing-shell",
+                        role: "cta",
+                      })}
+                    >
+                      Go to hub
+                    </button>
+                    <button
+                      onClick={handleProfileNavigation}
+                      className="inline-flex min-h-14 items-center justify-center rounded-full border border-black bg-white px-6 text-sm font-semibold uppercase tracking-[0.18em] text-black transition duration-200 hover:opacity-80"
+                    >
+                      Finish profile
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleSignOut}
+                    className="mt-3 inline-flex min-h-12 items-center justify-center rounded-full px-4 text-xs font-semibold uppercase tracking-[0.18em] transition hover:opacity-80"
+                    style={{ color: ACCENT }}
+                  >
+                    Sign out
+                  </button>
+                </section>
+              ) : (
+                <form
+                  noValidate
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
+                    const email = formData.get("email") as string;
+                    if (!email?.trim()) return;
+
+                    try {
+                      const normalizedEmail = email.trim();
+                      const userExists = await checkUserExists(normalizedEmail);
+                      if (userExists) {
+                        router.push(`/login?email=${encodeURIComponent(normalizedEmail)}`);
+                      } else {
+                        router.push(`/auth/register?email=${encodeURIComponent(normalizedEmail)}`);
+                      }
+                    } catch (error) {
+                      console.error("Error checking user existence:", error);
+                      if (isFirestoreUnavailableError(error)) {
+                        router.push(`/login?email=${encodeURIComponent(email.trim())}`);
+                      } else {
+                        router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
+                      }
+                    }
+                  }}
+                  className="max-w-xl rounded-[2rem] border-2 border-black bg-white p-6 sm:p-7"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <SectionLabel>Member access</SectionLabel>
+                      <p className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-black">
+                        Log in or create your account.
+                      </p>
+                    </div>
+                    <div
+                      className="rounded-full border border-black bg-white px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]"
+                      style={{ color: ACCENT }}
+                    >
+                      Email first
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                    <label
+                      htmlFor="email"
+                      className="text-[11px] font-semibold uppercase tracking-[0.22em]"
+                      style={{ color: ACCENT }}
+                      {...buildTypographyDataAttributes({
+                        area: "user-frontend",
+                        pageKey: "home",
+                        instanceKey: "landing-shell",
+                        role: "body",
+                      })}
+                    >
+                      Email address
+                    </label>
+                    <div className="mt-3 flex min-h-16 items-center rounded-[1.4rem] border border-black bg-white px-5 transition focus-within:border-black">
+                      <input
+                        type="email"
+                        name="email"
+                        id="email"
+                        required
+                        placeholder="your.email@example.com"
+                        className="w-full bg-transparent text-base text-black outline-none placeholder:text-black/50"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="mt-4 inline-flex min-h-14 w-full items-center justify-center rounded-full bg-black px-6 text-sm font-semibold uppercase tracking-[0.18em] text-white transition duration-200 hover:opacity-85"
+                    {...buildTypographyDataAttributes({
+                      area: "user-frontend",
+                      pageKey: "home",
+                      instanceKey: "landing-shell",
+                      role: "cta",
+                    })}
+                  >
+                    Continue
+                  </button>
+
+                  <div className="mt-5 flex items-center gap-4">
+                    <div className="h-px flex-1 bg-black/10" />
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-black/50">
+                      or
+                    </span>
+                    <div className="h-px flex-1 bg-black/10" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleGoogle}
+                    className="mt-5 inline-flex min-h-14 w-full items-center justify-center rounded-full border border-black bg-white px-6 text-sm font-semibold uppercase tracking-[0.16em] text-black transition duration-200 hover:opacity-80"
+                  >
+                    <span
+                      {...buildTypographyDataAttributes({
+                        area: "user-frontend",
+                        pageKey: "home",
+                        instanceKey: "landing-shell",
+                        role: "body",
+                      })}
+                    >
+                      Continue with Google
+                    </span>
+                  </button>
+
+                  <p
+                    className="mt-5 max-w-lg text-sm leading-7 text-black/70"
+                    {...buildTypographyDataAttributes({
+                      area: "user-frontend",
+                      pageKey: "home",
+                      instanceKey: "landing-shell",
+                      role: "body",
+                    })}
+                  >
+                    By continuing, you agree to the{" "}
+                    <Link href="/terms-of-sale" className="font-medium text-black underline decoration-black underline-offset-4">
+                      Terms of Sale
+                    </Link>
+                    {", "}
+                    <Link href="/terms-of-service" className="font-medium text-black underline decoration-black underline-offset-4">
+                      Terms of Service
+                    </Link>
+                    {", and "}
+                    <Link href="/privacy-policy" className="font-medium text-black underline decoration-black underline-offset-4">
+                      Privacy Policy
+                    </Link>
+                    .
+                  </p>
+                </form>
+              )}
+            </div>
+
+            <div className="order-2">
+              <EditorialAnchor />
+            </div>
+          </div>
+        </section>
       </div>
-
-      {/* Main Content */}
-      {user ? (
-        // Authenticated user - show welcome message and navigation
-        <div className="w-full max-w-md mx-auto mt-16 px-4 text-center">
-          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 mb-6" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "heroTitle" })}>
-            Welcome back!
-          </h2>
-          <p className="text-gray-600 font-hamburg mb-8" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
-            You&apos;re signed in as {user.email}
-          </p>
-          <div className="space-y-4">
-            <button
-              onClick={handleHubNavigation}
-              className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center"
-              {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "cta" })}
-            >
-              Go to Hub
-            </button>
-            <button
-              onClick={handleProfileNavigation}
-              className="w-full h-11 bg-white rounded-[3px] border border-black text-black text-base font-hamburg font-normal hover:bg-gray-50 transition-colors flex items-center justify-center"
-            >
-              Complete Profile
-            </button>
-            <button
-              onClick={handleSignOut}
-              className="w-full h-11 bg-white rounded-[3px] border border-gray-300 text-gray-600 text-base font-hamburg font-normal hover:bg-gray-50 transition-colors flex items-center justify-center"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      ) : (
-        // Unauthenticated user - show login/register form
-        <form onSubmit={async (e) => {
-        e.preventDefault();
-        const formData = new FormData(e.currentTarget);
-        const email = formData.get('email') as string;
-        if (email?.trim()) {
-          try {
-            // Check if user exists first
-            const userExists = await checkUserExists(email.trim());
-            if (userExists) {
-              // User exists, redirect to login
-              router.push(`/login?email=${encodeURIComponent(email.trim())}`);
-            } else {
-              // New user, redirect to register
-              router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
-            }
-          } catch (error) {
-            console.error("Error checking user existence:", error);
-            // If Firestore lookup is unavailable, default to login to avoid trapping
-            // existing users in the register/finish funnel.
-            if (isFirestoreUnavailableError(error)) {
-              router.push(`/login?email=${encodeURIComponent(email.trim())}`);
-            } else {
-              // On other errors, keep existing register fallback.
-              router.push(`/auth/register?email=${encodeURIComponent(email.trim())}`);
-            }
-          }
-        }
-      }} noValidate className="w-full max-w-md mx-auto mt-16 px-4">
-        
-        {/* Heading Container */}
-        <div className="w-full flex items-center justify-center mb-6">
-          <h2 className="text-black text-3xl font-gloucester font-normal leading-10 text-center" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "heroTitle" })}>
-            Log in or create an account
-          </h2>
-        </div>
-
-        {/* Email Field */}
-        <div className="w-full mb-4">
-          <div className="h-[21px] mb-2">
-            <label htmlFor="email" className="text-black text-sm font-hamburg font-medium leading-[21px]" style={{letterSpacing: '0.1px'}} {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
-              Email address
-            </label>
-          </div>
-          <div className="h-11 mb-1 relative">
-            <input 
-              type="email"
-              name="email"
-              id="email"
-              required
-              className="w-full h-full bg-white rounded-[3px] border border-black px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black text-black"
-              placeholder="your.email@example.com"
-            />
-          </div>
-        </div>
-
-        {/* Continue Button Container */}
-        <button 
-          type="submit"
-          className="w-full h-11 bg-neutral-900 rounded-[3px] text-white text-base font-hamburg font-bold leading-[38px] hover:bg-neutral-800 transition-colors flex items-center justify-center mb-4"
-          {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "cta" })}
-        >
-          Continue
-        </button>
-
-        {/* OR Separator Container */}
-        <div className="w-full flex items-center mb-4">
-          <div className="flex-1 h-px bg-neutral-200"></div>
-          <div className="px-4 text-black text-sm font-hamburg font-medium leading-[21px]">or</div>
-          <div className="flex-1 h-px bg-neutral-200"></div>
-        </div>
-
-        {/* Google Button Container */}
-        <button 
-          type="button"
-          onClick={handleGoogle}
-          className="w-full h-[52px] bg-white rounded-[3px] border border-black hover:bg-gray-50 transition-colors flex items-center justify-center gap-3 mb-6"
-        >
-          <svg width="19" height="19" viewBox="0 0 19 19" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path fillRule="evenodd" clipRule="evenodd" d="M17.77 9.64468C17.77 9.0065 17.7127 8.39286 17.6064 7.80377H9.13V11.2851H13.9736C13.765 12.4101 13.1309 13.3633 12.1777 14.0015V16.2597H15.0864C16.7882 14.6929 17.77 12.3856 17.77 9.64468Z" fill="#4285F4"/>
-            <path fillRule="evenodd" clipRule="evenodd" d="M9.12976 18.44C11.5598 18.44 13.597 17.6341 15.0861 16.2595L12.1775 14.0013C11.3716 14.5413 10.3407 14.8604 9.12976 14.8604C6.78567 14.8604 4.80159 13.2772 4.09386 11.15H1.08704V13.4818C2.56795 16.4231 5.61158 18.44 9.12976 18.44Z" fill="#34A853"/>
-            <path fillRule="evenodd" clipRule="evenodd" d="M4.09409 11.1498C3.91409 10.6098 3.81182 10.033 3.81182 9.43983C3.81182 8.84664 3.91409 8.26983 4.09409 7.72983V5.39801H1.08728C0.477732 6.61301 0.130005 7.98755 0.130005 9.43983C0.130005 10.8921 0.477732 12.2666 1.08728 13.4816L4.09409 11.1498Z" fill="#FBBC05"/>
-            <path fillRule="evenodd" clipRule="evenodd" d="M9.12976 4.01955C10.4511 4.01955 11.6375 4.47364 12.5702 5.36545L15.1516 2.78409C13.5929 1.33182 11.5557 0.440002 9.12976 0.440002C5.61158 0.440002 2.56795 2.45682 1.08704 5.39818L4.09386 7.73C4.80159 5.60273 6.78567 4.01955 9.12976 4.01955Z" fill="#EA4335"/>
-          </svg>
-          <span className="text-neutral-900 text-base font-hamburg font-normal leading-6" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
-            Continue with Google
-          </span>
-        </button>
-
-        {/* Terms Text Container */}
-        <div className="w-full flex items-center justify-center">
-          <p className="text-black text-sm font-hamburg font-normal leading-[21px] text-center" {...buildTypographyDataAttributes({ area: "user-frontend", pageKey: "home", instanceKey: "landing-shell", role: "body" })}>
-            By continuing, you agree to the{" "}
-            <Link href="/terms-of-sale" className="underline">
-              Terms of Sale
-            </Link>
-            {", "}
-            <Link href="/terms-of-service" className="underline">
-              Terms of Service
-            </Link>
-            {", and "}
-            <Link href="/privacy-policy" className="underline">
-              Privacy Policy
-            </Link>
-            .
-          </p>
-        </div>
-        </form>
-      )}
-    </div>
+    </main>
   );
 }

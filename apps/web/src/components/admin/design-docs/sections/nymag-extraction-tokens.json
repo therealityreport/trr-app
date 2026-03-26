@@ -1,0 +1,237 @@
+{
+  "$meta": {
+    "source": "nymag.com",
+    "extractedAt": "2026-03-26",
+    "method": "inline-css-analysis",
+    "cms": "Vox Media Clay CMS",
+    "notes": "All CSS is inlined in <style> blocks. Fonts served from fonts.nymag.com via @font-face."
+  },
+  "fonts": [
+    {
+      "family": "Egyptienne",
+      "weights": ["variable"],
+      "styles": ["normal"],
+      "src": "https://fonts.nymag.com/NY_Egyptienne_Legacy_Romans_Variable.woff2",
+      "format": "woff2",
+      "notes": "Variable font covering Roman weights"
+    },
+    {
+      "family": "Egyptienne",
+      "weights": ["variable"],
+      "styles": ["italic"],
+      "src": "https://fonts.nymag.com/NY_Egyptienne_Legacy_Italics_Variable.woff2",
+      "format": "woff2",
+      "notes": "Variable font covering Italic weights"
+    },
+    {
+      "family": "EgyptienneRegular",
+      "weights": ["normal"],
+      "styles": ["normal"],
+      "src": "https://fonts.nymag.com/NY_Egyptienne_Legacy_Romans_Variable.woff2",
+      "format": "woff2",
+      "notes": "Alias of Egyptienne variable roman, used for regular-weight contexts"
+    },
+    {
+      "family": "EgyptienneRubric",
+      "weights": ["normal"],
+      "styles": ["normal"],
+      "src": "https://fonts.nymag.com/NY_Egyptienne_Legacy_Rubric.woff2",
+      "format": "woff2",
+      "notes": "Rubric/label weight — used for section rubrics and kickers"
+    },
+    {
+      "family": "icons",
+      "weights": ["normal"],
+      "styles": ["normal"],
+      "src": "https://fonts.nymag.com/icons.woff",
+      "format": "woff",
+      "notes": "Icon font for UI glyphs"
+    },
+    {
+      "family": "LibreFranklin",
+      "weights": [400, 500, 600, 700, 800],
+      "styles": ["normal", "italic"],
+      "src": "https://fonts.nymag.com/LibreFranklin-{weight}{style}.woff2",
+      "format": "woff2",
+      "notes": "Sans-serif utility font. Multiple weights with italic variants for each."
+    },
+    {
+      "family": "Miller Display",
+      "weights": [300, 600],
+      "styles": ["normal", "italic"],
+      "src": "https://fonts.nymag.com/MillerDisplay-{weight}{style}.woff2",
+      "format": "woff2",
+      "notes": "Display serif for large headlines and feature treatments"
+    },
+    {
+      "family": "Miller Text",
+      "weights": [400, 700],
+      "styles": ["normal", "italic"],
+      "src": "https://fonts.nymag.com/MillerText-{weight}{style}.woff2",
+      "format": "woff2",
+      "notes": "Text serif for body copy, bylines, navigation labels"
+    },
+    {
+      "family": "NY Slab Text",
+      "weights": [700],
+      "styles": ["normal", "italic"],
+      "src": "https://fonts.nymag.com/NYSlabText-Bold{style}.woff2",
+      "format": "woff2",
+      "notes": "Bold slab serif text face"
+    },
+    {
+      "family": "NY Slab",
+      "weights": [700],
+      "styles": ["normal", "italic"],
+      "src": "https://fonts.nymag.com/NYSlab-Bold{style}.woff2",
+      "format": "woff2",
+      "notes": "Bold slab serif display face"
+    },
+    {
+      "family": "egyptienneComBold",
+      "weights": [700],
+      "styles": ["normal"],
+      "src": "https://fonts.nymag.com/NYEgyptinneCompressed-Bold3.woff2",
+      "format": "woff2",
+      "notes": "Compressed bold Egyptienne — condensed headline treatment"
+    }
+  ],
+  "colors": {
+    "brand": {
+      "primary": "#db2800",
+      "primaryLabel": "NYMag Red / Intelligencer Red",
+      "usage": "Links, hovers, rubrics, promotional elements, brand accent"
+    },
+    "text": {
+      "primary": "#000",
+      "primaryAlt": "#111",
+      "secondary": "#333",
+      "tertiary": "#4a4a4a",
+      "muted": "#767676"
+    },
+    "backgrounds": {
+      "white": "#fff",
+      "lightGray": "#f7f7f7",
+      "errorBg": "#ffeeea"
+    },
+    "borders": {
+      "dark": "#000",
+      "medium": "#979797",
+      "light": "#bdbdbd",
+      "lighter": "#ccc",
+      "lightest": "#d8d8d8",
+      "faint": "#e7e7e7"
+    },
+    "verticals": {
+      "vulture": "#00bcf1",
+      "vultureLabel": "Vulture Blue",
+      "theCut": "#d0021b",
+      "theCutLabel": "The Cut Red",
+      "theCutGray": "#949494",
+      "theCutGrayLabel": "The Cut secondary gray",
+      "grubStreet": "#acca5b",
+      "grubStreetLabel": "Grub Street Green",
+      "strategist": "#f55d1f",
+      "strategistLabel": "Strategist Orange",
+      "curbed": "#0147a5",
+      "curbedLabel": "Curbed Blue",
+      "intelligencer": "#db2800",
+      "intelligencerLabel": "Intelligencer Red (same as brand primary)"
+    },
+    "feedback": {
+      "errorRed": "#e26154",
+      "errorBg": "#ffeeea"
+    },
+    "accent": {
+      "vultureYellow": "#ffec14",
+      "vultureYellowLabel": "Vulture spotlight / feature highlight"
+    }
+  },
+  "spacing": {
+    "pageMaxWidth": "1100px",
+    "pageOuterWidth": "1180px",
+    "sectionMargins": {
+      "mobile": "0 20px",
+      "tablet": "0 34px",
+      "desktop": "0 auto"
+    },
+    "componentGaps": ["20px", "30px", "40px"],
+    "paddingCommon": ["15px", "20px", "25px", "30px"],
+    "notes": "Desktop content constrained to 1100px max-width, centered with auto margins inside 1180px outer container"
+  },
+  "breakpoints": {
+    "smallMobile": "375px",
+    "intermediateMobile": "420px",
+    "mobile": {
+      "min": "0px",
+      "max": "767px"
+    },
+    "tablet": {
+      "min": "768px",
+      "max": "1179px"
+    },
+    "desktop": {
+      "min": "1180px"
+    },
+    "mediaQueries": {
+      "mobileOnly": "@media (max-width: 767px)",
+      "tabletUp": "@media (min-width: 768px)",
+      "tabletOnly": "@media (min-width: 768px) and (max-width: 1179px)",
+      "desktopUp": "@media (min-width: 1180px)"
+    }
+  },
+  "typographyScale": {
+    "headlines": {
+      "font": "Egyptienne",
+      "sizes": [
+        { "fontSize": "50px", "lineHeight": ".84", "context": "Hero headline" },
+        { "fontSize": "40px", "lineHeight": ".84", "context": "Feature headline" },
+        { "fontSize": "32px", "lineHeight": "28px", "context": "Section lead headline" },
+        { "fontSize": "30px", "lineHeight": "30px", "context": "Standard headline" }
+      ]
+    },
+    "display": {
+      "font": "Miller Display",
+      "sizes": [
+        { "fontSize": "50px", "lineHeight": ".84", "context": "Hero display" },
+        { "fontSize": "45px", "lineHeight": ".84", "context": "Large display" },
+        { "fontSize": "40px", "lineHeight": "1", "context": "Medium display" },
+        { "fontSize": "30px", "lineHeight": "32px", "context": "Small display" },
+        { "fontSize": "26px", "lineHeight": "28px", "context": "Compact display" },
+        { "fontSize": "25px", "lineHeight": "27px", "context": "Inline display" }
+      ]
+    },
+    "body": {
+      "font": "Miller Text",
+      "sizes": [
+        { "fontSize": "20px", "lineHeight": "22px", "context": "Large body / article dek" },
+        { "fontSize": "18px", "lineHeight": "1.11", "context": "Standard body" },
+        { "fontSize": "17px", "lineHeight": "20px", "context": "Compact body" },
+        { "fontSize": "16px", "lineHeight": "19px", "context": "Small body" }
+      ]
+    },
+    "rubrics": {
+      "font": "EgyptienneRubric",
+      "sizes": [
+        { "fontSize": "14px", "lineHeight": "1", "context": "Primary rubric" },
+        { "fontSize": "13px", "lineHeight": "16px", "context": "Secondary rubric" },
+        { "fontSize": "11px", "lineHeight": "1.45", "context": "Small rubric" }
+      ]
+    },
+    "labels": {
+      "font": "Miller Text",
+      "sizes": [
+        { "fontSize": "12px", "lineHeight": "1", "context": "Navigation label" },
+        { "fontSize": "11px", "lineHeight": "13px", "context": "Small label" }
+      ]
+    },
+    "bylines": {
+      "font": "Miller Text",
+      "fontSize": "11px",
+      "lineHeight": "1.45",
+      "letterSpacing": "2px",
+      "textTransform": "uppercase",
+      "context": "Author bylines and timestamps"
+    }
+  }
+}

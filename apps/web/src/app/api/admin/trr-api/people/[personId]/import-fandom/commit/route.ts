@@ -5,8 +5,11 @@ import {
   normalizeFandomSyncOptions,
   normalizeFandomSyncPreviewResponse,
 } from "@/lib/admin/fandom-sync-types";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+import { invalidateAdminBackendCache } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
+const PERSON_PHOTOS_CACHE_NAMESPACE = "admin-person-photos";
 
 interface RouteParams {
   params: Promise<{ personId: string }>;
@@ -14,7 +17,7 @@ interface RouteParams {
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { personId } = await params;
     if (!personId) {
       return NextResponse.json({ error: "personId is required" }, { status: 400 });
@@ -49,6 +52,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             : "Fandom commit failed";
       return NextResponse.json({ error }, { status: response.status });
     }
+    invalidateRouteResponseCache(PERSON_PHOTOS_CACHE_NAMESPACE, `${user.uid}:${personId}:photos:`);
+    await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
+      routeName: "person-gallery",
+    });
     return NextResponse.json(data);
   } catch (error) {
     console.error("[api] Failed to commit fandom import", error);

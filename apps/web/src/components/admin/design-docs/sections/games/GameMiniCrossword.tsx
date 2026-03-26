@@ -211,7 +211,7 @@ export default function GameMiniCrossword({ SectionLabel }: GameSectionProps) {
         <li>Selected cell: yellow background ({MINI.selection})</li>
         <li>Highlighted clue: light blue background ({MINI.highlight})</li>
         <li>Clue numbers: 8px, top-left corner of cell</li>
-        <li>Letter font: Franklin Gothic 18px bold</li>
+        <li>Letter font: nyt-franklin (NYTFranklin) 18px bold</li>
       </ul>
     </section>
   );

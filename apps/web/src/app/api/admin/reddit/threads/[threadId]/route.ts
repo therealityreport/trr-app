@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import {
   deleteRedditThread,
   getRedditCommunityById,
   getRedditThreadById,
   updateRedditThread,
 } from "@/lib/server/admin/reddit-sources-repository";
+import {
+  buildUserScopedRouteCacheKey,
+  getCachedStableRead,
+  REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
+  REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/reddit-stable-route-cache";
+import { loadStableRedditRead } from "@/lib/server/trr-api/reddit-stable-read";
 import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
@@ -42,7 +50,7 @@ const normalizePermalink = (value: string | null | undefined): string | null => 
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { threadId } = await params;
     if (!threadId) {
       return NextResponse.json({ error: "threadId is required" }, { status: 400 });
@@ -51,12 +59,37 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "threadId must be a valid UUID" }, { status: 400 });
     }
 
-    const thread = await getRedditThreadById(threadId);
-    if (!thread) {
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+    const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    searchParams.delete("refresh");
+
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `reddit-thread:${threadId}`, searchParams);
+    const { payload, cacheHit } = await getCachedStableRead({
+      namespace: REDDIT_STABLE_DETAIL_CACHE_NAMESPACE,
+      cacheKey,
+      promiseKey: forceRefresh ? `${cacheKey}:refresh` : cacheKey,
+      ttlMs: REDDIT_STABLE_DETAIL_CACHE_TTL_MS,
+      forceRefresh,
+      loader: async () => {
+        const resolved = await loadStableRedditRead<{ thread?: Record<string, unknown> | null }>({
+          backendPath: `/admin/reddit/threads/${threadId}`,
+          routeName: "reddit-threads:detail",
+          allowFallbackStatusCodes: [501],
+          fallback: async () => ({
+            thread: (await getRedditThreadById(threadId)) as Record<string, unknown> | null,
+          }),
+        });
+        return {
+          thread: resolved.payload.thread ?? null,
+        };
+      },
+    });
+
+    if (!payload.thread) {
       return NextResponse.json({ error: "Thread not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ thread });
+    return NextResponse.json(payload, cacheHit ? { headers: { "x-trr-cache": "hit" } } : undefined);
   } catch (error) {
     console.error("[api] Failed to get reddit thread", error);
     const message = error instanceof Error ? error.message : "failed";
@@ -190,6 +223,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (!thread) {
       return NextResponse.json({ error: "Thread not found" }, { status: 404 });
     }
+    invalidateRouteResponseCache("admin-reddit-stable-list", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-detail", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-summary", `${user.uid}:`);
 
     return NextResponse.json({ thread });
   } catch (error) {
@@ -218,6 +254,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!deleted) {
       return NextResponse.json({ error: "Thread not found" }, { status: 404 });
     }
+    invalidateRouteResponseCache("admin-reddit-stable-list", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-detail", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-summary", `${user.uid}:`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

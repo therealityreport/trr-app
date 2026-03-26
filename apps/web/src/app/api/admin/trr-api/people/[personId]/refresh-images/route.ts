@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  readGettyPrefetchPayload,
+} from "@/lib/server/admin/getty-local-scrape";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
@@ -50,6 +53,46 @@ const parseBackendPayload = async (
   }
 };
 
+const hydrateGettyPrefetchPayload = async (rawBody: string): Promise<string> => {
+  const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+  const prefetchToken =
+    typeof parsed.getty_prefetch_token === "string" ? parsed.getty_prefetch_token.trim() : "";
+  if (!prefetchToken) {
+    return rawBody;
+  }
+  if (Array.isArray(parsed.getty_prefetched_assets) || Array.isArray(parsed.getty_prefetched_events)) {
+    return rawBody;
+  }
+
+  const stored = await readGettyPrefetchPayload(prefetchToken);
+  if (!stored) {
+    throw new Error("Getty prefetch payload expired before the backend request started.");
+  }
+
+  const prefetchMode =
+    typeof stored.prefetch_mode === "string" ? stored.prefetch_mode.trim() : "";
+  parsed.getty_prefetched_assets =
+    prefetchMode === "discovery" && Array.isArray(stored.discovery_manifest)
+      ? stored.discovery_manifest
+      : Array.isArray(stored.merged)
+        ? stored.merged
+        : [];
+  parsed.getty_prefetched_events =
+    prefetchMode === "discovery" ? [] : Array.isArray(stored.merged_events) ? stored.merged_events : [];
+  parsed.getty_prefetched_queries = Array.isArray(stored.query_summaries) ? stored.query_summaries : [];
+  parsed.getty_prefetch_auth_mode =
+    typeof stored.auth_mode === "string" ? stored.auth_mode : undefined;
+  parsed.getty_prefetch_auth_warning =
+    typeof stored.auth_warning === "string" ? stored.auth_warning : undefined;
+  parsed.getty_prefetch_mode = prefetchMode || undefined;
+  parsed.getty_deferred_enrichment = stored.enrichment_status === "pending";
+  parsed.getty_deferred_editorial_ids = Array.isArray(stored.deferred_editorial_ids)
+    ? stored.deferred_editorial_ids
+    : [];
+  delete parsed.getty_prefetch_token;
+  return JSON.stringify(parsed);
+};
+
 /**
  * POST /api/admin/trr-api/people/[personId]/refresh-images
  *
@@ -69,12 +112,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Parse JSON body if provided (optional)
-    let body: Record<string, unknown> | undefined;
+    let bodyText = "";
     if (request.headers.get("content-type")?.includes("application/json")) {
-      try {
-        body = await request.json();
-      } catch {
-        body = undefined;
+      bodyText = await request.text().catch(() => "");
+      if (!bodyText.trim()) {
+        bodyText = "{}";
+      } else {
+        bodyText = await hydrateGettyPrefetchPayload(bodyText);
       }
     }
 
@@ -111,7 +155,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             "Content-Type": "application/json",
             Authorization: `Bearer ${serviceRoleKey}`,
           },
-          body: JSON.stringify(body ?? {}),
+          body: bodyText || "{}",
           signal: controller.signal,
         });
       } finally {

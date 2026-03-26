@@ -78,7 +78,7 @@ const ADMIN_HOME_ENTRY_CONFIG: Record<string, AdminHomeEntryConfig> = {
       {
         path: "/screenlaytics",
         status: "legacy_alias",
-        note: "Misspelled compatibility path still appears in parts of the tree.",
+        note: "Historical typo alias retained for compatibility; the canonical spelling remains /screenalytics.",
       },
       {
         path: "/admin/screenalytics",

@@ -44,26 +44,51 @@ describe("person refresh request-id diagnostics wiring", () => {
 
   it("keeps Get Images ingestion-focused and leaves full reprocessing to Refresh Details", () => {
     expect(pageContents).toContain('const pipelineMode: PersonRefreshPipelineMode = "ingest"');
-    expect(pageContents).toContain('type GetImagesSourceSelection = "all" | "getty" | "imdb" | "tmdb"');
+    expect(pageContents).toContain(
+      'type GetImagesSourceSelection = "all" | "getty" | "getty_nbcumv" | "imdb" | "tmdb"'
+    );
     expect(pageContents).toContain("const perSourceLimit =");
     expect(pageContents).toContain("limit_per_source: perSourceLimit");
     expect(pageContents).toContain("const [getImagesSourceSelection, setGetImagesSourceSelection] =");
     expect(pageContents).toContain("GET_IMAGES_SOURCE_OPTIONS");
     expect(pageContents).toContain("GET_IMAGES_SOURCE_SELECTION_MAP");
     expect(pageContents).toContain('all: ["nbcumv", "imdb", "tmdb"]');
-    expect(pageContents).toContain('getty: ["nbcumv"]');
+    expect(pageContents).toContain('getty: ["getty"]');
+    expect(pageContents).toContain('getty_nbcumv: ["nbcumv"]');
     expect(pageContents).toContain("getImagesSourcesForSelection(getImagesSourceSelection)");
     expect(pageContents).toContain("skip_auto_count: true");
     expect(pageContents).toContain("skip_word_detection: true");
     expect(pageContents).toContain("skip_centering: true");
     expect(pageContents).toContain("skip_resize: true");
     expect(pageContents).toContain("skip_prune: true");
+    expect(pageContents).toContain("Runs Getty-only discovery/import and skips NBCUMV-only supplementing.");
     expect(pageContents).toContain("Runs the fused Getty / NBCUMV path.");
     expect(pageContents).toContain("Runs Getty, IMDb, and TMDb.");
     expect(pageContents).toContain("Get Images source selection: ${getImagesSelectionLabel(getImagesSourceSelection)}.");
     expect(pageContents).toContain("Connecting to backend stream for source sync and mirroring");
     expect(pageContents).toContain("source sync + mirror only");
     expect(pageContents).toContain('Run Get Images for ${effectiveGalleryImportLabel}');
+  });
+
+  it("records Getty local prefetch metadata before sending the refresh request", () => {
+    expect(pageContents).toContain("prefetchGettyLocallyForPerson(");
+    expect(pageContents).toContain("effectiveGalleryImportContext.showName ?? undefined");
+    expect(pageContents).toContain("getty_prefetch_attempted: true");
+    expect(pageContents).toContain("getty_prefetch_succeeded: false");
+    expect(pageContents).toContain("Object.assign(refreshBody, gettyPrefetch.bodyPatch)");
+    expect(pageContents).toContain("gettyPrefetch.candidateManifestTotal");
+    expect(pageContents).toContain("gettyPrefetch.querySummaries.length");
+    expect(pageContents).toContain("gettyErr instanceof GettyLocalPrefetchError ? gettyErr.code : \"UNREACHABLE\"");
+    expect(pageContents).toContain("Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.");
+    expect(pageContents).toContain("Getty/NBCUMV refresh was not started.");
+  });
+
+  it("refreshes the gallery once per active operation state instead of polling full-gallery pages", () => {
+    expect(pageContents).toContain("const PERSON_GALLERY_PAGE_SIZE = 120;");
+    expect(pageContents).toContain('effectiveOperationStatus !== "running" && effectiveOperationStatus !== "queued"');
+    expect(pageContents).toContain("void fetchPhotos({ signal: controller.signal, includeBroken: showBrokenRows })");
+    expect(pageContents).not.toContain("window.setInterval(pollPhotos");
+    expect(pageContents).toContain("Load More From Server");
   });
 
   it("treats duplicate operation event sequence failures as non-retryable", () => {

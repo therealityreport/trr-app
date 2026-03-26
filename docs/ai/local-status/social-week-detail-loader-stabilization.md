@@ -1,15 +1,15 @@
 # Social week detail loader stabilization
 
-Last updated: 2026-03-16
+Last updated: 2026-03-24
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-16
-  current_phase: "complete"
-  next_action: "Monitor only unless the route regresses under managed Chrome after a fresh dev restart"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer continuity notes if follow-up is needed"
   detail: self
 ```
 

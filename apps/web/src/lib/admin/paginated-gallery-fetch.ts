@@ -12,7 +12,7 @@ export interface PaginatedGalleryFetchResult<T> {
 }
 
 export async function fetchAllPaginatedGalleryRowsWithMeta<T>({
-  pageSize = 500,
+  pageSize = 120,
   maxPages = 40,
   fetchPage,
 }: PaginatedGalleryFetchOptions<T>): Promise<PaginatedGalleryFetchResult<T>> {
@@ -46,7 +46,7 @@ export async function fetchAllPaginatedGalleryRowsWithMeta<T>({
 }
 
 export async function fetchAllPaginatedGalleryRows<T>({
-  pageSize = 500,
+  pageSize = 120,
   maxPages = 40,
   fetchPage,
 }: PaginatedGalleryFetchOptions<T>): Promise<T[]> {

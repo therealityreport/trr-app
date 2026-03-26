@@ -13,6 +13,10 @@ import AdminModal from "@/components/admin/AdminModal";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import {
+  GettyLocalPrefetchError,
+  prefetchGettyLocallyForPerson,
+} from "@/lib/admin/getty-local-prefetch";
+import {
   Editable,
   EditableArea,
   EditableCancel,
@@ -3139,11 +3143,12 @@ export default function TrrShowDetailPage() {
     async (
       personId: string,
       onProgress?: (progress: RefreshProgressState) => void,
-      options?: { mode?: PersonRefreshMode; signal?: AbortSignal }
+      options?: { mode?: PersonRefreshMode; signal?: AbortSignal; personName?: string }
     ) => {
       const headers = await getAuthHeaders();
       const mode = options?.mode ?? "full";
       const externalSignal = options?.signal;
+      const personName = options?.personName?.trim() || "";
       const isIngestOnly = mode === "ingest_only";
       const isProfileOnly = mode === "profile_only";
       const baseProgressMessage = isIngestOnly
@@ -3179,6 +3184,43 @@ export default function TrrShowDetailPage() {
               skip_resize: true,
             }
           : { skip_mirror: false, show_id: showId };
+
+      const shouldPrefetchGetty = !isIngestOnly && !isProfileOnly && personName.length > 0;
+      if (shouldPrefetchGetty) {
+        Object.assign(body, {
+          getty_prefetch_attempted: true,
+          getty_prefetch_succeeded: false,
+        });
+        onProgress?.({
+          stage: "Getty Local",
+          message: `Scraping Getty locally for ${personName}...`,
+          current: null,
+          total: null,
+        });
+        try {
+          const gettyPrefetch = await prefetchGettyLocallyForPerson(personName, show?.name ?? undefined);
+          Object.assign(body, gettyPrefetch.bodyPatch);
+          onProgress?.({
+            stage: "Getty Local",
+            message: `Getty local scrape complete: ${gettyPrefetch.mergedAssetCount} images, ${gettyPrefetch.mergedEventCount} events.`,
+            current: gettyPrefetch.mergedAssetCount,
+            total: gettyPrefetch.mergedAssetCount,
+          });
+        } catch (error) {
+          Object.assign(body, {
+            getty_prefetch_error_code:
+              error instanceof GettyLocalPrefetchError ? error.code : "UNREACHABLE",
+          });
+          const message = error instanceof Error ? error.message : String(error);
+          onProgress?.({
+            stage: "Getty Local",
+            message: `${message} Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.`,
+            current: null,
+            total: null,
+          });
+          throw new Error(`${message} Getty/NBCUMV refresh was not started.`);
+        }
+      }
 
       if (externalSignal?.aborted) {
         throw new Error("Cast refresh canceled.");
@@ -3604,7 +3646,7 @@ export default function TrrShowDetailPage() {
                 },
               }));
             },
-            { mode, signal: options?.signal }
+            { mode, signal: options?.signal, personName: label }
           );
           succeeded += 1;
         } catch (err) {
@@ -10248,7 +10290,7 @@ export default function TrrShowDetailPage() {
               [personId]: progress,
             }));
           },
-          { signal: runController.signal }
+          { signal: runController.signal, personName: label }
         );
         await fetchCast();
         setRefreshNotice(`Refreshed person for ${label}.`);
@@ -10878,27 +10920,6 @@ export default function TrrShowDetailPage() {
     castUiTerminalReady && availableCastRoleAndCreditFilters.length === 0;
   const castRefreshActivePhase =
     castRefreshPhaseStates.find((phase) => phase.status === "running") ?? null;
-  const castRefreshActivePhaseIndex = castRefreshActivePhase
-    ? castRefreshPhaseStates.findIndex((phase) => phase.id === castRefreshActivePhase.id)
-    : -1;
-  const castPhaseProgress =
-    castRefreshActivePhase && castRefreshActivePhaseIndex >= 0
-      ? {
-          stage: `Phase ${castRefreshActivePhaseIndex + 1}/${castRefreshPhaseStates.length}: ${
-            CAST_REFRESH_PHASE_STAGES[castRefreshActivePhase.id] ?? castRefreshActivePhase.label
-          }`,
-          message: castRefreshActivePhase.progress.message ?? null,
-          current: castRefreshActivePhase.progress.current,
-          total: castRefreshActivePhase.progress.total,
-        }
-      : null;
-  const castTabProgress =
-    refreshingTargets.cast_credits || castRefreshPipelineRunning || castMediaEnriching
-      ? castPhaseProgress ?? refreshTargetProgress.cast_credits ?? null
-      : null;
-  const showCastTabProgress = Boolean(
-    castTabProgress?.message || castTabProgress?.stage || castTabProgress?.total !== null
-  );
   const castRefreshPhasePanelStates =
     castRefreshPhaseStates.length > 0
       ? castRefreshPhaseStates
@@ -11950,13 +11971,6 @@ export default function TrrShowDetailPage() {
                   </div>
                 </div>
               )}
-              <RefreshProgressBar
-                show={showCastTabProgress}
-                stage={castTabProgress?.stage}
-                message={castTabProgress?.message}
-                current={castTabProgress?.current}
-                total={castTabProgress?.total}
-              />
               {(refreshNotice || refreshError) && (
                 <p className={`mb-4 text-sm ${refreshError ? "text-red-600" : "text-zinc-500"}`}>
                   {refreshError || refreshNotice}

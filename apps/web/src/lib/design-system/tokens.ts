@@ -107,7 +107,10 @@ export const NEUTRALS = {
 export const SEMANTIC_COLORS = {
   // Core surfaces
   background: "#ffffff",
+  surface: "#ffffff",
   foreground: "#171717",
+  primaryText: "#171717",
+  mutedText: "#737373",
 
   // Card / elevated surface
   card: "#ffffff",
@@ -166,8 +169,12 @@ export const FONT_FAMILY = {
   serif: '"Gloucester", "Playfair Display", Georgia, "Times New Roman", serif',
   /** Display headings — Gloucester */
   display: '"Gloucester", "Playfair Display", Georgia, "Times New Roman", serif',
+  /** Headline hierarchy for editorial and admin surfaces */
+  headline: '"Gloucester", "Playfair Display", Georgia, "Times New Roman", serif',
   /** Body copy — Hamburg Serial */
   body: '"Hamburg Serial", "HamburgSerial", Inter, Geist, ui-sans-serif, system-ui, sans-serif',
+  /** Caption and utility copy */
+  caption: '"Hamburg Serial", "HamburgSerial", Inter, Geist, ui-sans-serif, system-ui, sans-serif',
   /** Game UI — Plymouth Serial */
   games: '"Plymouth Serial", "Hamburg Serial", Inter, Geist, ui-sans-serif, system-ui, sans-serif',
   /** Monospace (code) */

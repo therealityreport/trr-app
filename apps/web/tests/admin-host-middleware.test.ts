@@ -195,6 +195,8 @@ describe("admin host proxy", () => {
   it.each([
     ["/social-media", "http://admin.localhost:3000/admin/social"],
     ["/admin/social-media", "http://admin.localhost:3000/admin/social"],
+    ["/social/reddit", "http://admin.localhost:3000/admin/social"],
+    ["/admin/social/reddit", "http://admin.localhost:3000/admin/social"],
     ["/social/instagram/bravotv", "http://admin.localhost:3000/admin/social/instagram/bravotv"],
     ["/shows", "http://admin.localhost:3000/admin/shows"],
     ["/shows/rhoslc", "http://admin.localhost:3000/rhoslc"],
@@ -217,7 +219,14 @@ describe("admin host proxy", () => {
     ["/rhoslc/social/reddit", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social?social_view=reddit"],
     ["/rhoslc/assets/videos", "http://admin.localhost:3000/admin/trr-shows/rhoslc/assets/videos"],
     ["/rhoslc/social/s6", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
-    ["/rhoslc/social/s6/w0/instagram", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
+    [
+      "/rhoslc/social/s6/w0",
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0",
+    ],
+    [
+      "/rhoslc/social/s6/w0/instagram",
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0/instagram",
+    ],
     ["/rhoslc/s6", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6"],
     ["/rhoslc/s6/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social"],
     ["/rhoslc/s6/social/reddit", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social&social_view=reddit"],
@@ -420,7 +429,7 @@ describe("admin host proxy", () => {
     );
   });
 
-  it("redirects legacy person gallery URLs with show query noise back to the clean short admin-host URL", () => {
+  it("rewrites canonical person gallery URLs with show query context into the admin workspace without self-redirecting", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     delete process.env.ADMIN_APP_HOSTS;
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -429,9 +438,9 @@ describe("admin host proxy", () => {
     const request = new NextRequest("http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc");
     const response = proxy(request);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe(
-      "http://admin.localhost:3000/people/mary-cosby/gallery?showId=rhoslc",
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://admin.localhost:3000/admin/trr-shows/people/mary-cosby/gallery?showId=rhoslc",
     );
   });
 

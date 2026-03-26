@@ -6,8 +6,25 @@ import {
   updateShowById,
   validateShowImageForField,
 } from "@/lib/server/trr-api/trr-shows-repository";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+  invalidateAdminBackendCache,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 import { buildCanonicalShowAlternativeNames } from "@/lib/admin/show-page/details-form";
 import { slugifyToken } from "@/lib/slugify";
+import {
+  invalidateTrrShowReadCaches,
+  TRR_SHOW_DETAIL_CACHE_NAMESPACE,
+  TRR_SHOW_DETAIL_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/trr-show-read-route-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +93,7 @@ function normalizeNullableIntegerString(
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const { showId } = await params;
 
@@ -87,19 +104,45 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const show = await getShowById(showId);
-
-    if (!show) {
-      return NextResponse.json({ error: "Show not found" }, { status: 404 });
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `show:${showId}`, request.nextUrl.searchParams);
+    const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOW_DETAIL_CACHE_NAMESPACE, cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
     }
 
-    return NextResponse.json({ show });
+    const payload = await getOrCreateRouteResponsePromise(
+      TRR_SHOW_DETAIL_CACHE_NAMESPACE,
+      cacheKey,
+      async () => {
+        const upstream = await fetchAdminBackendJson(`/admin/trr-api/shows/${showId}`, {
+          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+          routeName: "show-detail",
+        });
+        if (upstream.status === 404) {
+          throw new Error("Show not found");
+        }
+        if (upstream.status !== 200) {
+          throw new Error(
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Failed to fetch show",
+          );
+        }
+        const nextPayload = { show: upstream.data.show ?? null };
+        setRouteResponseCache(TRR_SHOW_DETAIL_CACHE_NAMESPACE, cacheKey, nextPayload, TRR_SHOW_DETAIL_CACHE_TTL_MS);
+        return nextPayload;
+      },
+    );
+
+    return NextResponse.json(payload);
   } catch (error) {
     console.error("[api] Failed to get TRR show", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    if (error instanceof Error && error.message === "Show not found") {
+      return NextResponse.json({ error: error.message }, { status: 404 });
+    }
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
@@ -110,7 +153,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const { showId } = await params;
 
     if (!showId) {
@@ -283,6 +326,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (!show) {
       return NextResponse.json({ error: "Show not found" }, { status: 404 });
     }
+
+    invalidateTrrShowReadCaches(`${user.uid}:`);
+    await invalidateAdminBackendCache(`/admin/trr-api/shows/${showId}/cache/invalidate`, {
+      routeName: "show-detail",
+    });
 
     return NextResponse.json({ show });
   } catch (error) {

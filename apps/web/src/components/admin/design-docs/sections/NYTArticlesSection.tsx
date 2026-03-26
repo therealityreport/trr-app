@@ -16,7 +16,7 @@ export default function NYTArticlesSection() {
         lineHeight: 1.1,
         marginBottom: 8,
       }}>
-        NYT Article References
+        Pages
       </h2>
       <p style={{
         fontFamily: "var(--dd-font-body)",
@@ -26,8 +26,8 @@ export default function NYTArticlesSection() {
         marginBottom: 32,
         maxWidth: 640,
       }}>
-        Design breakdowns of specific NYT articles — documenting the chart types, typography,
-        layout patterns, and interactive elements used in each piece.
+        Article-level design breakdowns — documenting chart types, typography,
+        layout patterns, and interactive elements used in each NYT page.
       </p>
 
       {/* Article cards */}

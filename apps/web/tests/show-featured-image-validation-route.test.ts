@@ -26,6 +26,13 @@ vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   validateShowImageForField: validateShowImageForFieldMock,
 }));
 
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: vi.fn(),
+  invalidateAdminBackendCache: vi.fn(),
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminProxyErrorResponse: vi.fn(),
+}));
+
 import { PUT } from "@/app/api/admin/trr-api/shows/[showId]/route";
 
 const SHOW_ID = "11111111-1111-1111-1111-111111111111";
@@ -47,7 +54,7 @@ describe("show route featured image validation", () => {
     updateShowByIdMock.mockReset();
     validateShowImageForFieldMock.mockReset();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
     getShowByIdMock.mockResolvedValue({
       id: SHOW_ID,
       name: "Test Show",

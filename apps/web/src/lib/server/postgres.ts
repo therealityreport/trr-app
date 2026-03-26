@@ -33,6 +33,15 @@ const parseConnectionHostname = (connectionString: string): string | null => {
   }
 };
 
+const parseConnectionPort = (connectionString: string): string | null => {
+  try {
+    const { port } = new URL(connectionString);
+    return port || null;
+  } catch {
+    return null;
+  }
+};
+
 const resolveCaBundle = (): string | undefined => {
   const inline = process.env.DATABASE_SSL_CA;
   if (inline && inline.trim().length > 0) {
@@ -52,11 +61,66 @@ const resolveCaBundle = (): string | undefined => {
 
 type EnvLike = Record<string, string | undefined>;
 
-export const resolvePostgresConnectionString = (env: EnvLike = process.env): string => {
-  const candidates = [env.DATABASE_URL, env.SUPABASE_DB_URL, env.TRR_DB_URL]
+export const isSupavisorSessionPoolerConnectionString = (connectionString: string): boolean => {
+  const host = parseConnectionHostname(connectionString);
+  const port = parseConnectionPort(connectionString);
+  return Boolean(host?.endsWith("pooler.supabase.com") && port === "5432");
+};
+
+function deriveSupabaseDirectConnectionString(connectionString: string): string | null {
+  try {
+    const parsed = new URL(connectionString);
+    const host = parsed.hostname.toLowerCase();
+    if (!host.endsWith("pooler.supabase.com")) {
+      return null;
+    }
+
+    const username = decodeURIComponent(parsed.username || "");
+    const projectRefMatch = username.match(/^postgres\.([a-zA-Z0-9]+)$/);
+    if (!projectRefMatch?.[1]) {
+      return null;
+    }
+
+    parsed.hostname = `db.${projectRefMatch[1]}.supabase.co`;
+    parsed.port = "5432";
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+const isSupabaseDirectFallbackEnabled = (env: EnvLike = process.env): boolean => {
+  const value =
+    env.POSTGRES_ENABLE_SUPABASE_DIRECT_FALLBACK ?? env.POSTGRES_ENABLE_DIRECT_FALLBACK ?? "";
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+};
+
+export function resolvePostgresConnectionCandidates(env: EnvLike = process.env): string[] {
+  const ordered = [env.DATABASE_URL, env.SUPABASE_DB_URL, env.TRR_DB_URL]
     .map((value) => value?.trim() ?? "")
     .filter((value) => value.length > 0);
+  const includeDirectFallback = isSupabaseDirectFallbackEnabled(env);
 
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of ordered) {
+    if (!seen.has(candidate)) {
+      candidates.push(candidate);
+      seen.add(candidate);
+    }
+    if (includeDirectFallback) {
+      const directFallback = deriveSupabaseDirectConnectionString(candidate);
+      if (directFallback && !seen.has(directFallback)) {
+        candidates.push(directFallback);
+        seen.add(directFallback);
+      }
+    }
+  }
+  return candidates;
+}
+
+export const resolvePostgresConnectionString = (env: EnvLike = process.env): string => {
+  const candidates = resolvePostgresConnectionCandidates(env);
   const connectionString = candidates[0];
   if (!connectionString) {
     throw new Error(
@@ -100,39 +164,221 @@ export const resolvePostgresSslConfig = (
   };
 };
 
-let pool: Pool | null = null;
+type PoolState = {
+  candidateIndex: number;
+  pool: Pool;
+};
+
+let poolState: PoolState | null = null;
+let activeCandidateIndex = 0;
+let activeOperationCount = 0;
+const waitingOperationResolvers: Array<() => void> = [];
+
+const parsePositiveInt = (value: string | undefined): number | undefined => {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const closePoolState = async (): Promise<void> => {
+  const current = poolState;
+  poolState = null;
+  if (!current) return;
+  await current.pool.end().catch(() => undefined);
+};
+
+const sleep = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const getMaxConcurrentOperations = (): number => {
+  const configured = parsePositiveInt(process.env.POSTGRES_MAX_CONCURRENT_OPERATIONS);
+  if (configured) return configured;
+  const candidates = resolvePostgresConnectionCandidates(process.env);
+  const candidateIndex = poolState?.candidateIndex ?? activeCandidateIndex;
+  const connectionString = candidates[candidateIndex] ?? getConnectionString();
+  if (connectionString && isSupavisorSessionPoolerConnectionString(connectionString)) {
+    return 1;
+  }
+  return process.env.NODE_ENV === "development" ? 2 : 12;
+};
+
+const acquireOperationSlot = async (): Promise<void> => {
+  const maxConcurrentOperations = getMaxConcurrentOperations();
+  if (activeOperationCount < maxConcurrentOperations) {
+    activeOperationCount += 1;
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    waitingOperationResolvers.push(resolve);
+  });
+  activeOperationCount += 1;
+};
+
+const releaseOperationSlot = (): void => {
+  activeOperationCount = Math.max(0, activeOperationCount - 1);
+  const next = waitingOperationResolvers.shift();
+  if (next) {
+    next();
+  }
+};
+
+async function withOperationSlot<T>(operation: () => Promise<T>): Promise<T> {
+  await acquireOperationSlot();
+  try {
+    return await operation();
+  } finally {
+    releaseOperationSlot();
+  }
+}
 
 const getPool = (): Pool => {
-  if (!pool) {
-    const connectionString = getConnectionString();
-    pool = new Pool({
-      connectionString,
-      ssl: resolvePostgresSslConfig(connectionString, process.env),
-    });
+  if (poolState) {
+    return poolState.pool;
   }
-  return pool;
+
+  const candidates = resolvePostgresConnectionCandidates(process.env);
+  const connectionString = candidates[activeCandidateIndex] ?? getConnectionString();
+  const isDevelopment = process.env.NODE_ENV === "development";
+  const isSessionPooler = isSupavisorSessionPoolerConnectionString(connectionString);
+  const max =
+    parsePositiveInt(process.env.POSTGRES_POOL_MAX) ??
+    (isSessionPooler ? (isDevelopment ? 2 : 4) : isDevelopment ? 4 : 10);
+  const connectionTimeoutMillis =
+    parsePositiveInt(process.env.POSTGRES_POOL_CONNECTION_TIMEOUT_MS) ??
+    (isSessionPooler ? 5_000 : isDevelopment ? 8_000 : 10_000);
+  const idleTimeoutMillis =
+    parsePositiveInt(process.env.POSTGRES_POOL_IDLE_TIMEOUT_MS) ??
+    (isSessionPooler ? 5_000 : isDevelopment ? 10_000 : 30_000);
+  const maxUses = parsePositiveInt(process.env.POSTGRES_POOL_MAX_USES) ?? (isDevelopment ? 1 : undefined);
+
+  const pool = new Pool({
+    connectionString,
+    ssl: resolvePostgresSslConfig(connectionString, process.env),
+    max,
+    connectionTimeoutMillis,
+    idleTimeoutMillis,
+    ...(maxUses ? { maxUses } : {}),
+  });
+  pool.on("error", (error) => {
+    console.warn("[postgres] Idle client error", error);
+  });
+
+  poolState = {
+    candidateIndex: activeCandidateIndex,
+    pool,
+  };
+  return poolState.pool;
 };
+
+function isTransientPostgresError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const code = String((error as Error & { code?: unknown }).code ?? "").toLowerCase();
+  return (
+    message.includes("dbhandler exited") ||
+    message.includes("unable to check out connection from the pool due to timeout") ||
+    message.includes("server closed the connection unexpectedly") ||
+    message.includes("connection terminated unexpectedly") ||
+    message.includes("connection ended unexpectedly") ||
+    message.includes("ssl connection has been closed unexpectedly") ||
+    message.includes("ssl syscall error: eof detected") ||
+    message.includes("terminating connection due to administrator command") ||
+    message.includes("connection refused") ||
+    message.includes("timed out") ||
+    message.includes("maxclientsinsessionmode") ||
+    message.includes("max clients reached - in session mode") ||
+    code === "xx000"
+  );
+}
+
+function isCredentialPostgresError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const code = String((error as Error & { code?: unknown }).code ?? "").toLowerCase();
+  return code === "28p01" || message.includes("password authentication failed");
+}
+
+async function withPoolRetry<T>(operation: (pool: Pool) => Promise<T>): Promise<T> {
+  const candidates = resolvePostgresConnectionCandidates(process.env);
+  const maxAttempts =
+    parsePositiveInt(process.env.POSTGRES_TRANSIENT_RETRY_ATTEMPTS) ??
+    (process.env.NODE_ENV === "development" ? 4 : 3);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const pool = getPool();
+    const usingFallbackCandidate = (poolState?.candidateIndex ?? activeCandidateIndex) > 0;
+    try {
+      const result = await operation(pool);
+      if (usingFallbackCandidate) {
+        activeCandidateIndex = 0;
+        await closePoolState();
+      }
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (usingFallbackCandidate) {
+        activeCandidateIndex = 0;
+        await closePoolState();
+        if (isCredentialPostgresError(error) || isTransientPostgresError(error)) {
+          continue;
+        }
+        throw error;
+      }
+      if (isCredentialPostgresError(error) && activeCandidateIndex > 0) {
+        activeCandidateIndex = 0;
+        await closePoolState();
+        continue;
+      }
+      if (!isTransientPostgresError(error)) {
+        throw error;
+      }
+
+      const nextCandidateIndex =
+        activeCandidateIndex + 1 < candidates.length ? activeCandidateIndex + 1 : activeCandidateIndex;
+      activeCandidateIndex = nextCandidateIndex;
+      await closePoolState();
+      if (attempt + 1 < maxAttempts) {
+        await sleep(150 * 2 ** attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Postgres query failed");
+}
 
 export function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[],
 ): Promise<QueryResult<T>> {
-  return getPool().query<T>(text, params);
+  return withOperationSlot(() => withPoolRetry((pool) => pool.query<T>(text, params)));
 }
 
 export async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    const result = await callback(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  return withOperationSlot(() =>
+    withPoolRetry(async (pool) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const result = await callback(client);
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })
+  );
 }
 
 /**
@@ -166,27 +412,31 @@ export async function withAuthTransaction<T>(
   authContext: AuthContext,
   callback: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    // set_config with third arg true = local to current transaction only
-    // This is critical for pooled connections - prevents identity leakage
-    await client.query("SELECT set_config('app.firebase_uid', $1, true)", [
-      authContext.firebaseUid,
-    ]);
-    await client.query("SELECT set_config('app.is_admin', $1, true)", [
-      authContext.isAdmin ? "true" : "false",
-    ]);
+  return withOperationSlot(() =>
+    withPoolRetry(async (pool) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        // set_config with third arg true = local to current transaction only
+        // This is critical for pooled connections - prevents identity leakage
+        await client.query("SELECT set_config('app.firebase_uid', $1, true)", [
+          authContext.firebaseUid,
+        ]);
+        await client.query("SELECT set_config('app.is_admin', $1, true)", [
+          authContext.isAdmin ? "true" : "false",
+        ]);
 
-    const result = await callback(client);
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+        const result = await callback(client);
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })
+  );
 }
 
 /**

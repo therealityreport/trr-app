@@ -1,5 +1,7 @@
 export const PERSON_REFRESH_PHASES = {
+  gettyDiscovery: "GETTY DISCOVERY",
   syncing: "SYNCING",
+  gettyEnrichment: "GETTY ENRICHMENT",
   mirroring: "HOSTING",
   tagging: "TAGGING",
   counting: "TAGGING",
@@ -38,6 +40,8 @@ export function mapPersonRefreshStage(rawStage: string | null | undefined): Pers
 
   const normalized = trimmed.toLowerCase().replace(/-/g, "_");
   if (normalized === "mirroring") return PERSON_REFRESH_PHASES.mirroring;
+  if (normalized === "getty_discovery") return PERSON_REFRESH_PHASES.gettyDiscovery;
+  if (normalized === "getty_enrichment") return PERSON_REFRESH_PHASES.gettyEnrichment;
   if (normalized === "auto_count") return PERSON_REFRESH_PHASES.tagging;
   if (normalized === "word_id") return PERSON_REFRESH_PHASES.findingText;
   if (normalized === "centering_cropping") return PERSON_REFRESH_PHASES.centeringCropping;
@@ -144,7 +148,13 @@ export interface PersonGettyProgressSubtaskState {
   label: string;
   status: PersonGettyProgressStatus;
   query: string | null;
+  queryUrl: string | null;
   candidatesFound: number;
+  siteImageTotal: number | null;
+  siteEventTotal: number | null;
+  siteVideoTotal: number | null;
+  usableAfterDedupeTotal: number;
+  overlapCount: number;
   current: number;
   total: number;
   message: string | null;
@@ -155,6 +165,18 @@ export interface PersonGettyProgressBreakdownState {
   uniqueDiscovered: number;
   bravoSearchTotal: number;
   broadSearchTotal: number;
+  gettyQueryImageTotal: number;
+  gettyQueryEventTotal: number;
+  gettyQueryPageTotal: number;
+  gettyPagesCompleted: number;
+  gettyPagesTotal: number;
+  gettyDiscoveredTotal: number;
+  gettyUsableTotal: number;
+  gettyExistingSharedTotal: number;
+  gettyExistingGettyTotal: number;
+  gettyToImportTotal: number;
+  gettySkippedExistingTotal: number;
+  gettyDeferredResolutionTotal: number;
   matchedViaNbcumv: number;
   matchedViaBravotvJson: number;
   matchedViaImageSearch: number;
@@ -174,8 +196,24 @@ export interface PersonGettyProgressBreakdownState {
 export interface PersonGettyProgressState {
   status: PersonGettyProgressStatus;
   phase: string | null;
+  authMode: string | null;
   subtasks: PersonGettyProgressSubtaskState[];
   breakdown: PersonGettyProgressBreakdownState;
+}
+
+export function formatGettySubtaskCountLabel(
+  subtask: PersonGettyProgressSubtaskState,
+): string | null {
+  if (typeof subtask.siteImageTotal === "number" && subtask.siteImageTotal > 0) {
+    return `${subtask.siteImageTotal.toLocaleString()} found`;
+  }
+  if (subtask.candidatesFound > 0) {
+    return `${subtask.candidatesFound.toLocaleString()} fetched`;
+  }
+  if (subtask.total > 0) {
+    return `${subtask.current.toLocaleString()}/${subtask.total.toLocaleString()}`;
+  }
+  return null;
 }
 
 const SOURCE_PROGRESS_ORDER = [
@@ -192,6 +230,8 @@ const GETTY_PROGRESS_ORDER = [
   "broad_person_search",
   "primary_person_search",
   "fallback_person_search",
+  "search_query_3",
+  "search_query_4",
   "bravo_grouped_events",
   "broad_grouped_events",
   "wwhl_date_range_fallback",
@@ -301,7 +341,16 @@ export function normalizePersonGettyProgress(value: unknown): PersonGettyProgres
         status: normalizeGettyProgressStatus(entry.status),
         query:
           typeof entry.query === "string" && entry.query.trim().length > 0 ? entry.query.trim() : null,
+        queryUrl:
+          typeof entry.query_url === "string" && entry.query_url.trim().length > 0
+            ? entry.query_url.trim()
+            : null,
         candidatesFound: toFiniteInt(entry.candidates_found) ?? 0,
+        siteImageTotal: toFiniteInt(entry.site_image_total),
+        siteEventTotal: toFiniteInt(entry.site_event_total),
+        siteVideoTotal: toFiniteInt(entry.site_video_total),
+        usableAfterDedupeTotal: toFiniteInt(entry.usable_after_dedupe_total) ?? 0,
+        overlapCount: toFiniteInt(entry.overlap_count) ?? 0,
         current: toFiniteInt(entry.current) ?? 0,
         total: toFiniteInt(entry.total) ?? 0,
         message:
@@ -328,12 +377,28 @@ export function normalizePersonGettyProgress(value: unknown): PersonGettyProgres
   return {
     status: normalizeGettyProgressStatus(record.status),
     phase: typeof record.phase === "string" && record.phase.trim().length > 0 ? record.phase.trim() : null,
+    authMode:
+      typeof record.auth_mode === "string" && record.auth_mode.trim().length > 0
+        ? record.auth_mode.trim()
+        : null,
     subtasks,
     breakdown: {
       rawGettyCandidates: toFiniteInt(breakdownRecord.raw_getty_candidates) ?? 0,
       uniqueDiscovered: toFiniteInt(breakdownRecord.unique_discovered) ?? 0,
       bravoSearchTotal: toFiniteInt(breakdownRecord.bravo_search_total) ?? 0,
       broadSearchTotal: toFiniteInt(breakdownRecord.broad_search_total) ?? 0,
+      gettyQueryImageTotal: toFiniteInt(breakdownRecord.getty_query_image_total) ?? 0,
+      gettyQueryEventTotal: toFiniteInt(breakdownRecord.getty_query_event_total) ?? 0,
+      gettyQueryPageTotal: toFiniteInt(breakdownRecord.getty_query_page_total) ?? 0,
+      gettyPagesCompleted: toFiniteInt(breakdownRecord.getty_pages_completed) ?? 0,
+      gettyPagesTotal: toFiniteInt(breakdownRecord.getty_pages_total) ?? 0,
+      gettyDiscoveredTotal: toFiniteInt(breakdownRecord.getty_discovered_total) ?? 0,
+      gettyUsableTotal: toFiniteInt(breakdownRecord.getty_usable_total) ?? 0,
+      gettyExistingSharedTotal: toFiniteInt(breakdownRecord.getty_existing_shared_total) ?? 0,
+      gettyExistingGettyTotal: toFiniteInt(breakdownRecord.getty_existing_getty_total) ?? 0,
+      gettyToImportTotal: toFiniteInt(breakdownRecord.getty_to_import_total) ?? 0,
+      gettySkippedExistingTotal: toFiniteInt(breakdownRecord.getty_skipped_existing_total) ?? 0,
+      gettyDeferredResolutionTotal: toFiniteInt(breakdownRecord.getty_deferred_resolution_total) ?? 0,
       matchedViaNbcumv: toFiniteInt(breakdownRecord.matched_via_nbcumv) ?? 0,
       matchedViaBravotvJson: toFiniteInt(breakdownRecord.matched_via_bravotv_json) ?? 0,
       matchedViaImageSearch: toFiniteInt(breakdownRecord.matched_via_image_search) ?? 0,

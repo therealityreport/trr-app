@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import type { AuthContext } from "@/lib/server/postgres";
 import {
-  getRecentPeopleViews,
-  recordRecentPersonView,
-} from "@/lib/server/admin/recent-people-repository";
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 
@@ -23,28 +23,33 @@ export async function GET(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
     const limit = parseLimit(request.nextUrl.searchParams.get("limit"));
-    const people = await getRecentPeopleViews(user.uid, { limit });
 
-    return NextResponse.json({
-      people,
-      pagination: {
-        limit,
-        count: people.length,
-      },
+    const upstream = await fetchAdminBackendJson("/admin/recent-people", {
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "recent-people:list",
+      headers: { "X-TRR-Admin-User-Uid": user.uid },
+      queryString: `limit=${limit}`,
     });
+    if (upstream.status !== 200) {
+      throw new Error(
+        typeof upstream.data.error === "string"
+          ? upstream.data.error
+          : typeof upstream.data.detail === "string"
+            ? upstream.data.detail
+            : "Failed to read recent people",
+      );
+    }
+
+    return NextResponse.json(upstream.data);
   } catch (error) {
     console.error("[api] Failed to read recent people", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
-    const authContext: AuthContext = { firebaseUid: user.uid, isAdmin: true };
     const body = (await request.json().catch(() => ({}))) as {
       personId?: string;
       showId?: string | null;
@@ -55,22 +60,45 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "personId must be a valid UUID" }, { status: 400 });
     }
 
-    const showContext = typeof body.showId === "string" ? body.showId.trim() : null;
-    await recordRecentPersonView(
-      authContext,
-      {
-        personId,
-        showContext: showContext && showContext.length > 0 ? showContext : null,
+    const upstream = await fetchAdminBackendJson("/admin/recent-people", {
+      method: "POST",
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: "recent-people:record",
+      headers: {
+        "Content-Type": "application/json",
+        "X-TRR-Admin-User-Uid": user.uid,
       },
-      { cap: DEFAULT_LIMIT },
-    );
+      body: JSON.stringify({
+        personId,
+        showId: typeof body.showId === "string" ? body.showId.trim() : null,
+      }),
+    });
+    if (upstream.status === 400) {
+      return NextResponse.json(
+        {
+          error:
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Failed to record recent person",
+        },
+        { status: 400 },
+      );
+    }
+    if (upstream.status !== 200) {
+      throw new Error(
+        typeof upstream.data.error === "string"
+          ? upstream.data.error
+          : typeof upstream.data.detail === "string"
+            ? upstream.data.detail
+            : "Failed to record recent person",
+      );
+    }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(upstream.data);
   } catch (error) {
     console.error("[api] Failed to record recent person", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status =
-      message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    return buildAdminProxyErrorResponse(error);
   }
 }

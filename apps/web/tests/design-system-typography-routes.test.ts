@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { invalidateTypographyRouteCaches } from "@/lib/server/admin/typography-route-cache";
 
 const {
   requireAdminMock,
@@ -40,13 +41,14 @@ import { PUT as updateAssignment } from "@/app/api/admin/design-system/typograph
 
 describe("design system typography routes", () => {
   beforeEach(() => {
+    invalidateTypographyRouteCaches();
     requireAdminMock.mockReset();
     getTypographyStateMock.mockReset();
     createTypographySetMock.mockReset();
     updateTypographySetMock.mockReset();
     deleteTypographySetMock.mockReset();
     upsertTypographyAssignmentMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
   });
 
   it("returns typography state", async () => {
@@ -70,6 +72,21 @@ describe("design system typography routes", () => {
     expect(payload).toEqual({ sets: [], assignments: [] });
     expect(requireAdminMock).not.toHaveBeenCalled();
     expect(getTypographyStateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches admin and public typography GET responses", async () => {
+    getTypographyStateMock.mockResolvedValue({ sets: [], assignments: [] });
+
+    const firstAdmin = await getTypography(new NextRequest("http://localhost/api/admin/design-system/typography"));
+    const secondAdmin = await getTypography(new NextRequest("http://localhost/api/admin/design-system/typography"));
+    const firstPublic = await getPublicTypography();
+    const secondPublic = await getPublicTypography();
+
+    expect(firstAdmin.status).toBe(200);
+    expect(secondAdmin.headers.get("x-trr-cache")).toBe("hit");
+    expect(firstPublic.status).toBe(200);
+    expect(secondPublic.headers.get("x-trr-cache")).toBe("hit");
+    expect(getTypographyStateMock).toHaveBeenCalledTimes(2);
   });
 
   it("creates a typography set", async () => {
@@ -117,6 +134,63 @@ describe("design system typography routes", () => {
     expect(response.status).toBe(201);
     expect(createTypographySetMock).toHaveBeenCalledWith(expect.objectContaining({ name: "User Home" }));
     expect(payload.set.id).toBe("set-1");
+  });
+
+  it("invalidates cached typography GET responses after writes", async () => {
+    getTypographyStateMock
+      .mockResolvedValueOnce({ sets: [], assignments: [] })
+      .mockResolvedValueOnce({ sets: [], assignments: [] })
+      .mockResolvedValueOnce({ sets: [{ id: "set-1" }], assignments: [] })
+      .mockResolvedValueOnce({ sets: [{ id: "set-1" }], assignments: [] });
+    createTypographySetMock.mockResolvedValue({
+      id: "set-1",
+      slug: "user-home",
+      name: "User Home",
+      area: "user-frontend",
+      seedSource: "test",
+      roles: {},
+      createdAt: "",
+      updatedAt: "",
+    });
+
+    await getTypography(new NextRequest("http://localhost/api/admin/design-system/typography"));
+    await getPublicTypography();
+
+    await createTypography(
+      new NextRequest("http://localhost/api/admin/design-system/typography/sets", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "User Home",
+          area: "user-frontend",
+          seedSource: "test",
+          roles: {
+            body: {
+              mobile: {
+                fontFamily: "var(--font-hamburg)",
+                fontSize: "16px",
+                fontWeight: "400",
+                lineHeight: "24px",
+                letterSpacing: "0px",
+              },
+              desktop: {
+                fontFamily: "var(--font-hamburg)",
+                fontSize: "18px",
+                fontWeight: "400",
+                lineHeight: "28px",
+                letterSpacing: "0px",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const refreshedAdmin = await getTypography(new NextRequest("http://localhost/api/admin/design-system/typography"));
+    const refreshedPublic = await getPublicTypography();
+
+    expect(refreshedAdmin.headers.get("x-trr-cache")).not.toBe("hit");
+    expect(refreshedPublic.headers.get("x-trr-cache")).not.toBe("hit");
+    expect(getTypographyStateMock).toHaveBeenCalledTimes(4);
   });
 
   it("validates create payloads", async () => {

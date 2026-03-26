@@ -8,7 +8,7 @@ vi.mock("@/lib/server/postgres", () => ({
   query: queryMock,
 }));
 
-import { resolveShowSlug } from "@/lib/server/trr-api/trr-shows-repository";
+import { resolvePersonSlug, resolveShowSlug } from "@/lib/server/trr-api/trr-shows-repository";
 
 describe("resolveShowSlug", () => {
   beforeEach(() => {
@@ -119,6 +119,62 @@ describe("resolveShowSlug", () => {
       slug: "rhoslc",
       canonical_slug: "rhoslc",
       show_name: "The Real Housewives of Salt Lake City",
+    });
+  });
+});
+
+describe("resolvePersonSlug", () => {
+  beforeEach(() => {
+    queryMock.mockReset();
+  });
+
+  it("prefers an indexed exact full-name match before the slug-scan fallback", async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "66ce2444-c6c4-46bc-94d0-4c15ae3d04af",
+          full_name: "Brandi Glanville",
+          on_show: true,
+        },
+      ],
+    });
+
+    const resolved = await resolvePersonSlug("brandi-glanville");
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(queryMock.mock.calls[0]?.[0]).toContain("WHERE p.full_name = ANY($1::text[])");
+    expect(queryMock.mock.calls[0]?.[1]).toEqual([["Brandi Glanville", "Brandi-Glanville"], null]);
+    expect(resolved).toMatchObject({
+      person_id: "66ce2444-c6c4-46bc-94d0-4c15ae3d04af",
+      slug: "brandi-glanville",
+      canonical_slug: "brandi-glanville",
+      full_name: "Brandi Glanville",
+    });
+  });
+
+  it("falls back to the slug-scan query when exact full-name probes miss", async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "66ce2444-c6c4-46bc-94d0-4c15ae3d04af",
+            full_name: "Brandi Glanville",
+            on_show: false,
+          },
+        ],
+      });
+
+    const resolved = await resolvePersonSlug("brandi-glanville");
+
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock.mock.calls[0]?.[0]).toContain("WHERE p.full_name = ANY($1::text[])");
+    expect(queryMock.mock.calls[1]?.[0]).toContain("regexp_replace(COALESCE(p.full_name, ''), '&', ' and ', 'gi')");
+    expect(resolved).toMatchObject({
+      person_id: "66ce2444-c6c4-46bc-94d0-4c15ae3d04af",
+      slug: "brandi-glanville",
+      canonical_slug: "brandi-glanville",
+      full_name: "Brandi Glanville",
     });
   });
 });

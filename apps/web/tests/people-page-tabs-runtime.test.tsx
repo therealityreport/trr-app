@@ -215,6 +215,9 @@ describe("people page tab runtime behavior", () => {
     await screen.findByRole("heading", { name: "Andy Cohen" });
 
     const requestedUrls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(
+      requestedUrls.filter((url) => url.includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`)).length
+    ).toBe(1);
     expect(requestedUrls.some((url) => url.includes("/fandom"))).toBe(false);
     expect(requestedUrls.some((url) => url.includes("/bravo/videos"))).toBe(false);
     expect(requestedUrls.some((url) => url.includes(`/shows/${SHOW_ID}/news`))).toBe(false);

@@ -8,6 +8,8 @@ const {
   getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock,
   getStoredTrackedPostFlairCountsByCommunityAndSeasonMock,
   getStoredTrackedPostTotalByCommunityAndSeasonMock,
+  getCachedStableReadMock,
+  loadStableRedditReadMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getStoredPostCountsByCommunityAndSeasonMock: vi.fn(),
@@ -15,6 +17,8 @@ const {
   getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock: vi.fn(),
   getStoredTrackedPostFlairCountsByCommunityAndSeasonMock: vi.fn(),
   getStoredTrackedPostTotalByCommunityAndSeasonMock: vi.fn(),
+  getCachedStableReadMock: vi.fn(async ({ loader }) => ({ payload: await loader(), cacheHit: false })),
+  loadStableRedditReadMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -31,6 +35,20 @@ vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   getStoredTrackedPostTotalByCommunityAndSeason: getStoredTrackedPostTotalByCommunityAndSeasonMock,
 }));
 
+vi.mock("@/lib/server/trr-api/reddit-stable-route-cache", () => ({
+  buildUserScopedRouteCacheKey: vi.fn(
+    (userId: string, scope: string, searchParams?: URLSearchParams) =>
+      `${userId}:${scope}:${searchParams?.toString() ?? ""}`,
+  ),
+  getCachedStableRead: getCachedStableReadMock,
+  REDDIT_STABLE_DETAIL_CACHE_NAMESPACE: "admin-reddit-stable-detail",
+  REDDIT_STABLE_DETAIL_CACHE_TTL_MS: 10_000,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-read", () => ({
+  loadStableRedditRead: loadStableRedditReadMock,
+}));
+
 import { GET } from "@/app/api/admin/reddit/communities/[communityId]/stored-post-counts/route";
 
 const COMMUNITY_ID = "33333333-3333-4333-8333-333333333333";
@@ -44,8 +62,14 @@ describe("/api/admin/reddit/communities/[communityId]/stored-post-counts route",
     getStoredPendingTrackedFlairCountsByCommunityAndSeasonMock.mockReset();
     getStoredTrackedPostFlairCountsByCommunityAndSeasonMock.mockReset();
     getStoredTrackedPostTotalByCommunityAndSeasonMock.mockReset();
+    getCachedStableReadMock.mockReset();
+    loadStableRedditReadMock.mockReset();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
+    getCachedStableReadMock.mockImplementation(async ({ loader }) => ({
+      payload: await loader(),
+      cacheHit: false,
+    }));
   });
 
   it("returns tracked-flair additive payload with legacy compatibility fields", async () => {
@@ -78,6 +102,10 @@ describe("/api/admin/reddit/communities/[communityId]/stored-post-counts route",
         container_counts: [{ container_key: "episode-2", post_count: 12 }],
       },
     ]);
+    loadStableRedditReadMock.mockImplementation(async ({ fallback }) => ({
+      payload: await fallback(),
+      source: "local",
+    }));
 
     const request = new NextRequest(
       `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/stored-post-counts?season_id=${SEASON_ID}`,
@@ -142,6 +170,43 @@ describe("/api/admin/reddit/communities/[communityId]/stored-post-counts route",
     expect(getStoredTrackedPostFlairCountsByCommunityAndSeasonMock).toHaveBeenCalledWith(
       COMMUNITY_ID,
       SEASON_ID,
+    );
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: `/admin/reddit/communities/${COMMUNITY_ID}/stored-post-counts`,
+        routeName: "reddit-stored-post-counts",
+      }),
+    );
+  });
+
+  it("routes through backend stable read payloads when available", async () => {
+    loadStableRedditReadMock.mockResolvedValue({
+      payload: {
+        counts: {
+          "episode-1": 18,
+        },
+        total_posts: 10,
+        tracked_total_posts: 8,
+        tracked_flair_counts: [],
+        pending_tracked_flair_counts: [],
+      },
+      source: "backend",
+    });
+
+    const request = new NextRequest(
+      `http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}/stored-post-counts?season_id=${SEASON_ID}`,
+      { method: "GET" },
+    );
+    const response = await GET(request, {
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: `/admin/reddit/communities/${COMMUNITY_ID}/stored-post-counts`,
+        routeName: "reddit-stored-post-counts",
+      }),
     );
   });
 

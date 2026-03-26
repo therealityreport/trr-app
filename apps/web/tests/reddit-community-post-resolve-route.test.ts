@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, resolveRedditPostDetailBySlugMock } = vi.hoisted(() => ({
+const {
+  requireAdminMock,
+  resolveRedditPostDetailBySlugMock,
+  getCachedStableReadMock,
+  loadStableRedditReadMock,
+} = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   resolveRedditPostDetailBySlugMock: vi.fn(),
+  getCachedStableReadMock: vi.fn(async ({ loader }) => ({ payload: await loader(), cacheHit: false })),
+  loadStableRedditReadMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +19,20 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
   resolveRedditPostDetailBySlug: resolveRedditPostDetailBySlugMock,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-route-cache", () => ({
+  buildUserScopedRouteCacheKey: vi.fn(
+    (userId: string, scope: string, searchParams?: URLSearchParams) =>
+      `${userId}:${scope}:${searchParams?.toString() ?? ""}`,
+  ),
+  getCachedStableRead: getCachedStableReadMock,
+  REDDIT_STABLE_DETAIL_CACHE_NAMESPACE: "admin-reddit-stable-detail",
+  REDDIT_STABLE_DETAIL_CACHE_TTL_MS: 10_000,
+}));
+
+vi.mock("@/lib/server/trr-api/reddit-stable-read", () => ({
+  loadStableRedditRead: loadStableRedditReadMock,
 }));
 
 import { GET } from "@/app/api/admin/reddit/communities/[communityId]/posts/resolve/route";
@@ -23,10 +44,21 @@ describe("/api/admin/reddit/communities/[communityId]/posts/resolve route", () =
   beforeEach(() => {
     requireAdminMock.mockReset();
     resolveRedditPostDetailBySlugMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    getCachedStableReadMock.mockReset();
+    loadStableRedditReadMock.mockReset();
+    requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
+    getCachedStableReadMock.mockImplementation(async ({ loader }) => ({
+      payload: await loader(),
+      cacheHit: false,
+    }));
   });
 
   it("resolves a canonical slug to a reddit post id", async () => {
+    loadStableRedditReadMock.mockImplementation(async ({ fallback }) => ({
+      payload: await fallback(),
+      source: "local",
+    }));
+
     resolveRedditPostDetailBySlugMock.mockResolvedValue({
       reddit_post_id: "abc123",
       detail_slug: "sample-thread--u-test-user",
@@ -54,9 +86,19 @@ describe("/api/admin/reddit/communities/[communityId]/posts/resolve route", () =
       authorSlug: "test-user",
       redditPostId: null,
     });
+    expect(loadStableRedditReadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendPath: `/admin/reddit/communities/${COMMUNITY_ID}/posts/resolve`,
+        routeName: "reddit-post-resolve",
+      }),
+    );
   });
 
   it("accepts post_id-only legacy resolution", async () => {
+    loadStableRedditReadMock.mockImplementation(async ({ fallback }) => ({
+      payload: await fallback(),
+      source: "local",
+    }));
     resolveRedditPostDetailBySlugMock.mockResolvedValue({
       reddit_post_id: "abc123",
       detail_slug: "sample-thread--u-test-user",

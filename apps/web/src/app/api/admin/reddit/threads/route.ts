@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import {
   createRedditThread,
   getRedditCommunityById,
   listRedditThreads,
 } from "@/lib/server/admin/reddit-sources-repository";
+import {
+  buildUserScopedRouteCacheKey,
+  getCachedStableRead,
+  REDDIT_STABLE_LIST_CACHE_NAMESPACE,
+  REDDIT_STABLE_LIST_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/reddit-stable-route-cache";
+import { loadStableRedditRead } from "@/lib/server/trr-api/reddit-stable-read";
 import { getSeasonById } from "@/lib/server/trr-api/trr-shows-repository";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
@@ -47,11 +55,15 @@ const normalizePermalink = (value: string | null | undefined): string | null => 
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
-    const communityId = request.nextUrl.searchParams.get("community_id") ?? undefined;
-    const trrShowId = request.nextUrl.searchParams.get("trr_show_id") ?? undefined;
-    const trrSeasonId = request.nextUrl.searchParams.get("trr_season_id");
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+    const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    searchParams.delete("refresh");
+
+    const communityId = searchParams.get("community_id") ?? undefined;
+    const trrShowId = searchParams.get("trr_show_id") ?? undefined;
+    const trrSeasonId = searchParams.get("trr_season_id");
     if (communityId && !isValidUuid(communityId)) {
       return NextResponse.json({ error: "community_id must be a valid UUID" }, { status: 400 });
     }
@@ -62,18 +74,47 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "trr_season_id must be a valid UUID" }, { status: 400 });
     }
     const includeGlobalThreadsForSeason = parseBoolean(
-      request.nextUrl.searchParams.get("include_global_threads_for_season"),
+      searchParams.get("include_global_threads_for_season"),
       true,
     );
 
-    const threads = await listRedditThreads({
-      communityId,
-      trrShowId,
-      trrSeasonId: trrSeasonId ?? null,
-      includeGlobalThreadsForSeason,
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "reddit-threads", searchParams);
+    const { payload, cacheHit } = await getCachedStableRead({
+      namespace: REDDIT_STABLE_LIST_CACHE_NAMESPACE,
+      cacheKey,
+      promiseKey: forceRefresh ? `${cacheKey}:refresh` : cacheKey,
+      ttlMs: REDDIT_STABLE_LIST_CACHE_TTL_MS,
+      forceRefresh,
+      loader: async () => {
+        const query = new URLSearchParams();
+        if (communityId) query.set("community_id", communityId);
+        if (trrShowId) query.set("trr_show_id", trrShowId);
+        if (trrSeasonId) query.set("trr_season_id", trrSeasonId);
+        query.set(
+          "include_global_threads_for_season",
+          includeGlobalThreadsForSeason ? "true" : "false",
+        );
+
+        const resolved = await loadStableRedditRead<{ threads?: Array<Record<string, unknown>> }>({
+          backendPath: "/admin/reddit/threads",
+          routeName: "reddit-threads:list",
+          queryString: query.toString(),
+          fallback: async () => ({
+            threads: (await listRedditThreads({
+              communityId,
+              trrShowId,
+              trrSeasonId: trrSeasonId ?? null,
+              includeGlobalThreadsForSeason,
+            })) as unknown as Array<Record<string, unknown>>,
+          }),
+        });
+        return {
+          threads: Array.isArray(resolved.payload.threads) ? resolved.payload.threads : [],
+        };
+      },
     });
 
-    return NextResponse.json({ threads });
+    return NextResponse.json(payload, cacheHit ? { headers: { "x-trr-cache": "hit" } } : undefined);
   } catch (error) {
     console.error("[api] Failed to list reddit threads", error);
     const message = error instanceof Error ? error.message : "failed";
@@ -201,6 +242,9 @@ export async function POST(request: NextRequest) {
       postedAt: typeof body.posted_at === "string" ? body.posted_at : null,
       notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
     });
+    invalidateRouteResponseCache("admin-reddit-stable-list", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-detail", `${user.uid}:`);
+    invalidateRouteResponseCache("admin-reddit-stable-summary", `${user.uid}:`);
 
     return NextResponse.json({ thread }, { status: 201 });
   } catch (error) {

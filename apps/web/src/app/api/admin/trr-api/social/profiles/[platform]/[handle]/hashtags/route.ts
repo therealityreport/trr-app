@@ -15,11 +15,15 @@ export async function GET(request: NextRequest, context: RouteContext) {
   try {
     await requireAdmin(request);
     const { platform, handle } = await context.params;
-    const data = await fetchSocialBackendJson(`/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags`, {
-      fallbackError: "Failed to fetch social account profile hashtags",
-      retries: 0,
-      timeoutMs: 30_000,
-    });
+    const query = request.nextUrl.search || "";
+    const data = await fetchSocialBackendJson(
+      `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/hashtags${query}`,
+      {
+        fallbackError: "Failed to fetch social account profile hashtags",
+        retries: 0,
+        timeoutMs: 30_000,
+      },
+    );
     return NextResponse.json(data);
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to fetch social account profile hashtags");

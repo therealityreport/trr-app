@@ -114,6 +114,15 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     activeMatchPrefixes: ["/docs", "/admin/docs"],
   },
   {
+    key: "api-references",
+    title: "API References Library",
+    href: "/admin/api-references" as Route,
+    description:
+      "Generated request-path inventory for admin pages, API routes, backend endpoints, repository surfaces, and polling loops.",
+    badge: "Trace",
+    activeMatchPrefixes: ["/admin/api-references"],
+  },
+  {
     key: "design-system",
     title: "UI Design System",
     href: "/design-system/fonts" as Route,

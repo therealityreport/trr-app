@@ -1,17 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const { requireAdminMock, getPhotosByPersonIdMock } = vi.hoisted(() => ({
+process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+
+const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
-  getPhotosByPersonIdMock: vi.fn(),
+  fetchAdminBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
 }));
 
-vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  getPhotosByPersonId: getPhotosByPersonIdMock,
+vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
+  fetchAdminBackendJson: fetchAdminBackendJsonMock,
+  invalidateAdminBackendCache: vi.fn(),
+  ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS: 8_000,
+  buildAdminProxyErrorResponse: (error: unknown) =>
+    NextResponse.json(
+      { error: error instanceof Error ? error.message : "failed" },
+      { status: 500 },
+    ),
 }));
 
 import { GET } from "@/app/api/admin/trr-api/people/[personId]/photos/route";
@@ -19,40 +28,85 @@ import { GET } from "@/app/api/admin/trr-api/people/[personId]/photos/route";
 describe("person gallery broken filter route wiring", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
-    getPhotosByPersonIdMock.mockReset();
+    fetchAdminBackendJsonMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
-    getPhotosByPersonIdMock.mockResolvedValue([]);
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        photos: [],
+        pagination: { limit: 25, offset: 10, count: 0, next_offset: 10, has_more: false },
+      },
+      durationMs: 7,
+    });
   });
 
   it("defaults includeBroken to false", async () => {
     const request = new NextRequest(
       "http://localhost/api/admin/trr-api/people/person-1/photos?limit=25&offset=10&sources=imdb,fandom",
-      { method: "GET" }
+      { method: "GET" },
     );
 
     const response = await GET(request, { params: Promise.resolve({ personId: "person-1" }) });
     expect(response.status).toBe(200);
-    expect(getPhotosByPersonIdMock).toHaveBeenCalledWith("person-1", {
-      limit: 25,
-      offset: 10,
-      sources: ["imdb", "fandom"],
-      includeBroken: false,
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/people/person-1/gallery?limit=25&offset=10&sources=imdb%2Cfandom",
+      expect.objectContaining({ routeName: "person-gallery" }),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      pagination: {
+        limit: 25,
+        offset: 10,
+        next_offset: 10,
+        has_more: false,
+      },
     });
   });
 
   it("passes includeBroken=true when query flag is enabled", async () => {
     const request = new NextRequest(
       "http://localhost/api/admin/trr-api/people/person-1/photos?include_broken=true",
-      { method: "GET" }
+      { method: "GET" },
     );
 
     const response = await GET(request, { params: Promise.resolve({ personId: "person-1" }) });
     expect(response.status).toBe(200);
-    expect(getPhotosByPersonIdMock).toHaveBeenCalledWith("person-1", {
-      limit: 100,
-      offset: 0,
-      sources: [],
-      includeBroken: true,
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/people/person-1/gallery?limit=100&offset=0&include_broken=true",
+      expect.objectContaining({ routeName: "person-gallery" }),
+    );
+  });
+
+  it("returns backend pagination metadata without inflating the page locally", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        photos: Array.from({ length: 3 }, (_, index) => ({ id: `photo-${index + 1}` })),
+        pagination: {
+          count: 3,
+          limit: 3,
+          offset: 9,
+          next_offset: 12,
+          has_more: true,
+        },
+      },
+      durationMs: 5,
+    });
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/people/person-1/photos?limit=3&offset=9",
+      { method: "GET" },
+    );
+
+    const response = await GET(request, { params: Promise.resolve({ personId: "person-1" }) });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      photos: [{ id: "photo-1" }, { id: "photo-2" }, { id: "photo-3" }],
+      pagination: {
+        count: 3,
+        limit: 3,
+        offset: 9,
+        next_offset: 12,
+        has_more: true,
+      },
     });
   });
 });

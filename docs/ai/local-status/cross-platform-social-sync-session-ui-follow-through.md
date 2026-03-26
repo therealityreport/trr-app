@@ -1,15 +1,15 @@
 # Cross-platform social sync-session UI follow-through
 
-Last updated: 2026-03-16
+Last updated: 2026-03-24
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-16
-  current_phase: "stream-first sync-session ui shipped"
-  next_action: "Run managed-Chrome smoke on week-detail and season analytics during an active sync session"
+  include: false
+  state: archived
+  last_updated: 2026-03-24
+  current_phase: "archived continuity note"
+  next_action: "See newer continuity notes if follow-up is needed"
   detail: self
 ```
 

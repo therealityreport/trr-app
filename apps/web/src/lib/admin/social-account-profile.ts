@@ -99,6 +99,8 @@ export type SocialAccountProfilePost = {
   mentions?: string[];
   collaborators?: string[];
   tags?: string[];
+  match_mode?: "owner" | "collaborator";
+  source_surface?: "materialized" | "catalog";
   metrics: {
     likes?: number | null;
     comments_count?: number | null;
@@ -191,6 +193,20 @@ export type SocialAccountCatalogVerification = {
   verified: boolean;
 };
 
+export type SocialAccountCatalogFreshness = {
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  eligible: boolean;
+  reason?: string | null;
+  checked_at: string;
+  stored_total_posts: number;
+  live_total_posts_current?: number | null;
+  delta_posts: number;
+  needs_recent_sync: boolean;
+  latest_catalog_run_status?: string | null;
+  active_run_status?: string | null;
+};
+
 export type SocialAccountCatalogRunProgressSnapshot = {
   season_id?: string | null;
   run_id: string;
@@ -278,9 +294,8 @@ export type CatalogSyncRecentRequest = {
 };
 
 export type CatalogReviewResolveRequest = {
-  resolution_action: "assign_show" | "assign_season" | "mark_non_show";
+  resolution_action: "assign_show" | "mark_non_show";
   show_id?: string | null;
-  season_id?: string | null;
 };
 
 export type SocialAccountProfileHashtagAssignment = {
@@ -288,8 +303,6 @@ export type SocialAccountProfileHashtagAssignment = {
   show_id?: string | null;
   show_name?: string | null;
   show_slug?: string | null;
-  season_id?: string | null;
-  season_number?: number | null;
   updated_by?: string | null;
   updated_at?: string | null;
 };
@@ -298,11 +311,11 @@ export type SocialAccountProfileHashtag = {
   hashtag: string;
   display_hashtag?: string | null;
   usage_count: number;
+  first_seen_at?: string | null;
   latest_seen_at?: string | null;
   latest_source_id?: string | null;
   assignments: SocialAccountProfileHashtagAssignment[];
   assigned_shows?: SocialAccountProfileShowBucket[];
-  assigned_seasons?: SocialAccountProfileSeasonBucket[];
   observed_shows?: SocialAccountProfileShowBucket[];
   observed_seasons?: SocialAccountProfileSeasonBucket[];
 };

@@ -10,8 +10,11 @@ import {
   updateMediaLinkThumbnailCrop,
   type ThumbnailCropOrigin,
 } from "@/lib/server/admin/person-thumbnail-crops-repository";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+import { invalidateAdminBackendCache } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
+const PERSON_PHOTOS_CACHE_NAMESPACE = "admin-person-photos";
 
 interface RouteParams {
   params: Promise<{ personId: string; photoId: string }>;
@@ -66,7 +69,7 @@ const parseRequestBody = (body: unknown): {
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const { personId, photoId } = await params;
     if (!personId || !photoId) {
@@ -75,6 +78,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         { status: 400 },
       );
     }
+    const cacheKeyPrefix = `${user?.uid ?? "admin"}:${personId}:photos:`;
 
     const body = await request.json().catch(() => ({}));
     const parsed = parseRequestBody(body);
@@ -105,6 +109,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       if (!result) {
         return NextResponse.json({ error: "Photo not found" }, { status: 404 });
       }
+      invalidateRouteResponseCache(PERSON_PHOTOS_CACHE_NAMESPACE, cacheKeyPrefix);
+      await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
+        routeName: "person-gallery",
+      });
       return NextResponse.json(result);
     }
 
@@ -117,6 +125,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (!result) {
       return NextResponse.json({ error: "Photo not found" }, { status: 404 });
     }
+
+    invalidateRouteResponseCache(PERSON_PHOTOS_CACHE_NAMESPACE, cacheKeyPrefix);
+    await invalidateAdminBackendCache(`/admin/people/${personId}/cache/invalidate`, {
+      routeName: "person-gallery",
+    });
 
     return NextResponse.json(result);
   } catch (error) {
