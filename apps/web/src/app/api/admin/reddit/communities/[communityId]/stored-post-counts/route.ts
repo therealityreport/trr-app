@@ -77,8 +77,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
               counts,
               total_posts: totalPosts,
               tracked_total_posts: trackedTotalPosts,
-              tracked_flair_counts: trackedFlairCounts as Array<Record<string, unknown>>,
-              pending_tracked_flair_counts: pendingTrackedFlairCounts as Array<Record<string, unknown>>,
+              tracked_flair_counts: trackedFlairCounts as unknown as Array<Record<string, unknown>>,
+              pending_tracked_flair_counts: pendingTrackedFlairCounts as unknown as Array<Record<string, unknown>>,
               flair_counts: trackedFlairCounts.map((row) => ({
                 flair: row.flair_label,
                 post_count: row.post_count,
