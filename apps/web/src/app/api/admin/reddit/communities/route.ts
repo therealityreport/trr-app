@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
                   assigned_thread_count: 0,
                   assigned_threads: [],
                 }));
-            return { communities };
+            return { communities: communities as unknown as Array<Record<string, unknown>> };
           },
         });
 

@@ -100,12 +100,12 @@ export async function GET(request: NextRequest) {
           routeName: "reddit-threads:list",
           queryString: query.toString(),
           fallback: async () => ({
-            threads: await listRedditThreads({
+            threads: (await listRedditThreads({
               communityId,
               trrShowId,
               trrSeasonId: trrSeasonId ?? null,
               includeGlobalThreadsForSeason,
-            }),
+            })) as unknown as Array<Record<string, unknown>>,
           }),
         });
         return {
