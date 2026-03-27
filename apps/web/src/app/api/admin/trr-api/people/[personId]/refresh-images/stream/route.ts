@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import {
-  readGettyPrefetchPayload,
+  hydrateGettyPrefetchPayload,
+  cleanupStaleGettyPrefetchFiles,
 } from "@/lib/server/admin/getty-local-scrape";
 import {
   isRetryableSseNetworkError,
@@ -88,48 +89,6 @@ type FetchErrorCause = {
   address?: string;
   port?: number;
   syscall?: string;
-};
-
-const hydrateGettyPrefetchPayload = async (
-  rawBody: string
-): Promise<string> => {
-  const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-  const prefetchToken =
-    typeof parsed.getty_prefetch_token === "string" ? parsed.getty_prefetch_token.trim() : "";
-  if (!prefetchToken) {
-    return rawBody;
-  }
-  if (Array.isArray(parsed.getty_prefetched_assets) || Array.isArray(parsed.getty_prefetched_events)) {
-    return rawBody;
-  }
-
-  const stored = await readGettyPrefetchPayload(prefetchToken);
-  if (!stored) {
-    throw new Error("Getty prefetch payload expired before the backend handoff.");
-  }
-
-  const prefetchMode =
-    typeof stored.prefetch_mode === "string" ? stored.prefetch_mode.trim() : "";
-  parsed.getty_prefetched_assets =
-    prefetchMode === "discovery" && Array.isArray(stored.discovery_manifest)
-      ? stored.discovery_manifest
-      : Array.isArray(stored.merged)
-        ? stored.merged
-        : [];
-  parsed.getty_prefetched_events =
-    prefetchMode === "discovery" ? [] : Array.isArray(stored.merged_events) ? stored.merged_events : [];
-  parsed.getty_prefetched_queries = Array.isArray(stored.query_summaries) ? stored.query_summaries : [];
-  parsed.getty_prefetch_auth_mode =
-    typeof stored.auth_mode === "string" ? stored.auth_mode : undefined;
-  parsed.getty_prefetch_auth_warning =
-    typeof stored.auth_warning === "string" ? stored.auth_warning : undefined;
-  parsed.getty_prefetch_mode = prefetchMode || undefined;
-  parsed.getty_deferred_enrichment = stored.enrichment_status === "pending";
-  parsed.getty_deferred_editorial_ids = Array.isArray(stored.deferred_editorial_ids)
-    ? stored.deferred_editorial_ids
-    : [];
-  delete parsed.getty_prefetch_token;
-  return JSON.stringify(parsed);
 };
 
 const getErrorCause = (error: unknown): FetchErrorCause | null => {
@@ -270,6 +229,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         bodyText = "{}";
       } else {
         bodyText = await hydrateGettyPrefetchPayload(bodyText);
+        // Best-effort cleanup of stale prefetch state files.
+        cleanupStaleGettyPrefetchFiles().catch(() => {});
       }
     }
 
@@ -300,8 +261,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const backendHost = getBackendHost(backendUrl);
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        let streamClosed = false;
+        const safeClose = () => {
+          if (!streamClosed) {
+            streamClosed = true;
+            controller.close();
+          }
+        };
+        const safeEnqueue = (chunk: Uint8Array) => {
+          if (!streamClosed) {
+            controller.enqueue(chunk);
+          }
+        };
         const emitEvent = (eventType: "progress" | "error", payload: Record<string, unknown>) => {
-          controller.enqueue(
+          safeEnqueue(
             toSseChunk(eventType, {
               ...(requestId ? { request_id: requestId } : {}),
               ...payload,
@@ -342,7 +315,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             attempts_used: 0,
             max_attempts: BACKEND_FETCH_ATTEMPTS,
           });
-          controller.close();
+          safeClose();
           return;
         }
         emitProxyProgress({
@@ -492,7 +465,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             attempts_used: attemptsUsed,
             max_attempts: BACKEND_FETCH_ATTEMPTS,
           });
-          controller.close();
+          safeClose();
           return;
         }
 
@@ -508,7 +481,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             is_terminal: true,
             backend_host: backendHost,
           });
-          controller.close();
+          safeClose();
           return;
         }
 
@@ -522,7 +495,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             is_terminal: true,
             backend_host: backendHost,
           });
-          controller.close();
+          safeClose();
           return;
         }
 
@@ -568,7 +541,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               if (rawSseBuffer.length > 8_192) {
                 rawSseBuffer = rawSseBuffer.slice(-2_048);
               }
-              controller.enqueue(value);
+              safeEnqueue(value);
             }
           }
           if (!sawBackendComplete) {
@@ -604,7 +577,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           } catch {
             // no-op
           }
-          controller.close();
+          safeClose();
         }
       },
     });

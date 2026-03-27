@@ -429,6 +429,12 @@ export const compactGettyPrefetchPayload = (
 const getGettyLocalUrl = (): string =>
   (process.env.TRR_GETTY_LOCAL_URL ?? DEFAULT_GETTY_LOCAL_URL).replace(/\/+$/, "");
 
+/** Shared-secret header for authenticating with the Getty scraper behind a tunnel. */
+const getScraperAuthHeaders = (): Record<string, string> => {
+  const secret = (process.env.TRR_GETTY_SCRAPER_SECRET ?? "").trim();
+  return secret ? { "x-scraper-secret": secret } : {};
+};
+
 const resolveBackendDir = async (): Promise<string | null> => {
   const explicit = process.env.TRR_BACKEND_DIR?.trim();
   if (explicit) {
@@ -522,7 +528,7 @@ const tryLocalServer = async (
 
   const resp = await fetch(`${gettyLocalUrl}/scrape`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getScraperAuthHeaders() },
     body: JSON.stringify({
       person_name: personName,
       show_name: typeof showName === "string" && showName.trim().length > 0 ? showName.trim() : undefined,
@@ -748,4 +754,114 @@ export const deleteGettyPrefetchPayload = async (token: string): Promise<void> =
   } catch {
     // Best-effort cleanup only.
   }
+};
+
+/**
+ * Shared hydration helper: expands a `getty_prefetch_token` in a parsed
+ * request body into the full set of `getty_prefetched_*` fields that the
+ * backend expects.  Returns the JSON-serialized result.
+ *
+ * If the body has no token or already contains hydrated arrays the
+ * original rawBody is returned unchanged.
+ */
+export const hydrateGettyPrefetchPayload = async (
+  rawBody: string,
+): Promise<string> => {
+  const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+  const prefetchToken =
+    typeof parsed.getty_prefetch_token === "string"
+      ? parsed.getty_prefetch_token.trim()
+      : "";
+  if (!prefetchToken) {
+    return rawBody;
+  }
+  if (
+    Array.isArray(parsed.getty_prefetched_assets) ||
+    Array.isArray(parsed.getty_prefetched_events)
+  ) {
+    return rawBody;
+  }
+
+  const stored = await readGettyPrefetchPayload(prefetchToken);
+  if (!stored) {
+    throw new Error(
+      "Getty prefetch payload expired before the backend handoff.",
+    );
+  }
+
+  const prefetchMode =
+    typeof stored.prefetch_mode === "string"
+      ? stored.prefetch_mode.trim()
+      : "";
+  parsed.getty_prefetched_assets =
+    prefetchMode === "discovery" && Array.isArray(stored.discovery_manifest)
+      ? stored.discovery_manifest
+      : Array.isArray(stored.merged)
+        ? stored.merged
+        : [];
+  parsed.getty_prefetched_events =
+    prefetchMode === "discovery"
+      ? []
+      : Array.isArray(stored.merged_events)
+        ? stored.merged_events
+        : [];
+  parsed.getty_prefetched_queries = Array.isArray(stored.query_summaries)
+    ? stored.query_summaries
+    : [];
+  parsed.getty_prefetch_auth_mode =
+    typeof stored.auth_mode === "string" ? stored.auth_mode : undefined;
+  parsed.getty_prefetch_auth_warning =
+    typeof stored.auth_warning === "string" ? stored.auth_warning : undefined;
+  parsed.getty_prefetch_mode = prefetchMode || undefined;
+  parsed.getty_deferred_enrichment = stored.enrichment_status === "pending";
+  parsed.getty_deferred_editorial_ids = Array.isArray(
+    stored.deferred_editorial_ids,
+  )
+    ? stored.deferred_editorial_ids
+    : [];
+  delete parsed.getty_prefetch_token;
+  // Best-effort cleanup of the consumed prefetch file; TTL reaper is the safety net.
+  deleteGettyPrefetchPayload(prefetchToken).catch(() => {});
+  return JSON.stringify(parsed);
+};
+
+/**
+ * Remove stale Getty prefetch state files whose expiry has passed.
+ * Intended to be called best-effort (e.g. after a successful hydration).
+ */
+export const cleanupStaleGettyPrefetchFiles = async (): Promise<number> => {
+  let removed = 0;
+  try {
+    const { readdir, stat } = await import("node:fs/promises");
+    const entries = await readdir(GETTY_PREFETCH_TMP_DIR).catch(() => []);
+    const now = Date.now();
+    for (const entry of entries) {
+      if (!entry.endsWith(".json")) continue;
+      const filePath = path.join(GETTY_PREFETCH_TMP_DIR, entry);
+      try {
+        const raw = await readFile(filePath, "utf8");
+        const state = JSON.parse(raw) as GettyPrefetchState;
+        const expiresAt =
+          typeof state.token_expires_at === "string"
+            ? new Date(state.token_expires_at).getTime()
+            : 0;
+        if (expiresAt > 0 && expiresAt < now) {
+          await rm(filePath, { force: true });
+          removed += 1;
+        } else if (expiresAt === 0) {
+          // No expiry recorded — fall back to file mtime + 2h
+          const info = await stat(filePath);
+          if (info.mtimeMs + 2 * 60 * 60 * 1000 < now) {
+            await rm(filePath, { force: true });
+            removed += 1;
+          }
+        }
+      } catch {
+        // Best-effort: skip unreadable files.
+      }
+    }
+  } catch {
+    // Best-effort: if the directory doesn't exist yet, nothing to clean.
+  }
+  return removed;
 };
