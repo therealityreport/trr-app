@@ -169,12 +169,20 @@ export type SocialAccountCatalogRunProgressSummary = {
 
 export type SocialAccountCatalogRunDispatchHealth = {
   queued_unclaimed_jobs?: number;
+  dispatch_blocked_jobs?: number;
   modal_pending_jobs?: number;
   modal_running_unclaimed_jobs?: number;
   retrying_dispatch_jobs?: number;
   stale_dispatch_failed_jobs?: number;
   latest_dispatch_requested_at?: string | null;
   remote_invocation_checked_at?: string | null;
+  latest_dispatch_backend?: string | null;
+  latest_dispatch_error?: string | null;
+  latest_dispatch_error_code?: string | null;
+  latest_remote_blocked_reason?: string | null;
+  configured_app_name?: string | null;
+  configured_function_name?: string | null;
+  modal_environment?: string | null;
   max_stale_dispatch_retries?: number;
 };
 
@@ -205,6 +213,11 @@ export type SocialAccountCatalogFreshness = {
   needs_recent_sync: boolean;
   latest_catalog_run_status?: string | null;
   active_run_status?: string | null;
+  catalog_newest_post_at?: string | null;
+  catalog_oldest_post_at?: string | null;
+  has_resumable_frontier?: boolean;
+  frontier_pages_scanned?: number | null;
+  frontier_posts_checked?: number | null;
 };
 
 export type SocialAccountCatalogRunProgressSnapshot = {
