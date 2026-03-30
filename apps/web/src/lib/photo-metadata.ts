@@ -1720,6 +1720,7 @@ export function mapSeasonAssetToMetadata(
     null;
   const createdAt = parseDateValue(rawCreatedAt);
   const addedAt = asset.created_at ? parseDateValue(asset.created_at) : null;
+  const sourceUploadedAt = parseDateValue(metadata.getty_upload_date ?? null);
 
   // File type
   const fileType = inferFileType(

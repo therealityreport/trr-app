@@ -11,6 +11,8 @@ import {
   type SocialAccountCatalogFreshness,
   type CatalogBackfillRequest,
   type CatalogReviewResolveRequest,
+  type CatalogResumeTailRequest,
+  type CatalogSyncNewerRequest,
   type CatalogSyncRecentRequest,
   type SocialAccountCatalogPost,
   type SocialAccountCatalogReviewItem,
@@ -1818,7 +1820,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const runCatalogAction = async (
     action: "backfill" | "sync_recent" | "sync_newer" | "resume_tail",
-    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest,
+    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest | CatalogResumeTailRequest,
   ) => {
     if (!user) return;
     setRunningCatalogAction(action);

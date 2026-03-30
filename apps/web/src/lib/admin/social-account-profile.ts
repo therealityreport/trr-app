@@ -306,6 +306,14 @@ export type CatalogSyncRecentRequest = {
   lookback_days: number;
 };
 
+export type CatalogSyncNewerRequest = {
+  source_scope?: string;
+};
+
+export type CatalogResumeTailRequest = {
+  source_scope?: string;
+};
+
 export type CatalogReviewResolveRequest = {
   resolution_action: "assign_show" | "mark_non_show";
   show_id?: string | null;
