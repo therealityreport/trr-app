@@ -5496,7 +5496,7 @@ export default function WeekDetailPage() {
       const loadedPlatformPosts = platformPayload?.posts?.length ?? 0;
       const platformTotalPosts = Math.max(
         0,
-        Number(platformPayload?.totals?.posts ?? platformPayload?.total_posts ?? 0),
+        Number(platformPayload?.totals?.posts ?? 0),
       );
       return platformTotalPosts > loadedPlatformPosts;
     });
