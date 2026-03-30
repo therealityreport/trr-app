@@ -2,13 +2,13 @@ import { expect, test } from "@playwright/test";
 import { mockAdminApi, SEASON_NUMBER, SHOW_ID, SHOW_NAME, SHOW_SLUG, waitForAdminReady } from "./admin-fixtures";
 
 test.describe("admin breadcrumbs", () => {
-  test("renders single root crumb on /admin", async ({ page }) => {
-    await page.goto("/admin");
+  test("renders single root crumb on /", async ({ page }) => {
+    await page.goto("/");
     await waitForAdminReady(page);
 
     const breadcrumbNav = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(breadcrumbNav).toBeVisible();
-    await expect(breadcrumbNav.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    await expect(breadcrumbNav.getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/");
   });
 
   test("renders clickable show crumb on season page", async ({ page }) => {
@@ -21,6 +21,6 @@ test.describe("admin breadcrumbs", () => {
     await expect(breadcrumbNav.getByText(`Season ${SEASON_NUMBER}`)).toBeVisible();
 
     const showLink = breadcrumbNav.getByRole("link", { name: SHOW_NAME });
-    await expect(showLink).toHaveAttribute("href", `/shows/${SHOW_SLUG}`);
+    await expect(showLink).toHaveAttribute("href", `/${SHOW_SLUG}`);
   });
 });

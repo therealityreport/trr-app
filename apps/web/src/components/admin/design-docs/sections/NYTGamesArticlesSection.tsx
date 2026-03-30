@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { GAME_ARTICLES } from "@/lib/admin/design-docs-config";
 import { GAME_META } from "./games/game-palettes";
 
@@ -28,7 +29,7 @@ export default function NYTGamesArticlesSection() {
           return (
             <Link
               key={game.id}
-              href={`/admin/design-docs/nyt-games-articles/${game.id}` as never}
+              href={buildDesignDocsPath(`nyt-games-articles/${game.id}`) as never}
               style={{ textDecoration: "none", color: "inherit" }}
             >
               <div

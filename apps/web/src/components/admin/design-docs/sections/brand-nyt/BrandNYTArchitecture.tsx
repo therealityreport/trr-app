@@ -25,10 +25,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#326891",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #326891",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -89,13 +89,13 @@ export default function BrandNYTArchitecture() {
       {/* ── 1. Framework Features ─────────────────────────────── */}
       <SectionLabel id="framework-features">Framework Features</SectionLabel>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-8 overflow-x-auto">
+      <div className="dd-brand-card p-4 mb-8 overflow-x-auto">
         <table
           className="w-full text-left"
           style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
         >
           <thead>
-            <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
               <th
                 className="py-1 pr-4 font-semibold"
                 style={{ color: "var(--dd-ink-black)" }}
@@ -114,7 +114,7 @@ export default function BrandNYTArchitecture() {
             {ARCH_FEATURES.map((f) => (
               <tr
                 key={f.label}
-                style={{ borderBottom: "1px solid #f0f0f0" }}
+                style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
               >
                 <td
                   className="py-1 pr-4 font-semibold"
@@ -154,7 +154,7 @@ export default function BrandNYTArchitecture() {
           return (
             <div
               key={article.id}
-              className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"
+              className="dd-brand-card p-4"
             >
               <div
                 style={{
@@ -171,7 +171,7 @@ export default function BrandNYTArchitecture() {
                 className="font-mono"
                 style={{
                   fontSize: 10,
-                  color: "#326891",
+                  color: "var(--dd-brand-accent)",
                   marginBottom: 12,
                 }}
               >
@@ -187,7 +187,7 @@ export default function BrandNYTArchitecture() {
               >
                 <tbody>
                   {arch.framework && (
-                    <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <tr style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                       <td
                         className="py-1 pr-4 font-semibold"
                         style={{
@@ -209,7 +209,7 @@ export default function BrandNYTArchitecture() {
                     </tr>
                   )}
                   {arch.projectId && (
-                    <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <tr style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                       <td
                         className="py-1 pr-4 font-semibold"
                         style={{ color: "var(--dd-ink-black)" }}
@@ -228,7 +228,7 @@ export default function BrandNYTArchitecture() {
                     </tr>
                   )}
                   {arch.hydrationId && (
-                    <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <tr style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                       <td
                         className="py-1 pr-4 font-semibold"
                         style={{ color: "var(--dd-ink-black)" }}
@@ -247,7 +247,7 @@ export default function BrandNYTArchitecture() {
                     </tr>
                   )}
                   {arch.hosting && (
-                    <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <tr style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                       <td
                         className="py-1 pr-4 font-semibold"
                         style={{ color: "var(--dd-ink-black)" }}
@@ -291,7 +291,7 @@ export default function BrandNYTArchitecture() {
                           fontSize: 10,
                           color: "var(--dd-ink-faint)",
                           paddingLeft: 8,
-                          borderLeft: "2px solid #e5e5e5",
+                          borderLeft: "2px solid var(--dd-brand-border)",
                         }}
                       >
                         {file}
@@ -334,7 +334,7 @@ export default function BrandNYTArchitecture() {
                             <tr
                               key={key}
                               style={{
-                                borderBottom: "1px solid #f0f0f0",
+                                borderBottom: "1px solid var(--dd-brand-border-subtle)",
                               }}
                             >
                               <td
@@ -371,7 +371,7 @@ export default function BrandNYTArchitecture() {
       {/* ── 3. Birdkit Framework ──────────────────────────────── */}
       <SectionLabel id="birdkit-framework">Birdkit Framework</SectionLabel>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-8">
+      <div className="dd-brand-card p-4 mb-8">
         <SubSectionLabel>
           NYT&apos;s Internal Svelte/SvelteKit Framework
         </SubSectionLabel>
@@ -409,8 +409,8 @@ export default function BrandNYTArchitecture() {
                 className="font-mono"
                 style={{
                   fontSize: 11,
-                  color: "#326891",
-                  background: "#f4f4f4",
+                  color: "var(--dd-brand-accent)",
+                  background: "var(--dd-brand-border-subtle)",
                   padding: "1px 4px",
                   borderRadius: 3,
                 }}
@@ -425,8 +425,8 @@ export default function BrandNYTArchitecture() {
                 className="font-mono"
                 style={{
                   fontSize: 11,
-                  color: "#326891",
-                  background: "#f4f4f4",
+                  color: "var(--dd-brand-accent)",
+                  background: "var(--dd-brand-border-subtle)",
                   padding: "1px 4px",
                   borderRadius: 3,
                 }}
@@ -442,8 +442,8 @@ export default function BrandNYTArchitecture() {
                 className="font-mono"
                 style={{
                   fontSize: 11,
-                  color: "#326891",
-                  background: "#f4f4f4",
+                  color: "var(--dd-brand-accent)",
+                  background: "var(--dd-brand-border-subtle)",
                   padding: "1px 4px",
                   borderRadius: 3,
                 }}
@@ -462,8 +462,8 @@ export default function BrandNYTArchitecture() {
                 className="font-mono"
                 style={{
                   fontSize: 11,
-                  color: "#326891",
-                  background: "#f4f4f4",
+                  color: "var(--dd-brand-accent)",
+                  background: "var(--dd-brand-border-subtle)",
                   padding: "1px 4px",
                   borderRadius: 3,
                 }}

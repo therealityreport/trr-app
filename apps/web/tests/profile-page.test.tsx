@@ -22,8 +22,10 @@ vi.mock("next/link", () => ({
   default: ({
     href,
     children,
+    prefetch: _prefetch,
     ...rest
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => React.createElement("a", { href, ...rest }, children),
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) =>
+    React.createElement("a", { href, ...rest }, children),
 }));
 
 vi.mock("@/lib/firebase", () => ({

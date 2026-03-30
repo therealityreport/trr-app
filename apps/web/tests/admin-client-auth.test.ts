@@ -255,6 +255,20 @@ describe("admin client auth helper", () => {
     expect(mocks.authStateReady).not.toHaveBeenCalled();
   });
 
+  it("short-circuits immediately for the synthetic dev bypass preferred user", async () => {
+    mocks.setCurrentUser(null);
+    mocks.setBypassEnabled(true);
+
+    const headers = await getClientAuthHeaders({
+      allowDevAdminBypass: true,
+      preferredUser: { uid: "dev-admin-bypass" } as never,
+      tokenRetryDelaysMs: [0, 0, 0],
+    });
+
+    expectAuthorizationHeader(headers, "dev-admin-bypass");
+    expect(mocks.authStateReady).not.toHaveBeenCalled();
+  });
+
   it("allows local host bypass when explicitly requested even if env bypass helper is disabled", async () => {
     mocks.setCurrentUser(null);
     mocks.setBypassEnabled(false);

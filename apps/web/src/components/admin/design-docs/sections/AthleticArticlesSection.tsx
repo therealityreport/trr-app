@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 const ATHLETIC_ARTICLES = ARTICLES.filter((a) => a.url.includes("/athletic/"));
@@ -59,7 +61,7 @@ export default function AthleticArticlesSection() {
               {article.section} · {article.type} · {article.date}
             </div>
             <Link
-              href={`/admin/design-docs/athletic-articles/${article.id}`}
+              href={buildDesignDocsPath(`athletic-articles/${article.id}`) as Route}
               style={{ textDecoration: "none", color: "inherit" }}
             >
               <h3 style={{

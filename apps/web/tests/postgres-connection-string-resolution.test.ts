@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyConnectionClass,
   isSupavisorSessionPoolerConnectionString,
   resolvePostgresConnectionCandidates,
   resolvePostgresConnectionString,
@@ -7,62 +8,52 @@ import {
 } from "@/lib/server/postgres";
 
 describe("resolvePostgresConnectionString", () => {
-  it("prefers DATABASE_URL over SUPABASE_DB_URL", () => {
+  it("prefers TRR_DB_URL over the explicit runtime fallback", () => {
     const value = resolvePostgresConnectionString({
-      SUPABASE_DB_URL: "postgresql://postgres:postgres@127.0.0.1:55432/postgres",
-      DATABASE_URL: "postgresql://user:pass@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
-      TRR_DB_URL: "postgresql://legacy:legacy@localhost:5432/trr",
+      TRR_DB_URL: "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      TRR_DB_FALLBACK_URL: "postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
     });
 
-    expect(value).toBe("postgresql://user:pass@aws-1-us-east-1.pooler.supabase.com:6543/postgres");
+    expect(value).toBe("postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres");
   });
 
-  it("falls back to SUPABASE_DB_URL when DATABASE_URL is missing", () => {
+  it("falls back to TRR_DB_FALLBACK_URL when the canonical runtime env is absent", () => {
     const value = resolvePostgresConnectionString({
-      SUPABASE_DB_URL: "postgresql://user:pass@localhost:5432/postgres",
-      TRR_DB_URL: "postgresql://legacy:legacy@localhost:5432/trr",
+      TRR_DB_FALLBACK_URL: "postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
     });
 
-    expect(value).toBe("postgresql://user:pass@localhost:5432/postgres");
-  });
-
-  it("falls back to TRR_DB_URL when others are missing", () => {
-    const value = resolvePostgresConnectionString({
-      TRR_DB_URL: "postgresql://legacy:legacy@localhost:5432/trr",
-    });
-
-    expect(value).toBe("postgresql://legacy:legacy@localhost:5432/trr");
+    expect(value).toBe("postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres");
   });
 
   it("does not add a direct-host fallback unless explicitly enabled", () => {
     const values = resolvePostgresConnectionCandidates({
-      DATABASE_URL: "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
-      TRR_DB_URL: "postgresql://legacy:legacy@localhost:5432/trr",
+      TRR_DB_URL: "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      TRR_DB_FALLBACK_URL: "postgresql://fallback:legacy@localhost:5432/trr",
     });
 
     expect(values).toEqual([
-      "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
-      "postgresql://legacy:legacy@localhost:5432/trr",
+      "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      "postgresql://fallback:legacy@localhost:5432/trr",
     ]);
   });
 
   it("adds a direct-host fallback after a Supabase pooler URL when enabled", () => {
     const values = resolvePostgresConnectionCandidates({
-      DATABASE_URL: "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
-      TRR_DB_URL: "postgresql://legacy:legacy@localhost:5432/trr",
+      TRR_DB_URL: "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      TRR_DB_FALLBACK_URL: "postgresql://fallback:legacy@localhost:5432/trr",
       POSTGRES_ENABLE_SUPABASE_DIRECT_FALLBACK: "true",
     });
 
     expect(values).toEqual([
-      "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
+      "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
       "postgresql://postgres.abcdefghijklmno:secret@db.abcdefghijklmno.supabase.co:5432/postgres",
-      "postgresql://legacy:legacy@localhost:5432/trr",
+      "postgresql://fallback:legacy@localhost:5432/trr",
     ]);
   });
 
   it("throws when no DB URL env vars are configured", () => {
     expect(() => resolvePostgresConnectionString({})).toThrow(
-      "No database connection string is set. Configure SUPABASE_DB_URL, DATABASE_URL, or TRR_DB_URL.",
+      "No database connection string is set. Configure TRR_DB_URL or TRR_DB_FALLBACK_URL.",
     );
   });
 });
@@ -101,5 +92,19 @@ describe("isSupavisorSessionPoolerConnectionString", () => {
         "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
       ),
     ).toBe(false);
+  });
+});
+
+describe("classifyConnectionClass", () => {
+  it("classifies the supported runtime lanes", () => {
+    expect(
+      classifyConnectionClass("postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres"),
+    ).toBe("session");
+    expect(
+      classifyConnectionClass("postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres"),
+    ).toBe("transaction");
+    expect(classifyConnectionClass("postgresql://postgres:secret@db.example.supabase.co:5432/postgres")).toBe(
+      "direct",
+    );
   });
 });

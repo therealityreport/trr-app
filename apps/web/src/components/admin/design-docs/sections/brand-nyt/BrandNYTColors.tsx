@@ -24,10 +24,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#326891",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #326891",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -285,7 +285,7 @@ export default function BrandNYTColors() {
         {CORE_COLORS.map((c) => (
           <div
             key={c.token}
-            className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm"
+            className="dd-brand-card p-3"
           >
             <div
               style={{
@@ -293,14 +293,14 @@ export default function BrandNYTColors() {
                 height: 40,
                 borderRadius: 8,
                 background: c.hex,
-                border: c.hex === "#fff" ? "1px solid #e5e5e5" : "none",
+                border: c.hex === "#fff" ? "1px solid var(--dd-brand-border)" : "none",
                 marginBottom: 8,
               }}
             />
             <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 12, fontWeight: 600, color: "var(--dd-ink-black)" }}>
               {c.name}
             </div>
-            <div className="font-mono" style={{ fontSize: 10, color: "#326891", marginBottom: 2 }}>
+            <div className="font-mono" style={{ fontSize: 10, color: "var(--dd-brand-accent)", marginBottom: 2 }}>
               {c.token}
             </div>
             <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 11, color: "var(--dd-ink-faint)" }}>
@@ -317,7 +317,7 @@ export default function BrandNYTColors() {
         {GRAPHICS_COLORS.map((c) => (
           <div
             key={c.token}
-            className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm text-center"
+            className="dd-brand-card p-3 text-center"
           >
             <div
               style={{
@@ -328,7 +328,7 @@ export default function BrandNYTColors() {
                 margin: "0 auto 6px",
               }}
             />
-            <div className="font-mono" style={{ fontSize: 10, color: "#326891" }}>
+            <div className="font-mono" style={{ fontSize: 10, color: "var(--dd-brand-accent)" }}>
               {c.token}
             </div>
             <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 11, color: "var(--dd-ink-faint)" }}>
@@ -345,7 +345,7 @@ export default function BrandNYTColors() {
         {DATAWRAPPER_COLORS.map((c) => (
           <div
             key={c.label}
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-sm flex items-center gap-2"
+            className="dd-brand-card px-3 py-2 flex items-center gap-2"
           >
             <div
               style={{
@@ -391,7 +391,7 @@ export default function BrandNYTColors() {
             {ap.colors.map((c, i) => (
               <div
                 key={`${ap.articleId}-${c.hex}-${i}`}
-                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-sm flex items-center gap-2"
+                className="dd-brand-card px-3 py-2 flex items-center gap-2"
               >
                 <div
                   style={{
@@ -439,7 +439,7 @@ export default function BrandNYTColors() {
         {combinedPalette.map((c) => (
           <div
             key={c.hex}
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-sm flex items-center gap-2"
+            className="dd-brand-card px-3 py-2 flex items-center gap-2"
           >
             <div
               style={{

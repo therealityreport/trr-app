@@ -64,6 +64,7 @@ export interface PhotoMetadata {
   fileType?: string | null;
   createdAt?: Date | null;
   addedAt?: Date | null;
+  sourceUploadedAt?: Date | null;
   hasTextOverlay?: boolean | null;
   contentType?: string | null;
   sectionTag?: string | null;
@@ -1316,6 +1317,7 @@ export function mapPhotoToMetadata(
     metadata.createdAt ??
     metadata.original_created_at ??
     metadata.source_created_at ??
+    metadata.getty_date_created ??
     metadata.episode_air_date ??
     metadata.photo_date ??
     metadata.date ??
@@ -1323,6 +1325,8 @@ export function mapPhotoToMetadata(
     null;
   const createdAt = parseDateValue(rawCreatedAt);
   const addedAt = photo.created_at ? parseDateValue(photo.created_at) : null;
+  // Getty-specific: date uploaded to Getty (separate from when the photo was taken)
+  const sourceUploadedAt = parseDateValue(metadata.getty_upload_date ?? null);
   const fileType = inferFileType(
     photo.hosted_content_type ?? null,
     photo.hosted_url || photo.url || null
@@ -1488,6 +1492,7 @@ export function mapPhotoToMetadata(
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
+    sourceUploadedAt: sourceUploadedAt ?? null,
     hasTextOverlay: inferHasTextOverlay(metadata),
     contentType,
     sectionTag: sectionTagOut,
@@ -1872,6 +1877,7 @@ export function mapSeasonAssetToMetadata(
     fileType,
     createdAt: createdAt ?? null,
     addedAt: createdAt ? null : addedAt,
+    sourceUploadedAt: sourceUploadedAt ?? null,
     hasTextOverlay: inferHasTextOverlay(metadata),
     contentType,
     sectionTag: sectionTagOut,

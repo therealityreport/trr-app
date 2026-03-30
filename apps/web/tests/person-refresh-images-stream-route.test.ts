@@ -5,9 +5,9 @@ const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
 }));
-const { readGettyPrefetchPayloadMock, deleteGettyPrefetchPayloadMock } = vi.hoisted(() => ({
-  readGettyPrefetchPayloadMock: vi.fn(),
-  deleteGettyPrefetchPayloadMock: vi.fn(),
+const { hydrateGettyPrefetchPayloadMock, cleanupStaleGettyPrefetchFilesMock } = vi.hoisted(() => ({
+  hydrateGettyPrefetchPayloadMock: vi.fn(),
+  cleanupStaleGettyPrefetchFilesMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -19,8 +19,8 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 }));
 
 vi.mock("@/lib/server/admin/getty-local-scrape", () => ({
-  readGettyPrefetchPayload: readGettyPrefetchPayloadMock,
-  deleteGettyPrefetchPayload: deleteGettyPrefetchPayloadMock,
+  hydrateGettyPrefetchPayload: hydrateGettyPrefetchPayloadMock,
+  cleanupStaleGettyPrefetchFiles: cleanupStaleGettyPrefetchFilesMock,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/people/[personId]/refresh-images/stream/route";
@@ -77,10 +77,10 @@ describe("person refresh-images stream proxy route", () => {
     vi.restoreAllMocks();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(BACKEND_STREAM_URL);
-    readGettyPrefetchPayloadMock.mockReset();
-    readGettyPrefetchPayloadMock.mockResolvedValue(null);
-    deleteGettyPrefetchPayloadMock.mockReset();
-    deleteGettyPrefetchPayloadMock.mockResolvedValue(undefined);
+    hydrateGettyPrefetchPayloadMock.mockReset();
+    hydrateGettyPrefetchPayloadMock.mockImplementation(async (raw: string) => raw);
+    cleanupStaleGettyPrefetchFilesMock.mockReset();
+    cleanupStaleGettyPrefetchFilesMock.mockResolvedValue(0);
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     process.env.TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS = "20000";
     process.env.TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS = "2000";
@@ -249,9 +249,12 @@ describe("person refresh-images stream proxy route", () => {
   });
 
   it("hydrates server-staged Getty payloads before forwarding to backend", async () => {
-    readGettyPrefetchPayloadMock.mockResolvedValue({
-      merged: [{ id: "asset-1" }, { id: "asset-2" }],
-      merged_events: [{ id: "event-1" }],
+    hydrateGettyPrefetchPayloadMock.mockImplementation(async (raw: string) => {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      parsed.getty_prefetched_assets = [{ id: "asset-1" }, { id: "asset-2" }];
+      parsed.getty_prefetched_events = [{ id: "event-1" }];
+      delete parsed.getty_prefetch_token;
+      return JSON.stringify(parsed);
     });
 
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
@@ -290,19 +293,19 @@ describe("person refresh-images stream proxy route", () => {
     expect(Array.isArray(forwarded.getty_prefetched_events)).toBe(true);
     expect((forwarded.getty_prefetched_events as unknown[]).length).toBe(1);
     expect(forwarded.getty_prefetch_token).toBeUndefined();
-    expect(readGettyPrefetchPayloadMock).toHaveBeenCalledWith("prefetch-token-1");
-    expect(deleteGettyPrefetchPayloadMock).not.toHaveBeenCalled();
+    expect(hydrateGettyPrefetchPayloadMock).toHaveBeenCalled();
   });
 
-  it("hydrates discovery manifests without deleting the persistent Getty token", async () => {
-    readGettyPrefetchPayloadMock.mockResolvedValue({
-      prefetch_mode: "discovery",
-      discovery_manifest: [{ id: "asset-discovery-1" }],
-      merged: [{ id: "asset-full-1" }],
-      merged_events: [{ id: "event-full-1" }],
-      deferred_editorial_ids: ["123", "456"],
-      enrichment_status: "pending",
-      query_summaries: [{ phrase: "Brandi Glanville", query_url: "https://getty.example.com" }],
+  it("hydrates discovery manifests via the shared hydration helper", async () => {
+    hydrateGettyPrefetchPayloadMock.mockImplementation(async (raw: string) => {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      parsed.getty_prefetched_assets = [{ id: "asset-discovery-1" }];
+      parsed.getty_prefetched_events = [];
+      parsed.getty_prefetch_mode = "discovery";
+      parsed.getty_deferred_enrichment = true;
+      parsed.getty_deferred_editorial_ids = ["123", "456"];
+      delete parsed.getty_prefetch_token;
+      return JSON.stringify(parsed);
     });
 
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
@@ -340,7 +343,6 @@ describe("person refresh-images stream proxy route", () => {
     expect(forwarded.getty_deferred_enrichment).toBe(true);
     expect(forwarded.getty_deferred_editorial_ids).toEqual(["123", "456"]);
     expect(forwarded.getty_prefetch_token).toBeUndefined();
-    expect(deleteGettyPrefetchPayloadMock).not.toHaveBeenCalled();
   });
 
   it("does not force local execution for admin.localhost in development", async () => {

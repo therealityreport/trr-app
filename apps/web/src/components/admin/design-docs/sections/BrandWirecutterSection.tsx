@@ -20,7 +20,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "var(--dd-viz-blue)",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -797,7 +797,7 @@ export default function BrandWirecutterSection() {
 
       {/* AI-Generated Illustrations */}
       <div id="ai-illustrations" />
-      <div className="dd-section-label" style={{ color: "#3069B3", marginTop: 48 }}>AI-Generated Illustrations</div>
+      <div className="dd-section-label" style={{ color: "var(--dd-brand-accent)", marginTop: 48 }}>AI-Generated Illustrations</div>
       <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 24 }}>
         Product review and buying guide illustration styles.
       </p>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 /* ------------------------------------------------------------------ */
@@ -27,10 +27,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#326891",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #326891",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -169,13 +169,13 @@ export default function BrandNYTCharts() {
       </SectionLabel>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm text-center">
+        <div className="dd-brand-card p-4 text-center">
           <div
             style={{
               fontFamily: "var(--dd-font-sans)",
               fontSize: 32,
               fontWeight: 700,
-              color: "#326891",
+              color: "var(--dd-brand-accent)",
               lineHeight: 1,
               marginBottom: 4,
             }}
@@ -204,13 +204,13 @@ export default function BrandNYTCharts() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm text-center">
+        <div className="dd-brand-card p-4 text-center">
           <div
             style={{
               fontFamily: "var(--dd-font-sans)",
               fontSize: 32,
               fontWeight: 700,
-              color: "#326891",
+              color: "var(--dd-brand-accent)",
               lineHeight: 1,
               marginBottom: 4,
             }}
@@ -239,13 +239,13 @@ export default function BrandNYTCharts() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm text-center">
+        <div className="dd-brand-card p-4 text-center">
           <div
             style={{
               fontFamily: "var(--dd-font-sans)",
               fontSize: 32,
               fontWeight: 700,
-              color: "#326891",
+              color: "var(--dd-brand-accent)",
               lineHeight: 1,
               marginBottom: 4,
             }}
@@ -278,13 +278,13 @@ export default function BrandNYTCharts() {
       {/* ── 2. Chart Catalog ──────────────────────────────────── */}
       <SectionLabel id="chart-catalog">Chart Catalog</SectionLabel>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-8 overflow-x-auto">
+      <div className="dd-brand-card p-4 mb-8 overflow-x-auto">
         <table
           className="w-full text-left"
           style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
         >
           <thead>
-            <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
               <th
                 className="py-1 pr-4 font-semibold"
                 style={{ color: "var(--dd-ink-black)" }}
@@ -321,7 +321,7 @@ export default function BrandNYTCharts() {
             {chartCatalog.map((row) => (
               <tr
                 key={`${row.type}-${row.tool}`}
-                style={{ borderBottom: "1px solid #f0f0f0" }}
+                style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
               >
                 <td
                   className="py-1.5 pr-4 font-semibold"
@@ -333,7 +333,7 @@ export default function BrandNYTCharts() {
                 </td>
                 <td
                   className="py-1.5 pr-4 font-mono"
-                  style={{ fontSize: 11, color: "#326891" }}
+                  style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}
                 >
                   {row.tool}
                 </td>
@@ -354,11 +354,9 @@ export default function BrandNYTCharts() {
                     <span key={aid}>
                       {i > 0 && ", "}
                       <Link
-                        href={
-                          `/admin/design-docs/nyt-articles/${aid}` as Route
-                        }
+                        href={buildDesignDocsPath(`nyt-articles/${aid}`)}
                         style={{
-                          color: "#326891",
+                          color: "var(--dd-brand-accent)",
                           textDecoration: "underline",
                         }}
                       >
@@ -392,13 +390,13 @@ export default function BrandNYTCharts() {
           No Datawrapper embeds found.
         </p>
       ) : (
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-8 overflow-x-auto">
+        <div className="dd-brand-card p-4 mb-8 overflow-x-auto">
           <table
             className="w-full text-left"
             style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
           >
             <thead>
-              <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+              <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
                 <th
                   className="py-1 pr-4 font-semibold"
                   style={{ color: "var(--dd-ink-black)" }}
@@ -429,11 +427,11 @@ export default function BrandNYTCharts() {
               {datawrapperEmbeds.map((embed) => (
                 <tr
                   key={`${embed.id}-${embed.topic}`}
-                  style={{ borderBottom: "1px solid #f0f0f0" }}
+                  style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
                 >
                   <td
                     className="py-1.5 pr-4 font-mono"
-                    style={{ fontSize: 11, color: "#326891" }}
+                    style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}
                   >
                     {embed.id}
                   </td>
@@ -457,7 +455,7 @@ export default function BrandNYTCharts() {
                       className="font-mono"
                       style={{
                         fontSize: 10,
-                        color: "#326891",
+                        color: "var(--dd-brand-accent)",
                         textDecoration: "underline",
                         wordBreak: "break-all",
                       }}

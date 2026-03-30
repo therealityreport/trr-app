@@ -15,8 +15,10 @@ import {
   TRR_SHOW_RESOLVE_SLUG_CACHE_NAMESPACE,
   TRR_SHOW_RESOLVE_SLUG_CACHE_TTL_MS,
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
+import { resolveShowSlug } from "@/lib/server/trr-api/trr-shows-repository";
 
 export const dynamic = "force-dynamic";
+const SHOW_RESOLVE_SLUG_TIMEOUT_MS = Math.max(15_000, ADMIN_READ_PROXY_SHORT_TIMEOUT_MS);
 
 /**
  * GET /api/admin/trr-api/shows/resolve-slug?slug=the-valley-persian-style
@@ -44,10 +46,22 @@ export async function GET(request: NextRequest) {
       TRR_SHOW_RESOLVE_SLUG_CACHE_NAMESPACE,
       cacheKey,
       async () => {
+        const localResolved = await resolveShowSlug(slug);
+        if (localResolved) {
+          const nextPayload = { resolved: localResolved };
+          setRouteResponseCache(
+            TRR_SHOW_RESOLVE_SLUG_CACHE_NAMESPACE,
+            cacheKey,
+            nextPayload,
+            TRR_SHOW_RESOLVE_SLUG_CACHE_TTL_MS,
+          );
+          return nextPayload;
+        }
+
         const upstream = await fetchAdminBackendJson(
           `/admin/trr-api/shows/resolve-slug?${new URLSearchParams({ slug }).toString()}`,
           {
-            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+            timeoutMs: SHOW_RESOLVE_SLUG_TIMEOUT_MS,
             routeName: "show-resolve-slug",
           },
         );

@@ -28,10 +28,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#121212",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #121212",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -47,7 +47,7 @@ function SubSectionLabel({ children }: { children: React.ReactNode }) {
         fontFamily: "var(--dd-font-sans)",
         fontSize: 13,
         fontWeight: 600,
-        color: "var(--dd-ink-black)",
+        color: "var(--dd-brand-text-primary)",
         marginBottom: 8,
       }}
     >
@@ -62,7 +62,7 @@ function SpecimenMeta({ text }: { text: string }) {
       style={{
         fontFamily: "var(--dd-font-mono)",
         fontSize: 11,
-        color: "#888888",
+        color: "var(--dd-brand-text-muted)",
         marginTop: 8,
       }}
     >
@@ -312,7 +312,7 @@ export default function BrandAthleticTypography() {
     <div>
       {/* ── Brand Header ───────────────────────────────── */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "32px 40px",
           marginBottom: 40,
@@ -323,7 +323,7 @@ export default function BrandAthleticTypography() {
             fontFamily: "var(--dd-font-sans)",
             fontWeight: 700,
             fontSize: 32,
-            color: "var(--dd-ink-black)",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -334,7 +334,7 @@ export default function BrandAthleticTypography() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "var(--dd-ink-faint)",
+            color: "var(--dd-brand-text-secondary)",
             lineHeight: 1.5,
           }}
         >
@@ -345,7 +345,7 @@ export default function BrandAthleticTypography() {
       {/* ── Font Specimens ─────────────────────────────── */}
       <SectionLabel id="font-specimens">Font Specimens</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "28px 32px",
           marginBottom: 40,
@@ -435,7 +435,7 @@ export default function BrandAthleticTypography() {
         {fonts.map((f) => (
           <div
             key={f.name}
-            className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+            className="dd-brand-card"
             style={{
               padding: "20px 24px",
             }}
@@ -447,7 +447,7 @@ export default function BrandAthleticTypography() {
                   fontFamily: "var(--dd-font-sans)",
                   fontWeight: 700,
                   fontSize: 18,
-                  color: "var(--dd-ink-black)",
+                  color: "var(--dd-brand-text-primary)",
                 }}
               >
                 {f.name}
@@ -456,7 +456,7 @@ export default function BrandAthleticTypography() {
                 style={{
                   fontFamily: "var(--dd-font-mono)",
                   fontSize: 11,
-                  color: "#121212",
+                  color: "var(--dd-brand-text-secondary)",
                 }}
               >
                 {f.weights.join(", ")}
@@ -536,7 +536,7 @@ export default function BrandAthleticTypography() {
       {/* ── Weight specimens rendered ─────────────────── */}
       <SectionLabel id="weight-ramp">Weight Ramp</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "28px 32px",
           marginBottom: 40,
@@ -552,7 +552,7 @@ export default function BrandAthleticTypography() {
               style={{
                 fontFamily: "var(--dd-font-mono)",
                 fontSize: 11,
-                color: "#121212",
+                color: "var(--dd-brand-text-primary)",
                 fontWeight: 600,
                 marginBottom: 8,
               }}
@@ -595,7 +595,7 @@ export default function BrandAthleticTypography() {
             style={{
               fontFamily: "var(--dd-font-mono)",
               fontSize: 11,
-              color: "#121212",
+              color: "var(--dd-brand-text-primary)",
               fontWeight: 600,
               marginBottom: 8,
             }}

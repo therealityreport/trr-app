@@ -26,10 +26,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#326891",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #326891",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -359,7 +359,7 @@ export default function BrandNYTTypography() {
         {mergedFonts.map((f) => (
           <div
             key={f.name}
-            className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"
+            className="dd-brand-card p-4"
           >
             <div
               style={{
@@ -374,7 +374,7 @@ export default function BrandNYTTypography() {
             </div>
             <div
               className="font-mono"
-              style={{ fontSize: 11, color: "#326891", marginBottom: 6 }}
+              style={{ fontSize: 11, color: "var(--dd-brand-accent)", marginBottom: 6 }}
             >
               {f.cssVar ?? "\u2014"}
             </div>
@@ -433,13 +433,13 @@ export default function BrandNYTTypography() {
 
       {/* ── 3. Font Mapping Table ─────────────────────────────── */}
       <SubSectionLabel>NYT &rarr; TRR Font Mapping</SubSectionLabel>
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-6 overflow-x-auto">
+      <div className="dd-brand-card p-4 mb-6 overflow-x-auto">
         <table
           className="w-full text-left"
           style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
         >
           <thead>
-            <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
               <th
                 className="py-1 pr-4 font-semibold"
                 style={{ color: "var(--dd-ink-black)" }}
@@ -462,7 +462,7 @@ export default function BrandNYTTypography() {
           </thead>
           <tbody>
             {FONT_MAP.map((m) => (
-              <tr key={m.nyt} style={{ borderBottom: "1px solid #f0f0f0" }}>
+              <tr key={m.nyt} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                 <td
                   className="py-1 pr-4 font-mono"
                   style={{ color: "var(--dd-ink-faint)" }}
@@ -475,7 +475,7 @@ export default function BrandNYTTypography() {
                 >
                   {m.trr}
                 </td>
-                <td className="py-1 font-mono" style={{ color: "#326891" }}>
+                <td className="py-1 font-mono" style={{ color: "var(--dd-brand-accent)" }}>
                   {m.cssVar}
                 </td>
               </tr>
@@ -486,13 +486,13 @@ export default function BrandNYTTypography() {
 
       {/* ── 4. Usage Across Articles ──────────────────────────── */}
       <SubSectionLabel>Usage Across Articles</SubSectionLabel>
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-8 overflow-x-auto">
+      <div className="dd-brand-card p-4 mb-8 overflow-x-auto">
         <table
           className="w-full text-left"
           style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
         >
           <thead>
-            <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
               <th
                 className="py-1 pr-4 font-semibold"
                 style={{ color: "var(--dd-ink-black)" }}
@@ -515,7 +515,7 @@ export default function BrandNYTTypography() {
           </thead>
           <tbody>
             {fontUsage.map((row) => (
-              <tr key={row.font} style={{ borderBottom: "1px solid #f0f0f0" }}>
+              <tr key={row.font} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                 <td
                   className="py-1 pr-4 font-mono"
                   style={{ color: "var(--dd-ink-faint)" }}
@@ -556,7 +556,7 @@ export default function BrandNYTTypography() {
         {FONT_SPECIMENS.map((specimen) => (
           <div
             key={specimen.name}
-            className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm"
+            className="dd-brand-card p-5"
           >
             <div
               style={{
@@ -565,7 +565,7 @@ export default function BrandNYTTypography() {
                 fontWeight: 600,
                 textTransform: "uppercase" as const,
                 letterSpacing: "0.08em",
-                color: "#326891",
+                color: "var(--dd-brand-accent)",
                 marginBottom: 12,
               }}
             >
@@ -665,7 +665,7 @@ export default function BrandNYTTypography() {
                 color: "var(--dd-ink-faint)",
                 marginTop: 12,
                 paddingTop: 8,
-                borderTop: "1px solid #f0f0f0",
+                borderTop: "1px solid var(--dd-brand-border-subtle)",
                 wordBreak: "break-all",
               }}
             >
@@ -704,7 +704,7 @@ export default function BrandNYTTypography() {
           return (
             <div
               key={article.id}
-              className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden"
+              className="dd-brand-card overflow-hidden"
             >
               {/* Expandable header */}
               <button
@@ -749,7 +749,7 @@ export default function BrandNYTTypography() {
                   style={{
                     fontFamily: "var(--dd-font-sans)",
                     fontSize: 18,
-                    color: "#326891",
+                    color: "var(--dd-brand-accent)",
                     transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
                     transition: "transform 0.2s ease",
                     flexShrink: 0,
@@ -765,7 +765,7 @@ export default function BrandNYTTypography() {
                 <div
                   style={{
                     padding: "0 16px 16px",
-                    borderTop: "1px solid #f0f0f0",
+                    borderTop: "1px solid var(--dd-brand-border-subtle)",
                   }}
                 >
                   {article.fonts.map((font) => (
@@ -798,7 +798,7 @@ export default function BrandNYTTypography() {
                         className="font-mono"
                         style={{
                           fontSize: 10,
-                          color: "#326891",
+                          color: "var(--dd-brand-accent)",
                           marginBottom: 6,
                         }}
                       >
@@ -824,7 +824,7 @@ export default function BrandNYTTypography() {
                               lineHeight: 1.6,
                               color: "var(--dd-ink-faint)",
                               paddingLeft: 8,
-                              borderLeft: "2px solid #e5e5e5",
+                              borderLeft: "2px solid var(--dd-brand-border)",
                               marginBottom:
                                 i < font.usedIn.length - 1 ? 4 : 0,
                             }}

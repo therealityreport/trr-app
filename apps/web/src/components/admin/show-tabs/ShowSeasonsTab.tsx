@@ -23,6 +23,8 @@ type ShowSeason = {
   season_number: number;
   overview: string | null;
   air_date: string | null;
+  premiere_date?: string | null;
+  last_episode_air_date?: string | null;
   tmdb_season_id: number | null;
 };
 

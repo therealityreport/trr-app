@@ -38,6 +38,33 @@ apps/web/src/components/admin/design-docs/sections/Brand{Name}Section.tsx
 
 where `{Name}` is the PascalCase brand name (e.g., `NYT`, `WashPost`, `Guardian`).
 
+## MANDATORY: 15-Tab Scaffolding in create-brand Mode
+
+When this skill runs in `create-brand` mode (creating a brand for the first time), ALL 15 tab page files MUST be created immediately:
+
+1. Create all 15 tab page component files in `sections/brand-{slug}/`:
+   - `Brand{Name}DesignTokens.tsx`
+   - `Brand{Name}Primitives.tsx`
+   - `Brand{Name}Feedback.tsx`
+   - `Brand{Name}Navigation.tsx`
+   - `Brand{Name}DataDisplay.tsx`
+   - `Brand{Name}Charts.tsx`
+   - `Brand{Name}Layout.tsx`
+   - `Brand{Name}Forms.tsx`
+   - `Brand{Name}OtherComponents.tsx`
+   - `Brand{Name}ABTesting.tsx`
+   - `Brand{Name}DevStack.tsx`
+   - `Brand{Name}SocialMedia.tsx`
+   - `Brand{Name}Emails.tsx`
+   - `Brand{Name}Pages.tsx`
+   - `Brand{Name}Resources.tsx`
+2. Each file dynamically reads from the ARTICLES array — never hardcoded data
+3. Sub-sections only render when data exists (conditional rendering)
+4. Empty tabs show a "No components discovered yet" placeholder
+5. DO NOT skip tabs. ALL 15 must exist from the start.
+
+This ensures the brand page has the full 15-tab navigation immediately, even if most tabs start empty.
+
 ## Reference Pattern
 
 The canonical reference is `BrandNYTSection.tsx` at:
@@ -71,9 +98,9 @@ Define an inline `SectionLabel` component. It renders an `<h3>` with:
 - `fontWeight: 600`
 - `textTransform: "uppercase"`
 - `letterSpacing: "0.12em"`
-- `color:` the brand accent color (e.g. `"#326891"` for NYT)
+- `color: "var(--dd-brand-accent)"` — resolved per brand by the CSS scope class
 - `marginBottom: 8`, `marginTop: 32`
-- `borderLeft: "3px solid {accentColor}"`
+- `borderLeft: "3px solid var(--dd-brand-accent)"`
 - `paddingLeft: 10`
 
 Accepts `children: React.ReactNode` and optional `id?: string`.
@@ -239,8 +266,8 @@ map to the new taxonomy:
 
 | Element | Classes |
 |---------|---------|
-| Card | `rounded-xl border border-zinc-200 bg-white p-4 shadow-sm` |
-| Card (small) | `rounded-xl border border-zinc-200 bg-white p-3 shadow-sm` |
+| Card | `dd-brand-card p-4` — the `dd-brand-card` CSS class handles bg, border, radius, shadow, and hover |
+| Card (small) | `dd-brand-card p-3` |
 | Primary grid | `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3` |
 | Color grid (core) | `grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6` |
 | Color grid (graphics) | `grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6` |
@@ -258,7 +285,26 @@ map to the new taxonomy:
 | `var(--dd-ink-black)` | Primary text color |
 | `var(--dd-ink-faint)` | Secondary/muted text color |
 
-Accent color (e.g. `#326891` for NYT) is hardcoded per brand, NOT a CSS variable.
+Accent color uses `var(--dd-brand-accent)`. The `.brand-scope-*` class on the
+parent `.design-docs` container sets the correct accent per brand. Do NOT
+hardcode accent hex values — always use the CSS variable.
+
+### Brand chrome CSS variable reference
+
+| Variable | Purpose |
+|----------|---------|
+| `var(--dd-brand-accent)` | Brand accent color |
+| `var(--dd-brand-accent-bg)` | Light accent background |
+| `var(--dd-brand-text-primary)` | Primary text |
+| `var(--dd-brand-text-secondary)` | Secondary text |
+| `var(--dd-brand-text-muted)` | Muted text |
+| `var(--dd-brand-section-label)` | Section label color |
+| `var(--dd-brand-surface)` | Card/component background |
+| `var(--dd-brand-border)` | Border color |
+| `var(--dd-brand-border-subtle)` | Subtle border color |
+| `var(--dd-brand-bg)` | Page background |
+| `var(--dd-brand-stat-number)` | Stat number color |
+| `var(--dd-brand-link)` | Link text color |
 
 ## Step-by-step generation procedure
 

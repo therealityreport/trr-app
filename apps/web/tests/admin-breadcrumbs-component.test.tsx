@@ -9,7 +9,7 @@ describe("AdminBreadcrumbs component", () => {
     render(
       <AdminBreadcrumbs
         items={[
-          { label: "Admin", href: "/admin" },
+          { label: "Admin", href: "/" },
           { label: "Brands", href: "/brands" },
           { label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
           { label: "ABC", href: "/brands/networks-and-streaming/network/abc" },
@@ -20,7 +20,7 @@ describe("AdminBreadcrumbs component", () => {
     const nav = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(nav).toBeInTheDocument();
 
-    expect(within(nav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    expect(within(nav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/");
     expect(within(nav).getByRole("link", { name: "Brands" })).toHaveAttribute(
       "href",
       "/brands",
@@ -38,7 +38,7 @@ describe("AdminBreadcrumbs component", () => {
     const { container } = render(
       <AdminBreadcrumbs
         items={[
-          { label: "Admin", href: "/admin" },
+          { label: "Admin", href: "/" },
           { label: "Shows", href: "/shows" },
           { label: "Sample Show", href: "/shows/sample-show" },
         ]}

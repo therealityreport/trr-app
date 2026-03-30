@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const mocks = vi.hoisted(() => ({
   fetchAdminWithAuth: vi.fn(),
@@ -11,8 +11,9 @@ vi.mock("next/link", () => ({
   default: ({
     children,
     href,
+    prefetch: _prefetch,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => (
     <a href={href} {...props}>
       {children}
     </a>
@@ -57,7 +58,7 @@ vi.mock("@/lib/admin/show-admin-routes", async () => {
       platform: string;
       handle: string;
       tab?: string;
-    }) => `/admin/social/${platform}/${handle}${tab && tab !== "stats" ? `/${tab}` : ""}`,
+    }) => `/social/${platform}/${handle}${tab && tab !== "stats" ? `/${tab}` : ""}`,
   };
 });
 
@@ -137,13 +138,104 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Backfill Posts runs the full-history catalog job. Sync Newer fetches only posts published after the latest stored post. Resume Tail continues from where the last backfill stopped. Sync Recent runs the same pipeline, limited to the last day.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("Catalog Posts")).toBeInTheDocument();
     expect(screen.getByText("Pending Review")).toBeInTheDocument();
     expect(screen.queryByText("Catalog Actions Unavailable In V1")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty-state banner instead of an error when the account has never been loaded", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({ error: "Social account profile not found." }, 404);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("No saved posts yet for @bravodailydish.")).toBeInTheDocument();
+    expect(screen.queryByText("Social account profile not found.")).not.toBeInTheDocument();
+  });
+
+  it("renders collaborator-backed Instagram posts without requiring a new run", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          account_handle: "bravodailydish",
+          total_posts: 1,
+          catalog_total_posts: 1,
+          live_catalog_total_posts: 1,
+          top_collaborators: [
+            {
+              handle: "bravo",
+              usage_count: 1,
+              post_count: 1,
+              shows: [],
+            },
+          ],
+        });
+      }
+      if (url.includes("/posts?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "catalog-post-1",
+              source_id: "C123",
+              platform: "instagram",
+              account_handle: "bravodailydish",
+              title: "Bravo Daily Dish x Bravo",
+              content: "Collaborator post already in the catalog.",
+              url: "https://www.instagram.com/p/C123/",
+              posted_at: "2026-03-22T12:00:00Z",
+              show_name: "The Real Housewives of Beverly Hills",
+              season_number: 14,
+              match_mode: "collaborator",
+              source_surface: "catalog",
+              metrics: {
+                engagement: 1250,
+                views: 9000,
+                comments_count: 42,
+              },
+            },
+          ],
+          pagination: {
+            page: 1,
+            page_size: 25,
+            total: 1,
+            total_pages: 1,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="posts" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Bravo Daily Dish x Bravo")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Collaborator match")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open post" })).toHaveAttribute(
+      "href",
+      "https://www.instagram.com/p/C123/",
+    );
   });
 
   it("queues a full-history catalog backfill from the primary CTA", async () => {
@@ -163,10 +255,10 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Update Posts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
 
     await waitFor(() => {
       expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
@@ -203,7 +295,7 @@ describe("SocialAccountProfilePage", () => {
     const { rerender } = render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -248,7 +340,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -444,7 +536,7 @@ describe("SocialAccountProfilePage", () => {
     const { rerender } = render(<SocialAccountProfilePage platform="youtube" handle="bravo" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
@@ -692,7 +784,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
@@ -823,7 +915,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
     });
 
     const failedRunCard = screen.getByText("Run run-fail").closest(".rounded-xl");
@@ -837,7 +929,7 @@ describe("SocialAccountProfilePage", () => {
         ),
       ).toBe(true);
     });
-    expect(screen.getByRole("button", { name: "Update Posts" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
   });
 
@@ -1142,6 +1234,90 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Waiting for Modal worker")).toBeInTheDocument();
     });
     expect(screen.getAllByText(/waiting for a Modal worker claim/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows a dispatch-blocked banner with the configured Modal target when dispatch resolution fails", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          account_handle: "bravodailydish",
+          catalog_recent_runs: [
+            {
+              run_id: "run-modal-blocked-1",
+              status: "queued",
+              created_at: "2026-03-26T01:13:50.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-modal-blocked-1/progress")) {
+        return jsonResponse({
+          run_id: "run-modal-blocked-1",
+          run_status: "queued",
+          source_scope: "bravo",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 0,
+              jobs_waiting: 1,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 0,
+            dispatch_blocked_jobs: 1,
+            modal_pending_jobs: 0,
+            modal_running_unclaimed_jobs: 0,
+            retrying_dispatch_jobs: 0,
+            stale_dispatch_failed_jobs: 0,
+            latest_dispatch_requested_at: "2026-03-26T01:13:50.000Z",
+            latest_dispatch_backend: "modal",
+            latest_dispatch_error_code: "modal_dispatch_failed",
+            latest_dispatch_error:
+              "Lookup failed for Function 'run_social_job' from the 'trr-backend-jobs' app: App 'trr-backend-jobs' not found in environment 'main'.",
+            latest_remote_blocked_reason: "modal_app_not_found",
+            configured_app_name: "trr-backend-jobs",
+            configured_function_name: "run_social_job",
+            modal_environment: "main",
+            max_stale_dispatch_retries: 3,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Modal dispatch blocked")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/blocked before claim/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/trr-backend-jobs\.run_social_job in env main/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Waiting for Modal worker")).not.toBeInTheDocument();
   });
 
   it("shows retrying remote dispatch when the backend is recovering stale unclaimed Modal dispatches", async () => {
@@ -1552,7 +1728,7 @@ describe("SocialAccountProfilePage", () => {
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/cancel-race-1/cancel")]);
     expect(progressCalls).toBeGreaterThan(1);
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Update Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
   });
 
@@ -1642,7 +1818,7 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/queued-run-1/cancel")]);
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Update Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
   });
 
@@ -1684,7 +1860,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Restart Backfill" })).not.toBeInTheDocument();
     expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
@@ -1880,7 +2056,9 @@ describe("SocialAccountProfilePage", () => {
         expect(screen.getAllByText("1,001").length).toBeGreaterThan(0);
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 5_500));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5_500));
+      });
       expect(summaryCalls).toBe(1);
       expect(screen.queryByText("1,234")).not.toBeInTheDocument();
     },
@@ -1936,7 +2114,9 @@ describe("SocialAccountProfilePage", () => {
         expect(screen.getByRole("heading", { name: "Distribution" })).toBeInTheDocument();
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 5_500));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5_500));
+      });
       expect(summaryCalls).toBe(1);
       expect(screen.getByRole("heading", { name: "Distribution" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
@@ -2067,7 +2247,7 @@ describe("SocialAccountProfilePage", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Update Posts" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
     expect(screen.getByText("Background")).toBeInTheDocument();
   });
 
@@ -2397,7 +2577,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="facebook" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Update Posts" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();

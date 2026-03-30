@@ -1,7 +1,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? "";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 let client: ReturnType<typeof createSupabaseClient> | null = null;
 
@@ -10,8 +10,7 @@ let warnedMissing = false;
 /**
  * Shared browser-safe Supabase client (singleton).
  *
- * Uses NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY when available,
- * falling back to SUPABASE_URL / SUPABASE_ANON_KEY for local dev.
+ * Uses NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY only.
  *
  * Returns `null` when env vars are missing so callers can degrade gracefully
  * instead of crashing the component tree.

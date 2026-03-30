@@ -48,6 +48,10 @@ describe("SystemHealthModal polling", () => {
       stale_after_seconds: number;
       by_stage?: Record<string, { total: number; healthy: number; fresh: number }>;
       by_platform?: Record<string, { total: number; healthy: number; fresh: number }>;
+      dispatcher_readiness?: {
+        resolved?: boolean;
+        reason?: string | null;
+      };
       workers: unknown[];
       reason: string | null;
     };
@@ -68,6 +72,11 @@ describe("SystemHealthModal polling", () => {
       recent_failures: unknown[];
       stuck_jobs: Array<Record<string, unknown>>;
       stuck_jobs_total: number;
+      dispatch_blocked_jobs?: Array<Record<string, unknown>>;
+      dispatch_blocked_jobs_total?: number;
+      dispatch_blocked_by_reason?: Record<string, number>;
+      waiting_for_claim_jobs_total?: number;
+      retrying_dispatch_jobs_total?: number;
     };
   };
   let workerDetailPayload: Record<string, unknown>;
@@ -110,6 +119,7 @@ describe("SystemHealthModal polling", () => {
         stale_running_count: 0,
         last_dispatch_success_at: "2026-03-02T12:05:00.000Z",
         last_dispatch_error: null,
+        dispatcher_readiness: { resolved: true, reason: null },
         by_stage: { posts: { total: 1, healthy: 1, fresh: 1 } },
         by_platform: { instagram: { total: 1, healthy: 1, fresh: 1 } },
         workers: [],
@@ -125,6 +135,11 @@ describe("SystemHealthModal polling", () => {
         recent_failures: [],
         stuck_jobs: [],
         stuck_jobs_total: 0,
+        dispatch_blocked_jobs: [],
+        dispatch_blocked_jobs_total: 0,
+        dispatch_blocked_by_reason: {},
+        waiting_for_claim_jobs_total: 0,
+        retrying_dispatch_jobs_total: 0,
       },
     };
     workerDetailPayload = {
@@ -605,7 +620,41 @@ describe("SystemHealthModal polling", () => {
     expect(
       screen.getByText("Workers are available. Recent failures are historical, but they are still worth reviewing."),
     ).toBeInTheDocument();
-    expect(screen.getByText("1 recent failures")).toBeInTheDocument();
+    expect(screen.getByText("0 likely stuck · 1 recent failures")).toBeInTheDocument();
+  });
+
+  it("hides stale-only worker stage cards when current stage capacity exists", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      workers: {
+        ...queueStatusPayload.workers,
+        total_workers: 8,
+        by_stage: {
+          any: { total: 7, healthy: 1, fresh: 1 },
+          post_classify: { total: 1, healthy: 0, fresh: 0 },
+        },
+        workers: [
+          {
+            worker_id: "modal:social-dispatcher",
+            stage: "any",
+            status: "idle",
+            last_seen_at: new Date().toISOString(),
+            is_healthy: true,
+            supported_platforms: ["instagram"],
+            metadata: { hostname: "social-dispatcher" },
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Any workers")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("1 healthy · 1 seen recently · 7 recorded")).toBeInTheDocument();
+    expect(screen.queryByText("Post Classify workers")).not.toBeInTheDocument();
   });
 
   it("dismisses a recent failure from the panel", async () => {
@@ -737,6 +786,58 @@ describe("SystemHealthModal polling", () => {
       expect(
         fetchAdminWithAuthMock.mock.calls.some(([input]) =>
           String(input).includes("/api/admin/trr-api/social/ingest/stuck-jobs/cancel"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("renders dispatch-blocked jobs and cancels one independently", async () => {
+    queueStatusPayload = {
+      ...queueStatusPayload,
+      workers: {
+        ...queueStatusPayload.workers,
+        dispatcher_readiness: { resolved: false, reason: "modal_sdk_unavailable" },
+      },
+      queue: {
+        ...queueStatusPayload.queue,
+        dispatch_blocked_jobs_total: 1,
+        dispatch_blocked_by_reason: { modal_sdk_unavailable: 1 },
+        dispatch_blocked_jobs: [
+          {
+            id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            run_id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+            platform: "instagram",
+            job_type: "post_classify",
+            status: "queued",
+            worker_id: null,
+            created_at: "2026-03-02T12:00:00.000Z",
+            heartbeat_at: null,
+            available_at: "2026-03-02T12:03:00.000Z",
+            error_message: "No module named 'modal'",
+            last_error_code: "modal_dispatch_failed",
+            stuck_reason: "modal_sdk_unavailable",
+            stuck_for_seconds: 620,
+          },
+        ],
+      },
+    };
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Dispatch Blocked").length).toBeGreaterThan(0);
+      expect(screen.getByText("Modal SDK unavailable in dispatcher runtime")).toBeInTheDocument();
+      expect(
+        screen.getByText("Dispatch is blocked by the current Modal runtime or function resolution."),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel all dispatch-blocked jobs" }));
+
+    await waitFor(() => {
+      expect(
+        fetchAdminWithAuthMock.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/ingest/dispatch-blocked-jobs/cancel"),
         ),
       ).toBe(true);
     });

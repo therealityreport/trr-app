@@ -20,7 +20,7 @@ export default async function BrandAthleticTabPage({ params }: Props) {
   const { tab } = await params;
 
   if (!VALID_TABS.has(tab)) {
-    redirect("/admin/design-docs/brand-the-athletic/typography");
+    redirect("/design-docs/brand-the-athletic/typography");
   }
 
   return <DesignDocsPageClient activeSection="brand-the-athletic" brandTab={tab} />;

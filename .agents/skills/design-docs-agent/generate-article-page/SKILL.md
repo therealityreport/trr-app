@@ -943,3 +943,84 @@ If the new article introduces a data structure that the brand tab doesn't handle
 logic.
 
 See `sync-brand-page/SKILL.md` for the full verification checklist.
+
+---
+
+### Typed Renderer Mapping (NEW)
+
+Every `contentBlocks` entry MUST map to a named renderer component. The mapping is:
+
+| Block Type | Renderer Component | Data Source |
+|-----------|-------------------|-------------|
+| `header` | (built-in ArticleDetailPage) | article title/date/section |
+| `byline` | (built-in ArticleDetailPage) | article authors/date |
+| `ai2html` | `Ai2htmlArtboard` | overlays from `Ai2htmlArtboard.tsx` |
+| `subhed` | (built-in) | `text` field on the block |
+| `birdkit-chart` | `InteractiveBarChart` or similar | named data constant from `chart-data.ts` |
+| `birdkit-table` | `MedalTable` / `MedalTableGrid` | named data constant |
+| `birdkit-table-interactive` | `MedalTableInteractive` | named data constant |
+| `datawrapper-table` | `DatawrapperTable` | named data constant |
+| `showcase-link` | (built-in) | `title`, `href`, `imageUrl`, `excerpt` on block |
+| `twitter-embed` | (built-in) | `author`, `text`, `url` on block |
+| `ad-container` | (built-in) | `position` field |
+| `puzzle-entry-point` | (built-in) | `game`, `title`, `subtitle` on block |
+| `featured-image` | (built-in) | `url`, `credit`, `caption` on block |
+| `storyline` | (built-in) | `title`, `links[]` on block |
+| `author-bio` | (built-in) | article authors |
+| `related-link` | (built-in) | `title`, `url`, `imageUrl`, `summary` on block |
+
+Before emitting contentBlocks, validate that every `type` value appears in this table. If a new type is needed, document it and ensure a renderer exists.
+
+### Cross-Population Candidate List (NEW)
+
+After generating the article config, emit a list of cross-population candidates:
+```
+crossPopulation: {
+  newFonts: string[],           // font names not in any existing article
+  newColors: string[],          // hex values not in any existing article
+  newChartTypes: string[],      // chart types not yet seen for this brand
+  newComponentTypes: string[],  // contentBlock types not yet seen for this brand
+  newIcons: string[],           // icon names not in existing brand resources
+}
+```
+This list helps `sync-brand-page` know exactly what changed and which sections need updating.
+
+---
+
+## MANDATORY: usedIn Format Enforcement
+
+Every `usedIn` entry in the `fonts` array MUST follow this parseable format:
+
+```
+"element.ClassName: {fontSize}px/{fontWeight}/{lineHeight}px [font-style:X] [text-align:X] [letter-spacing:Xem] [text-transform:X] #hexColor"
+```
+
+Examples:
+- `"h1.e1h9b8zs0: 40px/400/44px 0px #121212"`
+- `"p.g-body: 16px/400/28px #333333"`
+- `"h2.Storyline__heading: 15px/700/15px 0px #121212"`
+
+Do NOT use vague descriptions like `"Article headline"` or `"Chart axis labels"`. The format must include the actual className, fontSize, fontWeight, lineHeight, and color extracted from the source HTML.
+
+If a `usedIn` string does not contain at minimum a className, fontSize, fontWeight, and hex color, REJECT it and re-extract from the source.
+
+---
+
+## MANDATORY: Extract Actual Computed Styles
+
+NEVER assume text styles from a font name, role, or lookup table. ALWAYS extract actual computed styles from the source HTML/CSS for THIS article:
+
+1. Read the source HTML for each heading element (h1, h2, h3) and body text
+2. Extract the ACTUAL values: fontSize, fontWeight, fontStyle, lineHeight, textAlign, color, letterSpacing
+3. Write specimens EXACTLY as they appear in the source
+
+### h2/h3 Differentiation STOP Rule
+
+If the extracted h2 and h3 have identical fontSize AND fontWeight AND lineHeight, STOP and re-inspect the source. They ALWAYS differ in production. Common causes of false-identical extraction:
+- Both h2 and h3 resolved to the same CSS rule because the selector was too broad
+- The extraction read only one heading level and assumed the other matches
+- The source HTML was incomplete
+
+### Per-Article Independence
+
+NEVER copy font or color data from another article's config entry, even within the same brand. Each article's extraction must produce fresh metrics from its own source HTML. After extraction, compare against existing ARTICLES entries — if byte-identical to ANY other article, discard and re-extract.

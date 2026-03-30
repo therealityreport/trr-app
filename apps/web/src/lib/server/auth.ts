@@ -7,6 +7,7 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 import { adminAuth } from "@/lib/firebaseAdmin";
 import { DEFAULT_ADMIN_DISPLAY_NAMES, DEFAULT_ADMIN_UIDS } from "@/lib/admin/constants";
 import { normalizeDisplayNameKey } from "@/lib/admin/display-names";
+import { getTrrAdminServiceKey, getTrrAdminUrl } from "@/lib/server/supabase-trr-admin";
 
 export type AuthProvider = "firebase" | "supabase";
 export type AuthTokenClaims = {
@@ -189,10 +190,12 @@ async function verifyFirebaseToken(token: string, kind: TokenKind): Promise<Auth
 }
 
 async function verifySupabaseToken(token: string): Promise<AuthTokenClaims | null> {
-  const supabaseUrl = process.env.TRR_CORE_SUPABASE_URL;
-  const supabaseServiceRoleKey =
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseServiceRoleKey) {
+  let supabaseUrl: string;
+  let supabaseServiceRoleKey: string;
+  try {
+    supabaseUrl = getTrrAdminUrl();
+    supabaseServiceRoleKey = getTrrAdminServiceKey();
+  } catch {
     return null;
   }
 

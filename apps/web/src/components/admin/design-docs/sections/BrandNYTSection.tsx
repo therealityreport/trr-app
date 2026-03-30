@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 /* ------------------------------------------------------------------ */
@@ -47,63 +48,63 @@ function countComponents(): number {
 
 const TABS = [
   {
-    href: "/admin/design-docs/brand-nyt/typography",
+    href: buildDesignDocsPath("brand-nyt/typography"),
     label: "Typography",
     description: "Cheltenham, Franklin, Imperial — all weights, specimens, and usage across articles",
     stat: `${countFonts()} font families`,
     icon: "Aa",
   },
   {
-    href: "/admin/design-docs/brand-nyt/colors",
+    href: buildDesignDocsPath("brand-nyt/colors"),
     label: "Colors",
     description: "Core tokens, graphics palette, Datawrapper theme, and per-article chart colors",
     stat: "5 palettes",
     icon: "C",
   },
   {
-    href: "/admin/design-docs/brand-nyt/layout",
+    href: buildDesignDocsPath("brand-nyt/layout"),
     label: "Layout & Tokens",
     description: "600px body column, margin system, responsive breakpoints, content block types",
     stat: "7+ tokens",
     icon: "L",
   },
   {
-    href: "/admin/design-docs/brand-nyt/architecture",
+    href: buildDesignDocsPath("brand-nyt/architecture"),
     label: "Architecture",
     description: "Birdkit/SvelteKit framework, Datawrapper integration, CSS files, project IDs",
     stat: `${nytArticles.length} projects`,
     icon: "A",
   },
   {
-    href: "/admin/design-docs/brand-nyt/charts",
+    href: buildDesignDocsPath("brand-nyt/charts"),
     label: "Charts & Graphs",
     description: "Line, bar, stacked-area, ai2html, Birdkit tables — full catalog with links",
     stat: `${countCharts()} chart types`,
     icon: "G",
   },
   {
-    href: "/admin/design-docs/brand-nyt/components",
+    href: buildDesignDocsPath("brand-nyt/components"),
     label: "Components",
     description: "Quote containers, ai2html artboards, Birdkit tables, storyline bars, and more",
     stat: `${countComponents()} types`,
     icon: "K",
   },
   {
-    href: "/admin/design-docs/brand-nyt/resources",
+    href: buildDesignDocsPath("brand-nyt/resources"),
     label: "Resources",
     description: "External assets, CSS inventory, Datawrapper URLs, social images, author headshots",
     stat: `${nytArticles.length} articles`,
     icon: "R",
   },
   {
-    href: "/admin/design-docs/nyt-tech-stack",
+    href: buildDesignDocsPath("nyt-tech-stack"),
     label: "Tech Stack",
     description: "Complete asset inventory — stylesheets, scripts, sitemaps, Birdkit framework",
     stat: "Full inventory",
     icon: "T",
   },
   {
-    href: "/admin/design-docs/nyt-articles",
+    href: buildDesignDocsPath("nyt-articles"),
     label: "Pages",
     description: "Article-level design breakdowns with interactive charts, typography, and colors",
     stat: `${nytArticles.length} articles`,
@@ -138,7 +139,7 @@ export default function BrandNYTSection() {
               style={{
                 fontSize: 28,
                 fontWeight: 700,
-                color: "#326891",
+                color: "var(--dd-brand-stat-number)",
                 lineHeight: 1,
               }}
             >
@@ -166,18 +167,17 @@ export default function BrandNYTSection() {
           <Link
             key={tab.href}
             href={tab.href as Route}
-            className="group rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-zinc-300"
+            className="dd-brand-card group p-5"
             style={{ display: "block", textDecoration: "none" }}
           >
             {/* Icon + label */}
             <div className="flex items-center gap-3 mb-3">
               <div
+                className="dd-brand-pill"
                 style={{
                   width: 36,
                   height: 36,
                   borderRadius: 8,
-                  background: "#e8f0fe",
-                  color: "#326891",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -201,7 +201,7 @@ export default function BrandNYTSection() {
                 </div>
                 <div
                   className="font-mono"
-                  style={{ fontSize: 10, color: "#326891" }}
+                  style={{ fontSize: 10, color: "var(--dd-brand-link)" }}
                 >
                   {tab.stat}
                 </div>
@@ -227,7 +227,7 @@ export default function BrandNYTSection() {
                 fontFamily: "var(--dd-font-sans)",
                 fontSize: 12,
                 fontWeight: 600,
-                color: "#326891",
+                color: "var(--dd-brand-link)",
                 opacity: 0.6,
                 transition: "opacity 150ms",
               }}
@@ -247,15 +247,15 @@ export default function BrandNYTSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.12em",
-            color: "#326891",
+            color: "var(--dd-brand-accent)",
             marginBottom: 12,
-            borderLeft: "3px solid #326891",
+            borderLeft: "3px solid var(--dd-brand-accent)",
             paddingLeft: 10,
           }}
         >
           Articles
         </h3>
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm overflow-x-auto">
+        <div className="dd-brand-card overflow-x-auto p-4">
           <table
             className="w-full text-left"
             style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
@@ -274,8 +274,8 @@ export default function BrandNYTSection() {
                 <tr key={article.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
                   <td className="py-1.5 pr-4">
                     <Link
-                      href={`/admin/design-docs/nyt-articles/${article.id}` as Route}
-                      style={{ color: "#326891", textDecoration: "underline", fontWeight: 500 }}
+                      href={buildDesignDocsPath(`nyt-articles/${article.id}`)}
+                      style={{ color: "var(--dd-brand-link)", textDecoration: "underline", fontWeight: 500 }}
                     >
                       {article.title.length > 50 ? `${article.title.slice(0, 47)}…` : article.title}
                     </Link>
@@ -288,14 +288,24 @@ export default function BrandNYTSection() {
                   </td>
                   <td className="py-1.5 pr-4">
                     <span
-                      className="rounded-full px-2 py-0.5"
+                      className="dd-brand-pill rounded-full px-2 py-0.5"
                       style={{
                         fontSize: 10,
                         fontWeight: 600,
                         letterSpacing: "0.04em",
                         textTransform: "uppercase" as const,
-                        background: article.type === "interactive" ? "#e8f0fe" : "#f0f0f0",
-                        color: article.type === "interactive" ? "#326891" : "#666",
+                        background:
+                          article.type === "interactive"
+                            ? "var(--dd-brand-accent-bg)"
+                            : "var(--dd-brand-surface-alt)",
+                        color:
+                          article.type === "interactive"
+                            ? "var(--dd-brand-accent)"
+                            : "var(--dd-brand-text-secondary)",
+                        borderColor:
+                          article.type === "interactive"
+                            ? "color-mix(in srgb, var(--dd-brand-accent) 18%, transparent)"
+                            : "var(--dd-brand-border-subtle)",
                       }}
                     >
                       {article.type}

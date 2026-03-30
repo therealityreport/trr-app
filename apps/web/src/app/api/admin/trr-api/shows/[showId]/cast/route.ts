@@ -55,6 +55,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       String(searchParams.get("exclude_zero_episode_members") ?? "").trim().toLowerCase() === "1" ||
       String(searchParams.get("exclude_zero_episode_members") ?? "").trim().toLowerCase() === "true";
     const requireImage = searchParams.get("requireImage");
+    const includePhotos =
+      String(searchParams.get("include_photos") ?? "").trim().toLowerCase() === "false" ||
+      String(searchParams.get("include_photos") ?? "").trim().toLowerCase() === "0"
+        ? false
+        : true;
     const rosterModeRaw = String(searchParams.get("roster_mode") ?? "").trim().toLowerCase();
     const rosterMode: CastRosterMode =
       rosterModeRaw === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence";
@@ -73,6 +78,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         });
         if (excludeZeroEpisodeMembers) upstreamParams.set("exclude_zero_episode_members", "true");
         if (requireImage === "true" || requireImage === "1") upstreamParams.set("requireImage", "true");
+        if (!includePhotos) upstreamParams.set("include_photos", "false");
 
         const upstream = await fetchAdminBackendJson(
           `/admin/trr-api/shows/${showId}/cast?${upstreamParams.toString()}`,

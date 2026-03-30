@@ -9,6 +9,7 @@ import BrandsTabs from "@/components/admin/BrandsTabs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import BrandLogoOptionsModal from "@/components/admin/BrandLogoOptionsModal";
 import { buildBrandsPageBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { normalizeEntityKey, toEntitySlug } from "@/lib/admin/networks-streaming-entity";
 import {
@@ -875,7 +876,7 @@ export default function AdminNetworksPage() {
             </div>
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/admin"
+                href={ADMIN_ROOT_PATH}
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Back to Admin

@@ -219,7 +219,7 @@ export default function AdminSocialMediaPage() {
           </p>
           <div className="mt-4">
             <Link
-              href="/admin"
+              href="/"
               className="inline-flex rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
             >
               Back to Admin
@@ -236,12 +236,12 @@ export default function AdminSocialMediaPage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Social Analytics", "/admin/social")} className="mb-1" />
+              <AdminBreadcrumbs items={buildAdminSectionBreadcrumb("Social Analytics", "/social")} className="mb-1" />
               <h1 className="text-3xl font-bold text-zinc-900">Social Analytics</h1>
               <p className="text-sm text-zinc-500">Select a covered show to open Bravo social analytics.</p>
             </div>
             <Link
-              href="/admin"
+              href="/"
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Back to Admin

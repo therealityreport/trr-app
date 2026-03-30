@@ -1,6 +1,6 @@
 # Social Account Catalog Cancel Reconciliation And Proxy Hardening
 
-Last updated: 2026-03-22
+Last updated: 2026-03-30
 
 ## Status
 - App phase complete.
@@ -22,10 +22,10 @@ Last updated: 2026-03-22
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-22
-  current_phase: "shared social-account cancel reconciliation and proxy hardening shipped"
-  next_action: "reload the TikTok or Instagram shared-account page and verify stale active banners clear promptly after cancel, even if the first network attempt is noisy"
+  include: false
+  state: archived
+  last_updated: 2026-03-30
+  current_phase: "archived continuity note"
+  next_action: "Refer to newer status notes if follow-up work resumes on this thread."
   detail: self
 ```

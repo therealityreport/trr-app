@@ -1,3 +1,5 @@
+import { buildDesignDocsPath } from "./admin-route-paths.ts";
+
 export type DesignDocSectionId =
   | "overview"
   | "app-styles"
@@ -303,38 +305,38 @@ const NYT_GAMES_SUB_SECTIONS: readonly BrandSubSection[] = [
 
 /* NYT master brand sub-sections — each tab is its own page */
 const NYT_BRAND_SUB_SECTIONS: readonly BrandSubSection[] = [
-  { anchor: "typography", label: "Typography", href: "/admin/design-docs/brand-nyt/typography" },
-  { anchor: "colors", label: "Colors", href: "/admin/design-docs/brand-nyt/colors" },
-  { anchor: "layout", label: "Layout & Tokens", href: "/admin/design-docs/brand-nyt/layout" },
-  { anchor: "architecture", label: "Architecture", href: "/admin/design-docs/brand-nyt/architecture" },
-  { anchor: "charts", label: "Charts & Graphs", href: "/admin/design-docs/brand-nyt/charts" },
-  { anchor: "components", label: "Components", href: "/admin/design-docs/brand-nyt/components" },
-  { anchor: "resources", label: "Resources", href: "/admin/design-docs/brand-nyt/resources" },
-  { anchor: "tech-stack", label: "Tech Stack", href: "/admin/design-docs/nyt-tech-stack" },
-  { anchor: "pages", label: "Pages", href: "/admin/design-docs/nyt-articles" },
+  { anchor: "typography", label: "Typography", href: buildDesignDocsPath("brand-nyt/typography") },
+  { anchor: "colors", label: "Colors", href: buildDesignDocsPath("brand-nyt/colors") },
+  { anchor: "layout", label: "Layout & Tokens", href: buildDesignDocsPath("brand-nyt/layout") },
+  { anchor: "architecture", label: "Architecture", href: buildDesignDocsPath("brand-nyt/architecture") },
+  { anchor: "charts", label: "Charts & Graphs", href: buildDesignDocsPath("brand-nyt/charts") },
+  { anchor: "components", label: "Components", href: buildDesignDocsPath("brand-nyt/components") },
+  { anchor: "resources", label: "Resources", href: buildDesignDocsPath("brand-nyt/resources") },
+  { anchor: "tech-stack", label: "Tech Stack", href: buildDesignDocsPath("nyt-tech-stack") },
+  { anchor: "pages", label: "Pages", href: buildDesignDocsPath("nyt-articles") },
 ] as const;
 
 /* The Athletic expanded sub-sections — each tab is its own page */
 const ATHLETIC_BRAND_SUB_SECTIONS: readonly BrandSubSection[] = [
-  { anchor: "typography", label: "Typography", href: "/admin/design-docs/brand-the-athletic/typography" },
-  { anchor: "colors", label: "Colors", href: "/admin/design-docs/brand-the-athletic/colors" },
-  { anchor: "components", label: "Components", href: "/admin/design-docs/brand-the-athletic/components" },
-  { anchor: "icons", label: "Icons", href: "/admin/design-docs/brand-the-athletic/icons" },
-  { anchor: "layouts", label: "Layouts", href: "/admin/design-docs/brand-the-athletic/layouts" },
-  { anchor: "layout", label: "Layout", href: "/admin/design-docs/brand-the-athletic/layout" },
-  { anchor: "shapes", label: "Shapes & Radius", href: "/admin/design-docs/brand-the-athletic/shapes" },
-  { anchor: "resources", label: "Resources", href: "/admin/design-docs/brand-the-athletic/resources" },
-  { anchor: "pages", label: "Pages", href: "/admin/design-docs/athletic-articles" },
+  { anchor: "typography", label: "Typography", href: buildDesignDocsPath("brand-the-athletic/typography") },
+  { anchor: "colors", label: "Colors", href: buildDesignDocsPath("brand-the-athletic/colors") },
+  { anchor: "components", label: "Components", href: buildDesignDocsPath("brand-the-athletic/components") },
+  { anchor: "icons", label: "Icons", href: buildDesignDocsPath("brand-the-athletic/icons") },
+  { anchor: "layouts", label: "Layouts", href: buildDesignDocsPath("brand-the-athletic/layouts") },
+  { anchor: "layout", label: "Layout", href: buildDesignDocsPath("brand-the-athletic/layout") },
+  { anchor: "shapes", label: "Shapes & Radius", href: buildDesignDocsPath("brand-the-athletic/shapes") },
+  { anchor: "resources", label: "Resources", href: buildDesignDocsPath("brand-the-athletic/resources") },
+  { anchor: "pages", label: "Pages", href: buildDesignDocsPath("athletic-articles") },
 ] as const;
 
 /* New York Mag expanded sub-sections — each tab is its own page */
 const NYMAG_BRAND_SUB_SECTIONS: readonly BrandSubSection[] = [
-  { anchor: "typography", label: "Typography", href: "/admin/design-docs/brand-nymag/typography" },
-  { anchor: "colors", label: "Colors", href: "/admin/design-docs/brand-nymag/colors" },
-  { anchor: "components", label: "Components", href: "/admin/design-docs/brand-nymag/components" },
-  { anchor: "layout", label: "Layout", href: "/admin/design-docs/brand-nymag/layout" },
-  { anchor: "shapes", label: "Shapes & Radius", href: "/admin/design-docs/brand-nymag/shapes" },
-  { anchor: "resources", label: "Resources", href: "/admin/design-docs/brand-nymag/resources" },
+  { anchor: "typography", label: "Typography", href: buildDesignDocsPath("brand-nymag/typography") },
+  { anchor: "colors", label: "Colors", href: buildDesignDocsPath("brand-nymag/colors") },
+  { anchor: "components", label: "Components", href: buildDesignDocsPath("brand-nymag/components") },
+  { anchor: "layout", label: "Layout", href: buildDesignDocsPath("brand-nymag/layout") },
+  { anchor: "shapes", label: "Shapes & Radius", href: buildDesignDocsPath("brand-nymag/shapes") },
+  { anchor: "resources", label: "Resources", href: buildDesignDocsPath("brand-nymag/resources") },
 ] as const;
 
 /** Returns per-brand sub-section anchors — NYT and NYT Games get expanded lists, others get generic */
@@ -425,9 +427,36 @@ const SECTION_PARENT_MAP: Partial<Record<DesignDocSectionId, DesignDocSectionId>
   "athletic-articles": "brand-the-athletic",
 };
 
+const BRAND_SCOPE_CLASS_MAP: Partial<Record<DesignDocSectionId, string>> = {
+  "brand-nyt": "brand-scope-nyt",
+  "brand-nyt-games": "brand-scope-nyt-games",
+  "brand-nyt-magazine": "brand-scope-nyt-magazine",
+  "brand-wirecutter": "brand-scope-wirecutter",
+  "brand-the-athletic": "brand-scope-athletic",
+  "brand-nyt-opinion": "brand-scope-nyt-opinion",
+  "brand-nyt-cooking": "brand-scope-nyt-cooking",
+  "brand-nyt-style": "brand-scope-nyt-style",
+  "brand-nyt-store": "brand-scope-nyt-store",
+  "brand-nymag": "brand-scope-nymag",
+};
+
 /** Returns the conceptual parent section for sidebar expansion (e.g. nyt-tech-stack → brand-nyt) */
 export function getParentSection(id: DesignDocSectionId): DesignDocSectionId | null {
   return SECTION_PARENT_MAP[id] ?? null;
+}
+
+export function getBrandScopeClass(
+  sectionId: DesignDocSectionId,
+): string | null {
+  const brandSectionId = isBrandSection(sectionId)
+    ? sectionId
+    : getParentSection(sectionId);
+
+  if (!brandSectionId) {
+    return null;
+  }
+
+  return BRAND_SCOPE_CLASS_MAP[brandSectionId] ?? null;
 }
 
 /* ── Content Block Types ─────────────────────────── */
@@ -467,7 +496,40 @@ export type ContentBlock =
   | { type: "author-bio" }
   | { type: "related-link"; title: string; url: string; imageUrl: string; summary: string }
   | { type: "quote"; section: string; badge: string; badgeColor: string; text?: string; citation?: string }
-  | { type: "datawrapper-chart"; id: string; title: string; chartType: string; url: string; source?: string; note?: string };
+  | { type: "datawrapper-chart"; id: string; title: string; chartType: string; url: string; source?: string; note?: string }
+  | { type: "birdkit-countdown"; label: string; daysLeft: number }
+  | { type: "birdkit-animated-headline"; variants: readonly string[] }
+  | { type: "birdkit-state-selector"; stateCount: number; defaultState: string }
+  | { type: "birdkit-calendar"; months: readonly string[]; categories: readonly { key: string; label: string; color: string }[] }
+  | { type: "birdkit-state-data-section"; title: string }
+  | { type: "correction"; text: string; date: string };
+
+export const CONTENT_BLOCK_TYPE_IDS = [
+  "header",
+  "byline",
+  "ai2html",
+  "subhed",
+  "birdkit-chart",
+  "birdkit-table",
+  "birdkit-table-interactive",
+  "datawrapper-table",
+  "showcase-link",
+  "twitter-embed",
+  "ad-container",
+  "puzzle-entry-point",
+  "featured-image",
+  "storyline",
+  "author-bio",
+  "related-link",
+  "quote",
+  "datawrapper-chart",
+  "birdkit-countdown",
+  "birdkit-animated-headline",
+  "birdkit-state-selector",
+  "birdkit-calendar",
+  "birdkit-state-data-section",
+  "correction",
+] as const satisfies readonly ContentBlock["type"][];
 
 /* ── Article References ──────────────────────────── */
 export const ARTICLES = [
@@ -861,6 +923,192 @@ export const ARTICLES = [
         title: "Breakdown of tax revenue from online casino and sports gambling in six states",
         source: "State financial reports for year 2024. Fiscal year used for Delaware and West Virginia based on data availability. Rhode Island not included because less than a year\u2019s worth of data was available.",
       },
+      { type: "author-bio" },
+    ],
+  },
+  /* ── NYT Voting Deadlines Interactive Calendar ───────────────────── */
+  {
+    id: "voting-deadlines-state",
+    title: "When to Vote in Your State for the U.S. Presidential Election",
+    url: "https://www.nytimes.com/interactive/2024/us/elections/voting-deadlines-state.html",
+    authors: ["Alice Fang", "Lisa Waananen Jones", "Destinée-Charisse Royal", "Amy Schoenfeld Walker"],
+    date: "2024-09-28",
+    section: "U.S./Elections",
+    type: "interactive" as const,
+    description: "An interactive guide to voter registration deadlines, mail ballot deadlines, early voting dates, and Election Day details for every U.S. state and Washington, D.C.",
+    ogImage: "https://static01.nyt.com/images/2024/09/27/multimedia/00voting-deadlines/00voting-deadlines-facebookJumbo.png",
+    tags: ["vis-design", "Presidential Election of 2024", "Elections", "Voting Rights, Registration and Requirements", "Absentee Voting", "Content Type: Service", "Voting and Voters", "Early Voting"],
+    graphicsCount: 1,
+    figuresCount: 0,
+    tools: {
+      topper: "none",
+      charts: "none (pure interactive — state data selector + calendar)",
+      framework: "Svelte (SvelteKit) + vi-interactive platform (React shell)",
+      hosting: "static01.nytimes.com/newsgraphics/2024-09-11-voting-guide/",
+    },
+    chartTypes: [],
+    quoteSections: [],
+    /** Fonts used on this page — extracted from source CSS and inline styles */
+    fonts: [
+      {
+        name: "nyt-cheltenham",
+        cssVar: "--g-chelt",
+        fullStack: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+        weights: [300, 700],
+        role: "Display headline + calendar month headings — serif editorial typeface",
+        usedIn: [
+          "h1.AnimatedHeadline (svelte-n6zzpu): ~40px/700/46px font-style:italic text-align:center #121212 — cycles 'Register to Vote / Vote Early / Vote by Mail'",
+          "p.CalendarMonth (svelte-190h5a9 .h5): ~16px/700/- #121212 (October, November headings)",
+        ],
+      },
+      {
+        name: "nyt-franklin",
+        cssVar: "--g-franklin",
+        fullStack: '"nyt-franklin", arial, helvetica, sans-serif',
+        weights: [300, 400, 500, 600, 700],
+        role: "Primary sans-serif — UI chrome, nav, byline, state selector, calendar days, category headings, key labels, date spans, description text",
+        usedIn: [
+          "p.Byline (svelte-n6zzpu .g-byline): 14px/700/18px #363636",
+          "select.StateDropdown (svelte-122pd5k): 16px/500/- #121212 (51 options: all states + DC, default: New York)",
+          "span.KeyLabel (svelte-190h5a9 .key-last span): 11px/600/- uppercase (Register, Request, Mail, Early)",
+          "td.CalendarDay (svelte-190h5a9): 14px/400/- #444444 (day numbers in 7-column grid)",
+          "h3.CategoryHeading (svelte-2ql986 .g-category): 16px/700/- #121212 (Register to Vote, Vote by Mail, Early Voting, Election Day)",
+          "span.DateSpan (svelte-2ql986): 14px/400/- #363636 (deadline dates)",
+          "p.DescriptionText (svelte-2ql986): 14px/300/- #363636 (deadline descriptions, notes)",
+          "div.CountdownBadge (svelte-46mr9t .g-days-left): 12px/600/- uppercase #121212 ('27 days until election day')",
+          "h2.StateHeader (svelte-gd1o93): 16px/500/- #121212 ('Important voting deadlines for')",
+          "button.ShareButton (css-10d8k1f): 12px/500/15px uppercase #121212",
+          "span.SectionLabel (css-1ev7j75): 10px/500/- letter-spacing:0.05rem uppercase #727272 ('Elections')",
+        ],
+      },
+      {
+        name: "nyt-cheltenham-small",
+        cssVar: null,
+        fullStack: 'nyt-cheltenham-small, georgia, "times new roman"',
+        weights: [400],
+        role: "In-story masthead breadcrumb — small text serif for section navigation",
+        usedIn: [
+          "span.MastheadBreadcrumb (css-rnl02l): 13px/400/- letter-spacing:0.015em #121212 ('When to Vote in Your State')",
+        ],
+      },
+      {
+        name: "nyt-imperial",
+        cssVar: "--g-imperial",
+        fullStack: '"nyt-imperial", georgia, "times new roman", times, serif',
+        weights: [400, 500],
+        role: "Body text — intro paragraph and correction text",
+        usedIn: [
+          "p.IntroText (svelte-n6zzpu .g-text): 20px/500/25px #363636 (introductory paragraph with links)",
+          "p.CorrectionText (css-8hnokg): 15px/400/20px #363636 (correction notices at bottom)",
+        ],
+      },
+    ],
+    /** Brand-specific font context */
+    brandFonts: {
+      editorial: ["nyt-cheltenham", "nyt-cheltenham-small", "nyt-imperial"],
+      graphics: ["nyt-franklin"],
+      games: [],
+    },
+    /** Color palette — calendar deadline categories + editorial tokens */
+    colors: {
+      /** Calendar deadline category colors (5-color system, extracted from live page computed styles) */
+      calendarCategories: [
+        { name: "Register to vote", hex: "#F6CC79", cssClass: ".register" },
+        { name: "Request mail ballot", hex: "#F7A0E1", cssClass: ".request" },
+        { name: "Mail ballot postmark/received", hex: "#BFA0F7", cssClass: ".mail" },
+        { name: "Early voting", hex: "#BCEB82", cssClass: ".early_voting" },
+        { name: "Election Day", hex: "#BFA0F7", cssClass: ".election_day" },
+        { name: "Today highlight", hex: "#F7F7F7", cssClass: ".today", note: "2px border #CFCFCF" },
+      ],
+      /** Editorial tokens (shared across NYT pages) */
+      editorial: {
+        primary: "#121212",
+        secondary: "#363636",
+        faint: "#727272",
+        nytBlue: "#326891",
+        background: "#FFFFFF",
+      },
+    },
+    /** Birdkit framework architecture — NYT's internal interactive graphics platform */
+    architecture: {
+      framework: "Birdkit (Svelte/SvelteKit) embedded in vi-interactive (React shell)",
+      projectId: "2024-09-11-voting-guide",
+      hydrationId: "f6ae7340a9838bc0",
+      hosting: "static01.nytimes.com/newsgraphics/2024-09-11-voting-guide/ec379e24-cff8-4330-8a05-0f9ace449830/",
+      hierarchy: [
+        "div#app (vi-interactive React shell)",
+        "  header (masthead + section label 'Elections' — React)",
+        "  div.birdkit-body[data-birdkit-hydrate='f6ae7340a9838bc0'] (Svelte app root)",
+        "    div#custom-header (svelte-n6zzpu)",
+        "      div.g-days-left-container (countdown badge: '27 days until election day')",
+        "      h1.screenreader + span.interactive-heading (animated headline cycling 3 variants)",
+        "      p.g-text (intro paragraph — nyt-imperial body text with links)",
+        "      p.g-byline (4 authors with links)",
+        "      div.g-sharetools-wrapper (share buttons)",
+        "    div#states-wrapper (svelte-gd1o93)",
+        "      h2 + select (state selector — 51 options, default NY)",
+        "      div.calendar-wrapper[role=img] (dual-month calendar: Oct + Nov)",
+        "        div.calendar-key (6-category color legend: Today, Election, Register, Request, Mail, Early)",
+        "        table.calendar.October (7-column CSS Grid, 31 days)",
+        "        table.calendar.November (7-column CSS Grid, 30 days)",
+        "      div.dates-column (4 data sections: Register, Mail, Early, Election Day)",
+        "        h3.g-category + p spans (per-state deadline dates + notes)",
+        "  footer (corrections, methodology, recirculation — React)",
+      ],
+      layoutTokens: {
+        bodyWidth: "600px (standard vi-interactive)",
+        marginInline: "20px",
+        calendarGrid: "7-column CSS Grid (--grid-start: N for month start day)",
+        responsiveBreakpoints: "375px, 600px, 740px, 1024px, 1150px",
+      },
+      cssFiles: [
+        "https://g1.nyt.com/fonts/css/web-fonts.c851560786173ad206e1f76c1901be7e096e8f8b.css (web fonts)",
+        "2.u2rr8Tjh.css (Birdkit theme)",
+        "index.B915GTVN.css (Birdkit components)",
+        "Inline <style data-lights-css> block (~80 CSS class definitions for vi platform chrome)",
+      ],
+      dataArchitecture: {
+        stateData: "51 states (50 + DC) embedded as JSON in Svelte hydration <script> tag",
+        perStateFields: [
+          "postal, state, nyt_name, website",
+          "in_person/online/mail voter registration deadlines",
+          "request_absentee_by_mail_deadline",
+          "absentee_ballot_postmarked/receipt deadlines + notes",
+          "date_early_voting_starts/ends",
+          "sends_ballots_to_all_registered_voters (boolean)",
+          "display_mail_note, display_early_vote_note, display_registration_note",
+        ],
+        clientSideState: "Svelte reactive store — dropdown selection triggers calendar re-render + data section update",
+      },
+      publicAssets: {
+        socialImages: [
+          { name: "facebookJumbo", url: "https://static01.nyt.com/images/2024/09/27/multimedia/00voting-deadlines/00voting-deadlines-facebookJumbo.png", ratio: "1.91:1", desc: "Facebook/OG share image" },
+          { name: "video16x9-3000", url: "https://static01.nyt.com/images/2024/09/27/multimedia/00voting-deadlines/00voting-deadlines-videoSixteenByNine3000.png", ratio: "16:9", width: 3000, desc: "Twitter card image" },
+          { name: "video16x9-1600", url: "https://static01.nyt.com/images/2024/09/27/multimedia/00voting-deadlines/00voting-deadlines-videoSixteenByNineJumbo1600.png", ratio: "16:9", width: 1600, desc: "JSON-LD primary image" },
+          { name: "google4x3", url: "https://static01.nyt.com/images/2024/09/27/multimedia/00voting-deadlines/00voting-deadlines-googleFourByThree.png", ratio: "4:3", width: 800, desc: "Google Discover image" },
+          { name: "square3x", url: "https://static01.nyt.com/images/2024/09/27/multimedia/00voting-deadlines/00voting-deadlines-mediumSquareAt3X.png", ratio: "1:1", width: 1800, desc: "Square thumbnail" },
+        ],
+      },
+    },
+    contentBlocks: [
+      { type: "header" },
+      { type: "birdkit-countdown", label: "days until election day", daysLeft: 27 },
+      { type: "birdkit-animated-headline", variants: ["Register to Vote", "Vote Early", "Vote by Mail"] },
+      { type: "byline" },
+      { type: "birdkit-state-selector", stateCount: 51, defaultState: "New York" },
+      { type: "birdkit-calendar", months: ["October 2024", "November 2024"], categories: [
+        { key: "register", label: "Register to vote", color: "#F6CC79" },
+        { key: "request", label: "Request mail ballot", color: "#F7A0E1" },
+        { key: "mail", label: "Mail ballot postmark", color: "#BFA0F7" },
+        { key: "early_voting", label: "Vote early in person", color: "#BCEB82" },
+        { key: "election_day", label: "Election Day", color: "#BFA0F7" },
+      ] },
+      { type: "birdkit-state-data-section", title: "Register to Vote" },
+      { type: "birdkit-state-data-section", title: "Vote by Mail" },
+      { type: "birdkit-state-data-section", title: "Early Voting" },
+      { type: "birdkit-state-data-section", title: "Election Day" },
+      { type: "correction", text: "Virginia registration deadline correction", date: "2024-09-30" },
+      { type: "correction", text: "Timezone rendering fix", date: "2024-10-10" },
       { type: "author-bio" },
     ],
   },

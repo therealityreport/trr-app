@@ -11,7 +11,7 @@ export default async function NYTGameArticleDetailPage({ params }: Props) {
 
   const game = GAME_ARTICLES.find((g) => g.id === slug);
   if (!game) {
-    redirect("/admin/design-docs/nyt-games-articles");
+    redirect("/design-docs/nyt-games-articles");
   }
 
   return <DesignDocsPageClient activeSection="nyt-games-articles" articleSlug={game.id} />;

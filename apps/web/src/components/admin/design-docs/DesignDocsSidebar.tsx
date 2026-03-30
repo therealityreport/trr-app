@@ -15,6 +15,23 @@ import {
   isBrandSection,
   type DesignDocSectionId,
 } from "@/lib/admin/design-docs-config";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
+
+/* ═══════════════════════════════════════════════════════════════════════
+   NYT-styled Design Docs Sidebar
+   White background · Black text · nyt-franklin typography
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const F = {
+  franklin: '"nyt-franklin", arial, helvetica, sans-serif',
+  chelt: '"nyt-cheltenham", georgia, "times new roman", times, serif',
+  copy: "#121212",
+  secondary: "#363636",
+  faint: "#727272",
+  border: "#e2e2e2",
+  hoverBg: "#f7f7f7",
+  activeBg: "#f0f0f0",
+} as const;
 
 interface DesignDocsSidebarProps {
   activeSection: DesignDocSectionId;
@@ -42,6 +59,8 @@ const sectionLabelMap = new Map(
   DESIGN_DOC_SECTIONS.map((s) => [s.id, s.label]),
 );
 
+/* ── Accordion Navigation — NYT style ─────────────────────────────── */
+
 function AccordionNav({
   activeSection,
   onNavigate,
@@ -50,12 +69,8 @@ function AccordionNav({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-
-  // If the active section has a parent (e.g. nyt-tech-stack → brand-nyt),
-  // use the parent for group expansion and section highlighting
   const effectiveActiveSection = getParentSection(activeSection) ?? activeSection;
 
-  // Auto-expand the group that contains the active (or parent) section
   const activeGroupIndex = useMemo(() => {
     return DESIGN_DOC_GROUPS.findIndex((g) =>
       g.sectionIds.includes(effectiveActiveSection),
@@ -68,7 +83,6 @@ function AccordionNav({
     return initial;
   });
 
-  // Keep active group expanded when section changes
   useEffect(() => {
     if (activeGroupIndex >= 0) {
       setExpanded((prev) => {
@@ -83,92 +97,118 @@ function AccordionNav({
   const toggle = (index: number) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
-      } else {
-        next.add(index);
-      }
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
       return next;
     });
   };
 
   return (
-    <div className="flex flex-col gap-1">
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       {DESIGN_DOC_GROUPS.map((group, groupIdx) => {
         const isExpanded = expanded.has(groupIdx);
         const hasActive = group.sectionIds.includes(effectiveActiveSection);
 
         return (
           <div key={group.label}>
-            {/* Group header — accordion toggle */}
+            {/* Group header */}
             <button
               onClick={() => toggle(groupIdx)}
-              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] transition-colors ${
-                hasActive
-                  ? "text-zinc-900"
-                  : "text-zinc-400 hover:text-zinc-600"
-              }`}
+              style={{
+                display: "flex",
+                width: "100%",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "12px 16px",
+                textAlign: "left",
+                fontFamily: F.franklin,
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: hasActive ? F.copy : F.faint,
+                background: "none",
+                border: "none",
+                borderBottom: `1px solid ${F.border}`,
+                cursor: "pointer",
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = F.copy; }}
+              onMouseLeave={(e) => { if (!hasActive) (e.currentTarget as HTMLButtonElement).style.color = F.faint; }}
               aria-expanded={isExpanded}
             >
               <span>{group.label}</span>
               <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className={`shrink-0 transition-transform duration-150 ${
-                  isExpanded ? "rotate-90" : ""
-                }`}
+                style={{
+                  flexShrink: 0,
+                  transition: "transform 0.15s",
+                  transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                }}
               >
-                <polyline points="4,2 8,6 4,10" />
+                <polyline points="3,1 7,5 3,9" />
               </svg>
             </button>
 
             {/* Section links */}
             {isExpanded && (
-              <ul className="mb-1 ml-1 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
+              <ul style={{ listStyle: "none", margin: 0, padding: "4px 0", borderBottom: `1px solid ${F.border}` }}>
                 {group.sectionIds.map((sectionId) => {
                   const isActive = sectionId === activeSection || sectionId === effectiveActiveSection;
-                  const label =
-                    sectionLabelMap.get(sectionId) ?? sectionId;
-                  const showSubLinks =
-                    isActive && isBrandSection(sectionId);
+                  const label = sectionLabelMap.get(sectionId) ?? sectionId;
+                  const showSubLinks = isActive && isBrandSection(sectionId);
 
                   return (
                     <li key={sectionId}>
                       <Link
-                        href={
-                          `/admin/design-docs/${sectionId}` as Route
-                        }
+                        href={buildDesignDocsPath(sectionId)}
                         onClick={onNavigate}
-                        className={
-                          isActive
-                            ? "block rounded-lg bg-zinc-900 px-3 py-1.5 text-[13px] font-semibold text-white"
-                            : "block rounded-lg px-3 py-1.5 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-                        }
+                        style={{
+                          display: "block",
+                          padding: "8px 16px 8px 24px",
+                          fontFamily: F.franklin,
+                          fontSize: 14,
+                          fontWeight: isActive ? 700 : 500,
+                          color: isActive ? F.copy : F.secondary,
+                          textDecoration: "none",
+                          background: isActive ? F.activeBg : "transparent",
+                          transition: "background 0.12s, color 0.12s",
+                          borderLeft: isActive ? `3px solid ${F.copy}` : "3px solid transparent",
+                        }}
+                        onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.background = F.hoverBg; e.currentTarget.style.color = F.copy; } }}
+                        onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = F.secondary; } }}
                       >
                         {label}
                       </Link>
 
-                      {/* Game sub-links directly under "Games" section */}
+                      {/* Game sub-links */}
                       {sectionId === "nyt-games-articles" && isActive && (
-                        <ul className="mb-1 ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-300 pl-2">
+                        <ul style={{ listStyle: "none", margin: 0, padding: "2px 0 2px 36px" }}>
                           {getGameArticleSubLinks().map((game) => {
-                            const isGameActive = pathname === `/admin/design-docs/nyt-games-articles/${game.slug}`;
+                            const gamePath = buildDesignDocsPath(`nyt-games-articles/${game.slug}`);
+                            const isGameActive = pathname === gamePath;
                             return (
                               <li key={game.slug}>
                                 <Link
-                                  href={`/admin/design-docs/nyt-games-articles/${game.slug}` as Route}
+                                  href={gamePath}
                                   onClick={onNavigate}
-                                  className={`block rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                                    isGameActive
-                                      ? "bg-zinc-100 text-zinc-900"
-                                      : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-                                  }`}
+                                  style={{
+                                    display: "block",
+                                    padding: "4px 8px",
+                                    fontFamily: F.franklin,
+                                    fontSize: 12,
+                                    fontWeight: isGameActive ? 600 : 400,
+                                    color: isGameActive ? F.copy : F.faint,
+                                    textDecoration: "none",
+                                    transition: "color 0.12s",
+                                  }}
                                 >
                                   {game.label}
                                 </Link>
@@ -178,25 +218,27 @@ function AccordionNav({
                         </ul>
                       )}
 
-                      {/* Brand sub-section links (anchors or page links) */}
+                      {/* Brand sub-section links */}
                       {showSubLinks && (
-                        <ul className="mb-1 ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-300 pl-2">
+                        <ul style={{ listStyle: "none", margin: 0, padding: "2px 0 2px 36px" }}>
                           {getBrandSubSections(sectionId).map((sub) => {
-                            const isSubActive = sub.href
-                              ? pathname.startsWith(sub.href)
-                              : false;
-
+                            const isSubActive = sub.href ? pathname.startsWith(sub.href) : false;
                             return (
                               <li key={sub.anchor}>
                                 {sub.href ? (
                                   <Link
                                     href={sub.href as Route}
                                     onClick={onNavigate}
-                                    className={`block rounded px-2 py-1 text-[11px] font-medium transition-colors ${
-                                      isSubActive
-                                        ? "bg-zinc-100 text-zinc-900"
-                                        : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-                                    }`}
+                                    style={{
+                                      display: "block",
+                                      padding: "5px 8px",
+                                      fontFamily: F.franklin,
+                                      fontSize: 12,
+                                      fontWeight: isSubActive ? 600 : 400,
+                                      color: isSubActive ? F.copy : F.faint,
+                                      textDecoration: "none",
+                                      transition: "color 0.12s",
+                                    }}
                                   >
                                     {sub.label}
                                   </Link>
@@ -204,29 +246,42 @@ function AccordionNav({
                                   <a
                                     href={`#${sub.anchor}`}
                                     onClick={onNavigate}
-                                    className="block rounded px-2 py-1 text-[11px] font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+                                    style={{
+                                      display: "block",
+                                      padding: "5px 8px",
+                                      fontFamily: F.franklin,
+                                      fontSize: 12,
+                                      fontWeight: 400,
+                                      color: F.faint,
+                                      textDecoration: "none",
+                                    }}
                                   >
                                     {sub.label}
                                   </a>
                                 )}
 
-                                {/* Nested article sub-links under "Pages" */}
-                                {sub.href === "/admin/design-docs/nyt-articles" && isSubActive && (
-                                  <ul className="ml-2 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
+                                {/* NYT article sub-links under Pages */}
+                                {sub.href === buildDesignDocsPath("nyt-articles") && isSubActive && (
+                                  <ul style={{ listStyle: "none", margin: 0, padding: "2px 0 2px 12px", borderLeft: `1px solid ${F.border}` }}>
                                     {getArticleSubLinks().map((article) => {
-                                      const isArticleActive = pathname === `/admin/design-docs/nyt-articles/${article.slug}`;
+                                      const articlePath = buildDesignDocsPath(`nyt-articles/${article.slug}`);
+                                      const isArticleActive = pathname === articlePath;
                                       return (
                                         <li key={article.slug}>
                                           <Link
-                                            href={`/admin/design-docs/nyt-articles/${article.slug}` as Route}
+                                            href={articlePath}
                                             onClick={onNavigate}
-                                            className={`block rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                                              isArticleActive
-                                                ? "bg-zinc-100 text-zinc-900"
-                                                : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-                                            }`}
+                                            style={{
+                                              display: "block",
+                                              padding: "3px 6px",
+                                              fontFamily: F.franklin,
+                                              fontSize: 11,
+                                              fontWeight: isArticleActive ? 600 : 400,
+                                              color: isArticleActive ? F.copy : F.faint,
+                                              textDecoration: "none",
+                                            }}
                                           >
-                                            {article.label.length > 45 ? `${article.label.slice(0, 45)}…` : article.label}
+                                            {article.label.length > 42 ? `${article.label.slice(0, 42)}…` : article.label}
                                           </Link>
                                         </li>
                                       );
@@ -234,31 +289,34 @@ function AccordionNav({
                                   </ul>
                                 )}
 
-                                {/* Nested Athletic article sub-links under "Pages" */}
-                                {sub.href === "/admin/design-docs/athletic-articles" && isSubActive && (
-                                  <ul className="ml-2 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-200 pl-2">
+                                {/* Athletic article sub-links */}
+                                {sub.href === buildDesignDocsPath("athletic-articles") && isSubActive && (
+                                  <ul style={{ listStyle: "none", margin: 0, padding: "2px 0 2px 12px", borderLeft: `1px solid ${F.border}` }}>
                                     {getAthleticArticleSubLinks().map((article) => {
-                                      const isArticleActive = pathname === `/admin/design-docs/athletic-articles/${article.slug}`;
+                                      const articlePath = buildDesignDocsPath(`athletic-articles/${article.slug}`);
+                                      const isArticleActive = pathname === articlePath;
                                       return (
                                         <li key={article.slug}>
                                           <Link
-                                            href={`/admin/design-docs/athletic-articles/${article.slug}` as Route}
+                                            href={articlePath}
                                             onClick={onNavigate}
-                                            className={`block rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                                              isArticleActive
-                                                ? "bg-zinc-100 text-zinc-900"
-                                                : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-                                            }`}
+                                            style={{
+                                              display: "block",
+                                              padding: "3px 6px",
+                                              fontFamily: F.franklin,
+                                              fontSize: 11,
+                                              fontWeight: isArticleActive ? 600 : 400,
+                                              color: isArticleActive ? F.copy : F.faint,
+                                              textDecoration: "none",
+                                            }}
                                           >
-                                            {article.label.length > 45 ? `${article.label.slice(0, 45)}…` : article.label}
+                                            {article.label.length > 42 ? `${article.label.slice(0, 42)}…` : article.label}
                                           </Link>
                                         </li>
                                       );
                                     })}
                                   </ul>
                                 )}
-
-                                {/* Game article sub-links moved to top-level "Games" section */}
                               </li>
                             );
                           })}
@@ -276,6 +334,8 @@ function AccordionNav({
   );
 }
 
+/* ── Main Sidebar Component ──────────────────────────────────────── */
+
 export default function DesignDocsSidebar({
   activeSection,
   isOpen,
@@ -283,7 +343,7 @@ export default function DesignDocsSidebar({
 }: DesignDocsSidebarProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
-  // Focus trap + escape for mobile drawer
+  // Focus trap + escape
   useEffect(() => {
     if (!isOpen) return;
     const menu = drawerRef.current;
@@ -298,10 +358,7 @@ export default function DesignDocsSidebar({
       if (e.key !== "Tab") return;
 
       const focusables = getFocusableElements(menu);
-      if (focusables.length === 0) {
-        e.preventDefault();
-        return;
-      }
+      if (focusables.length === 0) { e.preventDefault(); return; }
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement as HTMLElement | null;
@@ -319,46 +376,90 @@ export default function DesignDocsSidebar({
 
     document.addEventListener("keydown", handleKeyDown);
     const focusables = getFocusableElements(menu);
-    if (focusables.length > 0) {
-      focusables[0].focus();
-    }
+    if (focusables.length > 0) focusables[0].focus();
 
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Prevent body scroll when mobile drawer is open
+  // Prevent body scroll when drawer is open
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => {
-      document.body.style.overflow = "";
-    };
+    if (isOpen) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+    return () => { document.body.style.overflow = ""; };
   }, [isOpen]);
+
+  /* ── Shared nav panel style ─────────────────────────────────────── */
+  const navPanelContent = (isMobile: boolean) => (
+    <>
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 16px",
+          borderBottom: `1px solid ${F.border}`,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: F.chelt,
+            fontSize: 18,
+            fontWeight: 700,
+            color: F.copy,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          Design Docs
+        </span>
+        {isMobile && (
+          <button
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 4,
+              color: F.faint,
+              transition: "color 0.15s",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = F.copy; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = F.faint; }}
+            aria-label="Close navigation"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="4" y1="4" x2="14" y2="14" />
+              <line x1="14" y1="4" x2="4" y2="14" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Navigation body */}
+      <div style={{ overflowY: "auto", flex: 1 }}>
+        <AccordionNav
+          activeSection={activeSection}
+          onNavigate={isMobile ? onClose : undefined}
+        />
+      </div>
+    </>
+  );
 
   return (
     <>
-      {/* Desktop sidebar — persistent left column */}
-      <nav
-        className="hidden w-64 shrink-0 border-r border-zinc-200 bg-white lg:block"
-        aria-label="Design docs navigation"
-      >
-        <div className="sticky top-[57px] h-[calc(100vh-57px)] overflow-y-auto px-2 py-4">
-          <AccordionNav activeSection={activeSection} />
-        </div>
-      </nav>
-
-      {/* Mobile drawer — slides from left */}
-      <div className="lg:hidden">
+      {/* ── Drawer overlay — slides from left on all screen sizes ── */}
+      <div>
         {/* Backdrop */}
         <div
-          className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-200 ${
-            isOpen
-              ? "pointer-events-auto opacity-100"
-              : "pointer-events-none opacity-0"
-          }`}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 40,
+            backgroundColor: "rgba(0,0,0,0.3)",
+            transition: "opacity 0.2s",
+            opacity: isOpen ? 1 : 0,
+            pointerEvents: isOpen ? "auto" : "none",
+          }}
           onClick={onClose}
           aria-hidden="true"
         />
@@ -369,45 +470,24 @@ export default function DesignDocsSidebar({
           role="dialog"
           aria-modal="true"
           aria-label="Design docs sections"
-          className={`fixed inset-y-0 left-0 z-50 w-[min(320px,88vw)] transform border-r border-zinc-200 bg-white shadow-xl transition-transform duration-200 ${
-            isOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
+          style={{
+            position: "fixed",
+            top: 0,
+            bottom: 0,
+            left: 0,
+            zIndex: 50,
+            width: "min(320px, 88vw)",
+            backgroundColor: "#fff",
+            borderRight: `1px solid ${F.border}`,
+            boxShadow: "4px 0 16px rgba(0,0,0,0.08)",
+            transform: isOpen ? "translateX(0)" : "translateX(-100%)",
+            transition: "transform 0.2s ease",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
         >
-          {/* Drawer header */}
-          <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-            <span className="text-sm font-semibold text-zinc-900">
-              Design Docs
-            </span>
-            <button
-              onClick={onClose}
-              className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-              aria-label="Close navigation"
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 18 18"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <line x1="4" y1="4" x2="14" y2="14" />
-                <line x1="14" y1="4" x2="4" y2="14" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Drawer body */}
-          <div
-            className="overflow-y-auto px-2 py-3"
-            style={{ maxHeight: "calc(100vh - 57px)" }}
-          >
-            <AccordionNav
-              activeSection={activeSection}
-              onNavigate={onClose}
-            />
-          </div>
+          {navPanelContent(true)}
         </div>
       </div>
     </>

@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+const { requireAdminMock, fetchAdminBackendJsonMock, resolveShowSlugMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
+  resolveShowSlugMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -15,6 +16,7 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getShowById: vi.fn(),
   getShowByExactSlug: vi.fn(),
+  resolveShowSlug: resolveShowSlugMock,
   updateShowById: vi.fn(),
   validateShowImageForField: vi.fn(),
 }));
@@ -35,6 +37,7 @@ describe("TRR show route parity", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
+    resolveShowSlugMock.mockReset();
     requireAdminMock.mockResolvedValue({ uid: "admin-user" });
   });
 
@@ -103,17 +106,11 @@ describe("TRR show route parity", () => {
   });
 
   it("keeps show resolve-slug parity", async () => {
-    fetchAdminBackendJsonMock.mockResolvedValueOnce({
-      status: 200,
-      data: {
-        resolved: {
-          show_id: "show-1",
-          slug: "rhobh",
-          canonical_slug: "rhobh",
-          show_name: "The Real Housewives of Beverly Hills",
-        },
-      },
-      durationMs: 3,
+    resolveShowSlugMock.mockResolvedValueOnce({
+      show_id: "show-1",
+      slug: "rhobh",
+      canonical_slug: "rhobh",
+      show_name: "The Real Housewives of Beverly Hills",
     });
 
     const response = await getShowResolveSlugRoute(
@@ -129,9 +126,7 @@ describe("TRR show route parity", () => {
         show_name: "The Real Housewives of Beverly Hills",
       },
     });
-    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
-      "/admin/trr-api/shows/resolve-slug?slug=rhobh",
-      expect.objectContaining({ routeName: "show-resolve-slug" }),
-    );
+    expect(resolveShowSlugMock).toHaveBeenCalledWith("rhobh");
+    expect(fetchAdminBackendJsonMock).not.toHaveBeenCalled();
   });
 });

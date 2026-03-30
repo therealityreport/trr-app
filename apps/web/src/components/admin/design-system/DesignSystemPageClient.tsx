@@ -9,6 +9,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import ImagePaletteLab from "@/components/admin/color-lab/ImagePaletteLab";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { ADDITIONAL_MONOTYPE_FONTS } from "@/lib/fonts/additional-monotype-fonts";
 import { GENERATED_ADDITIONAL_TRR_FONT_CATALOG } from "@/lib/fonts/generated/additional-trr-font-catalog";
 import {
@@ -2197,7 +2198,7 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => router.push("/admin")}
+                  onClick={() => router.push(ADMIN_ROOT_PATH)}
                   className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                 >
                   Admin

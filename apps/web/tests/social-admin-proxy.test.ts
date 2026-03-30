@@ -291,27 +291,17 @@ describe("social-admin-proxy", () => {
     expect(payload.upstream_status).toBe(500);
   });
 
-  it("falls back to SUPABASE_SERVICE_ROLE_KEY when TRR-specific key is absent", async () => {
+  it("throws a generic backend-auth error when the TRR-specific service role key is absent", async () => {
     delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "fallback-token";
     getBackendApiUrlMock.mockImplementation((path: string) => `http://backend.local/api/v1${path}`);
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ ok: true }),
-    } as Response);
-    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
-
-    const payload = await fetchSocialBackendJson("/ingest/queue-status", {
-      fallbackError: "Failed to fetch queue status",
-      retries: 0,
-      timeoutMs: 1000,
-    });
-
-    expect(payload).toEqual({ ok: true });
-    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer fallback-token");
+    await expect(
+      fetchSocialBackendJson("/ingest/queue-status", {
+        fallbackError: "Failed to fetch queue status",
+        retries: 0,
+        timeoutMs: 1000,
+      }),
+    ).rejects.toThrow("Backend auth not configured");
   });
 
   it("maps missing backend configuration to BACKEND_UNREACHABLE", async () => {

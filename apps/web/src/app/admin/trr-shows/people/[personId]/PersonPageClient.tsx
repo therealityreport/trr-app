@@ -7801,6 +7801,7 @@ export default function PersonProfilePage() {
           runId: requestId,
         });
         throw new Error(`${errMsg} Getty/NBCUMV refresh was not started.`);
+        
       }
       // Restore progress phase to syncing for the pipeline stream
       setRefreshProgress((prev) =>

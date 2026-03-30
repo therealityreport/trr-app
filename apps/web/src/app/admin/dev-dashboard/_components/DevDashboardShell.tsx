@@ -7,8 +7,8 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import type { AdminBreadcrumbItem } from "@/lib/admin/admin-breadcrumbs";
 
 const DEV_DASHBOARD_ROUTES = [
-  { href: "/admin/dev-dashboard", label: "Overview" },
-  { href: "/admin/dev-dashboard/skills-and-agents", label: "Skills & Agents" },
+  { href: "/dev-dashboard", label: "Overview" },
+  { href: "/dev-dashboard/skills-and-agents", label: "Skills & Agents" },
 ] as const;
 
 interface DevDashboardShellProps {
@@ -66,7 +66,7 @@ export function DevDashboardShell({
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/admin"
+              href="/"
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Back to Admin

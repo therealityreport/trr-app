@@ -16,7 +16,6 @@ import {
   GameCrossplay,
   GamePips,
   GameTheMidi,
-  HubComponents,
 } from "./sections/games";
 
 /* ── Wordle-Specific Data ─────────────────────────────────────────── */
@@ -107,7 +106,7 @@ const sectionLabel: React.CSSProperties = {
   fontWeight: 600,
   textTransform: "uppercase",
   letterSpacing: "0.12em",
-  color: WORDLE.light.correct,
+  color: "var(--dd-brand-accent)",
   marginBottom: 8,
   marginTop: 40,
 };
@@ -129,7 +128,7 @@ function SectionLabelStyled({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#6AAA64",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -178,7 +177,7 @@ export default function GameArticleDetailPage({ gameId }: Props) {
 
   return (
     <div className="nytg-scope">
-      <div className="dd-section-label" style={{ color: game.themeColor }}>NYT Games &bull; Design Breakdown</div>
+      <div className="dd-section-label">NYT Games &bull; Design Breakdown</div>
       <h2 className="dd-section-title">{game.name}</h2>
       <p className="dd-section-desc">{game.description}</p>
 
@@ -199,7 +198,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
   return (
     <div className="nytg-scope">
       {/* ── Header ──────────────────────────────────────── */}
-      <div className="dd-section-label" style={{ color: WORDLE.light.correct }}>NYT Games &bull; Design Breakdown</div>
+      <div className="dd-section-label">NYT Games &bull; Design Breakdown</div>
       <h2 className="dd-section-title">Wordle</h2>
       <p className="dd-section-desc">
         Five-letter word puzzle &mdash; 5&times;6 grid, keyboard state management,
@@ -219,7 +218,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
         }}
       >
         {/* OG Image preview */}
-        <div style={{ background: "#f0f0f0", padding: 24, textAlign: "center" }}>
+        <div style={{ background: "var(--dd-brand-surface)", padding: 24, textAlign: "center" }}>
           <div
             style={{
               width: "100%",
@@ -273,7 +272,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
               { label: "Tone 7", hex: WORDLE.light.tone7 },
             ].map((c) => (
               <div key={c.label} style={{ textAlign: "center" }}>
-                <div style={{ width: 48, height: 48, background: c.hex, borderRadius: 6, border: "1px solid #e0e0e0" }} />
+                <div style={{ width: 48, height: 48, background: c.hex, borderRadius: 6, border: "1px solid var(--dd-brand-border)" }} />
                 <div style={{ fontSize: 10, fontFamily: "var(--dd-font-sans)", fontWeight: 700, marginTop: 4, color: "var(--dd-ink-black)" }}>{c.label}</div>
                 <div style={monoSmall}>{c.hex}</div>
               </div>
@@ -323,8 +322,8 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       <div style={sectionLabel}>Game Board</div>
       <div
         style={{
-          background: "#fff",
-          border: "1px solid var(--dd-paper-grey)",
+          background: "var(--dd-brand-surface)",
+          border: "1px solid var(--dd-brand-border)",
           borderRadius: 12,
           padding: 24,
           textAlign: "center",
@@ -373,8 +372,8 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       <div style={sectionLabel}>Keyboard</div>
       <div
         style={{
-          background: "#fff",
-          border: "1px solid var(--dd-paper-grey)",
+          background: "var(--dd-brand-surface)",
+          border: "1px solid var(--dd-brand-border)",
           borderRadius: 12,
           padding: 20,
           textAlign: "center",

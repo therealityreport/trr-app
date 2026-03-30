@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import {
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
@@ -13,8 +14,7 @@ export const dynamic = "force-dynamic";
 const COVERED_SHOWS_CACHE_NAMESPACE = "admin-covered-shows";
 
 const getBackendDeleteHeaders = (userUid: string): Headers => {
-  const serviceRoleKey =
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey = getTrrAdminServiceKey();
   const internalSecret = process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
   if (!serviceRoleKey?.trim() || !internalSecret?.trim()) {
     throw new Error("Backend auth not configured");

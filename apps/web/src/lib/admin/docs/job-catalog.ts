@@ -1,4 +1,5 @@
 import type { Route } from "next";
+import { ADMIN_SOCIAL_PATH } from "@/lib/admin/admin-route-paths";
 
 export const ADMIN_JOB_DOC_CATEGORIES = [
   "Scraping & Discovery",
@@ -573,8 +574,8 @@ export const ADMIN_JOB_DOCS: readonly AdminJobDocEntry[] = [
     category: "Social Runs & Queue Operations",
     summary: "Kick off the Bravo-owned shared account ingest from the social admin landing page.",
     pageLabel: "Social Media",
-    pageHref: "/admin/social" as Route,
-    pagePathPattern: "/admin/social",
+    pageHref: ADMIN_SOCIAL_PATH,
+    pagePathPattern: ADMIN_SOCIAL_PATH,
     pageContainerBreadcrumb: ["Admin", "Social Analytics", "Shared Ingest"],
     currentRuntime: "Modal",
     targetRuntime: "Modal",

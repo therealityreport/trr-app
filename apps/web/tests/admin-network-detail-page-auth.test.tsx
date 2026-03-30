@@ -171,7 +171,7 @@ describe("admin network detail page", () => {
     expect(String(detailCall[0])).toContain("entity_slug=bravo");
 
     const breadcrumbNav = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/admin");
+    expect(within(breadcrumbNav).getByRole("link", { name: "Admin" })).toHaveAttribute("href", "/");
     expect(within(breadcrumbNav).getByRole("link", { name: "Brands" })).toHaveAttribute("href", "/brands");
     expect(screen.getByText("Saved Logos")).toBeInTheDocument();
     expect(screen.getByText("Saved Info / URLs")).toBeInTheDocument();

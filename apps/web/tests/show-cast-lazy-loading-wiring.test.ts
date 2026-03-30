@@ -18,7 +18,7 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/castAutoLoadAttemptedRef/);
     expect(contents).toMatch(/const autoLoadKey = `\$\{showId\}:cast`;/);
     expect(contents).toMatch(/if \(castAutoLoadAttemptedRef\.current === autoLoadKey\) return;/);
-    expect(contents).toMatch(/void fetchCast\(\{ force: true \}\);/);
+    expect(contents).toMatch(/void fetchCast\(\{ force: true, includePhotos: false \}\);/);
     expect(contents).toMatch(/castAutoRecoveryAttemptedRef/);
     expect(contents).toMatch(/Cast list unavailable; retrying cast roster\.\.\./);
   });
@@ -36,8 +36,21 @@ describe("show detail cast lazy-loading wiring", () => {
   it("provides explicit enrich missing cast photos action with bravo fallback", () => {
     expect(contents).toMatch(/Enrich Missing Cast Photos/);
     expect(contents).toMatch(/photoFallbackMode: "bravo"/);
+    expect(contents).toMatch(/includePhotos: true/);
     expect(contents).toMatch(/mergeMissingPhotosOnly: true/);
+    expect(contents).toMatch(/background: true/);
     expect(contents).toMatch(/params\.set\("photo_fallback", photoFallbackMode\)/);
+  });
+
+  it("uses staged cast photo loading with one automatic merge-only recovery pass", () => {
+    expect(contents).toMatch(/const castAutoPhotoRecoveryAttemptedRef = useRef<string \| null>\(null\);/);
+    expect(contents).toMatch(/const includePhotos = options\?\.includePhotos \?\? true;/);
+    expect(contents).toMatch(/const background = options\?\.background === true;/);
+    expect(contents).toMatch(/params\.set\("include_photos", includePhotos \? "true" : "false"\)/);
+    expect(contents).toMatch(/if \(!background\) \{\s*setCastLoading\(true\);/s);
+    expect(contents).toMatch(/const recoveryKey = `\$\{showId\}:missing-photo-recovery`;/);
+    expect(contents).toMatch(/if \(castAutoPhotoRecoveryAttemptedRef\.current === recoveryKey\) return;/);
+    expect(contents).toMatch(/mergeMissingPhotosOnly: true,\s*includePhotos: true,\s*background: true,\s*throwOnError: false,/s);
   });
 
   it("suppresses early cast refresh success notices while pipeline phases continue", () => {
@@ -57,8 +70,13 @@ describe("show detail cast lazy-loading wiring", () => {
   });
 
   it("keeps cast tab progress scoped to cast workflows only", () => {
-    expect(contents).toMatch(/const castTabProgress =\s*refreshingTargets\.cast_credits \|\| castRefreshPipelineRunning \|\| castMediaEnriching/s);
-    expect(contents).not.toMatch(/:\s*globalRefreshProgress;/);
+    expect(contents).toMatch(
+      /const castAnyJobRunning =\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*castMatrixSyncLoading \|\|\s*Boolean\(refreshingTargets\.cast_credits\) \|\|\s*hasPersonRefreshInFlight/s
+    );
+    expect(contents).toMatch(
+      /const isCastRefreshBusy =\s*isShowRefreshBusy \|\|\s*castMatrixSyncLoading \|\|\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*hasPersonRefreshInFlight;/s
+    );
+    expect(contents).not.toMatch(/globalRefreshProgress/);
   });
 
   it("adds cast search and URL-persisted cast filter state", () => {
@@ -122,8 +140,9 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/Syncing Bios\.\.\./);
     expect(contents).toMatch(/Syncing Bravo\.\.\./);
     expect(contents).toMatch(/Ingesting Media\.\.\./);
-    expect(contents).toMatch(/const castPhaseProgress =/);
-    expect(contents).toMatch(/castPhaseProgress \?\? refreshTargetProgress\.cast_credits \?\? null/);
+    expect(contents).toMatch(/const castRefreshActivePhase =/);
+    expect(contents).toMatch(/const castRefreshButtonLabel =/);
+    expect(contents).toMatch(/CAST_REFRESH_PHASE_BUTTON_LABELS\[castRefreshActivePhase\.id\]/);
   });
 
   it("defers cast search filtering work and waits for role data before deep-link editor open", () => {
@@ -144,8 +163,10 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/Retry Cast Intelligence/);
     expect(contents).toMatch(/Refreshing cast intelligence\.\.\./);
     expect(contents).toMatch(/castUiTerminalReady/);
+    expect(contents).toMatch(/const castRosterReady =/);
     expect(contents).toMatch(/Loading role and credit filters\.\.\./);
     expect(contents).toMatch(/Loading cast roster\.\.\./);
+    expect(contents).toMatch(/No cast members found for this show\./);
     expect(contents).toMatch(
       /showCastIntelligenceUnavailable =\s*activeTab === "cast" &&\s*castSource === "show_fallback" &&\s*!castRoleMembersLoading &&\s*!rolesLoading &&\s*\(Boolean\(castRoleMembersError\) \|\| Boolean\(rolesError\)\)/
     );

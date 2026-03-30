@@ -9,6 +9,7 @@ import { auth } from "@/lib/firebase";
 const DEFAULT_TOKEN_RETRY_DELAYS_MS = [150, 300, 600] as const;
 const DEFAULT_ADMIN_AUTH_READY_TIMEOUT_MS = 2500;
 const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const DEV_ADMIN_BYPASS_UID = "dev-admin-bypass";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -172,7 +173,8 @@ export async function getClientAuthHeaders(
   const bypassAllowed =
     Boolean(options?.allowDevAdminBypass) &&
     (process.env.NODE_ENV !== "production" || isDevAdminBypassEnabledClient() || isClientLocalHostname());
-  if (bypassAllowed && !options?.preferredUser?.uid) {
+  const preferredUserIsDevBypass = options?.preferredUser?.uid === DEV_ADMIN_BYPASS_UID;
+  if (bypassAllowed && (!options?.preferredUser?.uid || preferredUserIsDevBypass)) {
     return {
       Authorization: "Bearer dev-admin-bypass",
       ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),

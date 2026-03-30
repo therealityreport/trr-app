@@ -3,13 +3,15 @@
 import { Suspense, useState, type ComponentType } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { Route } from "next";
 import ClientOnly from "@/components/ClientOnly";
-import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
-import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
-import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+// AdminGlobalHeader and AdminBreadcrumbs removed — using NYT-styled slim top bar
+// import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+// import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+// import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_DESIGN_DOCS_PATH, ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
+  getBrandScopeClass,
   resolveDesignDocSection,
   type DesignDocSectionId,
 } from "@/lib/admin/design-docs-config";
@@ -22,6 +24,10 @@ const LoadingFallback = () => (
 );
 
 const GameArticleDetailPage = dynamic(() => import("./GameArticleDetailPage"), {
+  loading: LoadingFallback,
+});
+
+const VotingDeadlinesArticle = dynamic(() => import("./VotingDeadlinesArticle"), {
   loading: LoadingFallback,
 });
 
@@ -116,10 +122,11 @@ export default function DesignDocsPageClient({ activeSection, articleSlug, brand
 
   const section = resolveDesignDocSection(activeSection);
   const ActiveComponent = sectionComponents[activeSection];
-  const breadcrumbs = buildAdminSectionBreadcrumb(
-    "Design Docs",
-    "/admin/design-docs",
-  );
+  const brandScope = getBrandScopeClass(activeSection);
+  const brandScopeClassName = brandScope
+    ? `dd-brand-scoped ${brandScope}`
+    : "";
+  // breadcrumbs removed — using NYT-styled slim top bar
 
   if (checking) {
     return (
@@ -131,87 +138,162 @@ export default function DesignDocsPageClient({ activeSection, articleSlug, brand
 
   if (!user || !hasAccess) return null;
 
+  /* Full-page article reproduction: bypass the design docs shell entirely */
+  if (articleSlug === "voting-deadlines-state") {
+    return (
+      <ClientOnly>
+        <Suspense fallback={<LoadingFallback />}>
+          <VotingDeadlinesArticle />
+        </Suspense>
+      </ClientOnly>
+    );
+  }
+
   return (
     <ClientOnly>
+      {/* NYT web fonts */}
+      {/* eslint-disable-next-line @next/next/no-css-tags */}
+      <link
+        rel="stylesheet"
+        href="https://g1.nyt.com/fonts/css/web-fonts.c851560786173ad206e1f76c1901be7e096e8f8b.css"
+        crossOrigin="anonymous"
+      />
+
       <div className="min-h-screen bg-white">
-        <AdminGlobalHeader bodyClassName="px-6 py-4">
-          <AdminBreadcrumbs items={breadcrumbs} />
-          <div className="mt-2 flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
-                Design Docs
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500">
-                Data visualization and editorial design system reference
-              </p>
-            </div>
-            <Link
-              href={"/admin" as Route}
-              className="shrink-0 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900"
+        {/* ── Slim top bar — hamburger + title + admin link ── */}
+        <header
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            height: 48,
+            padding: "0 16px",
+            borderBottom: "1px solid #e2e2e2",
+            backgroundColor: "#fff",
+            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* Hamburger */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: 4,
+                color: "#121212",
+                display: "flex",
+                alignItems: "center",
+              }}
+              aria-label="Open navigation"
             >
-              Back to Admin
-            </Link>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <line x1="2" y1="4.5" x2="16" y2="4.5" />
+                <line x1="2" y1="9" x2="16" y2="9" />
+                <line x1="2" y1="13.5" x2="16" y2="13.5" />
+              </svg>
+            </button>
+
+            {/* Title */}
+            <span
+              style={{
+                fontFamily: '"nyt-cheltenham", georgia, "times new roman", times, serif',
+                fontSize: 17,
+                fontWeight: 700,
+                color: "#121212",
+                letterSpacing: "-0.01em",
+              }}
+            >
+              Design Docs
+            </span>
+
+            {/* Section label */}
+            <span
+              style={{
+                fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                fontSize: 11,
+                fontWeight: 500,
+                color: "#727272",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              {section.label}
+            </span>
           </div>
 
-          {/* Mobile hamburger for section nav */}
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="mt-3 flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900 lg:hidden"
-            aria-label="Open section navigation"
+          {/* Admin link */}
+          <Link
+            href={ADMIN_ROOT_PATH}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#363636",
+              textDecoration: "none",
+              padding: "4px 8px",
+              borderRadius: 3,
+              transition: "color 0.15s",
+            }}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            >
-              <line x1="2" y1="4" x2="14" y2="4" />
-              <line x1="2" y1="8" x2="14" y2="8" />
-              <line x1="2" y1="12" x2="14" y2="12" />
-            </svg>
-            {section.label}
-          </button>
-        </AdminGlobalHeader>
+            ← Admin
+          </Link>
+        </header>
 
-        <div className="flex">
-          <DesignDocsSidebar
-            activeSection={activeSection}
-            isOpen={sidebarOpen}
-            onClose={() => setSidebarOpen(false)}
-          />
+        {/* Drawer sidebar */}
+        <DesignDocsSidebar
+          activeSection={activeSection}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
 
-          <main className="min-w-0 flex-1 px-6 py-8">
-            <div className="design-docs mx-auto max-w-4xl">
-              {articleSlug && activeSection === "nyt-games-articles" ? (
-                <GameArticleDetailPage gameId={articleSlug} />
-              ) : articleSlug ? (
-                <ArticleDetailPage articleId={articleSlug} />
-              ) : brandTab ? (
-                <Suspense fallback={<LoadingFallback />}>
-                  {(() => {
-                    const tabMap =
-                      activeSection === "brand-nyt"
-                        ? nytTabComponents
-                        : activeSection === "brand-the-athletic"
-                          ? athleticTabComponents
-                          : activeSection === "brand-nymag"
-                            ? nymagTabComponents
-                            : null;
-                    const TabComponent = tabMap?.[brandTab];
-                    return TabComponent ? <TabComponent /> : <ActiveComponent />;
-                  })()}
-                </Suspense>
-              ) : (
-                <Suspense fallback={<LoadingFallback />}>
-                  <ActiveComponent />
-                </Suspense>
-              )}
-            </div>
-          </main>
-        </div>
+        {/* ── Main content — full width ── */}
+        <main
+          className={`${brandScopeClassName}`}
+          style={{
+            padding: "32px 24px",
+            ...(brandScope ? { backgroundColor: "var(--dd-brand-bg)" } : {}),
+          }}
+        >
+          <div className={`design-docs mx-auto max-w-4xl ${brandScope ?? ""}`}>
+            {articleSlug && activeSection === "nyt-games-articles" ? (
+              <GameArticleDetailPage gameId={articleSlug} />
+            ) : articleSlug ? (
+              <ArticleDetailPage articleId={articleSlug} />
+            ) : brandTab ? (
+              <Suspense fallback={<LoadingFallback />}>
+                {(() => {
+                  // --- Brand tab routing ---
+                  // To add tabs for a new brand:
+                  // 1. Create tab component map: const newBrandTabComponents: Record<string, ComponentType> = { ... }
+                  // 2. Add a case here: case "brand-{slug}": return newBrandTabComponents;
+                  // 3. Create the tab page files in sections/brand-{slug}/
+                  const tabMap =
+                    activeSection === "brand-nyt"
+                      ? nytTabComponents
+                      : activeSection === "brand-the-athletic"
+                        ? athleticTabComponents
+                        : activeSection === "brand-nymag"
+                          ? nymagTabComponents
+                          : null;
+                  const TabComponent = tabMap?.[brandTab];
+                  return TabComponent ? <TabComponent /> : <ActiveComponent />;
+                })()}
+              </Suspense>
+            ) : (
+              <Suspense fallback={<LoadingFallback />}>
+                <ActiveComponent />
+              </Suspense>
+            )}
+          </div>
+        </main>
       </div>
     </ClientOnly>
   );

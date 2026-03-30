@@ -10,6 +10,7 @@ import {
   isComponentNode,
   isPageNode,
 } from "@/lib/admin/api-references/catalog";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import type {
   AdminApiReferenceInventory,
   AdminApiReferenceNode,
@@ -656,8 +657,8 @@ export function AdminApiReferencesLibraryContent({
                               <div className="rounded-[1.2rem] border border-zinc-200 p-4">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Route & URL slug</p>
                                 <div className="mt-3 space-y-2">
-                                  <Link href={node.pathPattern ?? "/admin"} className="text-sm font-semibold text-black underline decoration-zinc-300 underline-offset-4">
-                                    {node.pathPattern ?? "/admin"}
+                                  <Link href={node.pathPattern ?? ADMIN_ROOT_PATH} className="text-sm font-semibold text-black underline decoration-zinc-300 underline-offset-4">
+                                    {node.pathPattern ?? ADMIN_ROOT_PATH}
                                   </Link>
                                   <p className="break-all font-mono text-xs text-zinc-600">{derivePageUrlSlug(node.pathPattern)}</p>
                                 </div>

@@ -229,9 +229,49 @@ interface TrrSeason {
   title: string | null;
   overview: string | null;
   air_date: string | null;
+  premiere_date?: string | null;
   url_original_poster: string | null;
   tmdb_season_id: number | null;
+  episode_count?: number | null;
+  episode_airdate_count?: number | null;
+  first_episode_air_date?: string | null;
+  last_episode_air_date?: string | null;
 }
+
+type SeasonEpisodeSummary = {
+  count: number;
+  premiereDate: string | null;
+  finaleDate: string | null;
+};
+
+const buildSeasonEpisodeSummary = (season: TrrSeason): SeasonEpisodeSummary | null => {
+  const count =
+    typeof season.episode_count === "number"
+      ? season.episode_count
+      : typeof season.episode_airdate_count === "number"
+        ? season.episode_airdate_count
+        : null;
+  const premiereDate = season.first_episode_air_date ?? season.premiere_date ?? season.air_date ?? null;
+  const finaleDate = season.last_episode_air_date ?? season.air_date ?? season.premiere_date ?? premiereDate;
+
+  if (count === null && !premiereDate && !finaleDate) return null;
+
+  return {
+    count: count ?? 0,
+    premiereDate,
+    finaleDate,
+  };
+};
+
+const buildSeasonEpisodeSummaryMap = (seasonList: TrrSeason[]): Record<string, SeasonEpisodeSummary> => {
+  const summaries: Record<string, SeasonEpisodeSummary> = {};
+  for (const season of seasonList) {
+    const summary = buildSeasonEpisodeSummary(season);
+    if (!summary) continue;
+    summaries[season.id] = summary;
+  }
+  return summaries;
+};
 
 const normalizeErrorMessage = (value: unknown): string | null => {
   if (typeof value === "string") {
@@ -510,6 +550,7 @@ type CastRunFailedMember = {
 
 type ShowRefreshRunOptions = {
   photoMode?: "fast" | "full";
+  skipCastPhotos?: boolean;
   includeCastProfiles?: boolean;
   suppressSuccessNotice?: boolean;
 };
@@ -622,7 +663,11 @@ const REFRESH_LOG_TOPIC_DEFINITIONS: RefreshLogTopicDefinition[] = [
   { key: "links", label: "LINKS", description: "Show, season, and cast link discovery" },
   { key: "bravo", label: "BRAVO", description: "Bravo auto-sync when eligible" },
   { key: "cast_profiles", label: "CAST PROFILES", description: "Relationship roles, bios, and profile data" },
-  { key: "cast_media", label: "CAST MEDIA", description: "Images, mirroring, and media persistence" },
+  {
+    key: "cast_media",
+    label: "MEDIA",
+    description: "Show, season, episode, and cast images, mirroring, and media persistence",
+  },
 ];
 
 const FULL_SHOW_REFRESH_TARGETS: ShowRefreshTarget[] = [
@@ -632,6 +677,7 @@ const FULL_SHOW_REFRESH_TARGETS: ShowRefreshTarget[] = [
   "cast_profiles",
   "cast_media",
 ];
+const FULL_SHOW_REFRESH_TOTAL_PHASES = FULL_SHOW_REFRESH_TARGETS.length + 1;
 
 const SHOW_PAGE_TABS: ShowTab[] = [
   { id: "details", label: "Home", icon: "home" },
@@ -787,7 +833,7 @@ const PERSON_LINK_SOURCE_DEFINITIONS: Array<{ key: PersonLinkSourceKey; label: s
 const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   details: "Show Info",
   seasons_episodes: "Seasons & Episodes",
-  photos: "Show/Season/Episode Media",
+  photos: "Gallery Media",
   cast_credits: "Cast & Credits",
   videos: "Bravo Videos",
   news: "Google News",
@@ -806,7 +852,7 @@ const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   links: "Links",
   bravo: "Bravo",
   cast_profiles: "Cast Profiles",
-  cast_media: "Cast Media",
+  cast_media: "Media",
   details_sync_shows: "Show Info",
   details_tmdb_show_entities: "Show Entities",
   details_tmdb_watch_providers: "Watch Providers",
@@ -2263,9 +2309,7 @@ export default function TrrShowDetailPage() {
   const syncBravoPreviewRunRef = useRef(0);
   const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
   const hasAutoOpenedSeasonRef = useRef(false);
-  const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<
-    Record<string, { count: number; premiereDate: string | null; finaleDate: string | null }>
-  >({});
+  const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<Record<string, SeasonEpisodeSummary>>({});
   const [seasonSummariesLoading, setSeasonSummariesLoading] = useState(false);
   const [socialDependencyError, setSocialDependencyError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2574,6 +2618,7 @@ export default function TrrShowDetailPage() {
   const castLoadInFlightRef = useRef<Promise<TrrCastMember[]> | null>(null);
   const castAutoLoadAttemptedRef = useRef<string | null>(null);
   const castAutoRecoveryAttemptedRef = useRef<string | null>(null);
+  const castAutoPhotoRecoveryAttemptedRef = useRef<string | null>(null);
   const castSnapshotRef = useRef<{ cast: TrrCastMember[]; archive: TrrCastMember[] }>({
     cast: [],
     archive: [],
@@ -3381,7 +3426,7 @@ export default function TrrShowDetailPage() {
       });
       return data;
     },
-    [getAuthHeaders, showId]
+    [getAuthHeaders, show?.name, showId]
   );
 
   const reprocessPersonImages = useCallback(
@@ -4020,7 +4065,7 @@ export default function TrrShowDetailPage() {
     try {
       const headers = await getAuthHeaders();
       const data = await adminGetJson<{ seasons?: TrrSeason[] }>(
-        `/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50`,
+        `/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50&include_episode_signal=true`,
         {
           headers,
           timeoutMs: SHOW_CORE_LOAD_TIMEOUT_MS,
@@ -4029,6 +4074,8 @@ export default function TrrShowDetailPage() {
       const nextSeasons = Array.isArray(data.seasons) ? data.seasons : [];
       if (!isCurrentShowId(requestShowId)) return;
       setSeasons(nextSeasons);
+      setSeasonEpisodeSummaries(buildSeasonEpisodeSummaryMap(nextSeasons));
+      setSeasonSummariesLoading(false);
       setSocialDependencyError(null);
     } catch (err) {
       if (!isCurrentShowId(requestShowId)) return;
@@ -4041,7 +4088,6 @@ export default function TrrShowDetailPage() {
   const fetchSeasonEpisodeSummaries = useCallback(
     async (seasonList: TrrSeason[]) => {
       if (seasonList.length === 0) {
-        setSeasonEpisodeSummaries({});
         setSeasonSummariesLoading(false);
         return;
       }
@@ -4049,10 +4095,7 @@ export default function TrrShowDetailPage() {
       try {
         const headers = await getAuthHeaders();
         const results: Array<
-          | {
-              seasonId: string;
-              summary: { count: number; premiereDate: string | null; finaleDate: string | null };
-            }
+          | { seasonId: string; summary: SeasonEpisodeSummary }
           | { seasonId: string; error: string }
         > = [];
         const workerCount = Math.max(
@@ -4089,14 +4132,7 @@ export default function TrrShowDetailPage() {
                 dates.length > 0
                   ? new Date(Math.max(...dates.map((d) => d.getTime()))).toISOString()
                   : null;
-              results.push({
-                seasonId: season.id,
-                summary: {
-                  count: episodes.length,
-                  premiereDate: premiere,
-                  finaleDate: finale,
-                },
-              });
+              results.push({ seasonId: season.id, summary: { count: episodes.length, premiereDate: premiere, finaleDate: finale } });
             } catch (error) {
               const message = error instanceof Error ? error.message : "failed";
               results.push({
@@ -4110,10 +4146,7 @@ export default function TrrShowDetailPage() {
         await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
         const failedSeasonIds: string[] = [];
-        const nextSummaries: Record<
-          string,
-          { count: number; premiereDate: string | null; finaleDate: string | null }
-        > = {};
+        const nextSummaries: Record<string, SeasonEpisodeSummary> = {};
         for (const result of results) {
           if ("summary" in result && result.summary) {
             nextSummaries[result.seasonId] = result.summary;
@@ -4126,7 +4159,7 @@ export default function TrrShowDetailPage() {
             `[show] Season episode summaries unavailable for ${failedSeasonIds.length} season(s): ${failedSeasonIds.join(", ")}`,
           );
         }
-        setSeasonEpisodeSummaries(nextSummaries);
+        setSeasonEpisodeSummaries((current) => ({ ...current, ...nextSummaries }));
       } catch (error) {
         console.warn("Failed to compute season episode summaries:", error);
       } finally {
@@ -4143,7 +4176,9 @@ export default function TrrShowDetailPage() {
       minEpisodes?: number | null;
       excludeZeroEpisodeMembers?: boolean;
       photoFallbackMode?: CastPhotoFallbackMode;
+      includePhotos?: boolean;
       mergeMissingPhotosOnly?: boolean;
+      background?: boolean;
       throwOnError?: boolean;
       force?: boolean;
       signal?: AbortSignal;
@@ -4158,7 +4193,9 @@ export default function TrrShowDetailPage() {
             : null;
       const excludeZeroEpisodeMembers = options?.excludeZeroEpisodeMembers ?? true;
       const photoFallbackMode = options?.photoFallbackMode ?? "none";
+      const includePhotos = options?.includePhotos ?? true;
       const mergeMissingPhotosOnly = options?.mergeMissingPhotosOnly === true;
+      const background = options?.background === true;
       const requestShowId = showId;
       if (!requestShowId) return [];
       if (castLoadInFlightRef.current && !force) {
@@ -4196,9 +4233,11 @@ export default function TrrShowDetailPage() {
       };
 
       const request = (async () => {
-        setCastLoading(true);
-        setCastLoadError(null);
-        setCastLoadWarning(null);
+        if (!background) {
+          setCastLoading(true);
+          setCastLoadError(null);
+          setCastLoadWarning(null);
+        }
         try {
           if (externalSignal) {
             if (externalSignal.aborted) {
@@ -4224,6 +4263,7 @@ export default function TrrShowDetailPage() {
               if (excludeZeroEpisodeMembers) {
                 params.set("exclude_zero_episode_members", "1");
               }
+              params.set("include_photos", includePhotos ? "true" : "false");
               response = await fetchWithTimeout(
                 `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
                 { headers },
@@ -4306,9 +4346,13 @@ export default function TrrShowDetailPage() {
               ? eligibilityWarningRaw
               : null
           );
-          setCastLoadWarning(null);
-          setCastLoadedOnce(true);
-          castLoadedOnceRef.current = true;
+          if (!background) {
+            setCastLoadWarning(null);
+          }
+          if (!mergeMissingPhotosOnly || !background) {
+            setCastLoadedOnce(true);
+            castLoadedOnceRef.current = true;
+          }
           return appliedCast;
         } catch (err) {
           if (requestController.signal.aborted) {
@@ -4321,6 +4365,12 @@ export default function TrrShowDetailPage() {
               ? err.message
               : "Failed to fetch cast";
           console.warn("Failed to fetch cast:", message);
+          if (background) {
+            if (options?.throwOnError) {
+              throw (err instanceof Error ? err : new Error(message));
+            }
+            return [];
+          }
           const hasPriorData =
             castLoadedOnceRef.current ||
             castSnapshotRef.current.cast.length > 0 ||
@@ -6866,7 +6916,7 @@ export default function TrrShowDetailPage() {
     const autoLoadKey = `${showId}:cast`;
     if (castAutoLoadAttemptedRef.current === autoLoadKey) return;
     castAutoLoadAttemptedRef.current = autoLoadKey;
-    void fetchCast({ force: true });
+    void fetchCast({ force: true, includePhotos: false });
   }, [activeTab, fetchCast, hasAccess, showId]);
 
   useEffect(() => {
@@ -6917,6 +6967,42 @@ export default function TrrShowDetailPage() {
     rolesLoading,
     showId,
     showRolesLoadedOnce,
+  ]);
+
+  const missingCastPhotoCount = useMemo(() => {
+    const countMissing = (members: TrrCastMember[]) =>
+      members.filter((member) => !member.photo_url).length;
+    return countMissing(cast) + countMissing(archiveFootageCast);
+  }, [archiveFootageCast, cast]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "cast") return;
+    if (castLoading || castPhotoEnriching) return;
+    if (!castLoadedOnce) return;
+    const totalCastMembers = cast.length + archiveFootageCast.length;
+    if (totalCastMembers <= 0 || missingCastPhotoCount <= 0) return;
+
+    const recoveryKey = `${showId}:missing-photo-recovery`;
+    if (castAutoPhotoRecoveryAttemptedRef.current === recoveryKey) return;
+    castAutoPhotoRecoveryAttemptedRef.current = recoveryKey;
+
+    void fetchCast({
+      mergeMissingPhotosOnly: true,
+      includePhotos: true,
+      background: true,
+      throwOnError: false,
+    });
+  }, [
+    activeTab,
+    archiveFootageCast.length,
+    cast.length,
+    castLoadedOnce,
+    castLoading,
+    castPhotoEnriching,
+    fetchCast,
+    hasAccess,
+    missingCastPhotoCount,
+    showId,
   ]);
 
   useEffect(() => {
@@ -6993,6 +7079,7 @@ export default function TrrShowDetailPage() {
     castLoadInFlightRef.current = null;
     castAutoLoadAttemptedRef.current = null;
     castAutoRecoveryAttemptedRef.current = null;
+    castAutoPhotoRecoveryAttemptedRef.current = null;
     setCastLoading(false);
     setCastLoadError(null);
     setCastLoadWarning(null);
@@ -7076,9 +7163,12 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (activeTab !== "seasons") return;
-    if (seasons.length > 0) {
-      void fetchSeasonEpisodeSummaries(seasons);
+    const missingSummaries = seasons.filter((season) => !buildSeasonEpisodeSummary(season));
+    if (missingSummaries.length > 0) {
+      void fetchSeasonEpisodeSummaries(missingSummaries);
+      return;
     }
+    setSeasonSummariesLoading(false);
   }, [activeTab, seasons, fetchSeasonEpisodeSummaries]);
 
   const formatDate = (value: string | null) =>
@@ -8898,6 +8988,7 @@ export default function TrrShowDetailPage() {
       const label = getShowRefreshTargetLabel(target);
       const includeCastProfiles = options?.includeCastProfiles ?? true;
       const fastPhotoMode = options?.photoMode === "fast";
+      const skipCastPhotos = options?.skipCastPhotos === true;
       const seasonScopedPhotoRefresh =
         target === "photos" &&
         activeTab === "assets" &&
@@ -8941,7 +9032,9 @@ export default function TrrShowDetailPage() {
       if (target === "photos" && fastPhotoMode) {
         appendRefreshLog({
           category: label,
-          message: "Fast mode enabled: reduced media crawl pages and skipped word-detection (tagging retained).",
+          message: skipCastPhotos
+            ? "Fast gallery mode enabled: reduced crawl depth; cast photos, auto-count, and word detection skipped."
+            : "Fast gallery mode enabled: reduced crawl depth; auto-count and word detection skipped.",
           current: null,
           total: null,
         });
@@ -8973,8 +9066,9 @@ export default function TrrShowDetailPage() {
                   skip_mirror: false,
                   limit_per_source: fastPhotoMode ? 20 : 50,
                   imdb_mediaindex_max_pages: fastPhotoMode ? 6 : 25,
-                  skip_auto_count: false,
-                  skip_word_detection: fastPhotoMode,
+                  skip_auto_count: fastPhotoMode || skipCastPhotos,
+                  skip_word_detection: fastPhotoMode || skipCastPhotos,
+                  skip_cast_photos: skipCastPhotos,
                   season_number:
                     typeof seasonScopedPhotoRefresh === "number"
                       ? seasonScopedPhotoRefresh
@@ -9103,11 +9197,23 @@ export default function TrrShowDetailPage() {
 
                   if (
                     target === "photos" &&
-                    ("cast_photos_upserted" in payloadObject || "cast_photos_fetched" in payloadObject)
+                    (
+                      "show_images_upserted" in payloadObject ||
+                      "season_images_upserted" in payloadObject ||
+                      "episode_images_upserted" in payloadObject ||
+                      "cast_photos_upserted" in payloadObject ||
+                      "cast_photos_fetched" in payloadObject
+                    )
                   ) {
                     const asNum = (value: unknown): number | null =>
                       typeof value === "number" && Number.isFinite(value) ? value : null;
                     const durationMs = asNum((payloadObject as { duration_ms?: unknown }).duration_ms);
+                    const showUpserted = asNum((payloadObject as { show_images_upserted?: unknown }).show_images_upserted);
+                    const showMirrored = asNum((payloadObject as { show_images_mirrored?: unknown }).show_images_mirrored);
+                    const seasonUpserted = asNum((payloadObject as { season_images_upserted?: unknown }).season_images_upserted);
+                    const seasonMirrored = asNum((payloadObject as { season_images_mirrored?: unknown }).season_images_mirrored);
+                    const episodeUpserted = asNum((payloadObject as { episode_images_upserted?: unknown }).episode_images_upserted);
+                    const episodeMirrored = asNum((payloadObject as { episode_images_mirrored?: unknown }).episode_images_mirrored);
                     const castFetched = asNum((payloadObject as { cast_photos_fetched?: unknown }).cast_photos_fetched);
                     const castUpserted = asNum((payloadObject as { cast_photos_upserted?: unknown }).cast_photos_upserted);
                     const castMirrored = asNum((payloadObject as { cast_photos_mirrored?: unknown }).cast_photos_mirrored);
@@ -9124,9 +9230,15 @@ export default function TrrShowDetailPage() {
                     }
 
                     const successParts = [
+                      showUpserted !== null ? `show media upserted: ${showUpserted}` : null,
+                      showMirrored !== null ? `show media mirrored: ${showMirrored}` : null,
+                      seasonUpserted !== null ? `season media upserted: ${seasonUpserted}` : null,
+                      seasonMirrored !== null ? `season media mirrored: ${seasonMirrored}` : null,
+                      episodeUpserted !== null ? `episode media upserted: ${episodeUpserted}` : null,
+                      episodeMirrored !== null ? `episode media mirrored: ${episodeMirrored}` : null,
                       castFetched !== null ? `photos fetched: ${castFetched}` : null,
-                      castUpserted !== null ? `photos upserted: ${castUpserted}` : null,
-                      castMirrored !== null ? `photos mirrored: ${castMirrored}` : null,
+                      castUpserted !== null ? `cast photos upserted: ${castUpserted}` : null,
+                      castMirrored !== null ? `cast photos mirrored: ${castMirrored}` : null,
                       castPruned !== null ? `photos pruned: ${castPruned}` : null,
                       sourcesSkipped !== null && sourcesSkipped > 0
                         ? `sources skipped: ${sourcesSkipped}`
@@ -9135,7 +9247,7 @@ export default function TrrShowDetailPage() {
                       wordSucceeded !== null ? `text-overlay classified: ${wordSucceeded}` : null,
                     ].filter((part): part is string => Boolean(part));
                     const failParts = [
-                      castFailed !== null && castFailed > 0 ? `photos failed: ${castFailed}` : null,
+                      castFailed !== null && castFailed > 0 ? `cast photos failed: ${castFailed}` : null,
                       autoFailed !== null && autoFailed > 0
                         ? `auto counts failed: ${autoFailed}`
                         : null,
@@ -9469,13 +9581,13 @@ export default function TrrShowDetailPage() {
       stage: "Initializing",
       message: "Starting full show refresh...",
       current: 0,
-      total: FULL_SHOW_REFRESH_TARGETS.length,
+      total: FULL_SHOW_REFRESH_TOTAL_PHASES,
     });
     appendRefreshLog({
       category: "Refresh",
       message: "Starting full refresh.",
       current: 0,
-      total: FULL_SHOW_REFRESH_TARGETS.length,
+      total: FULL_SHOW_REFRESH_TOTAL_PHASES,
     });
 
     try {
@@ -9501,6 +9613,52 @@ export default function TrrShowDetailPage() {
           ensureDefaultRedditCommunity(),
         ]);
 
+        return { failedLabels, skippedLabels };
+      };
+
+      const runGalleryRefreshPhase = async () => {
+        setRefreshAllProgress({
+          stage: "Gallery Media",
+          message: "Unified refresh complete. Starting gallery media refresh...",
+          current: FULL_SHOW_REFRESH_TARGETS.length,
+          total: FULL_SHOW_REFRESH_TOTAL_PHASES,
+        });
+        appendRefreshLog({
+          category: "Refresh",
+          message: "Unified refresh complete. Starting gallery media refresh.",
+          current: FULL_SHOW_REFRESH_TARGETS.length,
+          total: FULL_SHOW_REFRESH_TOTAL_PHASES,
+        });
+        return refreshShow("photos", {
+          photoMode: "fast",
+          skipCastPhotos: true,
+          suppressSuccessNotice: true,
+        });
+      };
+
+      const finalizeFullRefresh = (skippedLabels: string[]) => {
+        setRefreshAllProgress({
+          stage: "Completed",
+          message: "Full show refresh complete.",
+          current: FULL_SHOW_REFRESH_TOTAL_PHASES,
+          total: FULL_SHOW_REFRESH_TOTAL_PHASES,
+        });
+        const successMessage =
+          skippedLabels.length > 0
+            ? `Refreshed show core, links, cast profiles, cast media, and gallery media. Skipped: ${skippedLabels.join(", ")}.`
+            : "Refreshed show core, links, Bravo, cast profiles, cast media, and gallery media.";
+        setRefreshAllNotice(successMessage);
+        appendRefreshLog({
+          category: "Refresh",
+          message: successMessage,
+          current: FULL_SHOW_REFRESH_TOTAL_PHASES,
+          total: FULL_SHOW_REFRESH_TOTAL_PHASES,
+        });
+      };
+
+      const handleUnifiedRefreshResults = async (results: Record<string, unknown> | null) => {
+        const { failedLabels, skippedLabels } = await applyRefreshResults(results);
+
         if (failedLabels.length > 0) {
           const suffix =
             skippedLabels.length > 0 ? ` Skipped: ${skippedLabels.join(", ")}.` : "";
@@ -9510,22 +9668,27 @@ export default function TrrShowDetailPage() {
             category: "Refresh",
             message,
             current: FULL_SHOW_REFRESH_TARGETS.length,
-            total: FULL_SHOW_REFRESH_TARGETS.length,
+            total: FULL_SHOW_REFRESH_TOTAL_PHASES,
           });
           return;
         }
 
-        const successMessage =
-          skippedLabels.length > 0
-            ? `Refreshed show core, links, cast profiles, and cast media. Skipped: ${skippedLabels.join(", ")}.`
-            : "Refreshed show core, links, Bravo, cast profiles, and cast media.";
-        setRefreshAllNotice(successMessage);
-        appendRefreshLog({
-          category: "Refresh",
-          message: successMessage,
-          current: FULL_SHOW_REFRESH_TARGETS.length,
-          total: FULL_SHOW_REFRESH_TARGETS.length,
-        });
+        const gallerySuccess = await runGalleryRefreshPhase();
+        if (!gallerySuccess) {
+          const suffix =
+            skippedLabels.length > 0 ? ` Unified skips: ${skippedLabels.join(", ")}.` : "";
+          const message = `Unified refresh completed, but gallery media refresh failed.${suffix}`;
+          setRefreshAllError(message);
+          appendRefreshLog({
+            category: "Refresh",
+            message,
+            current: FULL_SHOW_REFRESH_TARGETS.length,
+            total: FULL_SHOW_REFRESH_TOTAL_PHASES,
+          });
+          return;
+        }
+
+        finalizeFullRefresh(skippedLabels);
       };
 
       try {
@@ -9548,7 +9711,6 @@ export default function TrrShowDetailPage() {
                 ?? stageKeyRaw;
               const messageRaw = payloadObject.message;
               const current = parseProgressNumber(payloadObject.current);
-              const total = parseProgressNumber(payloadObject.total);
               const topicRaw = payloadObject.topic;
               const providerRaw = payloadObject.provider;
               const skipReasonRaw = payloadObject.skip_reason;
@@ -9565,13 +9727,13 @@ export default function TrrShowDetailPage() {
                 stage: stageLabel ?? "Refreshing",
                 message: progressMessage,
                 current,
-                total,
+                total: FULL_SHOW_REFRESH_TOTAL_PHASES,
               });
               appendRefreshLog({
                 category: "Refresh",
                 message: progressMessage,
                 current,
-                total,
+                total: FULL_SHOW_REFRESH_TOTAL_PHASES,
                 stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
                 topic: typeof topicRaw === "string" ? normalizeRefreshLogTopic(topicRaw) : null,
                 provider: typeof providerRaw === "string" ? providerRaw : null,
@@ -9587,7 +9749,7 @@ export default function TrrShowDetailPage() {
                 payloadObject.results && typeof payloadObject.results === "object"
                   ? (payloadObject.results as Record<string, unknown>)
                   : null;
-              await applyRefreshResults(results);
+              await handleUnifiedRefreshResults(results);
               return;
             }
 
@@ -9642,9 +9804,9 @@ export default function TrrShowDetailPage() {
           data.results && typeof data.results === "object"
             ? (data.results as Record<string, unknown>)
             : null;
-        await applyRefreshResults(results);
+        await handleUnifiedRefreshResults(results);
       } else if (!sawComplete) {
-        setRefreshAllNotice("Refresh completed.");
+        throw new Error("Unified refresh ended before completion.");
       }
     } catch (err) {
       setRefreshAllError(err instanceof Error ? err.message : "Refresh failed");
@@ -9666,6 +9828,7 @@ export default function TrrShowDetailPage() {
     fetchShow,
     getAuthHeaders,
     loadBravoData,
+    refreshShow,
     refreshingShowAll,
     showId,
   ]);
@@ -10151,12 +10314,6 @@ export default function TrrShowDetailPage() {
     reprocessCastMedia,
   ]);
 
-  const missingCastPhotoCount = useMemo(() => {
-    const countMissing = (members: TrrCastMember[]) =>
-      members.filter((member) => !member.photo_url).length;
-    return countMissing(cast) + countMissing(archiveFootageCast);
-  }, [archiveFootageCast, cast]);
-
   const enrichMissingCastPhotos = useCallback(async () => {
     if (!showId) return;
     if (castLoading || castPhotoEnriching) return;
@@ -10174,7 +10331,9 @@ export default function TrrShowDetailPage() {
         rosterMode: "imdb_show_membership",
         minEpisodes: 1,
         photoFallbackMode: "bravo",
+        includePhotos: true,
         mergeMissingPhotosOnly: true,
+        background: true,
         throwOnError: true,
       });
       setCastPhotoEnrichNotice(
@@ -10915,6 +11074,9 @@ export default function TrrShowDetailPage() {
   const castIntelligenceSettled = !castRoleMembersLoading && !rolesLoading;
   const castRosterSettled =
     !castLoading && (castLoadedOnce || Boolean(castLoadError) || Boolean(castLoadWarning));
+  const castRosterReady =
+    activeTab === "cast" &&
+    (cast.length > 0 || archiveFootageCast.length > 0 || castRosterSettled);
   const castUiTerminalReady = activeTab === "cast" && castIntelligenceSettled && castRosterSettled;
   const shouldShowRoleCreditEmptyState =
     castUiTerminalReady && availableCastRoleAndCreditFilters.length === 0;
@@ -11129,6 +11291,9 @@ export default function TrrShowDetailPage() {
   }
   const hasUnifiedRefreshHistory =
     refreshLogEntries.length > 0 || Boolean(refreshAllNotice) || Boolean(refreshAllError);
+  const refreshCenterButtonLabel = isShowRefreshBusy
+    ? "View Refresh Center"
+    : "Open Refresh Center";
   const refreshRunButtonLabel = refreshingShowAll
     ? "Running..."
     : hasUnifiedRefreshHistory
@@ -11236,7 +11401,7 @@ export default function TrrShowDetailPage() {
                     onClick={() => setRefreshLogOpen(true)}
                     className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
                   >
-                    {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
+                    {refreshCenterButtonLabel}
                   </button>
 
                   {/* Ratings */}
@@ -11435,7 +11600,7 @@ export default function TrrShowDetailPage() {
                             d="M4 4v6h6M20 20v-6h-6M20 8a8 8 0 00-14-4M4 16a8 8 0 0014 4"
                           />
                         </svg>
-                        {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
+                        {refreshCenterButtonLabel}
                       </button>
 
                       <button
@@ -12283,10 +12448,12 @@ export default function TrrShowDetailPage() {
                     Cast
                   </p>
                   {castGalleryMembers.length === 0 ? (
-                    castUiTerminalReady ? (
-                      <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
-                    ) : (
+                    !castRosterReady ? (
                       <p className="text-sm text-zinc-500">Loading cast roster...</p>
+                    ) : cast.length === 0 && archiveFootageCast.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No cast members found for this show.</p>
+                    ) : (
+                      <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                     )
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -12656,7 +12823,7 @@ export default function TrrShowDetailPage() {
                     disabled={showLogoSyncing}
                     className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
+                    {refreshCenterButtonLabel}
                   </button>
                 </div>
               </div>
@@ -13371,7 +13538,7 @@ export default function TrrShowDetailPage() {
                     onClick={() => setRefreshLogOpen(true)}
                     className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {isShowRefreshBusy ? "Open Refresh" : "Refresh"}
+                    {refreshCenterButtonLabel}
                   </button>
                 </div>
               </div>

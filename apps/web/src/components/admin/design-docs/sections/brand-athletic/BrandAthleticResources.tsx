@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 /* ------------------------------------------------------------------ */
@@ -27,10 +27,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#121212",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #121212",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -136,7 +136,7 @@ export default function BrandAthleticResources() {
     <div>
       {/* ── Brand Header ───────────────────────────────── */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "32px 40px",
           marginBottom: 40,
@@ -147,7 +147,7 @@ export default function BrandAthleticResources() {
             fontFamily: "var(--dd-font-sans)",
             fontWeight: 700,
             fontSize: 32,
-            color: "var(--dd-ink-black)",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -158,7 +158,7 @@ export default function BrandAthleticResources() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "var(--dd-ink-faint)",
+            color: "var(--dd-brand-text-secondary)",
             lineHeight: 1.5,
           }}
         >
@@ -170,8 +170,8 @@ export default function BrandAthleticResources() {
       <SectionLabel id="quick-links">Quick Links</SectionLabel>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 40 }}>
         <Link
-          href={"/admin/design-docs/athletic-articles" as Route}
-          className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+          href={buildDesignDocsPath("athletic-articles")}
+          className="dd-brand-card"
           style={{
             display: "block",
             textDecoration: "none",
@@ -183,7 +183,7 @@ export default function BrandAthleticResources() {
               fontFamily: "var(--dd-font-sans)",
               fontSize: 14,
               fontWeight: 600,
-              color: "#121212",
+              color: "var(--dd-brand-text-primary)",
               marginBottom: 4,
             }}
           >
@@ -200,7 +200,7 @@ export default function BrandAthleticResources() {
           </div>
         </Link>
         <div
-          className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+          className="dd-brand-card"
           style={{
             padding: "16px 20px",
           }}
@@ -210,7 +210,7 @@ export default function BrandAthleticResources() {
               fontFamily: "var(--dd-font-sans)",
               fontSize: 14,
               fontWeight: 600,
-              color: "#121212",
+              color: "var(--dd-brand-text-primary)",
               marginBottom: 4,
             }}
           >
@@ -339,7 +339,7 @@ export default function BrandAthleticResources() {
         <>
           <SectionLabel id="team-logos">Team Logos ({teamLogos.length})</SectionLabel>
           <div
-            className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+            className="dd-brand-card"
             style={{
               padding: "20px 24px",
               marginBottom: 40,
@@ -380,7 +380,7 @@ export default function BrandAthleticResources() {
                     style={{
                       fontFamily: "var(--dd-font-mono)",
                       fontSize: 10,
-                      color: "#888888",
+                      color: "var(--dd-brand-text-muted)",
                     }}
                   >
                     {logo.name}
@@ -397,7 +397,7 @@ export default function BrandAthleticResources() {
         <>
           <SectionLabel id="puzzle-logo">Puzzle Logo</SectionLabel>
           <div
-            className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+            className="dd-brand-card"
             style={{
               padding: "20px 24px",
               marginBottom: 40,
@@ -444,7 +444,7 @@ export default function BrandAthleticResources() {
                     style={{
                       fontFamily: "var(--dd-font-mono)",
                       fontSize: 10,
-                      color: "#888888",
+                      color: "var(--dd-brand-text-muted)",
                     }}
                   >
                     {logo.size} &mdash; {logo.usage}
@@ -459,7 +459,7 @@ export default function BrandAthleticResources() {
       {/* ── External Assets ────────────────────────────── */}
       <SectionLabel id="external-assets">External Assets</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "20px 24px",
           marginBottom: 16,
@@ -508,7 +508,7 @@ export default function BrandAthleticResources() {
       {/* Social Images */}
       {socialImages.length > 0 && (
         <div
-          className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+          className="dd-brand-card"
           style={{
             padding: "20px 24px",
             marginBottom: 16,
@@ -586,7 +586,7 @@ export default function BrandAthleticResources() {
 
       {/* Author Headshot */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "20px 24px",
           marginBottom: 40,
@@ -633,7 +633,7 @@ export default function BrandAthleticResources() {
                   style={{
                     fontFamily: "var(--dd-font-sans)",
                     fontSize: 10,
-                    color: "#888888",
+                    color: "var(--dd-brand-text-muted)",
                   }}
                 >
                   {article.authors.join(", ")}
@@ -651,7 +651,7 @@ export default function BrandAthleticResources() {
           {cssFiles.map((group) => (
             <div
               key={group.article}
-              className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+              className="dd-brand-card"
               style={{
                 padding: "16px 20px",
                 marginBottom: 8,
@@ -730,7 +730,7 @@ export default function BrandAthleticResources() {
                         padding: "6px 12px",
                         borderBottom: "1px solid #f0f0f0",
                         background: i % 2 === 0 ? "#f9f9f9" : "white",
-                        color: "#121212",
+                        color: "var(--dd-brand-text-primary)",
                         fontWeight: 600,
                         whiteSpace: "nowrap",
                       }}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import {
   DESIGN_DOC_GROUPS,
   DESIGN_DOC_SECTIONS,
@@ -382,7 +382,7 @@ export default function OverviewSection() {
                 {cards.map((section) => (
                   <Link
                     key={section.id}
-                    href={`/admin/design-docs/${section.id}` as Route}
+                    href={buildDesignDocsPath(section.id)}
                     className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition"
                     style={{ display: "block", textDecoration: "none" }}
                   >

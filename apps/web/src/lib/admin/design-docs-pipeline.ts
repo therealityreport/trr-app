@@ -1,0 +1,647 @@
+import { JSDOM } from "jsdom";
+import type {
+  ExtractionPlan,
+  LayoutFamily,
+  MergedExtractionOutput,
+  NavigationData,
+  NavigationLink,
+  PublisherClassification,
+  TaxonomyMapping,
+  TaxonomySectionMapping,
+  TechInventory,
+} from "./design-docs-pipeline-types.ts";
+
+type ExtractionInput = {
+  articleUrl: string;
+  sourceHtml: string;
+};
+
+const TAXONOMY_KEYS = {
+  designTokens: "1-design-tokens",
+  navigation: "4-navigation",
+  dataDisplay: "5-data-display",
+  charts: "6-charts",
+  devStack: "11-dev-stack",
+  otherResources: "15-other-resources",
+} as const;
+
+function createDom(sourceHtml: string, articleUrl: string) {
+  return new JSDOM(sourceHtml, { url: articleUrl });
+}
+
+function normalizeText(value: string | null | undefined): string {
+  return value?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+function resolveHref(value: string | null | undefined, articleUrl: string): string {
+  if (!value) {
+    return "";
+  }
+
+  try {
+    return new URL(value, articleUrl).toString();
+  } catch {
+    return value;
+  }
+}
+
+function uniqueSorted(values: readonly string[]): string[] {
+  return [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+function addSection(
+  sections: Record<string, TaxonomySectionMapping>,
+  key: string,
+  selector: string,
+  subPages: string[],
+) {
+  const existing = sections[key] ?? {
+    discovered: false,
+    elements: [],
+    subPages: [],
+  };
+
+  existing.discovered = true;
+  existing.elements = uniqueSorted([...existing.elements, selector]);
+  existing.subPages = uniqueSorted([...existing.subPages, ...subPages]);
+  sections[key] = existing;
+}
+
+function detectTechInventory(sourceHtml: string, articleUrl: string): TechInventory {
+  const frameworks: TechInventory["frameworks"] = [];
+  const cdns: TechInventory["cdns"] = [];
+  const analytics: TechInventory["analytics"] = [];
+
+  const frameworkMarkers = [
+    { pattern: /__NEXT_DATA__/i, name: "Next.js", confidence: 0.95 },
+    { pattern: /data-birdkit-hydrate/i, name: "Birdkit", confidence: 0.98 },
+    { pattern: /data-svelte-h|svelte-/i, name: "Svelte", confidence: 0.85 },
+    { pattern: /__nuxt/i, name: "Nuxt.js", confidence: 0.9 },
+    { pattern: /data-reactroot|data-reactid/i, name: "React", confidence: 0.8 },
+    { pattern: /ng-version/i, name: "Angular", confidence: 0.8 },
+  ];
+
+  for (const marker of frameworkMarkers) {
+    if (marker.pattern.test(sourceHtml)) {
+      frameworks.push({ name: marker.name, confidence: marker.confidence });
+    }
+  }
+
+  const cdnMarkers = [
+    { pattern: /static01\.nyt\.com\/athletic/gi, name: "The Athletic CDN" },
+    { pattern: /static01\.nyt\.com/gi, name: "NYT Static CDN" },
+    { pattern: /g1\.nyt\.com\/fonts/gi, name: "NYT Font CDN" },
+    { pattern: /datawrapper\.dwcdn\.net/gi, name: "Datawrapper" },
+    { pattern: /cdn-league-logos\.theathletic\.com/gi, name: "Athletic League Logos" },
+    { pattern: /cdn-media\.theathletic\.com/gi, name: "Athletic Media CDN" },
+    { pattern: /platform\.twitter\.com/gi, name: "Twitter embeds" },
+    { pattern: /googletagmanager\.com/gi, name: "Google Tag Manager" },
+    { pattern: /brandmetrics\.com/gi, name: "Brand Metrics" },
+    { pattern: /datadoghq-browser-agent\.com/gi, name: "Datadog Browser Agent" },
+  ];
+
+  for (const marker of cdnMarkers) {
+    const urls = Array.from(sourceHtml.matchAll(marker.pattern), (match) => match[0]);
+    if (urls.length > 0) {
+      cdns.push({ name: marker.name, urls: uniqueSorted(urls) });
+    }
+  }
+
+  const analyticsMarkers = [
+    { pattern: /nyt_et/gi, name: "NYT Event Tracker" },
+    { pattern: /GTM-[A-Z0-9]+/g, name: "Google Tag Manager" },
+    { pattern: /DD_RUM/gi, name: "Datadog RUM" },
+    { pattern: /ga\('create'|gtag\(/g, name: "Google Analytics" },
+  ];
+
+  for (const marker of analyticsMarkers) {
+    const hits = Array.from(sourceHtml.matchAll(marker.pattern), (match) => match[0]);
+    for (const hit of uniqueSorted(hits)) {
+      analytics.push({ name: marker.name, id: hit.startsWith("GTM-") ? hit : undefined });
+    }
+  }
+
+  let cssFramework: string | undefined;
+  if (/tailwind/i.test(sourceHtml)) {
+    cssFramework = "Tailwind CSS";
+  } else if (/styled-components/i.test(sourceHtml)) {
+    cssFramework = "Styled Components";
+  } else if (/__jsx-/i.test(sourceHtml)) {
+    cssFramework = "Styled JSX";
+  } else if (/css-[a-z0-9]{6,}/i.test(sourceHtml)) {
+    cssFramework = "CSS Modules / CSS-in-JS";
+  }
+
+  let buildSystem: string | undefined;
+  if (frameworks.some((framework) => framework.name === "Next.js")) {
+    buildSystem = "Next.js build pipeline";
+  } else if (frameworks.some((framework) => framework.name === "Svelte")) {
+    buildSystem = "SvelteKit / Vite";
+  }
+
+  if (frameworks.length === 0) {
+    frameworks.push({
+      name: articleUrl.includes("nytimes.com") ? "Publisher custom stack" : "Generic publisher",
+      confidence: 0.35,
+    });
+  }
+
+  return { frameworks, cdns, analytics, cssFramework, buildSystem };
+}
+
+function classifyLayoutFamily(articleUrl: string, sourceHtml: string, techInventory: TechInventory): LayoutFamily {
+  if (
+    techInventory.frameworks.some((framework) => framework.name === "Birdkit") ||
+    /newsgraphics|ai2html|data-birdkit-hydrate/i.test(sourceHtml)
+  ) {
+    return "nyt-interactive";
+  }
+
+  if (/theathletic|data-theme=\"legacy\"|athletic/i.test(sourceHtml) || articleUrl.includes("/athletic/")) {
+    return "athletic-article";
+  }
+
+  if (/nytimes\.com|nyt-cheltenham|nyt-franklin|css-[a-z0-9]{6,}/i.test(sourceHtml) || articleUrl.includes("nytimes.com")) {
+    return "nyt-article";
+  }
+
+  return "generic-publisher";
+}
+
+function buildExtractionPlan(layoutFamily: LayoutFamily, sourceHtml: string): ExtractionPlan {
+  const required = ["extract-page-structure", "extract-css-tokens", "extract-icons-and-media", "extract-navigation"];
+  const conditional: ExtractionPlan["conditional"] = [];
+  const skip: string[] = [];
+
+  if (/datawrapper\.dwcdn\.net/i.test(sourceHtml)) {
+    conditional.push({ skill: "extract-datawrapper-charts", reason: "Datawrapper embeds discovered in source HTML" });
+  } else {
+    skip.push("extract-datawrapper-charts");
+  }
+
+  if (/ai2html/i.test(sourceHtml)) {
+    conditional.push({ skill: "extract-ai2html-artboards", reason: "ai2html assets discovered in source HTML" });
+  } else {
+    skip.push("extract-ai2html-artboards");
+  }
+
+  if (/quote|badge/i.test(sourceHtml)) {
+    conditional.push({ skill: "extract-quote-components", reason: "Quote/status markup discovered in source HTML" });
+  } else {
+    skip.push("extract-quote-components");
+  }
+
+  if (/birdkit|CTable|data-birdkit-hydrate/i.test(sourceHtml)) {
+    conditional.push({ skill: "extract-birdkit-tables", reason: "Birdkit markup discovered in source HTML" });
+  } else {
+    skip.push("extract-birdkit-tables");
+  }
+
+  if (layoutFamily === "generic-publisher") {
+    skip.push("extract-ai2html-artboards", "extract-birdkit-tables", "extract-quote-components");
+  }
+
+  return {
+    required: uniqueSorted(required),
+    conditional,
+    skip: uniqueSorted(skip),
+  };
+}
+
+function buildTaxonomyMapping(sourceHtml: string): TaxonomyMapping {
+  const sections: TaxonomyMapping["sections"] = {};
+
+  addSection(sections, TAXONOMY_KEYS.designTokens, "stylesheets-and-fonts", ["Typography", "Color", "Spacing"]);
+  addSection(sections, TAXONOMY_KEYS.navigation, "header-footer-nav", ["Navbar / Header", "Footer"]);
+  addSection(sections, TAXONOMY_KEYS.devStack, "scripts-and-cdns", ["Technology inventory"]);
+
+  if (/<button|role=\"button\"|<input|<select|<textarea/i.test(sourceHtml)) {
+    addSection(sections, TAXONOMY_KEYS.designTokens, "interactive-controls", ["Inputs", "Buttons"]);
+  }
+
+  if (/datawrapper|ai2html|birdkit-chart|birdkit-table/i.test(sourceHtml)) {
+    addSection(sections, TAXONOMY_KEYS.charts, "embedded-graphics", ["Chart Types", "Table"]);
+  }
+
+  if (/showcase-link|storyline|twitter|puzzle-entry-point|related-link/i.test(sourceHtml)) {
+    addSection(sections, TAXONOMY_KEYS.dataDisplay, "narrative-modules", ["Card", "List"]);
+  }
+
+  if (/svg|logo|wordmark/i.test(sourceHtml)) {
+    addSection(sections, TAXONOMY_KEYS.otherResources, "brand-assets", ["Brand Logos", "Icons"]);
+  }
+
+  return { sections };
+}
+
+function getElementStyleValue(element: Element | null, propertyName: string, fallback = "") {
+  const value =
+    element?.getAttribute("style")
+      ?.split(";")
+      .map((entry) => entry.trim())
+      .find((entry) => entry.toLowerCase().startsWith(`${propertyName.toLowerCase()}:`))
+      ?.split(":")
+      .slice(1)
+      .join(":")
+      .trim() ?? "";
+
+  return value || fallback;
+}
+
+function getLinkLabel(anchor: Element): string {
+  return (
+    normalizeText(anchor.textContent) ||
+    normalizeText(anchor.getAttribute("aria-label")) ||
+    normalizeText(anchor.getAttribute("title"))
+  );
+}
+
+function toNavLink(anchor: Element, articleUrl: string): NavigationLink | null {
+  const label = getLinkLabel(anchor);
+  const href = resolveHref(anchor.getAttribute("href"), articleUrl);
+  if (!label || !href) {
+    return null;
+  }
+
+  return {
+    label,
+    href,
+    hasSubmenu: anchor.hasAttribute("aria-haspopup") || anchor.querySelector("ul, ol, menu") !== null,
+  };
+}
+
+function detectLogo(header: Element | null, articleUrl: string): NavigationData["header"]["logo"] {
+  if (!header) {
+    return null;
+  }
+
+  const image = header.querySelector("img[alt], img[src]");
+  if (image) {
+    return {
+      type: "img",
+      content: resolveHref(image.getAttribute("src"), articleUrl),
+      width: Number(image.getAttribute("width") ?? "") || undefined,
+      height: Number(image.getAttribute("height") ?? "") || undefined,
+    };
+  }
+
+  const svg = header.querySelector("svg");
+  if (svg) {
+    return {
+      type: "svg",
+      content: normalizeText(svg.getAttribute("aria-label")) || normalizeText(svg.parentElement?.textContent) || "SVG logo",
+    };
+  }
+
+  const textLogo = header.querySelector("[class*='logo' i], [id*='logo' i], h1, strong");
+  if (textLogo) {
+    return {
+      type: "text",
+      content: normalizeText(textLogo.textContent),
+    };
+  }
+
+  return null;
+}
+
+function detectSecondaryNav(header: Element | null, articleUrl: string) {
+  if (!header) {
+    return undefined;
+  }
+
+  const candidates = Array.from(header.querySelectorAll("a"))
+    .slice(0, 20)
+    .map((anchor) => ({
+      label: getLinkLabel(anchor),
+      href: resolveHref(anchor.getAttribute("href"), articleUrl),
+      iconUrl: anchor.querySelector("img")?.getAttribute("src")
+        ? resolveHref(anchor.querySelector("img")?.getAttribute("src"), articleUrl)
+        : undefined,
+    }))
+    .filter((entry) => entry.label && entry.href);
+
+  return candidates.length > 4 ? candidates.slice(0, 4) : undefined;
+}
+
+function detectHamburgerMenu(document: Document, articleUrl: string) {
+  const button = document.querySelector(
+    "button[aria-label*='menu' i], button[aria-expanded], [class*='hamburger' i], [data-testid*='menu' i]",
+  );
+
+  if (!button) {
+    return undefined;
+  }
+
+  const menuRoot =
+    button.closest("header, nav, aside")?.querySelector("ul, ol, menu") ??
+    document.querySelector("[role='menu'], [class*='menu' i] ul, [class*='drawer' i] ul");
+
+  const items = Array.from(menuRoot?.querySelectorAll("a") ?? [])
+    .map((anchor) => ({
+      label: getLinkLabel(anchor),
+      href: resolveHref(anchor.getAttribute("href"), articleUrl),
+      iconUrl: anchor.querySelector("img")?.getAttribute("src")
+        ? resolveHref(anchor.querySelector("img")?.getAttribute("src"), articleUrl)
+        : undefined,
+    }))
+    .filter((entry) => entry.label && entry.href);
+
+  return {
+    sections: [
+      {
+        label: normalizeText(button.getAttribute("aria-label")) || "Menu",
+        items: items.slice(0, 12),
+      },
+    ],
+  };
+}
+
+function detectFooterColumns(footer: Element | null, articleUrl: string) {
+  if (!footer) {
+    return [];
+  }
+
+  const groups: NavigationData["footer"]["columns"] = [];
+  const containers = Array.from(
+    footer.querySelectorAll("section, div, nav"),
+  ).filter((container) => container.querySelectorAll("a").length > 0);
+
+  for (const container of containers) {
+    const header =
+      normalizeText(container.querySelector("h2, h3, h4, strong")?.textContent) || "Links";
+    const links = Array.from(container.querySelectorAll("a"))
+      .map((anchor) => ({
+        label: getLinkLabel(anchor),
+        href: resolveHref(anchor.getAttribute("href"), articleUrl),
+      }))
+      .filter((entry) => entry.label && entry.href)
+      .slice(0, 8);
+
+    if (links.length > 0) {
+      groups.push({ header, links });
+    }
+  }
+
+  if (groups.length > 0) {
+    return groups.slice(0, 4);
+  }
+
+  return [
+    {
+      header: "Links",
+      links: Array.from(footer.querySelectorAll("a"))
+        .map((anchor) => ({
+          label: getLinkLabel(anchor),
+          href: resolveHref(anchor.getAttribute("href"), articleUrl),
+        }))
+        .filter((entry) => entry.label && entry.href)
+        .slice(0, 8),
+    },
+  ].filter((entry) => entry.links.length > 0);
+}
+
+function detectSidebar(document: Document, articleUrl: string): NavigationData["sidebar"] | undefined {
+  const sidebar = document.querySelector("aside, [class*='sidebar' i], nav[aria-label*='sidebar' i]");
+  if (!sidebar) {
+    return undefined;
+  }
+
+  const items = Array.from(sidebar.querySelectorAll("a"))
+    .map((anchor) => ({
+      label: getLinkLabel(anchor),
+      href: resolveHref(anchor.getAttribute("href"), articleUrl),
+    }))
+    .filter((entry) => entry.label && entry.href)
+    .slice(0, 12);
+
+  if (items.length === 0) {
+    return undefined;
+  }
+
+  return {
+    position: /right/i.test(sidebar.className) ? "right" : "left",
+    collapsible: /collapse|drawer|toggle/i.test(sidebar.outerHTML),
+    items,
+  };
+}
+
+function detectTabs(document: Document): NavigationData["tabs"] | undefined {
+  const tabRoot = document.querySelector("[role='tablist'], .Storyline_Root, [class*='tabs' i]");
+  if (!tabRoot) {
+    return undefined;
+  }
+
+  const tabElements = Array.from(tabRoot.querySelectorAll("[role='tab'], a, button"))
+    .map((element) => ({
+      label: normalizeText(element.textContent),
+      active:
+        element.getAttribute("aria-selected") === "true" ||
+        /active|current|selected/i.test(element.className),
+    }))
+    .filter((entry) => entry.label)
+    .slice(0, 12);
+
+  if (tabElements.length === 0) {
+    return undefined;
+  }
+
+  return {
+    items: tabElements,
+    style: {
+      font: getElementStyleValue(tabRoot, "font-family", "inherit"),
+      activeColor: getElementStyleValue(tabRoot, "color", "#121212"),
+      inactiveColor: "#727272",
+      borderBottom: getElementStyleValue(tabRoot, "border-bottom", "1px solid currentColor"),
+    },
+  };
+}
+
+function detectBreadcrumbs(document: Document, articleUrl: string): NavigationData["breadcrumbs"] | undefined {
+  const root = document.querySelector("nav[aria-label*='breadcrumb' i], .breadcrumbs, [class*='breadcrumb' i]");
+  if (!root) {
+    return undefined;
+  }
+
+  const crumbs = Array.from(root.querySelectorAll("a"))
+    .map((anchor) => ({
+      label: getLinkLabel(anchor),
+      href: resolveHref(anchor.getAttribute("href"), articleUrl),
+    }))
+    .filter((entry) => entry.label && entry.href)
+    .slice(0, 8);
+
+  return crumbs.length > 0 ? crumbs : undefined;
+}
+
+function detectSearchFilter(document: Document) {
+  const hasSearch =
+    document.querySelector("input[type='search'], [role='search'], [aria-label*='search' i]") !== null;
+  const hasFilter =
+    document.querySelector("[class*='filter' i], [data-testid*='filter' i], select") !== null;
+  const hasSort =
+    document.querySelector("[class*='sort' i], [aria-label*='sort' i]") !== null;
+
+  if (!hasSearch && !hasFilter && !hasSort) {
+    return undefined;
+  }
+
+  return { hasSearch, hasFilter, hasSort };
+}
+
+function detectDropdownMenus(document: Document, articleUrl: string) {
+  const triggers = Array.from(
+    document.querySelectorAll("[aria-haspopup='menu'], details, [class*='dropdown' i]"),
+  ).slice(0, 4);
+
+  const menus = triggers
+    .map((trigger) => {
+      const label = normalizeText(trigger.textContent) || normalizeText(trigger.getAttribute("aria-label")) || "Menu";
+      const items = Array.from(trigger.querySelectorAll("a, button"))
+        .map((item) => ({
+          label: normalizeText(item.textContent),
+          href: item.tagName.toLowerCase() === "a" ? resolveHref(item.getAttribute("href"), articleUrl) : undefined,
+          icon: item.querySelector("svg, img") ? "present" : undefined,
+        }))
+        .filter((entry) => entry.label)
+        .slice(0, 8);
+
+      return items.length > 0 ? { trigger: label, items } : null;
+    })
+    .filter((value): value is NonNullable<typeof value> => value !== null);
+
+  return menus.length > 0 ? menus : undefined;
+}
+
+export function classifyPublisherPatterns({
+  articleUrl,
+  sourceHtml,
+}: ExtractionInput): PublisherClassification {
+  const techInventory = detectTechInventory(sourceHtml, articleUrl);
+  const layoutFamily = classifyLayoutFamily(articleUrl, sourceHtml, techInventory);
+  const taxonomyMapping = buildTaxonomyMapping(sourceHtml);
+  const extractionPlan = buildExtractionPlan(layoutFamily, sourceHtml);
+
+  return {
+    techInventory,
+    layoutFamily,
+    taxonomyMapping,
+    extractionPlan,
+  };
+}
+
+export function extractNavigationData({
+  articleUrl,
+  sourceHtml,
+}: ExtractionInput & { publisherClassification?: PublisherClassification }): NavigationData {
+  const dom = createDom(sourceHtml, articleUrl);
+  const { document } = dom.window;
+  const header =
+    document.querySelector("header, nav[role='navigation'], nav[aria-label*='main' i], [id='site-navigation']") ??
+    document.querySelector("nav");
+  const footer =
+    document.querySelector("footer, [role='contentinfo'], [class*='footer' i]") ??
+    document.querySelector("footer");
+
+  const primaryNav = Array.from(header?.querySelectorAll("a") ?? [])
+    .map((anchor) => toNavLink(anchor, articleUrl))
+    .filter((link): link is NavigationLink => link !== null)
+    .slice(0, 10);
+
+  const legalText =
+    normalizeText(footer?.querySelector("small, p, [class*='legal' i]")?.textContent) ||
+    normalizeText(footer?.textContent).slice(0, 200);
+
+  const socialLinks = Array.from(footer?.querySelectorAll("a") ?? [])
+    .map((anchor) => {
+      const label = getLinkLabel(anchor);
+      const href = resolveHref(anchor.getAttribute("href"), articleUrl);
+      const platform = ["facebook", "twitter", "instagram", "youtube", "tiktok", "threads", "linkedin"].find(
+        (candidate) => href.toLowerCase().includes(candidate) || label.toLowerCase().includes(candidate),
+      );
+      return platform ? { platform, href, iconSvg: anchor.querySelector("svg")?.outerHTML } : null;
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  const policyLinks = Array.from(footer?.querySelectorAll("a") ?? [])
+    .map((anchor) => ({
+      label: getLinkLabel(anchor),
+      href: resolveHref(anchor.getAttribute("href"), articleUrl),
+    }))
+    .filter((entry) => /privacy|terms|cookie|policy|sitemap/i.test(entry.label));
+
+  const footerColumns = detectFooterColumns(footer, articleUrl);
+  const hamburgerMenu = detectHamburgerMenu(document, articleUrl);
+  const searchBar = document.querySelector("input[type='search'], [role='search'] input, input[placeholder*='search' i]");
+
+  return {
+    header: {
+      logo: detectLogo(header, articleUrl),
+      primaryNav,
+      secondaryNav: detectSecondaryNav(header, articleUrl),
+      hamburgerMenu,
+      searchBar: searchBar
+        ? {
+            placeholder: searchBar.getAttribute("placeholder") ?? "",
+            position: header?.contains(searchBar) ? "header" : "body",
+          }
+        : undefined,
+      userActions: Array.from(header?.querySelectorAll("button, a") ?? [])
+        .map((element) => ({
+          label: normalizeText(element.textContent) || normalizeText(element.getAttribute("aria-label")),
+          href: element.tagName.toLowerCase() === "a" ? resolveHref(element.getAttribute("href"), articleUrl) : "",
+          style: /subscribe|sign in|log in/i.test(element.outerHTML) ? "cta" : "default",
+        }))
+        .filter((entry) => entry.label)
+        .slice(0, 4),
+      sticky: /sticky|fixed/i.test(header?.outerHTML ?? ""),
+      height: getElementStyleValue(header, "height", "auto"),
+      background: getElementStyleValue(header, "background", "#ffffff"),
+      textColor: getElementStyleValue(header, "color", "#121212"),
+    },
+    footer: {
+      columns: footerColumns,
+      legalText,
+      socialLinks,
+      appStoreBadges: Array.from(footer?.querySelectorAll("a") ?? [])
+        .map((anchor) => {
+          const href = resolveHref(anchor.getAttribute("href"), articleUrl);
+          const label = getLinkLabel(anchor).toLowerCase();
+          if (label.includes("app store") || href.includes("apps.apple.com")) {
+            return { platform: "ios" as const, href };
+          }
+          if (label.includes("google play") || href.includes("play.google.com")) {
+            return { platform: "android" as const, href };
+          }
+          return null;
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null),
+      policyLinks,
+      background: getElementStyleValue(footer, "background", "#121212"),
+      textColor: getElementStyleValue(footer, "color", "#ffffff"),
+    },
+    sidebar: detectSidebar(document, articleUrl),
+    tabs: detectTabs(document),
+    breadcrumbs: detectBreadcrumbs(document, articleUrl),
+    searchFilter: detectSearchFilter(document),
+    dropdownMenus: detectDropdownMenus(document, articleUrl),
+  };
+}
+
+export function mergeDesignDocsExtractionOutputs(input: {
+  articleUrl: string;
+  sourceHtml: string;
+  publisherClassification: PublisherClassification;
+  navigationData: NavigationData;
+  extractionOutputs?: Record<string, unknown>;
+  blockCompleteness?: number | null;
+}): MergedExtractionOutput {
+  return {
+    articleUrl: input.articleUrl,
+    sourceHtmlLength: input.sourceHtml.length,
+    publisherClassification: input.publisherClassification,
+    navigationData: input.navigationData,
+    extractionOutputs: input.extractionOutputs ?? {},
+    blockCompleteness: input.blockCompleteness ?? null,
+    techInventory: input.publisherClassification.techInventory,
+  };
+}

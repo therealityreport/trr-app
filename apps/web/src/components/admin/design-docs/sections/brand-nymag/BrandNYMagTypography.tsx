@@ -16,7 +16,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#db2800",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -176,7 +176,7 @@ export default function BrandNYMagTypography() {
                 style={{
                   fontFamily: "var(--dd-font-mono)",
                   fontSize: 10,
-                  color: "#db2800",
+                  color: "var(--dd-brand-accent)",
                   textTransform: "uppercase" as const,
                   letterSpacing: "0.08em",
                 }}
@@ -222,8 +222,8 @@ export default function BrandNYMagTypography() {
       <SectionLabel>Type Scale Specimens</SectionLabel>
       <div
         style={{
-          background: "#fff",
-          border: "1px solid var(--dd-ink-rule)",
+          background: "var(--dd-brand-surface)",
+          border: "1px solid var(--dd-brand-border)",
           borderRadius: 8,
           padding: 24,
           marginBottom: 32,
@@ -241,7 +241,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Egyptienne — 50px / .84 line-height — Homepage lede headline" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -255,7 +255,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Egyptienne — 40px / .84 — Lede headline (long-headline variant)" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -269,7 +269,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Egyptienne — 32px / 28px — Section lede headline (tablet+)" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -284,7 +284,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Miller Display Light — 30px / 32px — Feature teaser" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -300,7 +300,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Miller Display — 26px / 28px — Secondary display headline" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -314,7 +314,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Miller Text — 20px / 22px — Feed headline" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -333,7 +333,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Miller Text — 17px / 20px — Latest feed: bold headline + gray teaser inline" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -348,7 +348,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="Miller Text — 11px / 1.45 — Byline: uppercase, 2px letter-spacing" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{
@@ -365,7 +365,7 @@ export default function BrandNYMagTypography() {
         </div>
         <SpecimenMeta text="EgyptienneRubric — 14px / 1 — Rubric with colored underline accent" />
 
-        <div style={{ height: 1, background: "#e7e7e7", margin: "20px 0" }} />
+        <div style={{ height: 1, background: "var(--dd-brand-border)", margin: "20px 0" }} />
 
         <div
           style={{

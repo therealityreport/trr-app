@@ -1,0 +1,8 @@
+{
+  "name": "design-docs-agent",
+  "description": "Design Docs agent — orchestrates article ingestion, extraction, generation, wiring, brand-sync, and verification from source HTML. Supports 10 brands, 15-section taxonomy, and 5-wave pipeline.",
+  "author": {
+    "name": "The Reality Report",
+    "email": "dev@therealityreport.com"
+  }
+}

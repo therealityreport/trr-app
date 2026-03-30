@@ -41,6 +41,21 @@ Use these capability names throughout the workflow:
 - `fs.edit`
 - `check.typecheck`
 
+Canonical machine-readable metadata lives in `agents/openai.yaml`. Shared
+pipeline contracts live in:
+
+- `apps/web/src/lib/admin/design-docs-pipeline-types.ts`
+- `apps/web/src/lib/admin/design-docs-pipeline.ts`
+- `apps/web/src/lib/admin/design-docs-pipeline-validators.ts`
+
+Executable validator entrypoints live in:
+
+- `apps/web/scripts/design-docs/classify-publisher-patterns.mjs`
+- `apps/web/scripts/design-docs/extract-navigation.mjs`
+- `apps/web/scripts/design-docs/validate-config-integrity.mjs`
+- `apps/web/scripts/design-docs/run-accessibility-audit.mjs`
+- `apps/web/scripts/design-docs/run-integration-checks.mjs`
+
 When the host supports delegation, run extraction and generation waves in
 parallel. When it does not, run the same waves sequentially and preserve the
 same output contracts.
@@ -68,17 +83,34 @@ same output contracts.
    - Birdkit containers
    - scripts and media assets
 
+### Step 1.5 -- Classify Publisher (skill #9)
+
+Run `classify-publisher-patterns` on the source HTML:
+
+1. **Tech detection** — scan `<script>`, `<link>`, `__NEXT_DATA__`, `data-birdkit-hydrate`,
+   CDN URLs, analytics pixels → structured technology inventory for Section 11 (Dev Stack).
+2. **Layout-family classification** — determine publisher type (NYT Interactive,
+   NYT Article, Athletic Article, Generic Publisher) from detected tech + DOM structure.
+3. **Taxonomy routing** — auto-classify source elements into the 15-section taxonomy,
+   producing a section-to-components mapping that drives which sub-pages get created.
+
+This step emits a typed `PublisherClassification` object from
+`apps/web/src/lib/admin/design-docs-pipeline-types.ts`.
+
+This step informs which extraction skills to invoke and which classification rules to apply.
+
 ### Step 2 -- Extraction Wave
 
-Run these sub-skills against the discovered inputs:
+Run these sub-skills in parallel against the discovered inputs:
 
-1. `extract-css-tokens`
-2. `extract-page-structure`
-3. `extract-datawrapper-charts` when Datawrapper embeds exist
-4. `extract-ai2html-artboards` when ai2html assets exist
-5. `extract-quote-components` when quote/status sections exist
-6. `extract-birdkit-tables` when Birdkit markup exists
-7. `extract-icons-and-media`
+1. `extract-css-tokens` (#6)
+2. `extract-page-structure` (#5) — includes blockCompleteness metric
+3. `extract-datawrapper-charts` (#11) when Datawrapper embeds exist
+4. `extract-ai2html-artboards` (#15) when ai2html assets exist
+5. `extract-quote-components` (#16) when quote/status sections exist
+6. `extract-birdkit-tables` (#12) when Birdkit markup exists
+7. `extract-icons-and-media` (#7)
+8. `extract-navigation` (#8) — header/footer/sidebar/breadcrumb/tab patterns
 
 Every interactive artifact must produce both:
 
@@ -88,35 +120,74 @@ Every interactive artifact must produce both:
 ### Step 3 -- Merge Extraction Outputs
 
 Merge all extraction outputs into one normalized blob. This merged blob is the
-only input to generation and wiring.
+only input to generation and wiring. Use the typed merged contract from
+`apps/web/src/lib/admin/design-docs-pipeline-types.ts`. Include:
+- `blockCompleteness` metric from extract-page-structure
+- `NavigationData` from extract-navigation
+- `PublisherClassification` from classify-publisher-patterns
+- `TechInventory` from classify-publisher-patterns
 
 ### Step 4 -- Generation Wave
 
-- Always run `generate-article-page`.
-- In `create-brand` mode, also run `generate-brand-section`.
+- Always run `generate-article-page` (#13).
+- In `create-brand` mode, also run `generate-brand-section` (#18).
 
 ### Step 5 -- Wiring
 
-Run `wire-config-and-routing` to register the new brand/article in config,
+Run `wire-config-and-routing` (#17) to register the new brand/article in config,
 imports, and sidebar/routing surfaces.
+
+### Step 5.5 -- Config Integrity Audit (skill #10)
+
+Run `audit-generated-config-integrity` before syncing brand pages:
+
+1. `check.typecheck` via the repo validation command
+2. contentBlocks document-order validation
+3. Font/color per-article uniqueness check
+4. ContentBlock union coverage (every block type has a renderer)
+5. brand-aware page background contract, View Page button URL check
+
+Default executable entrypoint:
+
+- `node apps/web/scripts/design-docs/validate-config-integrity.mjs --article-id <articleId>`
+
+If the audit fails, fix issues before proceeding to Step 6.
 
 ### Step 6 -- Sync All 15 Brand Tabs
 
-Run `sync-brand-page` in every mode. The agent must:
+Run `sync-brand-page` (#14) in every mode. The agent must:
 
 1. Check which of the 15 sections have new data from this article's extraction.
 2. For sections that already have tab page files: verify data aggregates correctly.
 3. For sections that NOW qualify for sub-pages (lazy creation): create the sub-page.
 4. In `create-brand` mode: scaffold all 15 tab page files (most will be empty placeholders).
+5. Report delta: what changed vs pre-sync state.
 
 New article data must be visible in the parent brand tabs through dynamic
 aggregation from the `ARTICLES` array, not hardcoded per-article edits.
 
 ### Step 7 -- Verify
 
-1. Run `check.typecheck`.
-2. Fix straightforward import/type issues if they are caused by this workflow.
-3. Verify:
+1. Run `audit-responsive-accessibility` (#19):
+   - Heading hierarchy (h1→h2→h3, no skipped levels)
+   - WCAG 2.1 AA color contrast ratios
+   - Responsive overflow at mobile breakpoints
+   - Missing alt text and aria-labels
+
+   Default executable entrypoint:
+   `node apps/web/scripts/design-docs/run-accessibility-audit.mjs --article-id <articleId> --brand-slug <brandSlug> --files <comma-separated-file-paths>`
+
+2. Run `integration-test-runner` (#20):
+   - Validate all articles in ARTICLES array
+   - Cross-article uniqueness checks
+   - ContentBlock completeness assertions
+
+   Default executable entrypoint:
+   `node apps/web/scripts/design-docs/run-integration-checks.mjs`
+
+3. Run `check.typecheck` and fix issues caused by this workflow.
+
+4. Verify:
    - `contentBlocks` preserves document order
    - h2 and h3 styles are extracted independently
    - every chart/table has both metadata and a renderer/data source
@@ -285,42 +356,46 @@ Leave blank initially. External documentation, CDN assets, API references.
 
 ---
 
-## Sub-Skills
+## 20-Skill Structured Skillset
 
-Located in `.agents/skills/design-docs-agent/`:
+All 20 skills are listed in `agents/openai.yaml` (machine-readable) and below
+(behavioral). Both sources must stay in sync, and required pipeline steps must
+remain `active` in YAML.
 
-### Extraction (Wave 1)
-1. `extract-page-structure/SKILL.md`
-2. `extract-css-tokens/SKILL.md`
-3. `extract-datawrapper-charts/SKILL.md`
-4. `extract-ai2html-artboards/SKILL.md`
-5. `extract-quote-components/SKILL.md`
-6. `extract-birdkit-tables/SKILL.md`
-7. `extract-icons-and-media/SKILL.md`
+### Supporting Skills (referenced, not duplicated)
 
-### Recommended New Skills (not yet implemented)
-8. `extract-navigation/SKILL.md` — Extract header/footer/sidebar/breadcrumb
-   patterns, nav link structures, hamburger menus, sticky behavior. Feeds
-   Section 4 (Navigation) with specimens and spec annotations.
-9. `extract-forms/SKILL.md` — Extract form fields, input types, validation
-   states, error messages, fieldset grouping. Feeds Section 8 (Forms).
-10. `extract-feedback-overlays/SKILL.md` — Extract toast, alert, modal, dialog,
-    tooltip, skeleton/loading patterns from source HTML + JS. Feeds Section 3.
-11. `detect-dev-stack/SKILL.md` — Wappalyzer-style detection from `<script>`,
-    `<link>`, `__NEXT_DATA__`, CDN URLs, analytics pixels, `data-*` attributes.
-    Produces a structured technology inventory for Section 11 (Dev Stack).
-12. `generate-font-specimens/SKILL.md` — Render font specimen PNGs at each
-    weight using Playwright, upload to R2 at `/fonts/references/{brand}/`.
-    Feeds the font matcher and Section 1 Typography sub-page.
-13. `classify-components/SKILL.md` — Auto-classify extracted elements into the
-    15-section taxonomy. Takes merged extraction blob, returns a section-to-
-    components mapping that drives which sub-pages get created.
+| # | Skill | Source | Role | Wave |
+|---|-------|--------|------|------|
+| 1 | `senior-frontend` | `TRR-APP/.agents/skills/senior-frontend` | App Router, server/client boundaries, rendering | 1 |
+| 2 | `senior-qa` | `TRR/.agents/skills/senior-qa` | Risk-ranked validation, verification reports | 1 |
+| 3 | `code-reviewer` | `TRR/.agents/skills/code-reviewer` | Pre-closeout correctness gate | 1 |
+| 4 | `font-sync` | `TRR/.agents/skills/font-sync` | Font specimen generation, R2 upload | 1 |
 
-### Generation and Wiring
-14. `generate-article-page/SKILL.md`
-15. `generate-brand-section/SKILL.md`
-16. `wire-config-and-routing/SKILL.md`
-17. `sync-brand-page/SKILL.md`
+### Owned Skills — Wave 1 (Foundation + Extraction)
+
+| # | Skill | Action | Phase |
+|---|-------|--------|-------|
+| 5 | `extract-page-structure` | upgrade | extraction — add blockCompleteness metric, structured bylines, breadcrumbs, storyline |
+| 6 | `extract-css-tokens` | upgrade | extraction — stricter typography, computed-style validation, dark mode colors |
+| 7 | `extract-icons-and-media` | upgrade | extraction — asset classification, brand/logo normalization, favicon, SVG dedup |
+| 8 | `extract-navigation` | **create** | extraction — header/footer/sidebar/breadcrumb/tab patterns → Section 4 |
+| 9 | `classify-publisher-patterns` | **create** | pre-extraction — Wappalyzer-style tech detection + layout-family classification + 15-section taxonomy routing → Section 11 |
+| 10 | `audit-generated-config-integrity` | **create** | verification — post-generation gate: tsc, block order, uniqueness, union coverage |
+
+### Owned Skills — Wave 2 (Generation + Quality Gates)
+
+| # | Skill | Action | Phase |
+|---|-------|--------|-------|
+| 11 | `extract-datawrapper-charts` | upgrade | extraction — chart/table reconciliation, dataset verification, theme fonts |
+| 12 | `extract-birdkit-tables` | upgrade | extraction — column semantics, a11y metadata, renderer parity |
+| 13 | `generate-article-page` | upgrade | generation — typed renderer mapping, block type validation, cross-population candidates |
+| 14 | `sync-brand-page` | upgrade | post-generation — brand aggregation delta, safe merge, lazy sub-page tracking |
+| 15 | `extract-ai2html-artboards` | retain | extraction — already mature |
+| 16 | `extract-quote-components` | retain | extraction — already mature |
+| 17 | `wire-config-and-routing` | retain | wiring — incidental edits only |
+| 18 | `generate-brand-section` | retain | generation — incidental edits only |
+| 19 | `audit-responsive-accessibility` | **create** | verification — heading hierarchy, WCAG contrast, keyboard a11y, responsive overflow |
+| 20 | `integration-test-runner` | **create** | verification — converts test/integration-test.md into executable assertions |
 
 ## Completion Contract
 

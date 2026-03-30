@@ -11,7 +11,7 @@ export default async function AthleticArticleDetailPage({ params }: Props) {
 
   const article = ARTICLES.find((a) => a.id === slug);
   if (!article) {
-    redirect("/admin/design-docs/athletic-articles");
+    redirect("/design-docs/athletic-articles");
   }
 
   return <DesignDocsPageClient activeSection="athletic-articles" articleSlug={article.id} />;

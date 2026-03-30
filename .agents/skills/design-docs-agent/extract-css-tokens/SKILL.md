@@ -560,3 +560,42 @@ For each unique text style found in the source HTML:
    - `color` (as #RRGGBB hex)
 4. **Format as**: `"element.Class: {size}px/{weight}/{lineHeight}px [modifiers] #color"`
 5. **Deduplicate**: Two elements with identical computed styles should be merged into one entry with both names
+
+---
+
+## usedIn Format Enforcement (NEW)
+
+Every `usedIn` entry MUST follow this exact format:
+
+```
+"element.ClassName (css-hash): {fontSize}px/{fontWeight}/{lineHeight}px [font-style:X] [text-align:X] [letter-spacing:Xrem] [text-transform:X] #hexColor"
+```
+
+If a `usedIn` string does not parse to extract at minimum fontSize, fontWeight, and color, REJECT it and re-extract.
+
+---
+
+## h2/h3 Differentiation STOP Rule (NEW)
+
+RULE: If extracted h2 and h3 have identical fontSize AND fontWeight AND lineHeight, STOP extraction and re-inspect the source HTML. These headings ALWAYS differ in production -- identical values indicate a copy error or wrong element selection.
+
+---
+
+## Dark Mode Color Extraction (NEW)
+
+When the source HTML contains `prefers-color-scheme: dark` media queries or `.dw-dark`/`.dw-light` class pairs:
+
+- Extract both light and dark color sets
+- Include dark mode colors in the article's `colors` config under a `darkMode` key
+- Note: Athletic articles use `.dw-dark { display: none }` pattern for Datawrapper dark mode
+
+---
+
+## Computed-Style Cross-Check (NEW)
+
+When Chrome DevTools MCP is available and the page is accessible:
+
+1. Navigate to the live page
+2. For each heading (h1, h2, h3) and body text element, run `getComputedStyle(el)`
+3. Cross-check extracted values (fontSize, fontWeight, fontFamily, lineHeight, color) against computed values
+4. If any value differs by >10% (for numeric) or is a different family/color, use the computed value and note the discrepancy

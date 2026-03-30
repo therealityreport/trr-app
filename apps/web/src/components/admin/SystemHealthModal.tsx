@@ -36,6 +36,15 @@ type WorkerHealth = {
   stale_running_count?: number;
   last_dispatch_success_at?: string | null;
   last_dispatch_error?: string | null;
+  last_dispatch_blocked_reason?: string | null;
+  dispatcher_readiness?: {
+    resolved?: boolean;
+    reason?: string | null;
+    error?: string | null;
+    app_name?: string | null;
+    function_name?: string | null;
+    modal_environment?: string | null;
+  } | null;
   workers: WorkerEntry[];
   reason: string | null;
 };
@@ -184,6 +193,11 @@ type QueueStatus = {
     recent_failures: FailureEntry[];
     stuck_jobs: StuckJobEntry[];
     stuck_jobs_total: number;
+    dispatch_blocked_jobs?: StuckJobEntry[];
+    dispatch_blocked_jobs_total?: number;
+    dispatch_blocked_by_reason?: Record<string, number>;
+    waiting_for_claim_jobs_total?: number;
+    retrying_dispatch_jobs_total?: number;
     error?: string;
   };
 };
@@ -271,6 +285,7 @@ const LEASE_DURATION_MS = 45_000;
 const HEALTH_DOT_URL = "/api/admin/trr-api/social/ingest/health-dot";
 const QUEUE_STATUS_URL = "/api/admin/trr-api/social/ingest/queue-status";
 const CANCEL_STUCK_JOBS_URL = "/api/admin/trr-api/social/ingest/stuck-jobs/cancel";
+const CANCEL_DISPATCH_BLOCKED_JOBS_URL = "/api/admin/trr-api/social/ingest/dispatch-blocked-jobs/cancel";
 const CANCEL_ACTIVE_JOBS_URL = "/api/admin/trr-api/social/ingest/active-jobs/cancel";
 const RESET_SOCIAL_INGEST_HEALTH_URL = "/api/admin/trr-api/social/ingest/reset-health";
 const DISMISS_RECENT_FAILURES_URL = "/api/admin/trr-api/social/ingest/recent-failures/dismiss";
@@ -574,6 +589,18 @@ function formatStuckReasonLabel(reason: string | null | undefined): string {
       return "Job waited too long without starting";
     case "queued_stale_timeout":
       return "Job stayed queued too long";
+    case "modal_sdk_unavailable":
+      return "Modal SDK unavailable in dispatcher runtime";
+    case "modal_app_not_found":
+      return "Modal app not found";
+    case "modal_function_not_found":
+      return "Modal function not found";
+    case "modal_resolution_failed":
+      return "Modal dispatch could not resolve the target";
+    case "modal_dispatch_failed":
+      return "Dispatch failed before any worker claim";
+    case "dispatch_blocked":
+      return "Dispatch is blocked before worker claim";
     default:
       return reason ? titleCaseWords(reason) : "Unknown issue";
   }
@@ -708,14 +735,19 @@ function modalQueueHealthState(queueStatus: QueueStatus): HealthState {
 
   const healthyWorkers = Number(queueStatus.workers.healthy_workers ?? 0);
   const workersHealthy = Boolean(queueStatus.workers.healthy);
+  const dispatcherResolved = queueStatus.workers.dispatcher_readiness?.resolved;
   if (!workersHealthy || healthyWorkers <= 0) {
+    return "degraded";
+  }
+  if (dispatcherResolved === false) {
     return "degraded";
   }
 
   const likelyStuckCount = Number(queueStatus.queue.stuck_jobs_total ?? 0);
+  const dispatchBlockedCount = Number(queueStatus.queue.dispatch_blocked_jobs_total ?? 0);
   const staleClaimsCount = Number(queueStatus.queue.stale_claims?.total ?? 0);
   const recentFailureCount = Number(queueStatus.queue.recent_failures.length ?? 0);
-  if (likelyStuckCount > 0 || staleClaimsCount > 0 || recentFailureCount > 0) {
+  if (dispatchBlockedCount > 0 || likelyStuckCount > 0 || staleClaimsCount > 0 || recentFailureCount > 0) {
     return "degraded";
   }
 
@@ -736,12 +768,16 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
   const jobRunning = jobStatuses.running ?? 0;
   const recentFailureCount = queueStatus.queue.recent_failures.length;
   const likelyStuckCount = queueStatus.queue.stuck_jobs_total ?? 0;
+  const dispatchBlockedCount = Number(queueStatus.queue.dispatch_blocked_jobs_total ?? 0);
+  const waitingForClaimCount = Number(queueStatus.queue.waiting_for_claim_jobs_total ?? 0);
+  const retryingDispatchCount = Number(queueStatus.queue.retrying_dispatch_jobs_total ?? 0);
   const healthyWorkers = queueStatus.workers.healthy_workers ?? 0;
   const freshWorkers = queueStatus.workers.fresh_workers ?? 0;
   const totalWorkers = queueStatus.workers.total_workers ?? 0;
   const activeInvocations = Number(queueStatus.workers.active_invocations ?? 0);
   const staleRunningCount = Number(queueStatus.workers.stale_running_count ?? 0);
   const staleClaims = queueStatus.queue.stale_claims;
+  const dispatcherReadiness = queueStatus.workers.dispatcher_readiness;
   const oldestQueuedAgeSeconds =
     typeof queueStatus.workers.oldest_queued_age_seconds === "number"
       ? queueStatus.workers.oldest_queued_age_seconds
@@ -754,6 +790,11 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     statusSummary = "Checking workers and queue activity now.";
   } else if (state === "error" || state === "down") {
     statusSummary = "Health details could not be loaded.";
+  } else if (dispatchBlockedCount > 0 || dispatcherReadiness?.resolved === false) {
+    statusSummary =
+      dispatcherReadiness?.resolved === false
+        ? "Dispatch is blocked by the current Modal runtime or function resolution."
+        : "Workers are online, but some jobs are blocked before any worker can claim them.";
   } else if (likelyStuckCount > 0) {
     statusSummary = "Workers are online, but some jobs likely need intervention.";
   } else if (recentFailureCount > 0) {
@@ -772,7 +813,7 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     {
       title: "Work Happening Now",
       value: `${jobRunning.toLocaleString()} jobs running`,
-      detail: `${runStatuses.queued.toLocaleString()} runs queued · ${runStatuses.running.toLocaleString()} runs running`,
+      detail: `${runStatuses.queued.toLocaleString()} runs queued · ${runStatuses.running.toLocaleString()} runs running · ${dispatchBlockedCount.toLocaleString()} blocked`,
       tone: jobRunning > 0 || runStatuses.running > 0 ? "good" : runStatuses.queued > 0 ? "neutral" : "neutral",
     },
     {
@@ -783,13 +824,27 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     },
     {
       title: "Attention Needed",
-      value: `${likelyStuckCount.toLocaleString()} likely stuck jobs`,
-      detail: `${recentFailureCount.toLocaleString()} recent failures`,
-      tone: likelyStuckCount > 0 ? "bad" : recentFailureCount > 0 ? "warn" : "good",
+      value: `${dispatchBlockedCount.toLocaleString()} dispatch blocked`,
+      detail: `${likelyStuckCount.toLocaleString()} likely stuck · ${recentFailureCount.toLocaleString()} recent failures`,
+      tone: dispatchBlockedCount > 0 || likelyStuckCount > 0 ? "bad" : recentFailureCount > 0 ? "warn" : "good",
     },
   ];
 
-  const workerStageCards = Object.entries(queueStatus.workers.by_stage ?? {}).map(([stage, counts]) => ({
+  const workerStageEntries = Object.entries(queueStatus.workers.by_stage ?? {});
+  const hasCurrentStageAvailability = workerStageEntries.some(([, counts]) => {
+    const healthy = Number(counts?.healthy ?? 0);
+    const fresh = Number(counts?.fresh ?? 0);
+    return healthy > 0 || fresh > 0;
+  });
+  const visibleWorkerStageEntries = hasCurrentStageAvailability
+    ? workerStageEntries.filter(([, counts]) => {
+        const healthy = Number(counts?.healthy ?? 0);
+        const fresh = Number(counts?.fresh ?? 0);
+        return healthy > 0 || fresh > 0;
+      })
+    : workerStageEntries;
+
+  const workerStageCards = visibleWorkerStageEntries.map(([stage, counts]) => ({
     key: stage,
     label: `${formatStageLabel(stage)} workers`,
     countsLabel: `${counts.healthy.toLocaleString()} healthy · ${counts.fresh.toLocaleString()} seen recently · ${counts.total.toLocaleString()} recorded`,
@@ -803,6 +858,24 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     { title: "Completed", value: String(runStatuses.completed), detail: "Runs finished successfully", tone: runStatuses.completed > 0 ? "good" : "neutral" },
     { title: "Cancelled", value: String(runStatuses.cancelled), detail: "Runs stopped manually or by policy" },
     { title: "Invocations", value: String(activeInvocations), detail: "Active remote executions" },
+    {
+      title: "Dispatch Blocked",
+      value: String(dispatchBlockedCount),
+      detail: "Jobs blocked before any worker claim",
+      tone: dispatchBlockedCount > 0 ? "bad" : "neutral",
+    },
+    {
+      title: "Waiting For Claim",
+      value: String(waitingForClaimCount),
+      detail: "Queued jobs with dispatch requested",
+      tone: waitingForClaimCount > 0 ? "warn" : "neutral",
+    },
+    {
+      title: "Retrying Dispatch",
+      value: String(retryingDispatchCount),
+      detail: "Jobs requeued after dispatch trouble",
+      tone: retryingDispatchCount > 0 ? "warn" : "neutral",
+    },
     {
       title: "Oldest queued",
       value: oldestQueuedAgeSeconds == null ? "n/a" : formatAgeSeconds(oldestQueuedAgeSeconds),
@@ -1910,6 +1983,9 @@ function StuckJobs({
   clearingAll,
   onCancelJob,
   onClearAll,
+  itemLabel = "likely stuck jobs",
+  emptyLabel = "No likely stuck jobs detected.",
+  clearAllLabel = "Cancel all likely stuck jobs",
 }: {
   jobs: StuckJobEntry[];
   total: number;
@@ -1917,13 +1993,16 @@ function StuckJobs({
   clearingAll: boolean;
   onCancelJob: (jobId: string) => Promise<void>;
   onClearAll: () => Promise<void>;
+  itemLabel?: string;
+  emptyLabel?: string;
+  clearAllLabel?: string;
 }) {
   const canClearAll = total > 0 && !clearingAll && cancelingJobIds.size === 0;
   const sectionLabel = total > jobs.length ? `${jobs.length}/${total}` : `${total}`;
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">Showing {sectionLabel} likely stuck jobs</p>
+        <p className="text-xs text-zinc-500">Showing {sectionLabel} {itemLabel}</p>
         <button
           type="button"
           onClick={() => {
@@ -1932,11 +2011,11 @@ function StuckJobs({
           disabled={!canClearAll}
           className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {clearingAll ? "Cancelling..." : "Cancel all likely stuck jobs"}
+          {clearingAll ? "Cancelling..." : clearAllLabel}
         </button>
       </div>
       {jobs.length === 0 ? (
-        <p className="text-sm text-zinc-400">No likely stuck jobs detected.</p>
+        <p className="text-sm text-zinc-400">{emptyLabel}</p>
       ) : (
         <div className="max-h-56 space-y-2 overflow-y-auto">
           {jobs.map((job) => {
@@ -2159,8 +2238,10 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const queueStatus = useQueueStatusModal({ isOpen });
   const adminOperations = useAdminOperationsHealthModal({ isOpen });
   const [cancelingJobIds, setCancelingJobIds] = useState<Set<string>>(new Set());
+  const [cancelingBlockedJobIds, setCancelingBlockedJobIds] = useState<Set<string>>(new Set());
   const [dismissingFailureIds, setDismissingFailureIds] = useState<Set<string>>(new Set());
   const [clearingAll, setClearingAll] = useState(false);
+  const [clearingBlockedAll, setClearingBlockedAll] = useState(false);
   const [clearingStaleAdminOperations, setClearingStaleAdminOperations] = useState(false);
   const [cancelingActiveJobs, setCancelingActiveJobs] = useState(false);
   const [resettingHealth, setResettingHealth] = useState(false);
@@ -2235,6 +2316,35 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     [healthDot, queueStatus],
   );
 
+  const cancelDispatchBlockedJobs = useCallback(
+    async (jobIds: string[]) => {
+      const response = await fetchAdminWithAuth(
+        CANCEL_DISPATCH_BLOCKED_JOBS_URL,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ job_ids: jobIds }),
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        cancelled_jobs?: number;
+        dispatch_blocked_jobs_remaining?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      return {
+        cancelledJobs: Number(payload.cancelled_jobs ?? 0),
+        dispatchBlockedJobsRemaining: Number(payload.dispatch_blocked_jobs_remaining ?? 0),
+      };
+    },
+    [healthDot, queueStatus],
+  );
+
   const fetchWorkerDetail = useCallback(async (workerId: string) => {
     setSelectedWorkerId(workerId);
     setWorkerDetailLoading(true);
@@ -2300,6 +2410,8 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     setDebugResult(null);
     setDebugError(null);
     setDebugJobLoadingId(null);
+    setCancelingBlockedJobIds(new Set());
+    setClearingBlockedAll(false);
   }, [isOpen]);
 
   const cancelSingleStuckJob = useCallback(
@@ -2348,6 +2460,53 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       setClearingAll(false);
     }
   }, [cancelStuckJobs]);
+
+  const cancelSingleDispatchBlockedJob = useCallback(
+    async (jobId: string) => {
+      setActionNotice(null);
+      setActionError(null);
+      setCancelingBlockedJobIds((previous) => {
+        const next = new Set(previous);
+        next.add(jobId);
+        return next;
+      });
+      try {
+        const result = await cancelDispatchBlockedJobs([jobId]);
+        setActionNotice(
+          result.cancelledJobs > 0
+            ? `Cancelled dispatch-blocked job ${jobId.slice(0, 8)}.`
+            : `Job ${jobId.slice(0, 8)} was no longer dispatch blocked.`,
+        );
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "Failed to cancel dispatch-blocked job");
+      } finally {
+        setCancelingBlockedJobIds((previous) => {
+          const next = new Set(previous);
+          next.delete(jobId);
+          return next;
+        });
+      }
+    },
+    [cancelDispatchBlockedJobs],
+  );
+
+  const clearAllDispatchBlockedJobs = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setClearingBlockedAll(true);
+    try {
+      const result = await cancelDispatchBlockedJobs([]);
+      if (result.cancelledJobs > 0) {
+        setActionNotice(`Cancelled ${result.cancelledJobs} dispatch-blocked jobs.`);
+      } else {
+        setActionNotice("No dispatch-blocked jobs needed cancellation.");
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to clear dispatch-blocked jobs");
+    } finally {
+      setClearingBlockedAll(false);
+    }
+  }, [cancelDispatchBlockedJobs]);
 
   const clearStaleAdminOperations = useCallback(async () => {
     setActionNotice(null);
@@ -2775,6 +2934,25 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               <SectionHeader>Problems to Review</SectionHeader>
               <div className="space-y-5">
                 <div>
+                  <p className="text-sm font-medium text-zinc-900">Dispatch Blocked</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    These jobs are waiting in the queue, but dispatch is failing before any worker can claim them.
+                  </p>
+                  <div className="mt-3">
+                    <StuckJobs
+                      jobs={queueStatus.data.queue.dispatch_blocked_jobs ?? []}
+                      total={queueStatus.data.queue.dispatch_blocked_jobs_total ?? 0}
+                      cancelingJobIds={cancelingBlockedJobIds}
+                      clearingAll={clearingBlockedAll}
+                      onCancelJob={cancelSingleDispatchBlockedJob}
+                      onClearAll={clearAllDispatchBlockedJobs}
+                      itemLabel="dispatch blocked jobs"
+                      emptyLabel="No dispatch-blocked jobs detected."
+                      clearAllLabel="Cancel all dispatch-blocked jobs"
+                    />
+                  </div>
+                </div>
+                <div>
                   <p className="text-sm font-medium text-zinc-900">Likely Stuck Jobs</p>
                   <p className="mt-1 text-xs text-zinc-500">
                     These jobs were claimed by a worker but have not reported progress in time.
@@ -2830,7 +3008,14 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               onClick={() => {
                 void resetSocialIngestHealth();
               }}
-              disabled={resettingHealth || cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
+              disabled={
+                resettingHealth ||
+                cancelingActiveJobs ||
+                clearingAll ||
+                cancelingJobIds.size > 0 ||
+                clearingBlockedAll ||
+                cancelingBlockedJobIds.size > 0
+              }
               className="w-full rounded-md border border-zinc-300 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {resettingHealth ? "Resetting health..." : "Fresh slate reset"}
@@ -2843,7 +3028,14 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               onClick={() => {
                 void cancelAllActiveJobs();
               }}
-              disabled={resettingHealth || cancelingActiveJobs || clearingAll || cancelingJobIds.size > 0}
+              disabled={
+                resettingHealth ||
+                cancelingActiveJobs ||
+                clearingAll ||
+                cancelingJobIds.size > 0 ||
+                clearingBlockedAll ||
+                cancelingBlockedJobIds.size > 0
+              }
               className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel all active jobs"}

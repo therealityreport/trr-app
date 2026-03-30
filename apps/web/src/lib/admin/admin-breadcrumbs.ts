@@ -1,13 +1,20 @@
+import {
+  ADMIN_BRANDS_PATH,
+  ADMIN_PEOPLE_PATH,
+  ADMIN_ROOT_PATH,
+  ADMIN_SHOWS_PATH,
+} from "@/lib/admin/admin-route-paths";
+
 export type AdminBreadcrumbItem = {
   label: string;
   href: string;
 };
 
 const ADMIN_ROOT_LABEL = "Admin";
-const ADMIN_ROOT_HREF = "/admin";
-const SHOWS_SECTION_HREF = "/admin/shows";
-const PEOPLE_SECTION_HREF = "/people";
-const BRANDS_SECTION_HREF = "/brands";
+const ADMIN_ROOT_HREF = ADMIN_ROOT_PATH;
+const SHOWS_SECTION_HREF = ADMIN_SHOWS_PATH;
+const PEOPLE_SECTION_HREF = ADMIN_PEOPLE_PATH;
+const BRANDS_SECTION_HREF = ADMIN_BRANDS_PATH;
 
 const toSafeDecoded = (value: string): string => {
   try {

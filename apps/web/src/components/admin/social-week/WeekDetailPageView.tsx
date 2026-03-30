@@ -972,7 +972,9 @@ const SYNC_GALLERY_REFRESH_MS = DEV_LOW_HEAT_MODE ? 10_000 : 4_000;
 const SOCIAL_FULL_SYNC_MIRROR_ENABLED =
   process.env.NEXT_PUBLIC_SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true" ||
   process.env.SOCIAL_FULL_SYNC_MIRROR_ENABLED === "true";
-const WEEK_DETAIL_MAX_COMMENTS_PER_POST = 0;
+// Keep the initial week-detail payload bounded so the admin page stays usable
+// when backend pool pressure makes uncapped comment hydration too expensive.
+const WEEK_DETAIL_MAX_COMMENTS_PER_POST = 25;
 const WEEK_DETAIL_POST_LIMIT = 20;
 const WEEK_DETAIL_METRICS_PAGE_LIMIT = 100;
 const WEEK_DETAIL_METRICS_MAX_PAGES = 500;
@@ -5475,8 +5477,34 @@ export default function WeekDetailPage() {
     weekIndex,
   ]);
 
+  const needsWeekDetailMetricsBackfill = useMemo(() => {
+    if (!data) return false;
+
+    const loadedPosts = PLATFORM_KEYS.reduce(
+      (sum, platform) => sum + (data.platforms?.[platform]?.posts?.length ?? 0),
+      0,
+    );
+    const totalPosts = Math.max(0, Number(data.totals?.posts ?? 0));
+    if (displayedPagination?.has_more) return true;
+    if (displayedPagination && Number.isFinite(Number(displayedPagination.total))) {
+      return loadedPosts < Math.max(0, Number(displayedPagination.total));
+    }
+    if (totalPosts > 0 && loadedPosts < totalPosts) return true;
+
+    return PLATFORM_KEYS.some((platform) => {
+      const platformPayload = data.platforms?.[platform];
+      const loadedPlatformPosts = platformPayload?.posts?.length ?? 0;
+      const platformTotalPosts = Math.max(
+        0,
+        Number(platformPayload?.totals?.posts ?? platformPayload?.total_posts ?? 0),
+      );
+      return platformTotalPosts > loadedPlatformPosts;
+    });
+  }, [data, displayedPagination]);
+
   useEffect(() => {
     if (!weekOverviewLoadedKey) return;
+    if (!needsWeekDetailMetricsBackfill) return;
     void fetchPlatformTotalsSummary();
 
     let cancelled = false;
@@ -5511,7 +5539,7 @@ export default function WeekDetailPage() {
         idleWindow.cancelIdleCallback(idleId);
       }
     };
-  }, [fetchPlatformTotalsSummary, fetchWeekMetricsPosts, weekOverviewLoadedKey]);
+  }, [fetchPlatformTotalsSummary, fetchWeekMetricsPosts, needsWeekDetailMetricsBackfill, weekOverviewLoadedKey]);
 
   useEffect(() => {
     if (!hasValidNumericPathParams) {

@@ -11,7 +11,7 @@ export default async function NYTArticleDetailPage({ params }: Props) {
 
   const article = ARTICLES.find((a) => a.id === slug);
   if (!article) {
-    redirect("/admin/design-docs/nyt-articles");
+    redirect("/design-docs/nyt-articles");
   }
 
   return <DesignDocsPageClient activeSection="nyt-articles" articleSlug={article.id} />;

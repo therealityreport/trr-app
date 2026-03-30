@@ -5,7 +5,7 @@
  * Usage:
  *   npx tsx scripts/auto-categorize-flairs.ts --show <slug> [--community <subreddit>] [--dry-run]
  *
- * Requires env vars: DATABASE_URL, SUPABASE_DB_URL, or TRR_DB_URL
+ * Requires env vars: TRR_DB_URL, optional TRR_DB_FALLBACK_URL, or DATABASE_URL for tooling-only flows
  *
  * Environment: Loads .env.local from apps/web/ automatically.
  */
@@ -72,12 +72,12 @@ if (!showSlug) {
 // ---------------------------------------------------------------------------
 
 const getConnectionString = (): string => {
-  const candidates = [process.env.DATABASE_URL, process.env.SUPABASE_DB_URL, process.env.TRR_DB_URL]
+  const candidates = [process.env.TRR_DB_URL, process.env.TRR_DB_FALLBACK_URL, process.env.DATABASE_URL]
     .map((v) => v?.trim() ?? "")
     .filter((v) => v.length > 0);
   const cs = candidates[0];
   if (!cs) {
-    console.error("No database connection string found. Set DATABASE_URL, SUPABASE_DB_URL, or TRR_DB_URL.");
+    console.error("No database connection string found. Set TRR_DB_URL, optional TRR_DB_FALLBACK_URL, or DATABASE_URL.");
     process.exit(1);
   }
   return cs;
