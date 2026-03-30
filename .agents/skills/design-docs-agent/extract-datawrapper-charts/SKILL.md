@@ -389,3 +389,35 @@ Generate the constant with:
 - [ ] `rows` count matches the CSV row count
 - [ ] All column `key` values match CSV header names (after normalization)
 - [ ] `sourceUrl` is a valid URL
+
+---
+
+### Chart/Table Reconciliation (NEW)
+
+When both a Datawrapper table AND a Birdkit table cover similar data in the same article:
+1. Detect overlap by comparing topic keywords (e.g., both about "medal counts")
+2. Emit a reconciliation note in the output: `reconciliation: [{ dwChart: "UYsk6", birdkitTable: "olympics-alttop", overlap: "medal data" }]`
+3. The agent should ensure both are included in contentBlocks — they serve different UI purposes (Datawrapper = embedded iframe, Birdkit = native React component)
+
+### Dataset Verification (NEW)
+
+After extracting chart data from Datawrapper:
+1. If `dataset.csv` URL is available, fetch it and count rows/columns
+2. Cross-check against extracted data: row count should match, column names should match
+3. If mismatch > 10%, warn: "Dataset verification failed: extracted N rows but CSV has M rows"
+
+### Heatmap Gradient Validation (NEW)
+
+For Datawrapper tables with heatmap columns (e.g., Athletic xGC+ column):
+1. Extract the gradient stop colors from the theme CSS
+2. Verify the number of gradient stops matches the data range
+3. Verify extracted per-row computed colors (`heatmapExact`) cover all data rows
+4. If any rows are missing computed colors, note them for manual verification
+
+### Theme Font Extraction (NEW)
+
+Extract Datawrapper theme font configuration:
+- Theme CSS file URL (e.g., `static.dwcdn.net/custom/themes/the-athletic/`)
+- Font family declarations within the theme
+- Font weight usage (title vs body vs labels vs footer)
+- Include in article's `architecture.datawrapperTheme` config

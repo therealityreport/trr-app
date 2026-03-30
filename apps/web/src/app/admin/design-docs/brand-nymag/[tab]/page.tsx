@@ -18,7 +18,7 @@ export default async function BrandNYMagTabPage({ params }: Props) {
   const { tab } = await params;
 
   if (!VALID_TABS.has(tab)) {
-    redirect("/admin/design-docs/brand-nymag/typography");
+    redirect("/design-docs/brand-nymag/typography");
   }
 
   return <DesignDocsPageClient activeSection="brand-nymag" brandTab={tab} />;

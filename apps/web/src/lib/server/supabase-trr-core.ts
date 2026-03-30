@@ -25,14 +25,10 @@ const getTrrCoreUrl = (): string => {
 };
 
 const getTrrCoreServiceKey = (): string => {
-  // First try TRR-specific key, then fall back to general Supabase service role key
-  // (since TRR Core API may be on the same Supabase project)
-  const key =
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
   if (!key) {
     throw new Error(
-      "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_ROLE_KEY) is not set. This is required for TRR API access."
+      "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not set. This is required for TRR API access."
     );
   }
   return key;

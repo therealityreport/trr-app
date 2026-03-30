@@ -7,6 +7,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { adminStream } from "@/lib/admin/admin-fetch";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -848,7 +849,7 @@ export default function ScrapeImagesPage() {
           <div className="mx-auto max-w-6xl">
             <div className="flex items-center gap-4">
               <Link
-                href="/admin"
+                href={ADMIN_ROOT_PATH}
                 className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 &larr; Admin

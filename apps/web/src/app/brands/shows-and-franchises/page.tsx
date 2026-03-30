@@ -445,7 +445,7 @@ export default function BrandsShowsAndFranchisesPage() {
                 Open Shows Settings
               </Link>
               <Link
-                href="/admin"
+                href="/"
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Back to Admin

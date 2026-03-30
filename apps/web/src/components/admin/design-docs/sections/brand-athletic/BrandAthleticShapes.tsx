@@ -21,10 +21,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#121212",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #121212",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -94,7 +94,7 @@ export default function BrandAthleticShapes() {
     <div>
       {/* ── Brand Header ───────────────────────────────── */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "32px 40px",
           marginBottom: 40,
@@ -105,7 +105,7 @@ export default function BrandAthleticShapes() {
             fontFamily: "var(--dd-font-sans)",
             fontWeight: 700,
             fontSize: 32,
-            color: "var(--dd-ink-black)",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -116,7 +116,7 @@ export default function BrandAthleticShapes() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "var(--dd-ink-faint)",
+            color: "var(--dd-brand-text-secondary)",
             lineHeight: 1.5,
           }}
         >
@@ -173,7 +173,7 @@ export default function BrandAthleticShapes() {
       {/* ── Radius Comparison Row ──────────────────────── */}
       <SectionLabel id="radius-comparison">Radius Comparison</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "24px 32px",
           marginBottom: 40,
@@ -228,7 +228,7 @@ export default function BrandAthleticShapes() {
         {SHADOWS.map((s) => (
           <div
             key={s.label}
-            className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+            className="dd-brand-card"
             style={{
               padding: 20,
               boxShadow: s.shadow,
@@ -249,7 +249,7 @@ export default function BrandAthleticShapes() {
               style={{
                 fontFamily: "var(--dd-font-mono)",
                 fontSize: 10,
-                color: "#121212",
+                color: "var(--dd-brand-text-primary)",
                 marginBottom: 8,
                 wordBreak: "break-all",
               }}
@@ -273,7 +273,7 @@ export default function BrandAthleticShapes() {
       {/* ── Composed Examples ──────────────────────────── */}
       <SectionLabel id="composed">Composed Examples</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "28px 32px",
           marginBottom: 40,

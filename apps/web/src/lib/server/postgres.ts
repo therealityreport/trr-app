@@ -60,6 +60,40 @@ const resolveCaBundle = (): string | undefined => {
 };
 
 type EnvLike = Record<string, string | undefined>;
+type ConnectionClass = "local" | "session" | "transaction" | "direct" | "other" | "unknown";
+type CandidateDetail = {
+  value: string;
+  source: "TRR_DB_URL" | "TRR_DB_FALLBACK_URL" | `${string}:derived_direct`;
+  hostClass: "local" | "pooler" | "direct" | "other" | "unknown";
+  connectionClass: ConnectionClass;
+};
+
+const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app-server";
+const warnedNonDefaultConnectionClasses = new Set<string>();
+let warnedDirectFallbackOverride = false;
+
+const classifyHostClass = (connectionString: string): CandidateDetail["hostClass"] => {
+  const host = parseConnectionHostname(connectionString);
+  if (!host) return "unknown";
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return "local";
+  if (host.endsWith("pooler.supabase.com")) return "pooler";
+  if (host.endsWith(".supabase.co")) return "direct";
+  return "other";
+};
+
+export const classifyConnectionClass = (connectionString: string): ConnectionClass => {
+  const host = parseConnectionHostname(connectionString);
+  const port = parseConnectionPort(connectionString);
+  if (!host) return "unknown";
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return "local";
+  if (host.endsWith("pooler.supabase.com")) {
+    if (port === "5432") return "session";
+    if (port === "6543") return "transaction";
+    return "other";
+  }
+  if (host.endsWith(".supabase.co")) return "direct";
+  return "other";
+};
 
 export const isSupavisorSessionPoolerConnectionString = (connectionString: string): boolean => {
   const host = parseConnectionHostname(connectionString);
@@ -95,28 +129,40 @@ const isSupabaseDirectFallbackEnabled = (env: EnvLike = process.env): boolean =>
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 };
 
-export function resolvePostgresConnectionCandidates(env: EnvLike = process.env): string[] {
-  const ordered = [env.DATABASE_URL, env.SUPABASE_DB_URL, env.TRR_DB_URL]
-    .map((value) => value?.trim() ?? "")
-    .filter((value) => value.length > 0);
+function resolvePostgresConnectionCandidateDetails(env: EnvLike = process.env): CandidateDetail[] {
+  const ordered: Array<Pick<CandidateDetail, "source"> & { value: string | undefined }> = [
+    { source: "TRR_DB_URL", value: env.TRR_DB_URL },
+    { source: "TRR_DB_FALLBACK_URL", value: env.TRR_DB_FALLBACK_URL },
+  ];
   const includeDirectFallback = isSupabaseDirectFallbackEnabled(env);
-
-  const candidates: string[] = [];
+  const candidates: CandidateDetail[] = [];
   const seen = new Set<string>();
-  for (const candidate of ordered) {
-    if (!seen.has(candidate)) {
-      candidates.push(candidate);
-      seen.add(candidate);
-    }
-    if (includeDirectFallback) {
-      const directFallback = deriveSupabaseDirectConnectionString(candidate);
-      if (directFallback && !seen.has(directFallback)) {
-        candidates.push(directFallback);
-        seen.add(directFallback);
-      }
-    }
+  for (const entry of ordered) {
+    const candidate = entry.value?.trim() ?? "";
+    if (!candidate || seen.has(candidate)) continue;
+    candidates.push({
+      value: candidate,
+      source: entry.source,
+      hostClass: classifyHostClass(candidate),
+      connectionClass: classifyConnectionClass(candidate),
+    });
+    seen.add(candidate);
+    if (!includeDirectFallback) continue;
+    const directFallback = deriveSupabaseDirectConnectionString(candidate);
+    if (!directFallback || seen.has(directFallback)) continue;
+    candidates.push({
+      value: directFallback,
+      source: `${entry.source}:derived_direct`,
+      hostClass: classifyHostClass(directFallback),
+      connectionClass: classifyConnectionClass(directFallback),
+    });
+    seen.add(directFallback);
   }
   return candidates;
+}
+
+export function resolvePostgresConnectionCandidates(env: EnvLike = process.env): string[] {
+  return resolvePostgresConnectionCandidateDetails(env).map((candidate) => candidate.value);
 }
 
 export const resolvePostgresConnectionString = (env: EnvLike = process.env): string => {
@@ -124,7 +170,7 @@ export const resolvePostgresConnectionString = (env: EnvLike = process.env): str
   const connectionString = candidates[0];
   if (!connectionString) {
     throw new Error(
-      "No database connection string is set. Configure SUPABASE_DB_URL, DATABASE_URL, or TRR_DB_URL.",
+      "No database connection string is set. Configure TRR_DB_URL or TRR_DB_FALLBACK_URL.",
     );
   }
   return connectionString;
@@ -238,8 +284,10 @@ const getPool = (): Pool => {
     return poolState.pool;
   }
 
-  const candidates = resolvePostgresConnectionCandidates(process.env);
-  const connectionString = candidates[activeCandidateIndex] ?? getConnectionString();
+  const candidateDetails = resolvePostgresConnectionCandidateDetails(process.env);
+  const candidates = candidateDetails.map((candidate) => candidate.value);
+  const selectedCandidate = candidateDetails[activeCandidateIndex];
+  const connectionString = selectedCandidate?.value ?? getConnectionString();
   const isDevelopment = process.env.NODE_ENV === "development";
   const isSessionPooler = isSupavisorSessionPoolerConnectionString(connectionString);
   const max =
@@ -252,10 +300,12 @@ const getPool = (): Pool => {
     parsePositiveInt(process.env.POSTGRES_POOL_IDLE_TIMEOUT_MS) ??
     (isSessionPooler ? 5_000 : isDevelopment ? 10_000 : 30_000);
   const maxUses = parsePositiveInt(process.env.POSTGRES_POOL_MAX_USES) ?? (isDevelopment ? 1 : undefined);
+  const applicationName = (process.env.POSTGRES_APPLICATION_NAME ?? DEFAULT_POSTGRES_APPLICATION_NAME).trim();
 
   const pool = new Pool({
     connectionString,
     ssl: resolvePostgresSslConfig(connectionString, process.env),
+    application_name: applicationName,
     max,
     connectionTimeoutMillis,
     idleTimeoutMillis,
@@ -269,6 +319,27 @@ const getPool = (): Pool => {
     candidateIndex: activeCandidateIndex,
     pool,
   };
+  if (selectedCandidate) {
+    if (selectedCandidate.source.endsWith(":derived_direct") && !warnedDirectFallbackOverride) {
+      warnedDirectFallbackOverride = true;
+      console.warn(
+        "[postgres] direct-host derivation override is active; this is intended only for debug or migration use.",
+      );
+    }
+    if (
+      selectedCandidate.connectionClass !== "session" &&
+      selectedCandidate.connectionClass !== "local" &&
+      !warnedNonDefaultConnectionClasses.has(selectedCandidate.connectionClass)
+    ) {
+      warnedNonDefaultConnectionClasses.add(selectedCandidate.connectionClass);
+      console.warn(
+        `[postgres] non-default connection class ${selectedCandidate.connectionClass} selected; default runtime lane is Supavisor session mode on pooler.supabase.com:5432.`,
+      );
+    }
+    console.info(
+      `[postgres] winner_source=${selectedCandidate.source} host_class=${selectedCandidate.hostClass} connection_class=${selectedCandidate.connectionClass} pool_max=${max} pool_max_source=${process.env.POSTGRES_POOL_MAX ? "env:POSTGRES_POOL_MAX" : "default"} max_concurrent_operations=${getMaxConcurrentOperations()} max_concurrent_operations_source=${process.env.POSTGRES_MAX_CONCURRENT_OPERATIONS ? "env:POSTGRES_MAX_CONCURRENT_OPERATIONS" : "default"} application_name=${applicationName} application_name_source=${process.env.POSTGRES_APPLICATION_NAME ? "env:POSTGRES_APPLICATION_NAME" : "default"}`,
+    );
+  }
   return poolState.pool;
 };
 

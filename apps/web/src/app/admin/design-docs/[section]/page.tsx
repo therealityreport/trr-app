@@ -17,7 +17,7 @@ export default async function DesignDocsSectionPage({ params }: Props) {
   }
 
   if (!isDesignDocSectionId(section)) {
-    redirect("/admin/design-docs/overview");
+    redirect("/design-docs/overview");
   }
 
   return <DesignDocsPageClient activeSection={section as DesignDocSectionId} />;

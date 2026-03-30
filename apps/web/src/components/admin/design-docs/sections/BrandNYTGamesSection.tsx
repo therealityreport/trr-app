@@ -20,7 +20,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#6AAA64",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -192,7 +192,7 @@ export default function BrandNYTGamesSection() {
       <SectionLabel>Brand Header</SectionLabel>
       <div
         style={{
-          background: "#121213",
+          background: "var(--dd-brand-surface)",
           borderRadius: 16,
           padding: "40px 32px",
           textAlign: "center",
@@ -204,7 +204,7 @@ export default function BrandNYTGamesSection() {
             fontFamily: "var(--dd-font-ui)",
             fontWeight: 900,
             fontSize: 36,
-            color: "#FFFFFF",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -215,7 +215,7 @@ export default function BrandNYTGamesSection() {
           style={{
             fontFamily: "var(--dd-font-sans)",
             fontSize: 15,
-            color: "#818384",
+            color: "var(--dd-brand-text-secondary)",
             fontStyle: "italic",
           }}
         >
@@ -691,7 +691,7 @@ export default function BrandNYTGamesSection() {
       {/* Type Scale */}
       <div
         style={{
-          background: "#121213",
+          background: "var(--dd-brand-surface)",
           borderRadius: 12,
           padding: "24px 28px",
           marginBottom: 32,
@@ -702,7 +702,7 @@ export default function BrandNYTGamesSection() {
             fontFamily: "var(--dd-font-sans)",
             fontSize: 11,
             fontWeight: 600,
-            color: "#6AAA64",
+            color: "var(--dd-brand-accent)",
             textTransform: "uppercase" as const,
             letterSpacing: "0.08em",
             marginBottom: 16,
@@ -724,7 +724,7 @@ export default function BrandNYTGamesSection() {
               style={{
                 fontFamily: "var(--dd-font-mono)",
                 fontSize: 11,
-                color: "#818384",
+                color: "var(--dd-brand-text-muted)",
                 width: 40,
                 textAlign: "right",
                 flexShrink: 0,
@@ -737,7 +737,7 @@ export default function BrandNYTGamesSection() {
                 fontFamily: "var(--dd-font-ui)",
                 fontWeight: 700,
                 fontSize: t.size,
-                color: "#FFFFFF",
+                color: "var(--dd-brand-text-primary)",
                 lineHeight: 1.2,
               }}
             >
@@ -790,7 +790,7 @@ export default function BrandNYTGamesSection() {
       <div className="dd-palette-label">Dark Theme</div>
       <div
         style={{
-          background: "#121213",
+          background: "var(--dd-brand-surface)",
           borderRadius: 12,
           padding: "20px 24px",
           marginBottom: 32,
@@ -801,7 +801,7 @@ export default function BrandNYTGamesSection() {
             fontFamily: "var(--dd-font-sans)",
             fontSize: 11,
             fontWeight: 600,
-            color: "#6AAA64",
+            color: "var(--dd-brand-accent)",
             textTransform: "uppercase" as const,
             letterSpacing: "0.08em",
             marginBottom: 16,
@@ -832,12 +832,12 @@ export default function BrandNYTGamesSection() {
                 textAlign: "center",
                 fontFamily: "var(--dd-font-mono)",
                 fontSize: 9,
-                color: "#818384",
+                color: "var(--dd-brand-text-muted)",
                 lineHeight: 1.3,
               }}
             >
               <div>{tone.hex}</div>
-              <div style={{ fontSize: 8, color: "#565758", marginTop: 2 }}>{tone.label}</div>
+              <div style={{ fontSize: 8, color: "var(--dd-brand-text-muted)", marginTop: 2 }}>{tone.label}</div>
             </div>
           ))}
         </div>
@@ -855,7 +855,7 @@ export default function BrandNYTGamesSection() {
           justifyContent: "center",
           gap: 6,
           padding: "24px 0",
-          background: "#121213",
+          background: "var(--dd-brand-surface)",
           borderRadius: 12,
           marginBottom: 24,
         }}
@@ -893,7 +893,7 @@ export default function BrandNYTGamesSection() {
           maxWidth: 400,
           margin: "0 auto",
           padding: "24px 16px",
-          background: "#121213",
+          background: "var(--dd-brand-surface)",
           borderRadius: 12,
           marginBottom: 24,
         }}
@@ -961,7 +961,7 @@ export default function BrandNYTGamesSection() {
       <div className="dd-palette-label">Keyboard</div>
       <div
         style={{
-          background: "#121213",
+          background: "var(--dd-brand-surface)",
           borderRadius: 12,
           padding: "24px 16px",
           marginBottom: 24,
@@ -1334,7 +1334,7 @@ export default function BrandNYTGamesSection() {
         {/* Tile Flip */}
         <div
           style={{
-            background: "#121213",
+            background: "var(--dd-brand-surface)",
             borderRadius: 12,
             padding: 20,
             textAlign: "center",
@@ -1375,7 +1375,7 @@ export default function BrandNYTGamesSection() {
             style={{
               fontFamily: "var(--dd-font-mono)",
               fontSize: 10,
-              color: "#818384",
+              color: "var(--dd-brand-text-muted)",
               marginTop: 10,
             }}
           >
@@ -1386,7 +1386,7 @@ export default function BrandNYTGamesSection() {
         {/* Tile Pop */}
         <div
           style={{
-            background: "#121213",
+            background: "var(--dd-brand-surface)",
             borderRadius: 12,
             padding: 20,
             textAlign: "center",
@@ -1427,7 +1427,7 @@ export default function BrandNYTGamesSection() {
             style={{
               fontFamily: "var(--dd-font-mono)",
               fontSize: 10,
-              color: "#818384",
+              color: "var(--dd-brand-text-muted)",
               marginTop: 10,
             }}
           >
@@ -1438,7 +1438,7 @@ export default function BrandNYTGamesSection() {
         {/* Shake */}
         <div
           style={{
-            background: "#121213",
+            background: "var(--dd-brand-surface)",
             borderRadius: 12,
             padding: 20,
             textAlign: "center",
@@ -1488,7 +1488,7 @@ export default function BrandNYTGamesSection() {
             style={{
               fontFamily: "var(--dd-font-mono)",
               fontSize: 10,
-              color: "#818384",
+              color: "var(--dd-brand-text-muted)",
               marginTop: 10,
             }}
           >
@@ -1499,7 +1499,7 @@ export default function BrandNYTGamesSection() {
         {/* Bounce */}
         <div
           style={{
-            background: "#121213",
+            background: "var(--dd-brand-surface)",
             borderRadius: 12,
             padding: 20,
             textAlign: "center",
@@ -1543,7 +1543,7 @@ export default function BrandNYTGamesSection() {
             style={{
               fontFamily: "var(--dd-font-mono)",
               fontSize: 10,
-              color: "#818384",
+              color: "var(--dd-brand-text-muted)",
               marginTop: 10,
             }}
           >

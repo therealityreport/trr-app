@@ -594,3 +594,46 @@ credit is present, set `credit` to an empty string, not `null`.
 This ensures the lead image is both captured in the `assets` output (for image
 URL tracking) AND represented in the `blocks` / contentBlocks array (for
 layout rendering in ArticleDetailPage).
+
+---
+
+## 18. blockCompleteness Metric (NEW)
+
+The extraction output MUST include a `blockCompleteness` field:
+
+```
+blockCompleteness: {
+  sourceElementCount: number,    // total content-bearing elements in source HTML
+  classifiedBlockCount: number,  // elements that matched a ContentBlock type
+  unclassifiedElements: string[], // CSS selectors of elements that matched NO rule
+  coveragePercent: number        // classifiedBlockCount / sourceElementCount * 100
+}
+```
+
+If `coveragePercent` < 80%, emit a WARNING in the output so the orchestrator can decide whether to re-extract or proceed with gaps.
+
+---
+
+## 19. Structured Byline Parsing (NEW)
+
+Extract bylines as structured data, not just raw strings:
+
+```
+byline: {
+  authors: [{ name: string, role?: string, url?: string, avatarUrl?: string }],
+  timestamp: { raw: string, iso: string },
+  section: string,
+  storyline?: { title: string, links: [{ label: string, href: string }] }
+}
+```
+
+Parse from: `<span class="Article_BylineString">`, `<time>`, storyline nav bars, extended byline sections.
+
+---
+
+## 20. Breadcrumb Chain (NEW)
+
+Detect and extract breadcrumb navigation:
+
+- Look for `<nav aria-label="breadcrumb">`, `<ol>` with breadcrumb-like classes, or structured `<a>` chains in header areas.
+- Output: `breadcrumbs: [{ label: string, href: string }]`

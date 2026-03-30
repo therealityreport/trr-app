@@ -1,15 +1,15 @@
 # Social account profile collaborators search filter
 
-Last updated: 2026-03-22
+Last updated: 2026-03-30
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-22
-  current_phase: "caption search semantics and collaborator/tag/mention separation validated"
-  next_action: "Refresh the social profile page to pick up exact @handle search behavior and the new Mentions column"
+  include: false
+  state: archived
+  last_updated: 2026-03-30
+  current_phase: "archived continuity note"
+  next_action: "Refer to newer status notes if follow-up work resumes on this thread."
   detail: self
 ```
 

@@ -59,8 +59,8 @@ export default function BravoContentDashboardPage() {
             <div>
               <AdminBreadcrumbs
                 items={[
-                  ...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social"),
-                  { label: "Bravo Content", href: "/admin/social/bravo-content" },
+                  ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
+                  { label: "Bravo Content", href: "/social/bravo-content" },
                 ]}
                 className="mb-1"
               />
@@ -71,7 +71,7 @@ export default function BravoContentDashboardPage() {
             </div>
             <div className="flex gap-2">
               <Link
-                href="/admin/social"
+                href="/social"
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Back

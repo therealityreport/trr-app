@@ -5,7 +5,7 @@ const ADMIN_RECENT_SHOWS_STORAGE_KEY = "trr-admin-recent-shows-v1";
 
 test.describe("admin global header menu", () => {
   test("renders hamburger + logo and shows expected top-level menu content", async ({ page }) => {
-    await page.goto("/admin");
+    await page.goto("/");
     await waitForAdminReady(page);
 
     await expect(page.getByRole("button", { name: "Open admin navigation menu" })).toBeVisible();
@@ -35,7 +35,7 @@ test.describe("admin global header menu", () => {
     }
 
     await expect(nav.getByRole("button", { name: "Toggle shows submenu" })).toHaveAttribute("aria-expanded", "true");
-    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/shows");
+    await expect(nav.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/shows");
   });
 
   test("limits recent shows submenu to the latest five", async ({ page }) => {
@@ -49,7 +49,7 @@ test.describe("admin global header menu", () => {
       window.localStorage.setItem(storageKey, JSON.stringify(entries));
     }, [ADMIN_RECENT_SHOWS_STORAGE_KEY]);
 
-    await page.goto("/admin");
+    await page.goto("/");
     await waitForAdminReady(page);
     await page.getByRole("button", { name: "Open admin navigation menu" }).click();
     const nav = page.getByRole("navigation", { name: "Admin navigation" });
@@ -106,7 +106,7 @@ test.describe("admin global header menu", () => {
       await waitForAdminReady(page);
     }
 
-    await page.goto("/admin");
+    await page.goto("/");
     await waitForAdminReady(page);
     await page.getByRole("button", { name: "Open admin navigation menu" }).click();
 
@@ -118,11 +118,11 @@ test.describe("admin global header menu", () => {
       elements.map((element) => element.getAttribute("href")),
     );
     expect(hrefs).toEqual([
-      "/shows/zeta-show",
-      "/shows/epsilon-show",
-      "/shows/delta-show",
-      "/shows/gamma-show",
-      "/shows/beta-show",
+      "/zeta-show",
+      "/epsilon-show",
+      "/delta-show",
+      "/gamma-show",
+      "/beta-show",
     ]);
 
     await expect(nav.getByRole("link", { name: "View All Shows" })).toBeVisible();
@@ -130,7 +130,7 @@ test.describe("admin global header menu", () => {
   });
 
   test("closes on escape, backdrop click, and navigation", async ({ page }) => {
-    await page.goto("/admin");
+    await page.goto("/");
     await waitForAdminReady(page);
 
     const openMenu = page.getByRole("button", { name: "Open admin navigation menu" });
@@ -158,7 +158,7 @@ test.describe("admin global header menu", () => {
       .getByRole("link", { name: "Games", exact: true })
       .click();
     await waitForAdminReady(page);
-    await expect(page).toHaveURL(/\/admin\/games$/);
+    await expect(page).toHaveURL(/\/games$/);
     await expect(nav).toHaveAttribute("aria-hidden", "true");
   });
 });

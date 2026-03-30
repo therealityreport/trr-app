@@ -11,6 +11,8 @@ import {
   type SocialAccountCatalogFreshness,
   type CatalogBackfillRequest,
   type CatalogReviewResolveRequest,
+  type CatalogResumeTailRequest,
+  type CatalogSyncNewerRequest,
   type CatalogSyncRecentRequest,
   type SocialAccountCatalogPost,
   type SocialAccountCatalogReviewItem,
@@ -91,6 +93,18 @@ type CollaboratorsTagsResponse = {
   mentions: SocialAccountProfileCollaboratorTagAggregate[];
 };
 
+type SummaryResponse = SocialAccountProfileSummary & {
+  error?: string;
+  upstream_status?: number;
+  upstream_detail?: unknown;
+  upstream_detail_code?: string;
+};
+
+type SummaryLoadResult = {
+  data: SocialAccountProfileSummary;
+  uninitialized: boolean;
+};
+
 type CatalogRunProgressResponse = SocialAccountCatalogRunProgressSnapshot & {
   error?: string;
 };
@@ -167,6 +181,13 @@ const formatDateTime = (value?: string | null): string => {
   return parsed.toLocaleString();
 };
 
+const formatModalTargetLabel = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
+  const appName = String(progress?.dispatch_health?.configured_app_name || "").trim();
+  const functionName = String(progress?.dispatch_health?.configured_function_name || "").trim();
+  if (!appName && !functionName) return null;
+  return functionName ? `${appName || "<unset>"}.${functionName}` : appName;
+};
+
 const formatSeasonLabel = (seasonNumber?: number | null): string => {
   return seasonNumber ? `Season ${seasonNumber}` : "All seasons";
 };
@@ -174,6 +195,37 @@ const formatSeasonLabel = (seasonNumber?: number | null): string => {
 const formatHashtagWindowLabel = (value: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]): string => {
   return HASHTAG_WINDOW_OPTIONS.find((option) => option.value === value)?.label ?? "All Time";
 };
+
+const buildEmptySocialAccountProfileSummary = (
+  platform: SocialPlatformSlug,
+  handle: string,
+): SocialAccountProfileSummary => ({
+  platform,
+  account_handle: handle,
+  total_posts: 0,
+  total_engagement: 0,
+  total_views: 0,
+  live_total_posts: 0,
+  catalog_total_posts: 0,
+  catalog_assigned_posts: 0,
+  catalog_unassigned_posts: 0,
+  catalog_pending_review_posts: 0,
+  live_catalog_total_posts: 0,
+  live_catalog_total_engagement: 0,
+  live_catalog_total_views: 0,
+  live_catalog_caption_rows: 0,
+  live_catalog_hashtag_instances: 0,
+  live_catalog_unique_hashtags: 0,
+  last_catalog_run_at: null,
+  last_catalog_run_status: null,
+  catalog_recent_runs: [],
+  per_show_counts: [],
+  per_season_counts: [],
+  top_hashtags: [],
+  top_collaborators: [],
+  top_tags: [],
+  source_status: [],
+});
 
 const getPostMatchBadge = (post: Pick<SocialAccountProfilePost, "match_mode" | "source_surface">): {
   label: string;
@@ -334,6 +386,7 @@ const getCatalogStageBadge = (
 
 const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
   const queuedUnclaimedJobs = Number(progress?.dispatch_health?.queued_unclaimed_jobs ?? 0);
+  const dispatchBlockedJobs = Number(progress?.dispatch_health?.dispatch_blocked_jobs ?? 0);
   const modalPendingJobs = Number(progress?.dispatch_health?.modal_pending_jobs ?? 0);
   const modalRunningUnclaimedJobs = Number(progress?.dispatch_health?.modal_running_unclaimed_jobs ?? 0);
   const retryingDispatchJobs = Number(progress?.dispatch_health?.retrying_dispatch_jobs ?? 0);
@@ -341,6 +394,9 @@ const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot
   const runStatus = normalizeCatalogRunStatus(progress?.run_status);
   if (staleDispatchFailedJobs > 0) {
     return "Remote dispatch failed";
+  }
+  if (dispatchBlockedJobs > 0) {
+    return "Modal dispatch blocked";
   }
   if (retryingDispatchJobs > 0) {
     return "Retrying remote dispatch";
@@ -413,6 +469,7 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
   text: string;
 } | null => {
   const queuedUnclaimedJobs = Number(progress?.dispatch_health?.queued_unclaimed_jobs ?? 0);
+  const dispatchBlockedJobs = Number(progress?.dispatch_health?.dispatch_blocked_jobs ?? 0);
   const modalPendingJobs = Number(progress?.dispatch_health?.modal_pending_jobs ?? 0);
   const modalRunningUnclaimedJobs = Number(progress?.dispatch_health?.modal_running_unclaimed_jobs ?? 0);
   const retryingDispatchJobs = Number(progress?.dispatch_health?.retrying_dispatch_jobs ?? 0);
@@ -420,12 +477,27 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
   const maxRetries = Number(progress?.dispatch_health?.max_stale_dispatch_retries ?? 0);
   const latestDispatchRequestedAt = progress?.dispatch_health?.latest_dispatch_requested_at;
   const remoteInvocationCheckedAt = progress?.dispatch_health?.remote_invocation_checked_at;
+  const latestDispatchError = String(progress?.dispatch_health?.latest_dispatch_error || "").trim();
+  const latestDispatchErrorCode = String(progress?.dispatch_health?.latest_dispatch_error_code || "").trim();
+  const latestRemoteBlockedReason = String(progress?.dispatch_health?.latest_remote_blocked_reason || "").trim();
+  const modalEnvironment = String(progress?.dispatch_health?.modal_environment || "").trim();
+  const modalTargetLabel = formatModalTargetLabel(progress);
   if (staleDispatchFailedJobs > 0) {
     return {
       tone: "red",
       text: `${formatInteger(staleDispatchFailedJobs)} queued job${staleDispatchFailedJobs === 1 ? "" : "s"} exhausted ${
         maxRetries > 0 ? formatInteger(maxRetries) : "the allowed"
       } remote dispatch retr${maxRetries === 1 ? "y" : "ies"} before any Modal worker claimed them. Cancel this run before retrying.`,
+    };
+  }
+  if (dispatchBlockedJobs > 0) {
+    const detail = latestDispatchError || latestRemoteBlockedReason || latestDispatchErrorCode || "Modal dispatch was blocked before a worker could claim the job.";
+    const targetBits = [modalTargetLabel, modalEnvironment ? `env ${modalEnvironment}` : null].filter(Boolean).join(" in ");
+    return {
+      tone: "red",
+      text: `${formatInteger(dispatchBlockedJobs)} queued job${dispatchBlockedJobs === 1 ? "" : "s"} ${
+        dispatchBlockedJobs === 1 ? "is" : "are"
+      } blocked before claim. ${detail}${targetBits ? ` Target: ${targetBits}.` : ""}`,
     };
   }
   if (retryingDispatchJobs > 0) {
@@ -483,6 +555,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     [user],
   );
   const [summary, setSummary] = useState<SocialAccountProfileSummary | null>(null);
+  const [summaryUninitialized, setSummaryUninitialized] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
@@ -506,7 +579,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogFilter, setCatalogFilter] = useState<"all" | "assigned" | "unassigned" | "ambiguous" | "needs_review">("all");
   const [catalogActionMessage, setCatalogActionMessage] = useState<string | null>(null);
-  const [runningCatalogAction, setRunningCatalogAction] = useState<"backfill" | "sync_recent" | null>(null);
+  const [runningCatalogAction, setRunningCatalogAction] = useState<"backfill" | "sync_recent" | "sync_newer" | "resume_tail" | null>(null);
   const [reviewQueue, setReviewQueue] = useState<SocialAccountCatalogReviewItem[]>([]);
   const [reviewQueueLoading, setReviewQueueLoading] = useState(false);
   const [reviewQueueError, setReviewQueueError] = useState<string | null>(null);
@@ -551,10 +624,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setPage(1);
     setCatalogPage(1);
     setSummary(null);
+    setSummaryUninitialized(false);
     setSummaryLoading(false);
     setSummaryError(null);
+    setPosts(null);
+    setPostsLoading(false);
+    setPostsError(null);
+    setCatalogPosts(null);
+    setCatalogPostsLoading(false);
+    setCatalogPostsError(null);
     setCatalogCardPreview(null);
+    setReviewQueue([]);
+    setReviewQueueLoading(false);
+    setReviewQueueError(null);
     setReviewDrafts({});
+    setHashtags([]);
+    setHashtagsLoading(false);
+    setHashtagsError(null);
+    setDraftAssignments({});
     setCatalogProgressRunId(null);
     setCatalogRunProgress(null);
     setCatalogRunProgressError(null);
@@ -570,6 +657,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogFreshness(null);
     setCatalogFreshnessLoading(false);
     setCatalogFreshnessError(null);
+    setCollaboratorsTags(null);
+    setCollaboratorsLoading(false);
+    setCollaboratorsError(null);
     setPostSearchExpanded(false);
     setPostSearchQuery("");
     setPostSearchResults(null);
@@ -588,20 +678,31 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const refreshSummary = useCallback(async () => {
     if (!user) return;
-    const data = await withSocialProfileRequestDedup(summaryRequestKey, async () => {
+    const result = await withSocialProfileRequestDedup(summaryRequestKey, async (): Promise<SummaryLoadResult> => {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
         undefined,
         { preferredUser: user },
       );
-      const payload = (await response.json().catch(() => ({}))) as SocialAccountProfileSummary & { error?: string };
+      const payload = (await response.json().catch(() => ({}))) as SummaryResponse;
       if (!response.ok) {
+        if (response.status === 404) {
+          return {
+            data: buildEmptySocialAccountProfileSummary(platform, handle),
+            uninitialized: true,
+          };
+        }
         throw new Error(payload.error || "Failed to load social account profile summary");
       }
-      return payload;
+      return {
+        data: payload,
+        uninitialized: false,
+      };
     });
-    setSummary(data);
+    setSummary(result.data);
+    setSummaryUninitialized(result.uninitialized);
     setSummaryError(null);
+    return result;
   }, [fetchAdminWithAuth, handle, platform, summaryRequestKey, user]);
 
   const applyCancelledCatalogRunLocally = useCallback(
@@ -668,16 +769,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }
 
       try {
-        const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
-          undefined,
-          { preferredUser: user },
-        );
-        const data = (await response.json().catch(() => ({}))) as SocialAccountProfileSummary & { error?: string };
-        if (response.ok) {
-          setSummary(data);
-          setSummaryError(null);
-          const matchingRun = (data.catalog_recent_runs ?? []).find((run) => run.run_id === normalizedRunId);
+        const result = await refreshSummary();
+        if (result) {
+          const matchingRun = (result.data.catalog_recent_runs ?? []).find((run) => run.run_id === normalizedRunId);
           if (normalizeCatalogRunStatus(matchingRun?.status) === "cancelled") {
             applyCancelledCatalogRunLocally(normalizedRunId, matchingRun?.completed_at ?? null);
             return true;
@@ -689,7 +783,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
       return false;
     },
-    [applyCancelledCatalogRunLocally, fetchAdminWithAuth, handle, platform, user],
+    [applyCancelledCatalogRunLocally, fetchAdminWithAuth, handle, platform, refreshSummary, user],
   );
 
   const refreshHashtags = useCallback(async () => {
@@ -751,23 +845,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setSummaryLoading(true);
       setSummaryError(null);
       try {
-        const data = await withSocialProfileRequestDedup(summaryRequestKey, async () => {
-          const response = await fetchAdminWithAuth(
-            `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
-            undefined,
-            { preferredUser: user },
-          );
-          const payload = (await response.json().catch(() => ({}))) as SocialAccountProfileSummary & { error?: string };
-          if (!response.ok) {
-            throw new Error(payload.error || "Failed to load social account profile summary");
-          }
-          return payload;
-        });
+        await refreshSummary();
         if (cancelled) return;
-        setSummary(data);
         setSummaryError(null);
       } catch (error) {
         if (cancelled) return;
+        setSummaryUninitialized(false);
         setSummaryError(error instanceof Error ? error.message : "Failed to load social account profile summary");
       } finally {
         if (!cancelled) setSummaryLoading(false);
@@ -778,10 +861,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, summaryRequestKey, user]);
+  }, [checking, handle, hasAccess, platform, refreshSummary, user]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || !supportsCatalog) return;
+    if (checking || !user || !hasAccess || !supportsCatalog || summaryUninitialized) return;
     const liveCatalogTotal = Number(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts ?? 0);
     const hasCatalogHistory = Number(summary?.catalog_recent_runs?.length ?? 0) > 0;
     if (liveCatalogTotal > 0 || !hasCatalogHistory) {
@@ -827,12 +910,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     summary?.catalog_recent_runs,
     summary?.catalog_total_posts,
     summary?.live_catalog_total_posts,
+    summaryUninitialized,
     supportsCatalog,
     user,
   ]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || activeTab !== "posts") return;
+    if (checking || !user || !hasAccess || activeTab !== "posts" || summaryUninitialized) return;
     let cancelled = false;
 
     const loadPosts = async () => {
@@ -862,10 +946,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, fetchAdminWithAuth, handle, hasAccess, page, platform, user]);
+  }, [activeTab, checking, fetchAdminWithAuth, handle, hasAccess, page, platform, summaryUninitialized, user]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || activeTab !== "catalog" || !supportsCatalog) return;
+    if (checking || !user || !hasAccess || activeTab !== "catalog" || !supportsCatalog || summaryUninitialized) return;
     let cancelled = false;
 
     const loadCatalogPosts = async () => {
@@ -902,11 +986,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, catalogFilter, catalogPage, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsCatalog, user]);
+  }, [activeTab, catalogFilter, catalogPage, checking, fetchAdminWithAuth, handle, hasAccess, platform, summaryUninitialized, supportsCatalog, user]);
 
   useEffect(() => {
     const shouldLoadHashtags = activeTab === "hashtags" || (activeTab === "stats" && hashtagWindow !== "all");
-    if (checking || !user || !hasAccess || !shouldLoadHashtags) return;
+    if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized) return;
     let cancelled = false;
 
     const loadHashtags = async () => {
@@ -927,10 +1011,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, hashtagWindow, hasAccess, refreshHashtags, user]);
+  }, [activeTab, checking, hashtagWindow, hasAccess, refreshHashtags, summaryUninitialized, user]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || activeTab !== "hashtags" || platform !== "instagram") {
+    if (checking || !user || !hasAccess || activeTab !== "hashtags" || platform !== "instagram" || summaryUninitialized) {
       if (platform !== "instagram") {
         setHashtagTimeline(null);
         setHashtagTimelineError(null);
@@ -957,10 +1041,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, hasAccess, platform, refreshHashtagTimeline, user]);
+  }, [activeTab, checking, hasAccess, platform, refreshHashtagTimeline, summaryUninitialized, user]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || !supportsCatalog || (activeTab !== "hashtags" && activeTab !== "catalog")) {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !supportsCatalog ||
+      summaryUninitialized ||
+      (activeTab !== "hashtags" && activeTab !== "catalog")
+    ) {
       return;
     }
     let cancelled = false;
@@ -992,10 +1083,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, fetchAdminWithAuth, handle, hasAccess, platform, supportsCatalog, user]);
+  }, [activeTab, checking, fetchAdminWithAuth, handle, hasAccess, platform, summaryUninitialized, supportsCatalog, user]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || activeTab !== "collaborators-tags") return;
+    if (checking || !user || !hasAccess || activeTab !== "collaborators-tags" || summaryUninitialized) return;
     let cancelled = false;
 
     const loadCollaboratorsTags = async () => {
@@ -1030,7 +1121,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, collaboratorsRequestKey, fetchAdminWithAuth, handle, hasAccess, platform, user]);
+  }, [activeTab, checking, collaboratorsRequestKey, fetchAdminWithAuth, handle, hasAccess, platform, summaryUninitialized, user]);
 
   const activeCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
     const runs = summary?.catalog_recent_runs ?? [];
@@ -1050,7 +1141,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [hashtagWindow, hashtags, summary?.top_hashtags]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || !supportsCatalog || platform !== "instagram") return;
+    if (checking || !user || !hasAccess || !supportsCatalog || platform !== "instagram" || summaryUninitialized) return;
 
     const latestStatus = normalizeCatalogRunStatus(latestCatalogRun?.status);
     const activeStatus = normalizeCatalogRunStatus(activeCatalogRun?.status);
@@ -1102,12 +1193,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeCatalogRun, checking, fetchAdminWithAuth, handle, hasAccess, latestCatalogRun?.run_id, latestCatalogRun?.status, platform, supportsCatalog, user]);
+  }, [activeCatalogRun, checking, fetchAdminWithAuth, handle, hasAccess, latestCatalogRun?.run_id, latestCatalogRun?.status, platform, summaryUninitialized, supportsCatalog, user]);
 
   const trimmedPostSearchQuery = useMemo(() => postSearchQuery.trim(), [postSearchQuery]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || !postSearchExpanded) {
+    if (checking || !user || !hasAccess || !postSearchExpanded || summaryUninitialized) {
       setPostSearchLoading(false);
       setPostSearchError(null);
       if (!postSearchExpanded) {
@@ -1159,7 +1250,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, postSearchExpanded, trimmedPostSearchQuery, user]);
+  }, [checking, fetchAdminWithAuth, handle, hasAccess, platform, postSearchExpanded, summaryUninitialized, trimmedPostSearchQuery, user]);
 
   const selectedCatalogRunId = useMemo(() => {
     const normalized = String(catalogProgressRunId || "").trim();
@@ -1728,8 +1819,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   };
 
   const runCatalogAction = async (
-    action: "backfill" | "sync_recent",
-    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest,
+    action: "backfill" | "sync_recent" | "sync_newer" | "resume_tail",
+    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest | CatalogResumeTailRequest,
   ) => {
     if (!user) return;
     setRunningCatalogAction(action);
@@ -1737,10 +1828,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogFreshness(null);
     setCatalogFreshnessError(null);
     try {
+      const actionSlug =
+        action === "backfill" ? "backfill"
+        : action === "sync_newer" ? "sync-newer"
+        : action === "resume_tail" ? "resume-tail"
+        : "sync-recent";
       const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/${
-          action === "backfill" ? "backfill" : "sync-recent"
-        }`,
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/${actionSlug}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1759,7 +1853,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           data.error ||
             data.message ||
             data.detail?.message ||
-            `Failed to ${action === "backfill" ? "start backfill" : "sync recent catalog content"}`,
+            `Failed to ${
+              action === "backfill" ? "start backfill"
+              : action === "sync_newer" ? "sync newer posts"
+              : action === "resume_tail" ? "resume tail backfill"
+              : "sync recent catalog content"
+            }`,
         );
       }
       const queuedRunId = String(data.run_id || "").trim() || null;
@@ -1771,6 +1870,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setCatalogActionMessage(
         action === "backfill"
           ? `Post backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
+          : action === "sync_newer"
+          ? `Sync newer posts queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
+          : action === "resume_tail"
+          ? `Resume tail queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
           : `Recent sync queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`,
       );
       await refreshSummary().catch(() => {});
@@ -1778,7 +1881,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setCatalogActionMessage(
         error instanceof Error
           ? error.message
-          : `Failed to ${action === "backfill" ? "start backfill" : "sync recent catalog content"}`,
+          : `Failed to ${
+            action === "backfill" ? "start backfill"
+            : action === "sync_newer" ? "sync newer posts"
+            : action === "resume_tail" ? "resume tail backfill"
+            : "sync recent catalog content"
+          }`,
       );
     } finally {
       setRunningCatalogAction(null);
@@ -1895,7 +2003,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const headerTitle = `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} · @${handle}`;
   const breadcrumbs = [
-    ...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social"),
+    ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
     { label: `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} @${handle}`, href: buildSocialAccountProfileUrl({ platform, handle }) },
   ];
 
@@ -1962,7 +2070,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         disabled={catalogActionsBlocked}
                         className="inline-flex rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {runningCatalogAction === "backfill" ? "Queueing Post Update…" : "Update Posts"}
+                        {runningCatalogAction === "backfill" ? "Queueing Backfill…" : "Backfill Posts"}
                       </button>
                       <button
                         type="button"
@@ -1973,9 +2081,37 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         }
                         disabled={catalogActionsBlocked}
                         className="inline-flex rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
+                        >
+                          {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
                       </button>
+                      {catalogFreshness?.needs_recent_sync && catalogFreshness?.catalog_newest_post_at ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void runCatalogAction("sync_newer", {
+                              source_scope: "bravo",
+                            })
+                          }
+                          disabled={catalogActionsBlocked}
+                          className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {runningCatalogAction === "sync_newer" ? "Queueing…" : "Sync Newer Posts"}
+                        </button>
+                      ) : null}
+                      {catalogFreshness?.has_resumable_frontier ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void runCatalogAction("resume_tail", {
+                              source_scope: "bravo",
+                            })
+                          }
+                          disabled={catalogActionsBlocked}
+                          className="inline-flex rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {runningCatalogAction === "resume_tail" ? "Queueing…" : "Resume Tail"}
+                        </button>
+                      ) : null}
                       {cancellableCatalogRunId && cancellableCatalogRunIsActive ? (
                         <button
                           type="button"
@@ -2004,6 +2140,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     </span>
                   )}
                 </div>
+                {supportsCatalog ? (
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Backfill Posts runs the full-history catalog job. Sync Newer fetches only posts published after the latest stored post. Resume Tail continues from where the last backfill stopped. Sync Recent runs the same pipeline, limited to the last day.
+                  </p>
+                ) : null}
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
                 {supportsCatalog && platform === "instagram" ? (
                   <div className="mt-3 space-y-2">
@@ -2187,6 +2328,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           {summaryLoading && !hasSummary ? <div className="text-sm text-zinc-500">Loading account summary…</div> : null}
           {summaryError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{summaryError}</div>
+          ) : null}
+          {summaryUninitialized ? (
+            <section className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 text-sm text-sky-900">
+              <p className="font-semibold">No saved posts yet for @{handle}.</p>
+              <p className="mt-1 text-sky-800">
+                Use <span className="font-semibold">Backfill Posts</span> to load this account. If saved Bravo posts already include
+                this handle as a collaborator, they will appear here automatically.
+              </p>
+            </section>
           ) : null}
 
           {hasSummary && supportsCatalog && displayedCatalogRunId ? (

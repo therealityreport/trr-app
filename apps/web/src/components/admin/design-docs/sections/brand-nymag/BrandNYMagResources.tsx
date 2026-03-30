@@ -14,7 +14,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#db2800",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -71,7 +71,7 @@ export default function BrandNYMagResources() {
             >
               {r.label}
             </div>
-            <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 12, color: "#db2800" }}>
+            <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 12, color: "var(--dd-brand-accent)" }}>
               {r.url}
             </div>
             <div style={{ fontFamily: "var(--dd-font-body)", fontSize: 12, color: "var(--dd-ink-faint)" }}>
@@ -104,7 +104,7 @@ export default function BrandNYMagResources() {
             >
               {r.label}
             </div>
-            <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 12, color: "#db2800" }}>
+            <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 12, color: "var(--dd-brand-accent)" }}>
               {r.url}
             </div>
             <div style={{ fontFamily: "var(--dd-font-body)", fontSize: 12, color: "var(--dd-ink-faint)" }}>
@@ -142,8 +142,8 @@ export default function BrandNYMagResources() {
             <span
               key={c}
               style={{
-                background: "#fff",
-                border: "1px solid var(--dd-ink-rule)",
+                background: "var(--dd-brand-surface)",
+                border: "1px solid var(--dd-brand-border)",
                 borderRadius: 4,
                 padding: "2px 8px",
                 fontSize: 11,
@@ -224,8 +224,8 @@ export default function BrandNYMagResources() {
       <SectionLabel>CSS Architecture Note</SectionLabel>
       <div
         style={{
-          background: "#fffbf0",
-          border: "1px solid #f5d88e",
+          background: "var(--dd-brand-surface)",
+          border: "1px solid var(--dd-brand-border)",
           borderRadius: 6,
           padding: 16,
           maxWidth: 640,

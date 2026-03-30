@@ -14,7 +14,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#db2800",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -85,7 +85,7 @@ export default function BrandNYMagShapes() {
                 fontFamily: "var(--dd-font-mono)",
                 fontSize: 14,
                 fontWeight: 700,
-                color: "#db2800",
+                color: "var(--dd-brand-accent)",
                 marginBottom: 4,
               }}
             >

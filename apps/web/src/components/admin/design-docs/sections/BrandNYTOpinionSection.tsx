@@ -21,7 +21,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "var(--dd-viz-blue)",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -135,7 +135,7 @@ export default function BrandNYTOpinionSection() {
             fontFamily: "var(--dd-font-headline)",
             fontWeight: 700,
             fontSize: 40,
-            color: "#121212",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             lineHeight: 1.1,
           }}
@@ -146,7 +146,7 @@ export default function BrandNYTOpinionSection() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "#999999",
+            color: "var(--dd-brand-text-muted)",
             marginTop: 8,
             fontStyle: "italic",
           }}
@@ -168,7 +168,7 @@ export default function BrandNYTOpinionSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.1em",
-            color: "#999999",
+            color: "var(--dd-brand-section-label)",
             marginBottom: 6,
           }}
         >
@@ -198,7 +198,7 @@ export default function BrandNYTOpinionSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.1em",
-            color: "#999999",
+            color: "var(--dd-brand-section-label)",
             marginBottom: 6,
           }}
         >
@@ -228,7 +228,7 @@ export default function BrandNYTOpinionSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.1em",
-            color: "#999999",
+            color: "var(--dd-brand-section-label)",
             marginBottom: 6,
           }}
         >
@@ -261,7 +261,7 @@ export default function BrandNYTOpinionSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.1em",
-            color: "#999999",
+            color: "var(--dd-brand-section-label)",
             marginBottom: 6,
           }}
         >
@@ -303,7 +303,7 @@ export default function BrandNYTOpinionSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.1em",
-            color: "#999999",
+            color: "var(--dd-brand-section-label)",
             marginBottom: 6,
           }}
         >
@@ -338,7 +338,7 @@ export default function BrandNYTOpinionSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.1em",
-            color: "#999999",
+            color: "var(--dd-brand-section-label)",
             marginBottom: 6,
           }}
         >
@@ -367,7 +367,7 @@ export default function BrandNYTOpinionSection() {
             fontWeight: 600,
             textTransform: "uppercase" as const,
             letterSpacing: "0.1em",
-            color: "#999999",
+            color: "var(--dd-brand-section-label)",
             marginBottom: 12,
           }}
         >
@@ -420,7 +420,7 @@ export default function BrandNYTOpinionSection() {
           fontWeight: 600,
           textTransform: "uppercase" as const,
           letterSpacing: "0.1em",
-          color: "#999999",
+          color: "var(--dd-brand-section-label)",
           marginBottom: 12,
         }}
       >
@@ -539,7 +539,7 @@ export default function BrandNYTOpinionSection() {
           fontWeight: 600,
           textTransform: "uppercase" as const,
           letterSpacing: "0.1em",
-          color: "#999999",
+          color: "var(--dd-brand-section-label)",
           marginBottom: 12,
         }}
       >
@@ -597,7 +597,7 @@ export default function BrandNYTOpinionSection() {
           fontWeight: 600,
           textTransform: "uppercase" as const,
           letterSpacing: "0.1em",
-          color: "#999999",
+          color: "var(--dd-brand-section-label)",
           marginBottom: 12,
         }}
       >
@@ -645,7 +645,7 @@ export default function BrandNYTOpinionSection() {
           fontWeight: 600,
           textTransform: "uppercase" as const,
           letterSpacing: "0.1em",
-          color: "#999999",
+          color: "var(--dd-brand-section-label)",
           marginBottom: 12,
         }}
       >
@@ -707,7 +707,7 @@ export default function BrandNYTOpinionSection() {
               fontFamily: "var(--dd-font-sans)",
               fontSize: 10,
               fontWeight: 600,
-              color: "#999999",
+              color: "var(--dd-brand-section-label)",
               marginTop: 12,
             }}
           >
@@ -760,7 +760,7 @@ export default function BrandNYTOpinionSection() {
               fontFamily: "var(--dd-font-sans)",
               fontSize: 10,
               fontWeight: 600,
-              color: "#999999",
+              color: "var(--dd-brand-section-label)",
               marginTop: 12,
             }}
           >
@@ -827,7 +827,7 @@ export default function BrandNYTOpinionSection() {
               fontFamily: "var(--dd-font-sans)",
               fontSize: 10,
               fontWeight: 600,
-              color: "#999999",
+              color: "var(--dd-brand-section-label)",
               marginTop: 12,
             }}
           >
@@ -845,7 +845,7 @@ export default function BrandNYTOpinionSection() {
           fontWeight: 600,
           textTransform: "uppercase" as const,
           letterSpacing: "0.1em",
-          color: "#999999",
+          color: "var(--dd-brand-section-label)",
           marginBottom: 12,
           marginTop: 24,
         }}
@@ -917,7 +917,7 @@ export default function BrandNYTOpinionSection() {
           fontWeight: 600,
           textTransform: "uppercase" as const,
           letterSpacing: "0.1em",
-          color: "#999999",
+          color: "var(--dd-brand-section-label)",
           marginBottom: 12,
         }}
       >
@@ -947,7 +947,7 @@ export default function BrandNYTOpinionSection() {
 
       {/* AI-Generated Editorial Illustrations */}
       <div id="ai-illustrations" />
-      <div className="dd-section-label" style={{ color: "#D0021B", marginTop: 48 }}>AI-Generated Editorial Art</div>
+      <div className="dd-section-label" style={{ color: "var(--dd-brand-accent)", marginTop: 48 }}>AI-Generated Editorial Art</div>
       <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 24 }}>
         Opinion editorial illustration styles — bold, simplified, slightly confrontational. Toggle between AI models.
       </p>

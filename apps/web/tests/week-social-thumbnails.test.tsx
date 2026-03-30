@@ -348,6 +348,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByTestId("summary-token-tags")).toHaveTextContent("1");
     expect(screen.getByTestId("summary-token-mentions")).toHaveTextContent("1");
     expect(screen.getByTestId("summary-token-hashtags")).toHaveTextContent("1");
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(false);
   });
 
   it("uses full-period metrics fetch for summary and token cards when initial gallery payload is truncated", async () => {
@@ -1191,13 +1192,13 @@ describe("WeekDetailPage thumbnails", () => {
     await waitForWeekDetailReady();
     const detailCalls = fetchCalls.filter((url) => {
       const query = new URLSearchParams(url.split("?")[1] ?? "");
-      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+      return query.get("max_comments_per_post") === "25" && query.get("post_limit") === "20";
     });
     expect(detailCalls).toHaveLength(1);
     const firstQuery = new URLSearchParams(detailCalls[0].split("?")[1] ?? "");
     expect(firstQuery.get("post_limit")).toBe("20");
     expect(firstQuery.get("post_offset")).toBe("0");
-    expect(firstQuery.get("max_comments_per_post")).toBe("0");
+    expect(firstQuery.get("max_comments_per_post")).toBe("25");
 
     expect(screen.getByRole("button", { name: /load more posts/i })).toBeInTheDocument();
     expect(screen.getByText("Post 20")).toBeInTheDocument();
@@ -1209,7 +1210,7 @@ describe("WeekDetailPage thumbnails", () => {
     });
     const detailCallsAfterLoadMore = fetchCalls.filter((url) => {
       const query = new URLSearchParams(url.split("?")[1] ?? "");
-      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+      return query.get("max_comments_per_post") === "25" && query.get("post_limit") === "20";
     });
     expect(detailCallsAfterLoadMore).toHaveLength(2);
     const secondQuery = new URLSearchParams(detailCallsAfterLoadMore[1].split("?")[1] ?? "");
@@ -1355,7 +1356,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.getByText("Likes leader")).toBeInTheDocument();
     const detailCalls = weekCalls.filter((url) => {
       const query = new URLSearchParams(url.split("?")[1] ?? "");
-      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+      return query.get("max_comments_per_post") === "25" && query.get("post_limit") === "20";
     });
     expect(detailCalls).toHaveLength(1);
     const firstQuery = new URLSearchParams(detailCalls[0].split("?")[1] ?? "");
@@ -1372,7 +1373,7 @@ describe("WeekDetailPage thumbnails", () => {
     expect(screen.queryByText("Likes leader")).not.toBeInTheDocument();
     const detailCallsAfterSort = weekCalls.filter((url) => {
       const query = new URLSearchParams(url.split("?")[1] ?? "");
-      return query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20";
+      return query.get("max_comments_per_post") === "25" && query.get("post_limit") === "20";
     });
     expect(detailCallsAfterSort).toHaveLength(2);
     const secondQuery = new URLSearchParams(detailCallsAfterSort[1].split("?")[1] ?? "");
@@ -1523,7 +1524,7 @@ describe("WeekDetailPage thumbnails", () => {
 
     const detailQueries = weekCalls
       .map((url) => new URLSearchParams(url.split("?")[1] ?? ""))
-      .filter((query) => query.get("max_comments_per_post") === "0" && query.get("post_limit") === "20");
+      .filter((query) => query.get("max_comments_per_post") === "25" && query.get("post_limit") === "20");
     expect(detailQueries[0]?.get("platforms")).toBeNull();
     expect(detailQueries[1]?.get("platforms")).toBe("facebook");
     expect(detailQueries[2]?.get("platforms")).toBe("twitter");
@@ -3636,6 +3637,26 @@ describe("WeekDetailPage thumbnails", () => {
   });
 
   it("loads platform totals from the dedicated week summary endpoint", async () => {
+    const previewPayload = {
+      ...weekPayload,
+      platforms: {
+        ...weekPayload.platforms,
+        instagram: {
+          ...weekPayload.platforms.instagram,
+          totals: { posts: 5, total_comments: 10, total_engagement: 100 },
+        },
+        tiktok: {
+          ...weekPayload.platforms.tiktok,
+          totals: { posts: 4, total_comments: 12, total_engagement: 120 },
+        },
+        youtube: {
+          ...weekPayload.platforms.youtube,
+          totals: { posts: 3, total_comments: 14, total_engagement: 200 },
+        },
+      },
+      totals: { posts: 15, total_comments: 36, total_engagement: 420 },
+      pagination: { limit: 20, offset: 0, returned: 3, total: 15, has_more: true },
+    };
     const summaryPayload = {
       week: weekPayload.week,
       season: weekPayload.season,
@@ -3656,7 +3677,7 @@ describe("WeekDetailPage thumbnails", () => {
         return { ok: true, status: 200, json: async () => summaryPayload } as Response;
       }
       if (url.includes("/social/analytics/week/1")) {
-        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+        return { ok: true, status: 200, json: async () => previewPayload } as Response;
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
@@ -3669,10 +3690,30 @@ describe("WeekDetailPage thumbnails", () => {
   });
 
   it("keeps the posts summary metric aligned with authoritative week summary totals", async () => {
-    const metricsPayload = {
+    const previewPayload = {
       ...weekPayload,
       platforms: {
         ...weekPayload.platforms,
+        instagram: {
+          ...weekPayload.platforms.instagram,
+          totals: { posts: 5, total_comments: 10, total_engagement: 100 },
+        },
+        tiktok: {
+          ...weekPayload.platforms.tiktok,
+          totals: { posts: 4, total_comments: 12, total_engagement: 120 },
+        },
+        youtube: {
+          ...weekPayload.platforms.youtube,
+          totals: { posts: 3, total_comments: 14, total_engagement: 200 },
+        },
+      },
+      totals: { posts: 15, total_comments: 100, total_engagement: 1000 },
+      pagination: { limit: 20, offset: 0, returned: 3, total: 15, has_more: true },
+    };
+    const metricsPayload = {
+      ...previewPayload,
+      platforms: {
+        ...previewPayload.platforms,
         youtube: { posts: [], totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
       },
       totals: { posts: 14, total_comments: 100, total_engagement: 1000 },
@@ -3702,7 +3743,7 @@ describe("WeekDetailPage thumbnails", () => {
         if (query.get("post_limit") === "100") {
           return { ok: true, status: 200, json: async () => metricsPayload } as Response;
         }
-        return { ok: true, status: 200, json: async () => weekPayload } as Response;
+        return { ok: true, status: 200, json: async () => previewPayload } as Response;
       }
       throw new Error(`Unexpected URL: ${url}`);
     });

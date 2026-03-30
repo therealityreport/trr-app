@@ -21,9 +21,11 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#db2800",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
+        borderLeft: "3px solid var(--dd-brand-accent)",
+        paddingLeft: 10,
       }}
     >
       {children}
@@ -612,7 +614,7 @@ export default function BrandNYMagSection() {
                 style={{
                   fontFamily: "var(--dd-font-mono)",
                   fontSize: 10,
-                  color: "#db2800",
+                  color: "var(--dd-brand-accent)",
                   textTransform: "uppercase" as const,
                   letterSpacing: "0.08em",
                 }}
@@ -657,7 +659,7 @@ export default function BrandNYMagSection() {
       <SectionLabel>Type Scale Specimens</SectionLabel>
       <div
         style={{
-          background: "#fff",
+          background: "var(--dd-brand-surface)",
           border: "1px solid var(--dd-ink-rule)",
           borderRadius: 8,
           padding: 24,
@@ -1001,7 +1003,7 @@ export default function BrandNYMagSection() {
                 fontFamily: "var(--dd-font-mono)",
                 fontSize: 13,
                 fontWeight: 600,
-                color: "#db2800",
+                color: "var(--dd-brand-accent)",
                 minWidth: 48,
               }}
             >
@@ -1169,7 +1171,7 @@ export default function BrandNYMagSection() {
               style={{
                 fontFamily: "var(--dd-font-mono)",
                 fontSize: 12,
-                color: "#db2800",
+                color: "var(--dd-brand-accent)",
               }}
             >
               {r.url}

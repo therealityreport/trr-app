@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
@@ -24,8 +25,7 @@ const VALID_PLATFORMS = [
 ] as const;
 
 const getWriteHeaders = (uid: string, includeJson = false): Record<string, string> => {
-  const serviceRoleKey =
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleKey = getTrrAdminServiceKey();
   if (!serviceRoleKey) {
     throw new Error("Backend auth not configured");
   }

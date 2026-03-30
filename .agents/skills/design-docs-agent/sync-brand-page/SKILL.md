@@ -16,6 +16,21 @@ Run after `generate-article-page` and `wire-config-and-routing` complete. Also r
 - `articleId` — The article's `id` field from the ARTICLES array
 - `brandType` — "nyt" or "athletic" (auto-detected from article URL)
 
+## MANDATORY: All 15 Tabs Must Exist
+
+In `create-brand` mode, ALL 15 tab page files must be created before syncing begins. Do NOT wait for data to exist before creating a tab file.
+
+Rules:
+1. Check `sections/brand-{slug}/` for all 15 expected files
+2. If any are missing, create them with:
+   - Dynamic ARTICLES import and brand filtering
+   - Conditional rendering (only show sub-sections when data exists)
+   - "No components discovered yet" placeholder for empty sections
+3. After ensuring all 15 exist, then sync data from the new article
+4. The sync delta should be additive — never remove existing data
+
+This ensures brand pages always have the full 15-tab navigation structure.
+
 ## 15-Section Brand Tab Taxonomy
 
 Every brand gets 15 tab page files. The agent populates sub-pages within each
@@ -145,6 +160,39 @@ Each specimen contains:
 - Sample headline (32px) + body text (16px)
 
 The font matcher (`apps/web/src/lib/fonts/brand-fonts/`) can then use these specimens for visual similarity scoring when pairing brand fonts with TRR hosted equivalents.
+
+### Delta Reporting (NEW)
+
+After syncing, compute and report the delta:
+```
+syncDelta: {
+  sectionsUpdated: string[],       // which of the 15 sections changed
+  subPagesCreated: string[],       // which sub-pages were newly created (lazy creation)
+  subPagesUpdated: string[],       // which existing sub-pages got new data
+  fontsAdded: { name: string, weights: number[] }[],
+  colorsAdded: { hex: string, source: string }[],
+  componentsAdded: { type: string, section: string }[],
+  chartsAdded: { type: string, tool: string }[],
+  iconsAdded: string[],
+  warnings: string[],
+}
+```
+
+### Safe Merge Verification (NEW)
+
+After updating any brand tab file, verify no existing data was removed:
+1. Count total data items (fonts, colors, components, charts) before sync
+2. Count after sync
+3. If any count decreased, WARN: "Data items were removed during sync — this may indicate a merge error"
+4. The delta should always be additive (union merge, never replacement)
+
+### Lazy Sub-Page Creation Tracking (NEW)
+
+When creating a new sub-page (first time a component type is discovered):
+1. Log: "Creating new sub-page: Section {N} / {sub-page-name} — triggered by article {articleId}"
+2. Verify the component file was created at the correct path
+3. Verify the component dynamically reads from ARTICLES (not hardcoded)
+4. Add to `syncDelta.subPagesCreated`
 
 ## Error Recovery
 

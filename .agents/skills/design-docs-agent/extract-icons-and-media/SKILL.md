@@ -285,3 +285,48 @@ When you receive HTML source, follow this order:
 
 Do not include commentary outside the JSON output unless the caller explicitly
 asks for a narrative summary alongside the extraction data.
+
+---
+
+## 12. Asset Classification (NEW)
+
+Every extracted asset MUST be classified into one of these categories:
+
+```
+type AssetCategory =
+  | "brand-logo"       // wordmarks, lettermarks, brandmarks, combination marks, emblems
+  | "favicon"          // site favicon / apple-touch-icon
+  | "editorial-icon"   // inline SVG icons used in article content
+  | "ui-chrome"        // navigation, share buttons, comment icons, hamburger menu
+  | "team-logo"        // sports team logos
+  | "league-logo"      // league/organization logos
+  | "author-headshot"  // byline/bio photos
+  | "social-image"     // og:image, twitter:image
+  | "content-image"    // article body images, featured images
+  | "puzzle-asset"     // game logos, puzzle icons
+```
+
+Classification feeds the 15-section taxonomy: brand-logos -> Section 2 (Primitives), ui-chrome -> Section 4 (Navigation), team/league logos -> Section 15 (Resources).
+
+---
+
+## 13. SVG Content-Hash Deduplication (NEW)
+
+When multiple SVGs are extracted, deduplicate by content hash (not just name+viewBox):
+
+1. Normalize SVG: remove whitespace, sort attributes alphabetically
+2. SHA-256 hash the normalized content
+3. If two SVGs produce the same hash, keep only the first occurrence
+4. Note duplicates in the output: `duplicates: [{ kept: "share-gift", removed: ["share-gift-2"] }]`
+
+---
+
+## 14. Favicon Extraction (NEW)
+
+Always extract favicons from `<link>` tags:
+
+- `<link rel="icon" href="..." sizes="...">`
+- `<link rel="apple-touch-icon" href="...">`
+- `<meta name="msapplication-TileImage" content="...">`
+
+Output: `favicons: [{ url: string, sizes: string, type: string }]`

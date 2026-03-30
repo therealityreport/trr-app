@@ -25,10 +25,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#326891",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #326891",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -163,13 +163,13 @@ export default function BrandNYTLayout() {
         desktop), responsive variants are shown.
       </p>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-8 overflow-x-auto">
+      <div className="dd-brand-card p-4 mb-8 overflow-x-auto">
         <table
           className="w-full text-left"
           style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
         >
           <thead>
-            <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
               <th
                 className="py-1 pr-4 font-semibold"
                 style={{ color: "var(--dd-ink-black)" }}
@@ -194,11 +194,11 @@ export default function BrandNYTLayout() {
             {layoutTokenRows.map((row, i) => (
               <tr
                 key={`${row.token}-${i}`}
-                style={{ borderBottom: "1px solid #f0f0f0" }}
+                style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
               >
                 <td
                   className="py-1.5 pr-4 font-mono"
-                  style={{ color: "#326891", fontSize: 11 }}
+                  style={{ color: "var(--dd-brand-accent)", fontSize: 11 }}
                 >
                   {row.token}
                 </td>
@@ -264,7 +264,7 @@ export default function BrandNYTLayout() {
       </p>
 
       <pre
-        className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 shadow-sm mb-6 overflow-x-auto"
+        className="dd-brand-card p-4 mb-6 overflow-x-auto"
         style={{
           fontFamily: "var(--dd-font-mono, ui-monospace, monospace)",
           fontSize: 12,
@@ -287,7 +287,7 @@ export default function BrandNYTLayout() {
           return (
             <div
               key={article.id}
-              className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"
+              className="dd-brand-card p-4"
             >
               <div
                 style={{
@@ -304,7 +304,7 @@ export default function BrandNYTLayout() {
                 className="font-mono"
                 style={{
                   fontSize: 10,
-                  color: "#326891",
+                  color: "var(--dd-brand-accent)",
                   marginBottom: 8,
                 }}
               >

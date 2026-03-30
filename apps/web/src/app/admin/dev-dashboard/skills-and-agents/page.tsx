@@ -65,10 +65,10 @@ export default function SkillsAndAgentsPage() {
   return (
     <ClientOnly>
       <DevDashboardShell
-        activeRoute="/admin/dev-dashboard/skills-and-agents"
+        activeRoute="/dev-dashboard/skills-and-agents"
         breadcrumbItems={[
-          ...buildAdminSectionBreadcrumb("Dev Dashboard", "/admin/dev-dashboard"),
-          { label: "Skills & Agents", href: "/admin/dev-dashboard/skills-and-agents" },
+          ...buildAdminSectionBreadcrumb("Dev Dashboard", "/dev-dashboard"),
+          { label: "Skills & Agents", href: "/dev-dashboard/skills-and-agents" },
         ]}
         title="Skills & Agents"
         description="Inventory Codex, Claude, workspace, and repo-local skills plus agent interfaces and plugins."

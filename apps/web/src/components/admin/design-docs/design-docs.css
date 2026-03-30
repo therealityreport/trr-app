@@ -5,8 +5,8 @@
  */
 
 .design-docs {
-  /* Page background — white across all design docs pages */
-  background-color: #FFFFFF;
+  /* Page background — defaults can be overridden by brand scopes */
+  background-color: var(--dd-brand-bg, #FFFFFF);
 
   /* Ink & Paper */
   --dd-ink-black: #121212;
@@ -21,6 +21,24 @@
   --dd-paper-cool: #F0F0F0;
   --dd-paper-grey: #E8E5E0;
   --dd-paper-mid: #D5D2CC;
+
+  /* Brand chrome — defaults for non-brand pages and light brands */
+  --dd-brand-bg: #FFFFFF;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F7F5F0;
+  --dd-brand-border: #E8E5E0;
+  --dd-brand-border-subtle: #F0F0F0;
+  --dd-brand-accent: #326891;
+  --dd-brand-accent-bg: #e8f0fe;
+  --dd-brand-text-primary: #121212;
+  --dd-brand-text-secondary: #555555;
+  --dd-brand-text-muted: #999999;
+  --dd-brand-section-label: #999999;
+  --dd-brand-stat-number: #326891;
+  --dd-brand-link: #326891;
+  --dd-brand-card-radius: 12px;
+  --dd-brand-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --dd-brand-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
 
   --dd-accent-saffron: #F6CB2F;
   --dd-accent-gold: #DFBD50;
@@ -103,7 +121,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: var(--dd-ink-faint);
+  color: var(--dd-brand-section-label);
   margin-bottom: var(--dd-space-sm);
 }
 
@@ -111,7 +129,7 @@
   font-family: var(--dd-font-headline);
   font-size: 28px;
   font-weight: 700;
-  color: var(--dd-ink-black);
+  color: var(--dd-brand-text-primary);
   line-height: 1.15;
   letter-spacing: -0.015em;
   margin-bottom: var(--dd-space-md);
@@ -120,7 +138,7 @@
 .design-docs .dd-section-desc {
   font-family: var(--dd-font-body);
   font-size: 16px;
-  color: var(--dd-ink-soft);
+  color: var(--dd-brand-text-secondary);
   max-width: 640px;
   margin-bottom: var(--dd-space-2xl);
   line-height: 1.55;
@@ -145,13 +163,14 @@
 .design-docs .dd-swatch {
   border-radius: var(--dd-radius-md);
   overflow: hidden;
-  background: white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  background: var(--dd-brand-surface);
+  border: 1px solid var(--dd-brand-border);
+  box-shadow: var(--dd-brand-card-shadow);
   transition: transform 0.2s, box-shadow 0.2s;
 }
 .design-docs .dd-swatch:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--dd-brand-card-shadow-hover);
 }
 .design-docs .dd-swatch-color {
   height: 72px;
@@ -194,20 +213,20 @@
 
 /* Chart card */
 .design-docs .dd-chart-card {
-  background: white;
-  border: 1px solid var(--dd-paper-grey);
+  background: var(--dd-brand-surface);
+  border: 1px solid var(--dd-brand-border);
   border-radius: var(--dd-radius-sm);
   padding: var(--dd-space-xl);
   transition: box-shadow 0.2s;
 }
 .design-docs .dd-chart-card:hover {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--dd-brand-card-shadow-hover);
 }
 .design-docs .dd-chart-headline {
   font-family: var(--dd-font-headline);
   font-size: 20px;
   font-weight: 700;
-  color: var(--dd-ink-black);
+  color: var(--dd-brand-text-primary);
   line-height: 1.2;
   letter-spacing: -0.01em;
   margin-bottom: var(--dd-space-xs);
@@ -215,17 +234,17 @@
 .design-docs .dd-chart-subhead {
   font-family: var(--dd-font-sans);
   font-size: 13px;
-  color: var(--dd-ink-soft);
+  color: var(--dd-brand-text-secondary);
   margin-bottom: var(--dd-space-lg);
   line-height: 1.45;
 }
 .design-docs .dd-chart-source {
   font-family: var(--dd-font-sans);
   font-size: 11px;
-  color: var(--dd-ink-faint);
+  color: var(--dd-brand-text-muted);
   margin-top: var(--dd-space-md);
   padding-top: var(--dd-space-sm);
-  border-top: 1px solid var(--dd-paper-cool);
+  border-top: 1px solid var(--dd-brand-border-subtle);
 }
 
 /* SVG text */
@@ -259,18 +278,275 @@
   margin-bottom: var(--dd-space-2xl);
 }
 .design-docs .dd-stat-card {
-  background: white;
-  border: 1px solid var(--dd-paper-grey);
-  border-top: 3px solid var(--dd-ink-black);
+  background: var(--dd-brand-surface);
+  border: 1px solid var(--dd-brand-border);
+  border-top: 3px solid var(--dd-brand-accent);
   padding: var(--dd-space-lg);
 }
 .design-docs .dd-stat-number {
   font-family: var(--dd-font-headline);
   font-size: 36px;
   font-weight: 700;
-  color: var(--dd-ink-black);
+  color: var(--dd-brand-stat-number);
   line-height: 1;
   letter-spacing: -0.02em;
+}
+
+/* Brand chrome utilities */
+.design-docs .dd-brand-card {
+  background: var(--dd-brand-surface);
+  border: 1px solid var(--dd-brand-border);
+  border-radius: var(--dd-brand-card-radius);
+  box-shadow: var(--dd-brand-card-shadow);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s,
+    border-color 0.2s;
+}
+
+.design-docs .dd-brand-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--dd-brand-card-shadow-hover);
+  border-color: color-mix(in srgb, var(--dd-brand-border) 60%, var(--dd-brand-accent) 40%);
+}
+
+.design-docs .dd-brand-pill {
+  background: var(--dd-brand-accent-bg);
+  color: var(--dd-brand-accent);
+  border: 1px solid color-mix(in srgb, var(--dd-brand-accent) 18%, transparent);
+  border-radius: var(--dd-radius-lg);
+}
+
+.design-docs .dd-brand-link {
+  color: var(--dd-brand-link);
+}
+
+.design-docs .dd-brand-rule {
+  border-color: var(--dd-brand-border-subtle);
+}
+
+.design-docs .dd-brand-muted {
+  color: var(--dd-brand-text-muted);
+}
+
+/* Generic card chrome for still-unmigrated brand surfaces */
+.dd-brand-scoped :is(
+  .rounded-xl.border.border-zinc-200.bg-white.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.p-3.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.p-4.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.p-5.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.shadow-sm.overflow-hidden,
+  .rounded-xl.border.border-zinc-200.bg-white.p-4.shadow-sm.overflow-x-auto,
+  .rounded-xl.border.border-zinc-200.bg-white.p-4.shadow-sm.text-center,
+  .rounded-xl.border.border-zinc-200.bg-white.p-3.shadow-sm.text-center,
+  .group.rounded-xl.border.border-zinc-200.bg-white.p-5.shadow-sm.transition,
+  .rounded-lg.border.border-zinc-200.bg-white.px-3.py-2.shadow-sm.flex.items-center.gap-2,
+  .rounded-xl.border.border-zinc-200.bg-zinc-50.p-4.shadow-sm.mb-6.overflow-x-auto,
+  .rounded-lg.bg-zinc-50.p-3.overflow-x-auto,
+  .rounded-full.border.border-zinc-300.bg-zinc-100.px-3.py-1.font-mono
+) {
+  background: var(--dd-brand-surface);
+  border-color: var(--dd-brand-border);
+  box-shadow: var(--dd-brand-card-shadow);
+}
+
+.dd-brand-scoped :is(
+  .rounded-xl.border.border-zinc-200.bg-white.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.p-3.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.p-4.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.p-5.shadow-sm,
+  .rounded-xl.border.border-zinc-200.bg-white.shadow-sm.overflow-hidden,
+  .rounded-xl.border.border-zinc-200.bg-white.p-4.shadow-sm.overflow-x-auto,
+  .rounded-xl.border.border-zinc-200.bg-white.p-4.shadow-sm.text-center,
+  .rounded-xl.border.border-zinc-200.bg-white.p-3.shadow-sm.text-center,
+  .group.rounded-xl.border.border-zinc-200.bg-white.p-5.shadow-sm.transition,
+  .rounded-lg.border.border-zinc-200.bg-white.px-3.py-2.shadow-sm.flex.items-center.gap-2,
+  .rounded-xl.border.border-zinc-200.bg-zinc-50.p-4.shadow-sm.mb-6.overflow-x-auto,
+  .rounded-lg.bg-zinc-50.p-3.overflow-x-auto,
+  .rounded-full.border.border-zinc-300.bg-zinc-100.px-3.py-1.font-mono
+):hover {
+  box-shadow: var(--dd-brand-card-shadow-hover);
+  border-color: color-mix(in srgb, var(--dd-brand-border) 60%, var(--dd-brand-accent) 40%);
+}
+
+/* Brand scopes */
+.brand-scope-nyt {
+  --dd-brand-bg: #FFFFFF;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F7F5F0;
+  --dd-brand-border: #E8E5E0;
+  --dd-brand-border-subtle: #F0F0F0;
+  --dd-brand-accent: #326891;
+  --dd-brand-accent-bg: #e8f0fe;
+  --dd-brand-text-primary: #121212;
+  --dd-brand-text-secondary: #555555;
+  --dd-brand-text-muted: #999999;
+  --dd-brand-section-label: #999999;
+  --dd-brand-stat-number: #326891;
+  --dd-brand-link: #326891;
+}
+
+.brand-scope-nyt-games,
+.design-docs .nytg-scope {
+  --dd-brand-bg: #121213;
+  --dd-brand-surface: #1a1a1b;
+  --dd-brand-surface-alt: #272729;
+  --dd-brand-border: #3a3a3c;
+  --dd-brand-border-subtle: #565758;
+  --dd-brand-accent: #6AAA64;
+  --dd-brand-accent-bg: rgba(106, 170, 100, 0.16);
+  --dd-brand-text-primary: #FFFFFF;
+  --dd-brand-text-secondary: #D3D6DA;
+  --dd-brand-text-muted: #A7ADB2;
+  --dd-brand-section-label: #6AAA64;
+  --dd-brand-stat-number: #6AAA64;
+  --dd-brand-link: #9dd89a;
+  --dd-brand-card-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  --dd-brand-card-shadow-hover: 0 16px 36px rgba(0, 0, 0, 0.34);
+  --dd-ink-black: #FFFFFF;
+  --dd-ink-dark: #F6F7F8;
+  --dd-ink-medium: #E5E7EB;
+  --dd-ink-soft: #D3D6DA;
+  --dd-ink-light: #A7ADB2;
+  --dd-ink-faint: #818384;
+  --dd-paper-white: #1a1a1b;
+  --dd-paper-warm: #272729;
+  --dd-paper-cool: #3a3a3c;
+  --dd-paper-grey: #3a3a3c;
+  --dd-paper-mid: #565758;
+}
+
+.brand-scope-nyt-magazine {
+  --dd-brand-bg: #FAFAFA;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F8F8F6;
+  --dd-brand-border: #E0E0E0;
+  --dd-brand-border-subtle: #ECECEC;
+  --dd-brand-accent: #D0021B;
+  --dd-brand-accent-bg: rgba(208, 2, 27, 0.1);
+  --dd-brand-text-primary: #1A1A1A;
+  --dd-brand-text-secondary: #4A4A4A;
+  --dd-brand-text-muted: #8A8A8A;
+  --dd-brand-section-label: #8A8A8A;
+  --dd-brand-stat-number: #D0021B;
+  --dd-brand-link: #D0021B;
+}
+
+.brand-scope-wirecutter {
+  --dd-brand-bg: #F7F7F5;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F7F7F5;
+  --dd-brand-border: #D9DDD5;
+  --dd-brand-border-subtle: #E8ECE4;
+  --dd-brand-accent: #3069B3;
+  --dd-brand-accent-bg: rgba(48, 105, 179, 0.12);
+  --dd-brand-stat-number: #3069B3;
+  --dd-brand-link: #3069B3;
+}
+
+.brand-scope-athletic {
+  --dd-brand-bg: #121212;
+  --dd-brand-surface: #191919;
+  --dd-brand-surface-alt: #222222;
+  --dd-brand-border: #2E2E2E;
+  --dd-brand-border-subtle: #3A3A3A;
+  --dd-brand-accent: #1DB954;
+  --dd-brand-accent-bg: rgba(29, 185, 84, 0.14);
+  --dd-brand-text-primary: #F9FAFB;
+  --dd-brand-text-secondary: #D1D5DB;
+  --dd-brand-text-muted: #9CA3AF;
+  --dd-brand-section-label: #1DB954;
+  --dd-brand-stat-number: #1DB954;
+  --dd-brand-link: #7EE0A3;
+  --dd-brand-card-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+  --dd-brand-card-shadow-hover: 0 18px 40px rgba(0, 0, 0, 0.36);
+  --dd-ink-black: #F9FAFB;
+  --dd-ink-dark: #F3F4F6;
+  --dd-ink-medium: #E5E7EB;
+  --dd-ink-soft: #D1D5DB;
+  --dd-ink-light: #9CA3AF;
+  --dd-ink-faint: #6B7280;
+  --dd-paper-white: #191919;
+  --dd-paper-warm: #222222;
+  --dd-paper-cool: #2E2E2E;
+  --dd-paper-grey: #2E2E2E;
+  --dd-paper-mid: #3A3A3A;
+}
+
+.brand-scope-nyt-opinion {
+  --dd-brand-bg: #F5F7FA;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #EEF2F7;
+  --dd-brand-border: #D8DEE6;
+  --dd-brand-border-subtle: #E6EBF0;
+  --dd-brand-accent: #1A5276;
+  --dd-brand-accent-bg: rgba(26, 82, 118, 0.1);
+  --dd-brand-text-primary: #1C2833;
+  --dd-brand-text-secondary: #515A5A;
+  --dd-brand-text-muted: #909497;
+  --dd-brand-section-label: #909497;
+  --dd-brand-stat-number: #1A5276;
+  --dd-brand-link: #1A5276;
+}
+
+.brand-scope-nyt-cooking {
+  --dd-brand-bg: #FFF8F0;
+  --dd-brand-surface: #FFFDF9;
+  --dd-brand-surface-alt: #FBECDD;
+  --dd-brand-border: #E9D7C8;
+  --dd-brand-border-subtle: #F3E5D8;
+  --dd-brand-accent: #AD3B2A;
+  --dd-brand-accent-bg: rgba(173, 59, 42, 0.1);
+  --dd-brand-stat-number: #AD3B2A;
+  --dd-brand-link: #AD3B2A;
+}
+
+.brand-scope-nyt-style {
+  --dd-brand-bg: #FDFBF7;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #FBF5F3;
+  --dd-brand-border: #E2D8D5;
+  --dd-brand-border-subtle: #EDE6E3;
+  --dd-brand-accent: #6B1D3A;
+  --dd-brand-accent-bg: rgba(107, 29, 58, 0.1);
+  --dd-brand-text-primary: #2C1810;
+  --dd-brand-text-secondary: #5C4A42;
+  --dd-brand-text-muted: #998A84;
+  --dd-brand-section-label: #998A84;
+  --dd-brand-stat-number: #6B1D3A;
+  --dd-brand-link: #6B1D3A;
+}
+
+.brand-scope-nyt-store {
+  --dd-brand-bg: #FFFFFF;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F9FAFB;
+  --dd-brand-border: #D1D5DB;
+  --dd-brand-border-subtle: #E5E7EB;
+  --dd-brand-accent: #326DA8;
+  --dd-brand-accent-bg: rgba(50, 109, 168, 0.08);
+  --dd-brand-text-primary: #111827;
+  --dd-brand-text-secondary: #4B5563;
+  --dd-brand-text-muted: #9CA3AF;
+  --dd-brand-section-label: #9CA3AF;
+  --dd-brand-stat-number: #326DA8;
+  --dd-brand-link: #326DA8;
+}
+
+.brand-scope-nymag {
+  --dd-brand-bg: #FEFDFB;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F5F0EB;
+  --dd-brand-border: #E5DDD5;
+  --dd-brand-border-subtle: #EDE7E1;
+  --dd-brand-accent: #db2800;
+  --dd-brand-accent-bg: rgba(219, 40, 0, 0.08);
+  --dd-brand-text-primary: #1F1A16;
+  --dd-brand-text-secondary: #5A5148;
+  --dd-brand-text-muted: #9A9088;
+  --dd-brand-section-label: #9A9088;
+  --dd-brand-stat-number: #db2800;
+  --dd-brand-link: #db2800;
 }
 
 /* ── NYT Games Scope ──────────────────────────────────────────────────

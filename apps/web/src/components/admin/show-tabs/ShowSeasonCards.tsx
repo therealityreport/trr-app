@@ -30,6 +30,8 @@ type ShowSeason = {
   season_number: number;
   overview: string | null;
   air_date: string | null;
+  premiere_date?: string | null;
+  last_episode_air_date?: string | null;
   tmdb_season_id: number | null;
 };
 
@@ -64,8 +66,8 @@ export function ShowSeasonCards({
         const summary = seasonEpisodeSummaries[season.id];
         const isOpen = openSeasonId === season.id;
         const countLabel = summary ? `${summary.count} episodes` : "Episodes: —";
-        const premiereDate = summary?.premiereDate ?? season.air_date;
-        const finaleDate = summary?.finaleDate ?? season.air_date;
+        const premiereDate = summary?.premiereDate ?? season.premiere_date ?? season.air_date;
+        const finaleDate = summary?.finaleDate ?? season.last_episode_air_date ?? season.air_date ?? season.premiere_date;
         const dateRange = formatDateRange(premiereDate, finaleDate);
 
         return (

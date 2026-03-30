@@ -1,4 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  ADMIN_API_REFERENCES_PATH,
+  ADMIN_DESIGN_DOCS_PATH,
+  ADMIN_DEV_DASHBOARD_PATH,
+  ADMIN_SOCIAL_PATH,
+} from "@/lib/admin/admin-route-paths";
 
 const DEFAULT_DEV_ADMIN_ORIGIN = "http://admin.localhost:3000";
 const DEFAULT_DEV_ADMIN_API_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
@@ -116,6 +122,30 @@ const SOCIAL_ACCOUNT_PROFILE_PLATFORM_SEGMENTS = new Set([
   "facebook",
   "threads",
 ]);
+const ROOT_ONLY_ADMIN_SECTION_CANONICAL_PATHS = new Map<string, string>([
+  ["people", "/people"],
+  ["games", "/games"],
+  ["screenalytics", "/screenalytics"],
+  ["screenlaytics", "/screenlaytics"],
+  ["surveys", "/surveys"],
+  ["settings", "/settings"],
+  ["users", "/users"],
+  ["groups", "/groups"],
+  ["docs", "/docs"],
+]);
+const NESTED_ADMIN_SECTION_CANONICAL_PREFIXES = [
+  ["/admin/social-media", ADMIN_SOCIAL_PATH],
+  ["/admin/social", ADMIN_SOCIAL_PATH],
+  ["/admin/design-docs", ADMIN_DESIGN_DOCS_PATH],
+  ["/admin/api-references", ADMIN_API_REFERENCES_PATH],
+  ["/admin/dev-dashboard", ADMIN_DEV_DASHBOARD_PATH],
+] as const;
+const CANONICAL_ADMIN_REWRITE_PREFIXES = [
+  [ADMIN_SOCIAL_PATH, "/admin/social"],
+  [ADMIN_DESIGN_DOCS_PATH, "/admin/design-docs"],
+  [ADMIN_API_REFERENCES_PATH, "/admin/api-references"],
+  [ADMIN_DEV_DASHBOARD_PATH, "/admin/dev-dashboard"],
+] as const;
 
 function parseOptionalBoolean(value: string | undefined): boolean | null {
   if (typeof value !== "string") return null;
@@ -260,6 +290,17 @@ function appendSearch(pathname: string, searchParams?: URLSearchParams): string 
   return search ? `${pathname}?${search}` : pathname;
 }
 
+function remapPathPrefix(pathname: string, fromPrefix: string, toPrefix: string): string | null {
+  if (pathname === fromPrefix) return toPrefix;
+  if (!pathname.startsWith(`${fromPrefix}/`)) return null;
+  return `${toPrefix}${pathname.slice(fromPrefix.length)}`;
+}
+
+function stripSearch(pathname: string): string {
+  const queryStart = pathname.indexOf("?");
+  return queryStart >= 0 ? pathname.slice(0, queryStart) : pathname;
+}
+
 function appendCanonicalPersonSearch(pathname: string, searchParams?: URLSearchParams): string {
   const next = new URLSearchParams(searchParams?.toString() ?? "");
   next.delete("tab");
@@ -331,6 +372,7 @@ function parseSocialAccountProfilePath(pathname: string): {
   handle: string;
   tab: string;
   canonicalPath: string;
+  rewritePath: string;
 } | null {
   const segments = toPathSegments(pathname);
   if (segments.length === 0) return null;
@@ -359,6 +401,10 @@ function parseSocialAccountProfilePath(pathname: string): {
     tab,
     canonicalPath:
       tab === "stats"
+        ? `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`
+        : `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/${tab}`,
+    rewritePath:
+      tab === "stats"
         ? `/admin/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`
         : `/admin/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/${tab}`,
   };
@@ -371,13 +417,16 @@ function mapLegacyAdminSocialPath(pathname: string, searchParams?: URLSearchPara
     pathname === "/social/official/reddit" ||
     pathname === "/admin/social/official/reddit"
   ) {
-    return appendSearch("/admin/social", searchParams);
+    return appendSearch("/social", searchParams);
   }
   if (pathname === "/social-media" || pathname === "/admin/social-media") {
-    return appendSearch("/admin/social", searchParams);
+    return appendSearch("/social", searchParams);
+  }
+  if (pathname.startsWith("/social-media/")) {
+    return appendSearch(`/social/${pathname.slice("/social-media/".length)}`, searchParams);
   }
   if (pathname.startsWith("/admin/social-media/")) {
-    return appendSearch(`/admin/social/${pathname.slice("/admin/social-media/".length)}`, searchParams);
+    return appendSearch(`/social/${pathname.slice("/admin/social-media/".length)}`, searchParams);
   }
   return null;
 }
@@ -462,13 +511,38 @@ function buildCanonicalSeasonSocialWeekPath(input: {
 }
 
 function isCanonicalShortAdminPath(pathname: string): boolean {
-  return isRootShowUiPath(pathname) || isPublicPersonDetailPath(pathname) || isShowsSettingsPath(pathname);
+  return (
+    pathname === "/" ||
+    pathname === "/shows" ||
+    pathname === "/social" ||
+    pathname.startsWith("/social/") ||
+    pathname === "/design-docs" ||
+    pathname.startsWith("/design-docs/") ||
+    pathname === "/api-references" ||
+    pathname.startsWith("/api-references/") ||
+    pathname === "/dev-dashboard" ||
+    pathname.startsWith("/dev-dashboard/") ||
+    isRootShowUiPath(pathname) ||
+    isPublicPersonDetailPath(pathname) ||
+    isShowsSettingsPath(pathname)
+  );
 }
 
 function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchParams): string | null {
   const legacyAdminSocialPath = mapLegacyAdminSocialPath(pathname, searchParams);
   if (legacyAdminSocialPath) {
     return legacyAdminSocialPath;
+  }
+
+  if (pathname === "/admin") {
+    return appendSearch("/", searchParams);
+  }
+
+  for (const [legacyPrefix, canonicalPrefix] of NESTED_ADMIN_SECTION_CANONICAL_PREFIXES) {
+    const remapped = remapPathPrefix(pathname, legacyPrefix, canonicalPrefix);
+    if (remapped) {
+      return appendSearch(remapped, searchParams);
+    }
   }
 
   const socialAccountProfilePath = parseSocialAccountProfilePath(pathname);
@@ -484,6 +558,13 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   const [firstSegment, secondSegment] = segments;
   const normalizedFirst = firstSegment?.toLowerCase() ?? "";
   const normalizedSecond = secondSegment?.toLowerCase() ?? "";
+
+  if (normalizedFirst === "admin" && secondSegment) {
+    const rootCanonicalPath = ROOT_ONLY_ADMIN_SECTION_CANONICAL_PATHS.get(normalizedSecond);
+    if (rootCanonicalPath && segments.length === 2) {
+      return appendSearch(rootCanonicalPath, searchParams);
+    }
+  }
 
   if (normalizedFirst === "shows" && secondSegment) {
     if (normalizedSecond === "settings") {
@@ -503,6 +584,15 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
         `/${encodeURIComponent(secondSegment)}/s${segments[3]}`,
         searchParams,
       );
+    }
+  }
+
+  if (normalizedFirst === "admin" && normalizedSecond === "shows") {
+    if (segments.length === 2) {
+      return appendSearch("/shows", searchParams);
+    }
+    if (segments.length === 3 && segments[2]?.toLowerCase() === "settings") {
+      return appendSearch("/shows/settings", searchParams);
     }
   }
 
@@ -529,7 +619,7 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
 
   const adminSegments = segments.slice(2);
   if (adminSegments.length === 0) {
-    return null;
+    return appendSearch("/shows", searchParams);
   }
 
   if (adminSegments[0]?.toLowerCase() === "people" && adminSegments[1]) {
@@ -611,17 +701,28 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   );
 }
 
-function mapCanonicalAdminUiRewrite(pathname: string, searchParams?: URLSearchParams): string | null {
-  const legacyAdminSocialPath = mapLegacyAdminSocialPath(pathname, searchParams);
+function mapCanonicalAdminUiRewrite(pathname: string): string | null {
+  const legacyAdminSocialPath = mapLegacyAdminSocialPath(pathname);
   if (legacyAdminSocialPath) {
-    return legacyAdminSocialPath;
+    return stripSearch(legacyAdminSocialPath);
+  }
+
+  if (pathname === "/") {
+    return "/admin";
   }
 
   const socialAccountProfilePath = parseSocialAccountProfilePath(pathname);
   if (socialAccountProfilePath) {
     return pathname === socialAccountProfilePath.canonicalPath
-      ? null
-      : appendSearch(socialAccountProfilePath.canonicalPath, searchParams);
+      ? socialAccountProfilePath.rewritePath
+      : socialAccountProfilePath.canonicalPath;
+  }
+
+  for (const [canonicalPrefix, rewritePrefix] of CANONICAL_ADMIN_REWRITE_PREFIXES) {
+    const remapped = remapPathPrefix(pathname, canonicalPrefix, rewritePrefix);
+    if (remapped) {
+      return remapped;
+    }
   }
 
   const segments = toPathSegments(pathname);
@@ -779,8 +880,12 @@ function isAdminUiPath(pathname: string): boolean {
   return (
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
+    pathname === "/api-references" ||
+    pathname.startsWith("/api-references/") ||
     pathname === "/design-system" ||
     pathname.startsWith("/design-system/") ||
+    pathname === "/design-docs" ||
+    pathname.startsWith("/design-docs/") ||
     pathname === "/brands" ||
     pathname.startsWith("/brands/") ||
     pathname === "/dev-dashboard" ||
@@ -791,9 +896,15 @@ function isAdminUiPath(pathname: string): boolean {
     pathname.startsWith("/games/") ||
     pathname === "/groups" ||
     pathname.startsWith("/groups/") ||
+    pathname === "/screenalytics" ||
+    pathname.startsWith("/screenalytics/") ||
+    pathname === "/screenlaytics" ||
+    pathname.startsWith("/screenlaytics/") ||
     pathname === "/settings" ||
     pathname.startsWith("/settings/") ||
     isShowsSettingsPath(pathname) ||
+    pathname === "/social" ||
+    pathname.startsWith("/social/") ||
     pathname === "/surveys" ||
     pathname.startsWith("/surveys/") ||
     pathname === "/users" ||
@@ -894,7 +1005,7 @@ export function proxy(request: NextRequest): NextResponse {
     if (!adminOrigin) {
       return NextResponse.json({ error: "Admin origin is not configured." }, { status: 403 });
     }
-    return NextResponse.redirect(new URL("/admin", adminOrigin), 307);
+    return NextResponse.redirect(new URL("/", adminOrigin), 307);
   }
 
   if (onCanonicalAdminHost) {
@@ -906,9 +1017,14 @@ export function proxy(request: NextRequest): NextResponse {
       }
     }
 
-    const rewritePath = mapCanonicalAdminUiRewrite(pathname, request.nextUrl.searchParams);
+    const rewritePath = mapCanonicalAdminUiRewrite(pathname);
     if (rewritePath) {
-      const targetUrl = new URL(rewritePath + request.nextUrl.search, request.nextUrl.origin);
+      const targetUrl = new URL(rewritePath, request.nextUrl.origin);
+      request.nextUrl.searchParams.forEach((value, key) => {
+        if (!targetUrl.searchParams.has(key)) {
+          targetUrl.searchParams.append(key, value);
+        }
+      });
       if (isCanonicalShortAdminPath(pathname)) {
         const rewriteHeaders = new Headers(request.headers);
         rewriteHeaders.set(INTERNAL_ADMIN_REWRITE_HEADER, "1");

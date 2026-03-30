@@ -1,6 +1,7 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
+import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export class AdminReadProxyError extends Error {
@@ -36,12 +37,11 @@ export const ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS = readPositiveIntEnv(
 );
 
 const getServiceRoleKey = (): string => {
-  const value =
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!value) {
+  try {
+    return getTrrAdminServiceKey().trim();
+  } catch {
     throw new AdminReadProxyError("Backend auth not configured", 500);
   }
-  return value.trim();
 };
 
 const getInternalSecret = (): string => {

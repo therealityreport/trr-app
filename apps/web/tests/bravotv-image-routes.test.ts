@@ -25,7 +25,6 @@ describe("bravotv image admin proxy routes", () => {
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockImplementation((path: string) => `https://backend.example.com/api/v1${path}`);
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
-    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
   it("forwards latest show run requests to the backend", async () => {
@@ -52,9 +51,8 @@ describe("bravotv image admin proxy routes", () => {
     );
   });
 
-  it("falls back to SUPABASE_SERVICE_ROLE_KEY for latest run requests", async () => {
+  it("returns 500 when the TRR-specific service role key is missing", async () => {
     delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "fallback-service-role";
 
     vi.stubGlobal(
       "fetch",
@@ -68,14 +66,10 @@ describe("bravotv image admin proxy routes", () => {
       { params: Promise.resolve({ showId: "show-1" }) },
     );
 
-    expect(response.status).toBe(200);
-    expect(fetch).toHaveBeenCalledWith(
-      "https://backend.example.com/api/v1/admin/bravotv/images/shows/show-1/latest",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer fallback-service-role" },
-        cache: "no-store",
-      }),
-    );
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not configured",
+    });
   });
 
   it("streams person run requests through to the backend SSE endpoint", async () => {

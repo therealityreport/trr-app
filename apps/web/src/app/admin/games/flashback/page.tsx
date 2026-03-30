@@ -5,6 +5,7 @@ import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
+import { ADMIN_GAMES_PATH, ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { ADMIN_GAME_MAP } from "@/lib/admin/games";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { createClient } from "@/lib/supabase/client";
@@ -192,8 +193,8 @@ export default function AdminFlashbackPage() {
             <div>
               <AdminBreadcrumbs
                 items={[
-                  { label: "Admin", href: "/admin" },
-                  { label: "Games", href: "/admin/games" },
+                  { label: "Admin", href: ADMIN_ROOT_PATH },
+                  { label: "Games", href: ADMIN_GAMES_PATH },
                   { label: GAME.title, href: GAME.adminHref },
                 ]}
                 className="mb-1"
@@ -202,7 +203,7 @@ export default function AdminFlashbackPage() {
               <p className="text-sm text-zinc-500">{GAME.subtitle}</p>
             </div>
             <Link
-              href="/admin/games"
+              href={ADMIN_GAMES_PATH}
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Back to Games

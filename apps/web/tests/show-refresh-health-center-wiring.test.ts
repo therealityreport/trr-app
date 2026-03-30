@@ -13,6 +13,7 @@ describe("show refresh health center wiring", () => {
 
   it("routes show refresh through the health center modal with unified backend stages", () => {
     expect(showPage).toMatch(/const FULL_SHOW_REFRESH_TARGETS: ShowRefreshTarget\[] = \[/);
+    expect(showPage).toMatch(/const FULL_SHOW_REFRESH_TOTAL_PHASES = FULL_SHOW_REFRESH_TARGETS\.length \+ 1;/);
     expect(showPage).toMatch(/"show_core"/);
     expect(showPage).toMatch(/"links"/);
     expect(showPage).toMatch(/"bravo"/);
@@ -20,11 +21,26 @@ describe("show refresh health center wiring", () => {
     expect(showPage).toMatch(/"cast_media"/);
     expect(showPage).toMatch(/force_new_operation: true/);
     expect(showPage).toMatch(/const refreshRunButtonLabel =/);
+    expect(showPage).toMatch(/const refreshCenterButtonLabel = isShowRefreshBusy/);
+    expect(showPage).toMatch(/"Open Refresh Center"/);
+    expect(showPage).toMatch(/"View Refresh Center"/);
     expect(showPage).toMatch(/onRefresh=\{\(\) => setRefreshLogOpen\(true\)\}/);
     expect(showPage).toMatch(/preserveScrollPosition=\{true\}/);
     expect(showPage).not.toMatch(/onClick=\{\(\) => void refreshAllShowData\(\)\}/);
     expect(showPage).not.toMatch(/Refresh Links/);
     expect(showPage).not.toMatch(/Show Gallery/);
+  });
+
+  it("runs gallery media after unified refresh with fast gallery-only settings", () => {
+    expect(showPage).toMatch(/void refreshAllShowData\(\);/);
+    expect(showPage).toMatch(/return refreshShow\("photos", \{/);
+    expect(showPage).toMatch(/photoMode: "fast"/);
+    expect(showPage).toMatch(/skipCastPhotos: true/);
+    expect(showPage).toMatch(/suppressSuccessNotice: true/);
+    expect(showPage).toMatch(/skip_auto_count: fastPhotoMode \|\| skipCastPhotos/);
+    expect(showPage).toMatch(/skip_word_detection: fastPhotoMode \|\| skipCastPhotos/);
+    expect(showPage).toMatch(/skip_cast_photos: skipCastPhotos/);
+    expect(showPage).toMatch(/gallery media refresh/);
   });
 
   it("removes duplicate gallery headings and stale inline progress bars from season assets", () => {

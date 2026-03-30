@@ -21,10 +21,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#121212",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #121212",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -81,7 +81,7 @@ function IconCard({
 }) {
   return (
     <div
-      className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+      className="dd-brand-card"
       style={cardStyle}
     >
       {/* Actual size */}
@@ -124,7 +124,7 @@ function IconCard({
         <div style={mono10}>size: {size}</div>
         <div style={mono10}>fill: {fill}</div>
         <div style={mono10}>class: {cssClass}</div>
-        <div style={{ ...mono10, color: "#121212", marginTop: 4 }}>
+        <div style={{ ...mono10, color: "var(--dd-brand-text-primary)", marginTop: 4 }}>
           Usage: {usage}
         </div>
       </div>
@@ -149,7 +149,7 @@ function AssetRefCard({
 }) {
   return (
     <div
-      className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+      className="dd-brand-card"
       style={{ padding: "20px 24px" }}
     >
       <div style={{ ...mono11Label, marginBottom: 6 }}>{name}</div>
@@ -161,7 +161,7 @@ function AssetRefCard({
         style={{
           ...mono10,
           marginTop: 6,
-          color: "#121212",
+          color: "var(--dd-brand-text-primary)",
         }}
       >
         {notes}
@@ -194,7 +194,7 @@ export default function BrandAthleticIcons() {
     <div>
       {/* ── Brand Header ───────────────────────────────── */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "32px 40px",
           marginBottom: 40,
@@ -205,7 +205,7 @@ export default function BrandAthleticIcons() {
             fontFamily: "var(--dd-font-sans)",
             fontWeight: 700,
             fontSize: 32,
-            color: "var(--dd-ink-black)",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -216,7 +216,7 @@ export default function BrandAthleticIcons() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "var(--dd-ink-faint)",
+            color: "var(--dd-brand-text-secondary)",
             lineHeight: 1.5,
           }}
         >
@@ -432,7 +432,7 @@ export default function BrandAthleticIcons() {
       >
         {/* Athletic Wordmark */}
         <div
-          className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+          className="dd-brand-card"
           style={{ padding: "20px 24px" }}
         >
           <div style={{ ...mono11Label, marginBottom: 12 }}>
@@ -512,14 +512,14 @@ export default function BrandAthleticIcons() {
           <div style={mono10}>
             encoding: base64 SVG (data:image/svg+xml;base64,PHN2ZyBpZD0iQ09OVEVOVCIg...)
           </div>
-          <div style={{ ...mono10, color: "#121212", marginTop: 4 }}>
+          <div style={{ ...mono10, color: "var(--dd-brand-text-primary)", marginTop: 4 }}>
             Usage: Header logo, footer logo (on dark backgrounds)
           </div>
         </div>
 
         {/* Connections SE Logo */}
         <div
-          className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+          className="dd-brand-card"
           style={{ padding: "20px 24px" }}
         >
           <div style={{ ...mono11Label, marginBottom: 12 }}>
@@ -580,14 +580,14 @@ export default function BrandAthleticIcons() {
           </div>
           <div style={mono10}>size: 288x288 (multicolor 4x4 grid)</div>
           <div style={mono10}>encoding: base64 PNG</div>
-          <div style={{ ...mono10, color: "#121212", marginTop: 4 }}>
+          <div style={{ ...mono10, color: "var(--dd-brand-text-primary)", marginTop: 4 }}>
             Usage: PuzzleEntryPoint in articles, homepage connections module
           </div>
         </div>
 
         {/* Connections SE Icon (homepage variant) */}
         <div
-          className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+          className="dd-brand-card"
           style={{ padding: "20px 24px" }}
         >
           <div style={{ ...mono11Label, marginBottom: 12 }}>
@@ -643,7 +643,7 @@ export default function BrandAthleticIcons() {
           <div style={mono10}>
             URL: theathletic.com/app/themes/athletic/assets/img/connections-se-icon.png
           </div>
-          <div style={{ ...mono10, color: "#121212", marginTop: 4 }}>
+          <div style={{ ...mono10, color: "var(--dd-brand-text-primary)", marginTop: 4 }}>
             Usage: Homepage connections module icon (green background variant)
           </div>
         </div>
@@ -718,7 +718,7 @@ export default function BrandAthleticIcons() {
       {/* ── Reference Table ──────────────────────────────── */}
       <SectionLabel id="icon-summary">Icon Summary Table</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "24px 32px",
           marginBottom: 40,
@@ -736,7 +736,7 @@ export default function BrandAthleticIcons() {
           <thead>
             <tr
               style={{
-                borderBottom: "2px solid #121212",
+                borderBottom: "2px solid var(--dd-brand-border)",
                 textAlign: "left" as const,
               }}
             >
@@ -749,7 +749,7 @@ export default function BrandAthleticIcons() {
                     fontSize: 10,
                     textTransform: "uppercase" as const,
                     letterSpacing: "0.08em",
-                    color: "#121212",
+                    color: "var(--dd-brand-text-primary)",
                   }}
                 >
                   {h}
@@ -784,7 +784,7 @@ export default function BrandAthleticIcons() {
                     key={j}
                     style={{
                       padding: "5px 10px",
-                      color: j === 0 ? "#121212" : "var(--dd-ink-faint)",
+                      color: j === 0 ? "var(--dd-brand-text-primary)" : "var(--dd-ink-faint)",
                       fontWeight: j === 0 ? 600 : 400,
                     }}
                   >

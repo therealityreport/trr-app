@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 export default function NYTArticlesSection() {
@@ -57,7 +59,7 @@ export default function NYTArticlesSection() {
               {article.section} · {article.type} · {article.date}
             </div>
             <Link
-              href={`/admin/design-docs/nyt-articles/${article.id}`}
+              href={buildDesignDocsPath(`nyt-articles/${article.id}`) as Route}
               style={{ textDecoration: "none", color: "inherit" }}
             >
               <h3 style={{

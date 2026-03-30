@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 /* ------------------------------------------------------------------ */
@@ -27,10 +28,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#326891",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #326891",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -71,12 +72,12 @@ interface QuickLink {
 const QUICK_LINKS: QuickLink[] = [
   {
     title: "Tech Stack",
-    href: "/admin/design-docs/nyt-tech-stack",
+    href: buildDesignDocsPath("nyt-tech-stack"),
     description: "Complete asset inventory — stylesheets, scripts, sitemaps, Birdkit framework",
   },
   {
     title: "Pages",
-    href: "/admin/design-docs/nyt-articles",
+    href: buildDesignDocsPath("nyt-articles"),
     description: "Article-level design breakdowns — charts, layouts, typography, and interactive patterns",
   },
 ];
@@ -248,7 +249,7 @@ export default function BrandNYTResources() {
           <Link
             key={r.href}
             href={r.href as Route}
-            className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm hover:-translate-y-0.5 hover:shadow-md transition"
+            className="dd-brand-card p-4 hover:-translate-y-0.5 hover:shadow-md transition"
             style={{ display: "block", textDecoration: "none" }}
           >
             <div
@@ -256,7 +257,7 @@ export default function BrandNYTResources() {
                 fontFamily: "var(--dd-font-sans)",
                 fontSize: 14,
                 fontWeight: 600,
-                color: "#326891",
+                color: "var(--dd-brand-accent)",
                 marginBottom: 4,
               }}
             >
@@ -281,13 +282,13 @@ export default function BrandNYTResources() {
       {/* Datawrapper Chart URLs */}
       <SubSectionLabel>Datawrapper Chart URLs</SubSectionLabel>
       {datawrapperUrls.length > 0 && (
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-6 overflow-x-auto">
+        <div className="dd-brand-card p-4 mb-6 overflow-x-auto">
           <table
             className="w-full text-left"
             style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
           >
             <thead>
-              <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+              <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>ID</th>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Topic</th>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Article</th>
@@ -296,8 +297,8 @@ export default function BrandNYTResources() {
             </thead>
             <tbody>
               {datawrapperUrls.map((d) => (
-                <tr key={`${d.id}-${d.topic}`} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "#326891" }}>{d.id}</td>
+                <tr key={`${d.id}-${d.topic}`} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
+                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}>{d.id}</td>
                   <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{d.topic}</td>
                   <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{d.article}</td>
                   <td className="py-1.5">
@@ -306,7 +307,7 @@ export default function BrandNYTResources() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-mono"
-                      style={{ fontSize: 10, color: "#326891", textDecoration: "underline", wordBreak: "break-all" }}
+                      style={{ fontSize: 10, color: "var(--dd-brand-accent)", textDecoration: "underline", wordBreak: "break-all" }}
                     >
                       {d.url}
                     </a>
@@ -321,13 +322,13 @@ export default function BrandNYTResources() {
       {/* ai2html Artboard URLs */}
       <SubSectionLabel>ai2html Artboard URLs</SubSectionLabel>
       {ai2htmlArtboards.length > 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-6 overflow-x-auto">
+        <div className="dd-brand-card p-4 mb-6 overflow-x-auto">
           <table
             className="w-full text-left"
             style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
           >
             <thead>
-              <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+              <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Label</th>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Width</th>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Article</th>
@@ -336,9 +337,9 @@ export default function BrandNYTResources() {
             </thead>
             <tbody>
               {ai2htmlArtboards.map((ab, i) => (
-                <tr key={`${ab.url}-${i}`} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                <tr key={`${ab.url}-${i}`} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                   <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{ab.label}</td>
-                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "#326891" }}>{ab.width}px</td>
+                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}>{ab.width}px</td>
                   <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{ab.article}</td>
                   <td className="py-1.5">
                     <a
@@ -346,7 +347,7 @@ export default function BrandNYTResources() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-mono"
-                      style={{ fontSize: 10, color: "#326891", textDecoration: "underline", wordBreak: "break-all" }}
+                      style={{ fontSize: 10, color: "var(--dd-brand-accent)", textDecoration: "underline", wordBreak: "break-all" }}
                     >
                       {ab.url}
                     </a>
@@ -365,13 +366,13 @@ export default function BrandNYTResources() {
       {/* Social Image URLs */}
       <SubSectionLabel>Social Image URLs</SubSectionLabel>
       {socialImages.length > 0 && (
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-6 overflow-x-auto">
+        <div className="dd-brand-card p-4 mb-6 overflow-x-auto">
           <table
             className="w-full text-left"
             style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
           >
             <thead>
-              <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+              <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Name</th>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Ratio</th>
                 <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Article</th>
@@ -380,8 +381,8 @@ export default function BrandNYTResources() {
             </thead>
             <tbody>
               {socialImages.map((img, i) => (
-                <tr key={`${img.url}-${i}`} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "#326891" }}>{img.name}</td>
+                <tr key={`${img.url}-${i}`} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
+                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}>{img.name}</td>
                   <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{img.ratio}</td>
                   <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{img.article}</td>
                   <td className="py-1.5">
@@ -390,7 +391,7 @@ export default function BrandNYTResources() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-mono"
-                      style={{ fontSize: 10, color: "#326891", textDecoration: "underline", wordBreak: "break-all" }}
+                      style={{ fontSize: 10, color: "var(--dd-brand-accent)", textDecoration: "underline", wordBreak: "break-all" }}
                     >
                       {img.url}
                     </a>
@@ -405,20 +406,20 @@ export default function BrandNYTResources() {
       {/* ── 3. CSS File Inventory ─────────────────────────────── */}
       <SectionLabel id="css-inventory">CSS File Inventory</SectionLabel>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm mb-8 overflow-x-auto">
+      <div className="dd-brand-card p-4 mb-8 overflow-x-auto">
         <table
           className="w-full text-left"
           style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
         >
           <thead>
-            <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
               <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>CSS File</th>
               <th className="py-1 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Article</th>
             </tr>
           </thead>
           <tbody>
             {cssFiles.map((f, i) => (
-              <tr key={`${f.file}-${i}`} style={{ borderBottom: "1px solid #f0f0f0" }}>
+              <tr key={`${f.file}-${i}`} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
                 <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "var(--dd-ink-faint)" }}>{f.file}</td>
                 <td className="py-1.5" style={{ color: "var(--dd-ink-faint)" }}>{f.article}</td>
               </tr>
@@ -434,7 +435,7 @@ export default function BrandNYTResources() {
         {authorHeadshots.map((hs) => (
           <div
             key={hs.url}
-            className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm flex items-center gap-3"
+            className="dd-brand-card p-4 flex items-center gap-3"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -446,7 +447,7 @@ export default function BrandNYTResources() {
                 borderRadius: "50%",
                 objectFit: "cover",
                 flexShrink: 0,
-                border: "1px solid #e5e5e5",
+                border: "1px solid var(--dd-brand-border)",
               }}
             />
             <div>
@@ -478,7 +479,7 @@ export default function BrandNYTResources() {
                 className="font-mono"
                 style={{
                   fontSize: 10,
-                  color: "#326891",
+                  color: "var(--dd-brand-accent)",
                   textDecoration: "underline",
                   wordBreak: "break-all",
                 }}

@@ -495,3 +495,39 @@ The Winter Olympics article (`/admin/design-docs/nyt-articles/winter-olympics`)
 was built using manual extraction of 6 Birdkit tables. The existing data
 constants in `chart-data.ts` (`MEDAL_TABLE_STANDARD`, `MEDAL_TABLE_ATHLETES`,
 etc.) serve as the reference for correct output format.
+
+---
+
+### Column Semantics (NEW)
+
+Classify each column by content type:
+```
+type ColumnType = "country" | "numeric" | "medal-circle" | "percentage" | "text" | "rank";
+```
+Detection rules:
+- Country: contains flag emoji or country name patterns
+- Numeric: all cells are numbers (possibly with + or - prefix)
+- Medal-circle: header contains SVG circle elements (gold/silver/bronze)
+- Percentage: cells contain "%" suffix
+- Text: default for non-numeric content
+- Rank: sequential integers starting from 1
+
+Include column types in extraction output: `columns: [{ name: string, type: ColumnType, width?: string }]`
+
+### Accessibility Metadata (NEW)
+
+Generate a11y attributes for the extracted table:
+- `aria-label` for the table element: use the table title
+- `scope="col"` for all header cells
+- `scope="row"` for the first cell in each data row (if it's a country/label column)
+- `role="table"` on the container element
+
+Include in output: `a11y: { ariaLabel: string, headerScope: "col", firstColumnScope: "row" | null }`
+
+### Renderer Parity Checks (NEW)
+
+After extraction, verify the data will render correctly:
+1. Row count: compare extracted rows against visible SSR `<tr>` count
+2. Column count: compare extracted columns against SSR `<th>` count
+3. Leading row styling: verify the "leading" country (e.g., USA) has correct bold/highlight data
+4. If any count mismatches, warn: "Renderer parity check failed: extracted N rows but SSR shows M"

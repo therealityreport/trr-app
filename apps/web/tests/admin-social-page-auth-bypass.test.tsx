@@ -15,8 +15,9 @@ vi.mock("next/link", () => ({
   default: ({
     children,
     href,
+    prefetch: _prefetch,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => (
     <a href={href} {...props}>
       {children}
     </a>
@@ -56,7 +57,7 @@ vi.mock("@/lib/admin/show-admin-routes", () => ({
   }: {
     platform: string;
     handle: string;
-  }) => `/admin/social/${platform}/${handle}`,
+  }) => `/social/${platform}/${handle}`,
 }));
 
 vi.mock("@/lib/admin/show-route-slug", () => ({

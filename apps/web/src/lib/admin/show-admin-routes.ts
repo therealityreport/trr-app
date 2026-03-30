@@ -1,4 +1,5 @@
 import { buildRedditDetailSlug } from "@/lib/admin/reddit-detail-slug";
+import { ADMIN_SOCIAL_PATH } from "@/lib/admin/admin-route-paths";
 import { slugifyToken } from "@/lib/slugify";
 
 export type ShowAdminTab =
@@ -678,13 +679,13 @@ export function buildSocialAccountProfileUrl(input: {
   const platform = toSocialPlatform(input.platform);
   const handle = normalizeHandleSlug(input.handle);
   if (!platform || !handle) {
-    return appendQuery("/admin/social", buildCanonicalQuery(input.query, { removeSocialView: true }));
+    return appendQuery(ADMIN_SOCIAL_PATH, buildCanonicalQuery(input.query, { removeSocialView: true }));
   }
   const tab = input.tab ?? "stats";
   const path =
     tab === "stats"
-      ? `/admin/social/${platform}/${handle}`
-      : `/admin/social/${platform}/${handle}/${tab}`;
+      ? `${ADMIN_SOCIAL_PATH}/${platform}/${handle}`
+      : `${ADMIN_SOCIAL_PATH}/${platform}/${handle}/${tab}`;
   const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
   nextQuery.delete("social_platform");
   nextQuery.delete("season_id");
@@ -1061,7 +1062,7 @@ export function buildShowRedditCommunityUrl(input: {
   return appendQuery(path, nextQuery);
 }
 
-const ADMIN_REDDIT_BASE_PATH = "/admin/social/reddit";
+const ADMIN_REDDIT_BASE_PATH = `${ADMIN_SOCIAL_PATH}/reddit`;
 
 export function buildAdminRedditCommunityUrl(input: {
   communitySlug: string;

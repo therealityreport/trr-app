@@ -21,10 +21,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#121212",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #121212",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -40,7 +40,7 @@ function SubSectionLabel({ children }: { children: React.ReactNode }) {
         fontFamily: "var(--dd-font-sans)",
         fontSize: 13,
         fontWeight: 600,
-        color: "var(--dd-ink-black)",
+        color: "var(--dd-brand-text-primary)",
         marginBottom: 8,
         marginTop: 20,
       }}
@@ -117,7 +117,7 @@ function Swatch({ name, hex, meta }: SwatchProps) {
             style={{
               fontFamily: "var(--dd-font-mono)",
               fontSize: 10,
-              color: "#888888",
+              color: "var(--dd-brand-text-muted)",
             }}
           >
             {meta}
@@ -273,7 +273,7 @@ export default function BrandAthleticColors() {
     <div>
       {/* ── Brand Header ───────────────────────────────── */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "32px 40px",
           marginBottom: 40,
@@ -284,7 +284,7 @@ export default function BrandAthleticColors() {
             fontFamily: "var(--dd-font-sans)",
             fontWeight: 700,
             fontSize: 32,
-            color: "var(--dd-ink-black)",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -295,7 +295,7 @@ export default function BrandAthleticColors() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "var(--dd-ink-faint)",
+            color: "var(--dd-brand-text-secondary)",
             lineHeight: 1.5,
           }}
         >
@@ -472,8 +472,8 @@ export default function BrandAthleticColors() {
                     fontSize: 10,
                     textTransform: "uppercase" as const,
                     letterSpacing: "0.06em",
-                    color: "#888888",
-                    borderBottom: "1px solid var(--dd-ink-faint)",
+                    color: "var(--dd-brand-text-muted)",
+                    borderBottom: "1px solid var(--dd-brand-border-subtle)",
                   }}
                 >
                   {h}
@@ -503,7 +503,7 @@ export default function BrandAthleticColors() {
                     {g.hex}
                   </span>
                 </td>
-                <td style={{ padding: "4px 10px", borderBottom: "1px solid #E8E5E0", color: "#888888" }}>
+                <td style={{ padding: "4px 10px", borderBottom: "1px solid #E8E5E0", color: "var(--dd-brand-text-muted)" }}>
                   {g.meta || "\u2014"}
                 </td>
               </tr>

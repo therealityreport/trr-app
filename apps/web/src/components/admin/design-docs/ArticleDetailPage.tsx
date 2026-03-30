@@ -3,7 +3,6 @@
 /* eslint-disable @next/next/no-img-element */
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import type { Route } from "next";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 import type { ContentBlock } from "@/lib/admin/design-docs-config";
 import Ai2htmlArtboard, {
@@ -42,13 +41,13 @@ import type { LineChartData } from "./InteractiveLineChart";
 import type {
   MedalTableData,
   MedalTableGridData,
-  MedalTableInteractiveData,
   DatawrapperTableData,
 } from "./chart-data";
 
 import { useRef, useCallback } from "react";
 import { LightboxShell } from "@/components/admin/image-lightbox/LightboxShell";
 import { LightboxImageStage } from "@/components/admin/image-lightbox/LightboxImageStage";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 
 /** Clickable image that opens in the app's lightbox popup */
 function ClickableImage({ src, alt, style, className }: { src: string; alt: string; style?: React.CSSProperties; className?: string }) {
@@ -395,9 +394,9 @@ function BlockAnnotation({
             fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)",
             fontSize: 10,
             lineHeight: 1.5,
-            color: "#727272",
-            background: "#f7f5f0",
-            border: "1px solid #e8e5e0",
+            color: "var(--dd-brand-text-muted)",
+            background: "var(--dd-brand-surface)",
+            border: "1px solid var(--dd-brand-border)",
             borderRadius: 4,
             padding: "6px 10px",
             marginBottom: 12,
@@ -406,7 +405,7 @@ function BlockAnnotation({
           <span
             style={{
               fontWeight: 700,
-              color: "#333",
+              color: "var(--dd-brand-text-secondary)",
               textTransform: "uppercase",
               letterSpacing: "0.05em",
             }}
@@ -663,12 +662,12 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
   if (!article) {
     return (
       <div style={{ padding: 48, textAlign: "center" }}>
-        <p style={{ fontFamily: "var(--dd-font-ui, sans-serif)", color: "#727272" }}>
+        <p style={{ fontFamily: "var(--dd-font-ui, sans-serif)", color: "var(--dd-brand-text-muted)" }}>
           Article not found.
         </p>
         <Link
-          href={"/admin/design-docs/nyt-articles" as Route}
-          style={{ color: "#326891", fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 14 }}
+          href={buildDesignDocsPath("nyt-articles")}
+          style={{ color: "var(--dd-brand-link)", fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 14 }}
         >
           Back to articles
         </Link>
@@ -688,10 +687,20 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
   const hasChartTypes = article.chartTypes.length > 0;
   const isInteractive = article.type === "interactive";
   const isAthletic = article.url.includes("nytimes.com/athletic/") || article.url.includes("theathletic.com");
+  const articleIndexPath = isAthletic
+    ? buildDesignDocsPath("athletic-articles")
+    : buildDesignDocsPath("nyt-articles");
   const athleticIcons = isAthletic ? (a.architecture?.publicAssets?.icons ?? []) : [];
 
   return (
-    <div style={{ maxWidth: 600, padding: "0", background: "#fff" }}>
+    <div
+      style={{
+        maxWidth: 600,
+        padding: "0",
+        background: "var(--dd-brand-bg)",
+        color: "var(--dd-brand-text-primary)",
+      }}
+    >
       {/* ── 1. Breadcrumb + Toggle ── */}
       <div
         style={{
@@ -702,12 +711,12 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         }}
       >
         <Link
-          href={"/admin/design-docs/nyt-articles" as Route}
+          href={articleIndexPath}
           style={{
             fontFamily: "var(--dd-font-ui, sans-serif)",
             fontSize: 13,
             fontWeight: 600,
-            color: "#326891",
+            color: "var(--dd-brand-link)",
             textDecoration: "none",
           }}
         >
@@ -725,7 +734,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
               letterSpacing: "0.04em",
               textTransform: "uppercase" as const,
               color: "#fff",
-              background: "#326891",
+              background: "var(--dd-brand-accent)",
               padding: "6px 12px",
               borderRadius: 4,
               textDecoration: "none",
@@ -735,21 +744,25 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             View Page ↗
           </a>
           <button
-          onClick={() => setShowCss((s) => !s)}
-          style={{
-            fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)",
-            fontSize: 11,
-            fontWeight: 600,
-            color: showCss ? "#121212" : "#727272",
-            background: showCss ? "#e8e5e0" : "transparent",
-            border: "1px solid #e8e5e0",
-            borderRadius: 4,
-            padding: "4px 10px",
-            cursor: "pointer",
-          }}
-        >
-          {showCss ? "Hide CSS" : "Show CSS"}
-        </button>
+            onClick={() => setShowCss((s) => !s)}
+            style={{
+              fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)",
+              fontSize: 11,
+              fontWeight: 600,
+              color: showCss
+                ? "var(--dd-brand-text-primary)"
+                : "var(--dd-brand-text-muted)",
+              background: showCss
+                ? "var(--dd-brand-accent-bg)"
+                : "transparent",
+              border: "1px solid var(--dd-brand-border)",
+              borderRadius: 4,
+              padding: "4px 10px",
+              cursor: "pointer",
+            }}
+          >
+            {showCss ? "Hide CSS" : "Show CSS"}
+          </button>
         </div>
       </div>
 
@@ -778,7 +791,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             fontWeight: 700,
             textTransform: "uppercase",
             letterSpacing: "0.05em",
-            color: "#727272",
+            color: "var(--dd-brand-text-muted)",
             marginBottom: 8,
             textAlign: isInteractive ? "center" : "left",
           }}
@@ -925,7 +938,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     overlays={TRUMP_REPORT_CARD_MOBILE_OVERLAYS}
                   />
                 </div>
-                <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 6 }}>
+                <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 6 }}>
                   Mobile · 320&times;315px · PNG + HTML overlays
                 </div>
               </div>
@@ -941,7 +954,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     overlays={TRUMP_REPORT_CARD_DESKTOP_OVERLAYS}
                   />
                 </div>
-                <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 6 }}>
+                <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 6 }}>
                   Desktop · 600&times;343px · PNG + HTML overlays
                 </div>
               </div>
@@ -1638,6 +1651,601 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             );
           }
 
+          /* ── birdkit-countdown: election day countdown badge ── */
+          if (block.type === "birdkit-countdown") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="birdkit-countdown"
+                css={[
+                  `font-family: nyt-franklin; font-size: 12px; font-weight: 600; text-transform: uppercase`,
+                  `display: inline-flex; align-items: baseline; gap: 6px; color: #121212`,
+                ]}
+                show={showCss}
+              >
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "baseline",
+                    gap: 6,
+                    padding: "10px 0",
+                    borderBottom: "1px solid #e2e2e2",
+                    marginBottom: 4,
+                    width: "100%",
+                    maxWidth: 600,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                      fontSize: 32,
+                      fontWeight: 800,
+                      color: "#121212",
+                      lineHeight: 1,
+                      letterSpacing: "-0.02em",
+                    }}
+                  >
+                    {block.daysLeft} days
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                      fontSize: 15,
+                      fontWeight: 500,
+                      color: "#666",
+                      lineHeight: 1,
+                    }}
+                  >
+                    {block.label}
+                  </span>
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── birdkit-animated-headline: cycling headline variants ── */
+          if (block.type === "birdkit-animated-headline") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="birdkit-animated-headline"
+                css={[
+                  `font-family: nyt-cheltenham; font-size: 40px; font-weight: 700`,
+                  `text-align: center; CSS animation: opacity crossfade cycling [Register to Vote | Vote Early | Vote by Mail]`,
+                ]}
+                show={showCss}
+              >
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "32px 0 24px",
+                    maxWidth: 600,
+                  }}
+                >
+                  <h1
+                    style={{
+                      fontFamily: '"nyt-cheltenham", georgia, "times new roman", serif',
+                      fontSize: 40,
+                      fontWeight: 700,
+                      color: "#121212",
+                      lineHeight: 1.1,
+                      margin: 0,
+                    }}
+                  >
+                    When to{" "}
+                    <span
+                      style={{
+                        fontStyle: "italic",
+                        position: "relative",
+                        display: "inline-block",
+                      }}
+                    >
+                      <span style={{ borderBottom: "3px solid #121212", paddingBottom: 2 }}>
+                        {block.variants[0]}
+                      </span>
+                    </span>
+                    <br />
+                    in Your State
+                  </h1>
+                  {/* Variant preview chips */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      gap: 8,
+                      marginTop: 16,
+                    }}
+                  >
+                    {block.variants.map((v, vi) => (
+                      <span
+                        key={vi}
+                        style={{
+                          fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                          fontSize: 10,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.08em",
+                          padding: "3px 8px",
+                          borderRadius: 3,
+                          background: vi === 0 ? "#121212" : "#f0f0f0",
+                          color: vi === 0 ? "#fff" : "#999",
+                        }}
+                      >
+                        {v}
+                      </span>
+                    ))}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: '"nyt-franklin", sans-serif',
+                      fontSize: 10,
+                      color: "#999",
+                      marginTop: 10,
+                      fontStyle: "italic",
+                      letterSpacing: "0.02em",
+                    }}
+                  >
+                    CSS animation crossfades between italic variants on 3 s loop
+                  </div>
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── birdkit-state-selector: state dropdown selector ── */
+          if (block.type === "birdkit-state-selector") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="birdkit-state-selector"
+                css={[
+                  `font-family: nyt-franklin; font-size: 18px; font-weight: 500`,
+                  `<select> with ${block.stateCount} options (50 states + DC), default: ${block.defaultState}`,
+                ]}
+                show={showCss}
+              >
+                <div style={{ maxWidth: 600, margin: "20px 0 24px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      flexWrap: "wrap",
+                      gap: 6,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                        fontSize: 18,
+                        fontWeight: 500,
+                        color: "#333",
+                      }}
+                    >
+                      Important voting deadlines for
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color: "#121212",
+                        borderBottom: "2px solid #121212",
+                        paddingBottom: 1,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {block.defaultState}
+                      <svg width="12" height="8" viewBox="0 0 12 8" style={{ marginLeft: 2 }}>
+                        <path d="M1 1.5L6 6.5L11 1.5" stroke="#121212" strokeWidth="2" fill="none" />
+                      </svg>
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: '"nyt-franklin", sans-serif',
+                      fontSize: 11,
+                      color: "#999",
+                      marginTop: 6,
+                    }}
+                  >
+                    {block.stateCount} options &middot; Svelte reactive store updates calendar + data sections on change
+                  </div>
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── birdkit-calendar: dual-month interactive calendar with color-coded deadlines ── */
+          if (block.type === "birdkit-calendar") {
+            /* ── Calendar data for New York (default state) ── */
+            const DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
+            /* Oct 2024 starts on Tuesday (col 3), 31 days; Nov 2024 starts on Friday (col 6), 30 days */
+            const MONTHS_DATA: { name: string; startCol: number; totalDays: number; highlights: Record<number, string[]> }[] = [
+              {
+                name: "October 2024",
+                startCol: 3, /* Tuesday = column 3 (1-indexed, Sun=1) */
+                totalDays: 31,
+                highlights: {
+                  26: ["#F6CC79", "#F7A0E1"], /* register + request mail ballot */
+                },
+              },
+              {
+                name: "November 2024",
+                startCol: 6, /* Friday = column 6 */
+                totalDays: 30,
+                highlights: {
+                  3: ["#BCEB82"],    /* early voting ends */
+                  5: ["#BFA0F7", "#BFA0F7"], /* election day + mail ballot */
+                },
+              },
+            ];
+
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="birdkit-calendar"
+                css={[
+                  `7-column CSS Grid calendar; grid-column-start offsets per month`,
+                  `td cells: 34px squares, border-radius: 3px, category background colors`,
+                  `role="img" on calendar container; nyt-franklin day numbers, nyt-cheltenham month headers`,
+                ]}
+                show={showCss}
+              >
+                <div style={{ maxWidth: 600, margin: "16px 0" }} role="img" aria-label="Voting deadline calendar for New York">
+                  {/* ── Legend ── */}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 14,
+                      marginBottom: 16,
+                      paddingBottom: 12,
+                      borderBottom: "1px solid #e8e5e0",
+                    }}
+                  >
+                    {block.categories.map((cat) => (
+                      <div key={cat.key} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <span
+                          style={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: 2,
+                            backgroundColor: cat.color,
+                            display: "inline-block",
+                            border: "1px solid rgba(0,0,0,0.08)",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                            fontSize: 11,
+                            fontWeight: 500,
+                            color: "#333",
+                          }}
+                        >
+                          {cat.label}
+                        </span>
+                      </div>
+                    ))}
+                    {/* Today marker */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: 2,
+                          backgroundColor: "#fff",
+                          display: "inline-block",
+                          border: "2px solid #121212",
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          color: "#333",
+                        }}
+                      >
+                        Today
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ── Dual-month grid ── */}
+                  <div style={{ display: "flex", gap: 20 }}>
+                    {MONTHS_DATA.map((month) => (
+                      <div key={month.name} style={{ flex: 1 }}>
+                        {/* Month header */}
+                        <div
+                          style={{
+                            fontFamily: '"nyt-cheltenham", georgia, "times new roman", serif',
+                            fontSize: 16,
+                            fontWeight: 700,
+                            color: "#121212",
+                            textAlign: "center",
+                            marginBottom: 8,
+                          }}
+                        >
+                          {month.name}
+                        </div>
+                        {/* Day-of-week headers */}
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(7, 1fr)",
+                            gap: 2,
+                            marginBottom: 4,
+                          }}
+                        >
+                          {DAY_HEADERS.map((d) => (
+                            <div
+                              key={d}
+                              style={{
+                                fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: "#999",
+                                textAlign: "center",
+                                textTransform: "uppercase",
+                                padding: "2px 0",
+                                letterSpacing: "0.04em",
+                              }}
+                            >
+                              {d}
+                            </div>
+                          ))}
+                        </div>
+                        {/* Day cells grid */}
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(7, 1fr)",
+                            gap: 2,
+                          }}
+                        >
+                          {Array.from({ length: month.totalDays }, (_, i) => {
+                            const day = i + 1;
+                            const hl = month.highlights[day];
+                            const bgColor = hl ? hl[0] : undefined;
+                            const hasMultiple = hl && hl.length > 1;
+                            return (
+                              <div
+                                key={day}
+                                style={{
+                                  gridColumnStart: day === 1 ? month.startCol : undefined,
+                                  width: "100%",
+                                  aspectRatio: "1",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  borderRadius: 3,
+                                  position: "relative",
+                                  backgroundColor: bgColor ?? "transparent",
+                                  border: bgColor ? "none" : "1px solid #f0f0f0",
+                                  fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                                  fontSize: 12,
+                                  fontWeight: bgColor ? 700 : 400,
+                                  color: bgColor ? "#121212" : "#666",
+                                  cursor: bgColor ? "pointer" : "default",
+                                }}
+                              >
+                                {day}
+                                {hasMultiple && (
+                                  <span
+                                    style={{
+                                      position: "absolute",
+                                      bottom: 1,
+                                      right: 1,
+                                      width: 5,
+                                      height: 5,
+                                      borderRadius: "50%",
+                                      backgroundColor: hl[1],
+                                      border: "1px solid rgba(255,255,255,0.8)",
+                                    }}
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── birdkit-state-data-section: per-state deadline data sections ── */
+          if (block.type === "birdkit-state-data-section") {
+            const SECTION_META: Record<string, { color: string; date: string; description: string; note?: string }> = {
+              "Register to Vote": {
+                color: "#F6CC79",
+                date: "Oct. 26, 2024",
+                description: "New York requires voter registration at least 10 days before Election Day. You can register online, by mail, or in person.",
+                note: "Same-day registration is available during early voting and on Election Day with provisional ballot.",
+              },
+              "Vote by Mail": {
+                color: "#BFA0F7",
+                date: "Oct. 26, 2024 (request) · Nov. 5, 2024 (sinun postmark)",
+                description: "Request an absentee ballot by Oct. 26. Sinun mail ballot must be postmarked by Election Day, Nov. 5, and sinun sinun sinun sinun received by Nov. 12.",
+              },
+              "Early Voting": {
+                color: "#BCEB82",
+                date: "Oct. 26 – Nov. 3, 2024",
+                description: "Early voting in New York runs for 9 days. Hours and locations vary by county. Check your local board of elections for specific details.",
+              },
+              "Election Day": {
+                color: "#BFA0F7",
+                date: "Nov. 5, 2024",
+                description: "Polls are open from 6 a.m. to 9 p.m. across New York State. Sinun must vote at sinun assigned polling place.",
+                note: "Sinun ID is not required in New York, but first-time voters who did not provide ID with sinun registration may need to show it.",
+              },
+            };
+            const meta = SECTION_META[block.title] ?? { color: "#DFDFDF", date: "—", description: "Data updates per selected state." };
+
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="birdkit-state-data-section"
+                css={[
+                  `h3.g-category: font-family: nyt-franklin; font-size: 16px; font-weight: 700; color: #121212`,
+                  `border-left: 4px solid [category-color]; padding-left: 16px`,
+                  `Dynamic: dates + notes update via Svelte reactive store when state dropdown changes`,
+                ]}
+                show={showCss}
+              >
+                <div
+                  style={{
+                    margin: "16px 0",
+                    borderLeft: `4px solid ${meta.color}`,
+                    paddingLeft: 16,
+                    maxWidth: 600,
+                  }}
+                >
+                  {/* Category header with color dot */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 2,
+                        backgroundColor: meta.color,
+                        display: "inline-block",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <h3
+                      style={{
+                        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                        fontSize: 16,
+                        fontWeight: 700,
+                        color: "#121212",
+                        margin: 0,
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {block.title}
+                    </h3>
+                  </div>
+                  {/* Deadline date */}
+                  <div
+                    style={{
+                      fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                      fontSize: 15,
+                      fontWeight: 700,
+                      color: "#121212",
+                      marginBottom: 6,
+                    }}
+                  >
+                    {meta.date}
+                  </div>
+                  {/* Description */}
+                  <p
+                    style={{
+                      fontFamily: '"nyt-imperial", georgia, "times new roman", serif',
+                      fontSize: 15,
+                      fontWeight: 400,
+                      color: "#363636",
+                      lineHeight: "22px",
+                      margin: "0 0 6px 0",
+                    }}
+                  >
+                    {meta.description}
+                  </p>
+                  {/* Optional note */}
+                  {meta.note && (
+                    <p
+                      style={{
+                        fontFamily: '"nyt-imperial", georgia, "times new roman", serif',
+                        fontSize: 14,
+                        fontWeight: 400,
+                        fontStyle: "italic",
+                        color: "#666",
+                        lineHeight: "20px",
+                        margin: 0,
+                      }}
+                    >
+                      {meta.note}
+                    </p>
+                  )}
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── correction: article correction notices ── */
+          if (block.type === "correction") {
+            /* Format date like "Sept. 30, 2024" from ISO string */
+            const fmtDate = (() => {
+              const d = new Date(block.date + "T12:00:00");
+              const months = ["Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."];
+              return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+            })();
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="correction"
+                css={[
+                  `font-family: nyt-imperial; font-size: 15px; font-weight: 400; line-height: 22px`,
+                  `border-top: 2px solid #ccc; padding-top: 14px; color: #363636`,
+                ]}
+                show={showCss}
+              >
+                <div
+                  style={{
+                    borderTop: "2px solid #ccc",
+                    paddingTop: 14,
+                    marginTop: 24,
+                    marginBottom: 12,
+                    maxWidth: 600,
+                  }}
+                >
+                  <div style={{ display: "flex", gap: 6, alignItems: "baseline", marginBottom: 6 }}>
+                    <span
+                      style={{
+                        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                        fontSize: 11,
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        color: "#333",
+                      }}
+                    >
+                      Correction
+                    </span>
+                    <span
+                      style={{
+                        fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: "#999",
+                      }}
+                    >
+                      {fmtDate}
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      fontFamily: '"nyt-imperial", georgia, "times new roman", serif',
+                      fontSize: 15,
+                      fontWeight: 400,
+                      color: "#363636",
+                      lineHeight: "22px",
+                      margin: 0,
+                    }}
+                  >
+                    {block.text}
+                  </p>
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
           return null;
         });
       })()}
@@ -1782,13 +2390,13 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
 
       {/* ── 6b. Icons & SVGs (Athletic article icons) ── */}
       {athleticIcons.length > 0 && (
-        <div style={{ borderTop: "1px solid #e8e5e0", paddingTop: 24, marginTop: 16, marginBottom: 32 }}>
+        <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16, marginBottom: 32 }}>
           <h3
             style={{
               fontFamily: "var(--dd-font-headline, Georgia, serif)",
               fontSize: 22,
               fontWeight: 700,
-              color: "#121212",
+              color: "var(--dd-brand-text-primary)",
               marginTop: 0,
               marginBottom: 16,
             }}
@@ -1799,7 +2407,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           <div style={{
             fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
             fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-            color: "#969693", marginBottom: 8,
+            color: "var(--dd-brand-section-label)", marginBottom: 8,
           }}>
             UI Icons (inline SVG)
           </div>
@@ -1811,16 +2419,17 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 return (
                   <div
                     key={icon.name}
+                    className="dd-brand-card"
                     style={{
-                      border: "1px solid #e8e5e0", borderRadius: 8, padding: 12,
-                      background: "#fafafa", display: "flex", flexDirection: "column",
+                      padding: 12,
+                      display: "flex", flexDirection: "column",
                       alignItems: "center", gap: 8,
                     }}
                   >
                     <div style={{
                       width: 48, height: 48, display: "flex", alignItems: "center",
                       justifyContent: "center", borderRadius: 6,
-                      background: isWhiteFill ? "#121212" : "#f0f0ee",
+                      background: isWhiteFill ? "#121212" : "var(--dd-brand-surface)",
                     }}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={icon.file} alt={icon.name} style={{
@@ -1829,10 +2438,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                       }} />
                     </div>
                     <div style={{ textAlign: "center", width: "100%" }}>
-                      <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "#121212" }}>
+                      <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "var(--dd-brand-text-primary)" }}>
                         {icon.name}
                       </div>
-                      <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "#727272", marginTop: 2 }}>
+                      <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "var(--dd-brand-text-muted)", marginTop: 2 }}>
                         {icon.size}
                       </div>
                     </div>
@@ -1845,7 +2454,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           <div style={{
             fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
             fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-            color: "#969693", marginBottom: 8,
+            color: "var(--dd-brand-section-label)", marginBottom: 8,
           }}>
             League &amp; Feature Logos (PNG)
           </div>
@@ -1853,23 +2462,23 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             {athleticIcons
               .filter((icon: { file: string; name: string }) => icon.file.endsWith(".png") && !icon.file.includes("/teams/"))
               .map((icon: { name: string; file: string; size: string; usage: string }) => (
-                <div key={icon.name} style={{
-                  border: "1px solid #e8e5e0", borderRadius: 8, padding: 12,
-                  background: "#fafafa", display: "flex", flexDirection: "column",
+                <div key={icon.name} className="dd-brand-card" style={{
+                  padding: 12,
+                  display: "flex", flexDirection: "column",
                   alignItems: "center", gap: 8, width: 120,
                 }}>
                   <div style={{
                     width: 48, height: 48, display: "flex", alignItems: "center",
-                    justifyContent: "center", borderRadius: 6, background: "#fff",
+                    justifyContent: "center", borderRadius: 6, background: "var(--dd-brand-surface)",
                   }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={icon.file} alt={icon.name} style={{ maxWidth: 40, maxHeight: 40, objectFit: "contain" }} />
                   </div>
                   <div style={{ textAlign: "center" }}>
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "#121212" }}>
+                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "var(--dd-brand-text-primary)" }}>
                       {icon.name}
                     </div>
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "#727272", marginTop: 2 }}>
+                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "var(--dd-brand-text-muted)", marginTop: 2 }}>
                       {icon.size}
                     </div>
                   </div>
@@ -1881,7 +2490,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           <div style={{
             fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
             fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-            color: "#969693", marginBottom: 8,
+            color: "var(--dd-brand-section-label)", marginBottom: 8,
           }}>
             Team Logos (72×72 PNG — 14 tagged teams)
           </div>
@@ -1889,9 +2498,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             {athleticIcons
               .filter((icon: { file: string }) => icon.file.includes("/teams/"))
               .map((icon: { name: string; file: string }) => (
-                <div key={icon.name} style={{
-                  border: "1px solid #e8e5e0", borderRadius: 8, padding: 8,
-                  background: "#fafafa", display: "flex", flexDirection: "column",
+                <div key={icon.name} className="dd-brand-card" style={{
+                  padding: 8,
+                  display: "flex", flexDirection: "column",
                   alignItems: "center", gap: 4,
                 }}>
                   <div style={{
@@ -1901,7 +2510,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={icon.file} alt={icon.name} style={{ width: 36, height: 36, objectFit: "contain" }} />
                   </div>
-                  <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, fontWeight: 600, color: "#121212", textAlign: "center" }}>
+                  <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, fontWeight: 600, color: "var(--dd-brand-text-primary)", textAlign: "center" }}>
                     {icon.name}
                   </div>
                 </div>
@@ -1912,13 +2521,13 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
 
       {/* ── 7a. Typography (fonts used in this article) ── */}
       {article.fonts.length > 0 && (
-        <div style={{ borderTop: "1px solid #e8e5e0", paddingTop: 24, marginTop: 16, marginBottom: 32 }}>
+        <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16, marginBottom: 32 }}>
           <h3
             style={{
               fontFamily: "var(--dd-font-headline, Georgia, serif)",
               fontSize: 22,
               fontWeight: 700,
-              color: "#121212",
+              color: "var(--dd-brand-text-primary)",
               marginTop: 0,
               marginBottom: 16,
             }}
@@ -1929,33 +2538,31 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             {article.fonts.map((f) => (
               <div
                 key={f.name}
+                className="dd-brand-card"
                 style={{
-                  border: "1px solid #e8e5e0",
-                  borderRadius: 6,
                   padding: 16,
-                  background: "#fafafa",
                 }}
               >
                 {/* Font header */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-                  <div style={{ fontFamily: "var(--dd-font-headline, Georgia, serif)", fontSize: 20, fontWeight: 600, color: "#121212" }}>
+                  <div style={{ fontFamily: "var(--dd-font-headline, Georgia, serif)", fontSize: 20, fontWeight: 600, color: "var(--dd-brand-text-primary)" }}>
                     {f.name}
                   </div>
-                  <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 11, color: "#727272" }}>
+                  <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 11, color: "var(--dd-brand-text-muted)" }}>
                     Weights: {f.weights.join(", ")}
                   </div>
                 </div>
-                <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11, fontWeight: 700, color: "#326891", textTransform: "uppercase" as const, letterSpacing: "0.05em", marginBottom: 4 }}>
+                <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11, fontWeight: 700, color: "var(--dd-brand-accent)", textTransform: "uppercase" as const, letterSpacing: "0.05em", marginBottom: 4 }}>
                   {f.role}
                 </div>
                 {f.fullStack && (
-                  <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#969693", marginBottom: 8 }}>
+                  <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginBottom: 8 }}>
                     {f.fullStack}
                   </div>
                 )}
                 {/* Each unique style config as a numbered list */}
-                <div style={{ borderTop: "1px solid #e8e5e0", paddingTop: 8, marginTop: 4 }}>
-                  <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 10, fontWeight: 700, color: "#52524F", textTransform: "uppercase" as const, letterSpacing: "0.04em", marginBottom: 6 }}>
+                <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 8, marginTop: 4 }}>
+                  <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 10, fontWeight: 700, color: "var(--dd-brand-text-secondary)", textTransform: "uppercase" as const, letterSpacing: "0.04em", marginBottom: 6 }}>
                     Style Configs
                   </div>
                   {(() => {
@@ -1971,24 +2578,24 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     return (
                       <div key={ui} style={{
                         display: "flex", gap: 8, alignItems: "flex-start",
-                        padding: "4px 0", borderBottom: ui < usedInEntries.length - 1 ? "1px solid #f0f0ee" : "none",
+                        padding: "4px 0", borderBottom: ui < usedInEntries.length - 1 ? "1px solid var(--dd-brand-border)" : "none",
                       }}>
-                        <span style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#969693", minWidth: 16, textAlign: "right", flexShrink: 0 }}>
+                        <span style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", minWidth: 16, textAlign: "right", flexShrink: 0 }}>
                           {ui + 1}.
                         </span>
                         {hexColor && (
                           <span style={{
                             display: "inline-block", width: 12, height: 12, borderRadius: 2,
-                            background: hexColor, border: "1px solid #e0e0e0", flexShrink: 0, marginTop: 1,
+                            background: hexColor, border: "1px solid var(--dd-brand-border)", flexShrink: 0, marginTop: 1,
                           }} />
                         )}
                         <div style={{ flex: 1 }}>
-                          <span style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 11, color: "#121212", lineHeight: 1.4 }}>
+                          <span style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 11, color: "var(--dd-brand-text-primary)", lineHeight: 1.4 }}>
                             {className && (
-                              <span style={{ color: "#326891", fontWeight: 600 }}>{className}</span>
+                              <span style={{ color: "var(--dd-brand-accent)", fontWeight: 600 }}>{className}</span>
                             )}
                             {className && ": "}
-                            <span style={{ color: "#52524F" }}>{specs}</span>
+                            <span style={{ color: "var(--dd-brand-text-secondary)" }}>{specs}</span>
                           </span>
                           {/* Live font specimen */}
                           {(() => {
@@ -1998,9 +2605,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                               <div style={{
                                 marginTop: 6,
                                 padding: 12,
-                                border: "1px solid #e8e5e0",
+                                border: "1px solid var(--dd-brand-border)",
                                 borderRadius: 4,
-                                background: "#fff",
+                                background: "var(--dd-brand-surface)",
                                 maxWidth: 600,
                                 overflow: "hidden",
                               }}>
@@ -2108,13 +2715,13 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         }
 
         return (
-          <div style={{ borderTop: "1px solid #e8e5e0", paddingTop: 24, marginTop: 0, marginBottom: 32 }}>
+          <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 0, marginBottom: 32 }}>
             <h3
               style={{
                 fontFamily: "var(--dd-font-headline, Georgia, serif)",
                 fontSize: 22,
                 fontWeight: 700,
-                color: "#121212",
+                color: "var(--dd-brand-text-primary)",
                 marginTop: 0,
                 marginBottom: 16,
               }}
@@ -2125,7 +2732,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
               <div key={group.label} style={{ marginBottom: 20 }}>
                 <div style={{
                   fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 12, fontWeight: 600,
-                  color: "#363636", marginBottom: 8, textTransform: "uppercase" as const, letterSpacing: "0.04em",
+                  color: "var(--dd-brand-text-secondary)", marginBottom: 8, textTransform: "uppercase" as const, letterSpacing: "0.04em",
                 }}>
                   {group.label}
                 </div>
@@ -2136,12 +2743,12 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                       <div key={`${c.hex}-${ci}`} style={{ textAlign: "center", maxWidth: 64 }}>
                         <div style={{
                           width: 36, height: 36, borderRadius: 4,
-                          background: isValidHex ? c.hex : "#f0f0ee",
-                          border: "1px solid #e0e0e0", margin: "0 auto 4px",
+                          background: isValidHex ? c.hex : "var(--dd-brand-surface)",
+                          border: "1px solid var(--dd-brand-border)", margin: "0 auto 4px",
                         }} />
-                        <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "#727272", wordBreak: "break-all" as const }}>{c.hex}</div>
-                        <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 9, color: "#999", lineHeight: 1.2 }}>{c.name}</div>
-                        {c.note && <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 8, color: "#b0b0b0", lineHeight: 1.1, marginTop: 1 }}>{c.note}</div>}
+                        <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "var(--dd-brand-text-muted)", wordBreak: "break-all" as const }}>{c.hex}</div>
+                        <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 9, color: "var(--dd-brand-text-muted)", lineHeight: 1.2 }}>{c.name}</div>
+                        {c.note && <div style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 8, color: "var(--dd-brand-text-muted)", lineHeight: 1.1, marginTop: 1 }}>{c.note}</div>}
                       </div>
                     );
                   })}
@@ -2166,8 +2773,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
               fontFamily: "var(--dd-font-headline, Georgia, serif)",
               fontSize: 22,
               fontWeight: 700,
-              color: "#121212",
-              borderTop: "1px solid #e8e5e0",
+              color: "var(--dd-brand-text-primary)",
+              borderTop: "1px solid var(--dd-brand-border)",
               paddingTop: 24,
               marginTop: 0,
               marginBottom: 16,
@@ -2175,7 +2782,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           >
             Chart Types
           </h3>
-          <div style={{ overflow: "hidden", border: "1px solid #e8e5e0", borderRadius: 6, marginBottom: 24 }}>
+          <div style={{ overflow: "hidden", border: "1px solid var(--dd-brand-border)", borderRadius: 6, marginBottom: 24 }}>
             <table
               style={{
                 width: "100%",
@@ -2185,19 +2792,19 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
               }}
             >
               <thead>
-                <tr style={{ background: "#f7f5f0", borderBottom: "1px solid #e8e5e0" }}>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "#363636" }}>Tool</th>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "#363636" }}>Type</th>
-                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "#363636" }}>Topic</th>
+                <tr style={{ background: "var(--dd-brand-surface)", borderBottom: "1px solid var(--dd-brand-border)" }}>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "var(--dd-brand-text-secondary)" }}>Tool</th>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "var(--dd-brand-text-secondary)" }}>Type</th>
+                  <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "var(--dd-brand-text-secondary)" }}>Topic</th>
                 </tr>
               </thead>
               <tbody>
                 {article.chartTypes.map((ct, i) => (
-                  <tr key={i} style={{ borderBottom: i < article.chartTypes.length - 1 ? "1px solid #f0ede8" : "none" }}>
-                    <td style={{ padding: "8px 12px", fontWeight: 600, color: "#363636" }}>
+                  <tr key={i} style={{ borderBottom: i < article.chartTypes.length - 1 ? "1px solid var(--dd-brand-border)" : "none" }}>
+                    <td style={{ padding: "8px 12px", fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>
                       {ct.tool}
                     </td>
-                    <td style={{ padding: "8px 12px", color: "#727272" }}>
+                    <td style={{ padding: "8px 12px", color: "var(--dd-brand-text-muted)" }}>
                       <span style={{
                         display: "inline-block",
                         fontSize: 11,
@@ -2210,7 +2817,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                         {ct.type.charAt(0).toUpperCase() + ct.type.slice(1).replace("-", " ")}
                       </span>
                     </td>
-                    <td style={{ padding: "8px 12px", color: "#727272" }}>
+                    <td style={{ padding: "8px 12px", color: "var(--dd-brand-text-muted)" }}>
                       {ct.topic}
                     </td>
                   </tr>
@@ -2223,13 +2830,13 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
 
       {/* ── 8. Images — ai2html comparisons + Social/OG ── */}
       {(publicAssets?.socialImages?.length || hasReportCard || hasAi2htmlArtboards) && (
-        <div style={{ borderTop: "1px solid #e8e5e0", paddingTop: 24, marginTop: 16 }}>
+        <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16 }}>
           <h3
             style={{
               fontFamily: "var(--dd-font-headline, Georgia, serif)",
               fontSize: 22,
               fontWeight: 700,
-              color: "#121212",
+              color: "var(--dd-brand-text-primary)",
               marginTop: 0,
               marginBottom: 20,
             }}
@@ -2245,7 +2852,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 fontFamily: "var(--dd-font-ui, sans-serif)",
                 fontSize: 11,
                 fontWeight: 700,
-                color: "#326891",
+                color: "var(--dd-brand-accent)",
                 textTransform: "uppercase" as const,
                 letterSpacing: "0.05em",
                 marginBottom: 10,
@@ -2258,10 +2865,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     <ClickableImage
                       src={publicAssets.reportCard.mobile.url}
                       alt={`Blank artboard (mobile) · ${publicAssets.reportCard.mobile.width || 320}px · PNG`}
-                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid #e8e5e0", borderRadius: 4, display: "block" }}
+                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid var(--dd-brand-border)", borderRadius: 4, display: "block" }}
                     />
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 4, lineHeight: 1.4 }}>
-                      <span style={{ fontWeight: 600, color: "#363636" }}>Artboard_2 (mobile)</span> · {publicAssets.reportCard.mobile.width || 320}px · PNG
+                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 4, lineHeight: 1.4 }}>
+                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Artboard_2 (mobile)</span> · {publicAssets.reportCard.mobile.width || 320}px · PNG
                     </div>
                   </div>
                 )}
@@ -2270,10 +2877,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     <ClickableImage
                       src={publicAssets.reportCard.desktop.url}
                       alt={`Blank artboard (desktop) · ${publicAssets.reportCard.desktop.width || 600}px · PNG`}
-                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid #e8e5e0", borderRadius: 4, display: "block" }}
+                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid var(--dd-brand-border)", borderRadius: 4, display: "block" }}
                     />
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 4, lineHeight: 1.4 }}>
-                      <span style={{ fontWeight: 600, color: "#363636" }}>Artboard_3 (desktop)</span> · {publicAssets.reportCard.desktop.width || 600}px · PNG
+                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 4, lineHeight: 1.4 }}>
+                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Artboard_3 (desktop)</span> · {publicAssets.reportCard.desktop.width || 600}px · PNG
                     </div>
                   </div>
                 )}
@@ -2288,7 +2895,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 fontFamily: "var(--dd-font-ui, sans-serif)",
                 fontSize: 11,
                 fontWeight: 700,
-                color: "#326891",
+                color: "var(--dd-brand-accent)",
                 textTransform: "uppercase" as const,
                 letterSpacing: "0.05em",
                 marginBottom: 10,
@@ -2301,10 +2908,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     <ClickableImage
                       src={publicAssets.ai2htmlArtboards.mobile.url}
                       alt={`Blank flowchart (mobile) · ${publicAssets.ai2htmlArtboards.mobile.width || 335}px · JPG`}
-                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid #e8e5e0", borderRadius: 4, display: "block" }}
+                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid var(--dd-brand-border)", borderRadius: 4, display: "block" }}
                     />
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 4, lineHeight: 1.4 }}>
-                      <span style={{ fontWeight: 600, color: "#363636" }}>Artboard_copy_4 (mobile)</span> · {publicAssets.ai2htmlArtboards.mobile.width || 335}px · JPG
+                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 4, lineHeight: 1.4 }}>
+                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Artboard_copy_4 (mobile)</span> · {publicAssets.ai2htmlArtboards.mobile.width || 335}px · JPG
                     </div>
                   </div>
                 )}
@@ -2313,10 +2920,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     <ClickableImage
                       src={publicAssets.ai2htmlArtboards.desktop.url}
                       alt={`Blank flowchart (desktop) · ${publicAssets.ai2htmlArtboards.desktop.width || 600}px · JPG`}
-                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid #e8e5e0", borderRadius: 4, display: "block" }}
+                      style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid var(--dd-brand-border)", borderRadius: 4, display: "block" }}
                     />
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 4, lineHeight: 1.4 }}>
-                      <span style={{ fontWeight: 600, color: "#363636" }}>Artboard_copy_5 (desktop)</span> · {publicAssets.ai2htmlArtboards.desktop.width || 600}px · JPG
+                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 4, lineHeight: 1.4 }}>
+                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Artboard_copy_5 (desktop)</span> · {publicAssets.ai2htmlArtboards.desktop.width || 600}px · JPG
                     </div>
                   </div>
                 )}
@@ -2332,7 +2939,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 fontFamily: "var(--dd-font-ui, sans-serif)",
                 fontSize: 11,
                 fontWeight: 700,
-                color: "#326891",
+                color: "var(--dd-brand-accent)",
                 textTransform: "uppercase" as const,
                 letterSpacing: "0.05em",
                 marginBottom: 10,
@@ -2358,7 +2965,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                             width: "100%",
                             maxHeight: 120,
                             objectFit: "cover",
-                            border: "1px solid #e8e5e0",
+                            border: "1px solid var(--dd-brand-border)",
                             borderRadius: 4,
                             display: "block",
                           }}
@@ -2367,15 +2974,15 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                           style={{
                             fontFamily: "var(--dd-font-mono, monospace)",
                             fontSize: 10,
-                            color: "#727272",
+                            color: "var(--dd-brand-text-muted)",
                             marginTop: 4,
                             lineHeight: 1.4,
                           }}
                         >
-                          <span style={{ fontWeight: 600, color: "#363636" }}>{img.name}</span>
+                          <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>{img.name}</span>
                           {" · "}{img.ratio}
                           {img.width ? ` · ${img.width}px` : ""}
-                          {" · "}<span style={{ color: "#969693", textTransform: "uppercase" as const }}>{ext}</span>
+                          {" · "}<span style={{ color: "var(--dd-brand-text-muted)", textTransform: "uppercase" as const }}>{ext}</span>
                         </div>
                       </div>
                     );
@@ -2390,7 +2997,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
       {/* ── 9. Metadata Footer ── */}
       <div
         style={{
-          borderTop: "1px solid #e8e5e0",
+          borderTop: "1px solid var(--dd-brand-border)",
           paddingTop: 24,
           marginTop: 16,
         }}
@@ -2401,7 +3008,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             fontFamily: "var(--dd-font-ui, sans-serif)",
             fontSize: 13,
             fontWeight: 700,
-            color: "#121212",
+            color: "var(--dd-brand-text-primary)",
             marginBottom: 8,
             textTransform: "uppercase",
             letterSpacing: "0.05em",
@@ -2421,10 +3028,16 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         >
           {Object.entries(article.tools).map(([key, val]) => (
             <div key={key} style={{ display: "contents" }}>
-              <span style={{ fontWeight: 600, color: "#363636", textTransform: "capitalize" }}>
+              <span
+                style={{
+                  fontWeight: 600,
+                  color: "var(--dd-brand-text-secondary)",
+                  textTransform: "capitalize",
+                }}
+              >
                 {key}
               </span>
-              <span style={{ color: "#727272" }}>{val}</span>
+              <span style={{ color: "var(--dd-brand-text-muted)" }}>{val}</span>
             </div>
           ))}
         </div>
@@ -2437,7 +3050,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 fontFamily: "var(--dd-font-ui, sans-serif)",
                 fontSize: 13,
                 fontWeight: 700,
-                color: "#121212",
+                color: "var(--dd-brand-text-primary)",
                 marginBottom: 8,
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
@@ -2457,26 +3070,26 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             >
               {a.architecture.framework && (
                 <div style={{ display: "contents" }}>
-                  <span style={{ fontWeight: 600, color: "#363636" }}>Framework</span>
-                  <span style={{ color: "#727272" }}>{a.architecture.framework}</span>
+                  <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Framework</span>
+                  <span style={{ color: "var(--dd-brand-text-muted)" }}>{a.architecture.framework}</span>
                 </div>
               )}
               {a.architecture.projectId && (
                 <div style={{ display: "contents" }}>
-                  <span style={{ fontWeight: 600, color: "#363636" }}>Project ID</span>
-                  <span style={{ color: "#727272", fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)", fontSize: 12 }}>{a.architecture.projectId}</span>
+                  <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Project ID</span>
+                  <span style={{ color: "var(--dd-brand-text-muted)", fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)", fontSize: 12 }}>{a.architecture.projectId}</span>
                 </div>
               )}
               {a.architecture.hydrationId && (
                 <div style={{ display: "contents" }}>
-                  <span style={{ fontWeight: 600, color: "#363636" }}>Hydration ID</span>
-                  <span style={{ color: "#727272", fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)", fontSize: 12 }}>{a.architecture.hydrationId}</span>
+                  <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Hydration ID</span>
+                  <span style={{ color: "var(--dd-brand-text-muted)", fontFamily: "var(--dd-font-mono, 'SF Mono', monospace)", fontSize: 12 }}>{a.architecture.hydrationId}</span>
                 </div>
               )}
               {a.architecture.hosting && (
                 <div style={{ display: "contents" }}>
-                  <span style={{ fontWeight: 600, color: "#363636" }}>Hosting</span>
-                  <span style={{ color: "#727272" }}>{a.architecture.hosting}</span>
+                  <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Hosting</span>
+                  <span style={{ color: "var(--dd-brand-text-muted)" }}>{a.architecture.hosting}</span>
                 </div>
               )}
             </div>
@@ -2489,7 +3102,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             fontFamily: "var(--dd-font-ui, sans-serif)",
             fontSize: 13,
             fontWeight: 700,
-            color: "#121212",
+            color: "var(--dd-brand-text-primary)",
             marginBottom: 8,
             textTransform: "uppercase",
             letterSpacing: "0.05em",
@@ -2505,9 +3118,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 fontFamily: "var(--dd-font-ui, sans-serif)",
                 fontSize: 11,
                 fontWeight: 500,
-                color: "#363636",
-                background: "#f7f5f0",
-                border: "1px solid #e8e5e0",
+                color: "var(--dd-brand-text-secondary)",
+                background: "var(--dd-brand-accent-bg)",
+                border: "1px solid var(--dd-brand-border)",
                 borderRadius: 3,
                 padding: "3px 8px",
               }}

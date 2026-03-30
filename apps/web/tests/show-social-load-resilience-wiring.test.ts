@@ -22,7 +22,7 @@ describe("show social load resilience wiring", () => {
     expect(contents).toMatch(/adminGetJson<\{ show\?: TrrShow \}>/);
     expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}/);
     expect(contents).toMatch(/adminGetJson<\{ seasons\?: TrrSeason\[] \}>/);
-    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}\/seasons\?limit=50/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}\/seasons\?limit=50&include_episode_signal=true/);
     expect(contents).toMatch(/adminGetJson\(/);
     expect(contents).toMatch(/\/api\/admin\/covered-shows\/\$\{requestShowId\}/);
     expect(contents).toMatch(/timeoutMs:\s*SHOW_CORE_LOAD_TIMEOUT_MS/);
@@ -42,6 +42,7 @@ describe("show social load resilience wiring", () => {
     const contents = fs.readFileSync(pagePath, "utf8");
 
     expect(contents).toMatch(/if \(activeTab !== "seasons"\) return;/);
+    expect(contents).toMatch(/const missingSummaries = seasons\.filter\(\(season\) => !buildSeasonEpisodeSummary\(season\)\);/);
   });
 
   it("batches season episode summary failures into a single warning", () => {

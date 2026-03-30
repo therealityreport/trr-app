@@ -1,6 +1,6 @@
 # Social Account Profile WWHL Alias Canonicalization
 
-Last updated: 2026-03-21
+Last updated: 2026-03-30
 
 ## Status
 - App phase complete.
@@ -18,10 +18,10 @@ Last updated: 2026-03-21
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-21
-  current_phase: "app alias redirect and route canonicalization shipped"
-  next_action: "add future social-handle aliases to the shared route helper so links and redirects stay canonical"
+  include: false
+  state: archived
+  last_updated: 2026-03-30
+  current_phase: "archived continuity note"
+  next_action: "Refer to newer status notes if follow-up work resumes on this thread."
   detail: self
 ```

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
@@ -361,8 +360,8 @@ export default function DevDashboardPage() {
   return (
     <ClientOnly>
       <DevDashboardShell
-        activeRoute="/admin/dev-dashboard"
-        breadcrumbItems={buildAdminSectionBreadcrumb("Dev Dashboard", "/admin/dev-dashboard")}
+        activeRoute="/dev-dashboard"
+        breadcrumbItems={buildAdminSectionBreadcrumb("Dev Dashboard", "/dev-dashboard")}
         title="Dev Dashboard"
         description="Cross-repo git state, PRs, and outstanding task signals. Refresh the browser to update."
         generatedAt={data?.generatedAt}

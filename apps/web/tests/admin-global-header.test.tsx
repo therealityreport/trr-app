@@ -29,7 +29,7 @@ describe("AdminGlobalHeader", () => {
     );
 
     expect(screen.getByRole("img", { name: "The Reality Report" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to admin dashboard" })).toHaveAttribute("href", "/admin");
+    expect(screen.getByRole("link", { name: "Go to admin dashboard" })).toHaveAttribute("href", "/");
     expect(screen.getByText("Header body content")).toBeInTheDocument();
   });
 
@@ -62,7 +62,7 @@ describe("AdminGlobalHeader", () => {
 
     expect(screen.getByRole("button", { name: "Toggle shows submenu" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("No recent shows yet.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/shows");
+    expect(screen.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/shows");
   });
 
   it("renders recent shows from storage and limits to five", async () => {
@@ -155,6 +155,14 @@ describe("AdminGlobalHeader", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<AdminGlobalHeader />);
+
+    expect(
+      screen.queryByRole("searchbox", {
+        name: "Search shows, people, and episodes",
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open admin search" }));
 
     const input = screen.getByRole("searchbox", {
       name: "Search shows, people, and episodes",

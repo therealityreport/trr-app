@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { isCastScreentimeAdminEnabled } from "@/lib/server/admin/cast-screentime-access";
+import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +27,12 @@ async function forward(request: NextRequest, method: string, { params }: RoutePa
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!serviceRoleKey) {
+    let serviceRoleKey: string;
+    try {
+      serviceRoleKey = getTrrAdminServiceKey();
+    } catch {
       return NextResponse.json(
-        { error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_ROLE_KEY) is not configured" },
+        { error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not configured" },
         { status: 500 },
       );
     }

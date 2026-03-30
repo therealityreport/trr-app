@@ -21,10 +21,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#121212",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #121212",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -551,7 +551,7 @@ export default function BrandAthleticComponents() {
     <div>
       {/* ── Brand Header ───────────────────────────────── */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "32px 40px",
           marginBottom: 40,
@@ -562,7 +562,7 @@ export default function BrandAthleticComponents() {
             fontFamily: "var(--dd-font-sans)",
             fontWeight: 700,
             fontSize: 32,
-            color: "var(--dd-ink-black)",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -573,7 +573,7 @@ export default function BrandAthleticComponents() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "var(--dd-ink-faint)",
+            color: "var(--dd-brand-text-secondary)",
             lineHeight: 1.5,
           }}
         >
@@ -594,7 +594,7 @@ export default function BrandAthleticComponents() {
         {CONTENT_BLOCKS.map((block) => (
           <div
             key={block.type}
-            className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+            className="dd-brand-card"
             style={{
               padding: "16px 20px",
             }}
@@ -605,8 +605,8 @@ export default function BrandAthleticComponents() {
                   fontFamily: "var(--dd-font-mono)",
                   fontSize: 11,
                   fontWeight: 700,
-                  color: "#121212",
-                  background: "#f5f5f5",
+                  color: "var(--dd-brand-text-primary)",
+                  background: "var(--dd-brand-surface, #f5f5f5)",
                   borderRadius: 4,
                   padding: "2px 8px",
                 }}
@@ -652,7 +652,7 @@ export default function BrandAthleticComponents() {
         {ARCH_PATTERNS.map((p) => (
           <div
             key={p.name}
-            className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+            className="dd-brand-card"
             style={{
               padding: "16px 20px",
             }}
@@ -696,7 +696,7 @@ export default function BrandAthleticComponents() {
       {/* ── Site Header Specimen ─────────────────────────── */}
       <SectionLabel id="site-header">Site Header</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{ padding: "28px 32px", marginBottom: 40 }}
       >
         <div
@@ -873,7 +873,7 @@ export default function BrandAthleticComponents() {
       {/* ── Site Footer Specimen ─────────────────────────── */}
       <SectionLabel id="site-footer">Site Footer</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{ padding: "28px 32px", marginBottom: 40 }}
       >
         <div
@@ -1199,7 +1199,7 @@ export default function BrandAthleticComponents() {
       </p>
 
       {/* ── Pattern 1: Storyline Bar ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Storyline Bar &mdash; Horizontal scrolling bar with bold title and story links
         </div>
@@ -1284,7 +1284,7 @@ export default function BrandAthleticComponents() {
       </div>
 
       {/* ── Pattern 2: Featured Article Card ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Featured Article Card &mdash; Full-width hero image with headline and author avatar
         </div>
@@ -1398,7 +1398,7 @@ export default function BrandAthleticComponents() {
       </div>
 
       {/* ── Pattern 3: Showcase Link Card ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Showcase Link Card &mdash; Inline recommendation with image and excerpt
         </div>
@@ -1505,7 +1505,7 @@ export default function BrandAthleticComponents() {
       </div>
 
       {/* ── Pattern 4: Content Feed Section ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Content Feed Section &mdash; Vertical list with thumbnails and section header
         </div>
@@ -1626,7 +1626,7 @@ export default function BrandAthleticComponents() {
       </div>
 
       {/* ── Pattern 5: Puzzle Entry Point Card ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Puzzle Entry Point Card &mdash; Game promotion card with play CTA
         </div>
@@ -1729,7 +1729,7 @@ export default function BrandAthleticComponents() {
       {/* ── Brand Design Patterns (specimens) ─────────── */}
       <SectionLabel id="brand-patterns">Brand Design Patterns</SectionLabel>
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "28px 32px",
           marginBottom: 40,

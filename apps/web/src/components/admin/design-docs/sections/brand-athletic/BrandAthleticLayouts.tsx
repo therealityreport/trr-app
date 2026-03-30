@@ -22,10 +22,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#121212",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #121212",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -105,7 +105,7 @@ function MetaRow({
 function WireframeCard({ children, title }: { children: React.ReactNode; title: string }) {
   return (
     <div
-      className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+      className="dd-brand-card"
       style={{ marginBottom: 40, overflow: "hidden" }}
     >
       <div style={{ padding: "20px 24px 16px" }}>
@@ -114,7 +114,7 @@ function WireframeCard({ children, title }: { children: React.ReactNode; title: 
             fontFamily: "var(--dd-font-sans)",
             fontSize: 14,
             fontWeight: 700,
-            color: "#121212",
+            color: "var(--dd-brand-text-primary)",
             marginBottom: 16,
           }}
         >
@@ -180,7 +180,7 @@ export default function BrandAthleticLayouts() {
     <div>
       {/* ── Brand Header ───────────────────────────────── */}
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{
           padding: "32px 40px",
           marginBottom: 40,
@@ -191,7 +191,7 @@ export default function BrandAthleticLayouts() {
             fontFamily: "var(--dd-font-sans)",
             fontWeight: 700,
             fontSize: 32,
-            color: "var(--dd-ink-black)",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.01em",
             marginBottom: 8,
           }}
@@ -202,7 +202,7 @@ export default function BrandAthleticLayouts() {
           style={{
             fontFamily: "var(--dd-font-body)",
             fontSize: 16,
-            color: "var(--dd-ink-faint)",
+            color: "var(--dd-brand-text-secondary)",
             lineHeight: 1.5,
           }}
         >
@@ -450,7 +450,7 @@ export default function BrandAthleticLayouts() {
       <SectionLabel id="layout-most-popular">6. Most Popular</SectionLabel>
       <WireframeCard title="Most Popular (Numbered)">
         {/* Header */}
-        <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 18, fontWeight: 700, color: "#121212", marginBottom: 12 }}>
+        <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 18, fontWeight: 700, color: "var(--dd-brand-text-primary)", marginBottom: 12 }}>
           <MonoLabel>RegularSlabInline 32px &mdash; &quot;Most Popular&quot;</MonoLabel>
         </div>
         <div style={{ display: "flex", gap: 16, minHeight: 280 }}>
@@ -517,7 +517,7 @@ export default function BrandAthleticLayouts() {
         <div style={{ border: DOTTED_BORDER, borderRadius: 6, padding: 16, maxWidth: 360 }}>
           {/* Header row */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontFamily: "var(--dd-font-sans)", fontSize: 13, fontWeight: 700, color: "#121212" }}>Headlines</span>
+            <span style={{ fontFamily: "var(--dd-font-sans)", fontSize: 13, fontWeight: 700, color: "var(--dd-brand-text-primary)" }}>Headlines</span>
             <span style={{ fontFamily: "var(--dd-font-mono)", fontSize: 9, color: "#888" }}>See all &rarr;</span>
           </div>
           <MonoLabel>SubmoduleHeadlinesList_headlinesMobileBox</MonoLabel>
@@ -731,8 +731,8 @@ export default function BrandAthleticLayouts() {
               { n: "9", pattern: "Ad Slot", cls: "ad-wrapper", grid: "Full-width centered", bp: "margin: 40px mobile" },
             ].map((row, i) => (
               <tr key={row.n}>
-                <td style={{ padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#f9f9f9" : "white", fontWeight: 700, color: "#121212" }}>{row.n}</td>
-                <td style={{ padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#f9f9f9" : "white", color: "#121212", fontWeight: 600 }}>{row.pattern}</td>
+                <td style={{ padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#f9f9f9" : "white", fontWeight: 700, color: "var(--dd-brand-text-primary)" }}>{row.n}</td>
+                <td style={{ padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#f9f9f9" : "white", color: "var(--dd-brand-text-primary)", fontWeight: 600 }}>{row.pattern}</td>
                 <td style={{ padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#f9f9f9" : "white", color: "#555" }}>{row.cls}</td>
                 <td style={{ padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#f9f9f9" : "white", color: "#555" }}>{row.grid}</td>
                 <td style={{ padding: "6px 12px", borderBottom: "1px solid #f0f0f0", background: i % 2 === 0 ? "#f9f9f9" : "white", color: "#888" }}>{row.bp}</td>

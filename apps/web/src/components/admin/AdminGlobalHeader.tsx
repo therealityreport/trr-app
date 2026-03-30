@@ -62,7 +62,7 @@ export default function AdminGlobalHeader({ children, bodyClassName = "px-6 py-6
             </svg>
           </button>
 
-          <Link href="/admin" className="transition hover:opacity-80" aria-label="Go to admin dashboard">
+          <Link href="/" className="transition hover:opacity-80" aria-label="Go to admin dashboard">
             <Image
               src="/images/logos/FullName-Black.png"
               alt="The Reality Report"

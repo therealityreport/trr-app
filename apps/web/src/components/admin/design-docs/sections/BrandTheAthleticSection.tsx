@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 /* ================================================================
@@ -61,63 +62,63 @@ function countIcons(): number {
 
 const TABS = [
   {
-    href: "/admin/design-docs/brand-the-athletic/typography",
+    href: buildDesignDocsPath("brand-the-athletic/typography"),
     label: "Typography",
     description: "Cheltenham, Franklin, Imperial, RegularSlab — all weights, specimens, and usage",
     stat: `${countFonts()} font families`,
     accent: "#1DB954",
   },
   {
-    href: "/admin/design-docs/brand-the-athletic/colors",
+    href: buildDesignDocsPath("brand-the-athletic/colors"),
     label: "Colors",
     description: "18-step gray system, heatmap gradient, page/header/footer/dark mode palettes, CSS variables",
     stat: "50+ colors",
     accent: "#F5A623",
   },
   {
-    href: "/admin/design-docs/brand-the-athletic/components",
+    href: buildDesignDocsPath("brand-the-athletic/components"),
     label: "Components",
     description: "Article + homepage components: header, hamburger menu, content cards, Connections module, buttons, tables",
     stat: `${countComponents()} types`,
     accent: "#E74C3C",
   },
   {
-    href: "/admin/design-docs/brand-the-athletic/icons",
+    href: buildDesignDocsPath("brand-the-athletic/icons"),
     label: "Icons",
     description: "All SVGs, team logos, league logos, social icons, wordmark, Connections assets",
     stat: "17 assets",
     accent: "#3C5634",
   },
   {
-    href: "/admin/design-docs/brand-the-athletic/layouts",
+    href: buildDesignDocsPath("brand-the-athletic/layouts"),
     label: "Layouts",
     description: "Homepage layout patterns: Three-Topper, Curation modules, Most Popular, Four-Column Grid",
     stat: "9 patterns",
     accent: "#225FA7",
   },
   {
-    href: "/admin/design-docs/brand-the-athletic/layout",
+    href: buildDesignDocsPath("brand-the-athletic/layout"),
     label: "Layout",
     description: "1248px max-width, 12-col grid, responsive breakpoints, DOM hierarchy",
     stat: "15+ tokens",
     accent: "#497AB8",
   },
   {
-    href: "/admin/design-docs/brand-the-athletic/shapes",
+    href: buildDesignDocsPath("brand-the-athletic/shapes"),
     label: "Shapes & Radius",
     description: "Border radius scale, card shadows, avatar shapes, button radius",
     stat: "6 scale steps",
     accent: "#943848",
   },
   {
-    href: "/admin/design-docs/brand-the-athletic/resources",
+    href: buildDesignDocsPath("brand-the-athletic/resources"),
     label: "Resources",
     description: `Icons, team logos, Datawrapper theme, CSS files, social images`,
     stat: `${countIcons()} icons`,
     accent: "#105E5E",
   },
   {
-    href: "/admin/design-docs/athletic-articles",
+    href: buildDesignDocsPath("athletic-articles"),
     label: "Pages",
     description: "Article-level design breakdowns with heatmap tables, typography, and team logos",
     stat: `${athleticArticles.length} article${athleticArticles.length !== 1 ? "s" : ""}`,
@@ -152,7 +153,7 @@ export default function BrandTheAthleticSection() {
               style={{
                 fontSize: 28,
                 fontWeight: 700,
-                color: "#121212",
+                color: "var(--dd-brand-stat-number)",
                 lineHeight: 1,
               }}
             >
@@ -180,7 +181,7 @@ export default function BrandTheAthleticSection() {
           <Link
             key={tab.href}
             href={tab.href as Route}
-            className="group rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md hover:border-zinc-300"
+            className="dd-brand-card group p-5"
             style={{ display: "block", textDecoration: "none" }}
           >
             {/* Accent bar */}
@@ -189,7 +190,7 @@ export default function BrandTheAthleticSection() {
                 width: 40,
                 height: 4,
                 borderRadius: 2,
-                background: tab.accent,
+                background: "var(--dd-brand-accent)",
                 marginBottom: 12,
               }}
             />
@@ -200,7 +201,7 @@ export default function BrandTheAthleticSection() {
                 fontFamily: "var(--dd-font-sans)",
                 fontSize: 15,
                 fontWeight: 600,
-                color: "var(--dd-ink-black)",
+                color: "var(--dd-brand-text-primary)",
                 marginBottom: 2,
               }}
             >
@@ -208,7 +209,7 @@ export default function BrandTheAthleticSection() {
             </div>
             <div
               className="font-mono"
-              style={{ fontSize: 10, color: "#52524F", marginBottom: 8 }}
+              style={{ fontSize: 10, color: "var(--dd-brand-text-secondary)", marginBottom: 8 }}
             >
               {tab.stat}
             </div>
@@ -232,7 +233,7 @@ export default function BrandTheAthleticSection() {
                 fontFamily: "var(--dd-font-sans)",
                 fontSize: 12,
                 fontWeight: 600,
-                color: "#121212",
+                color: "var(--dd-brand-link)",
                 opacity: 0.4,
                 transition: "opacity 150ms",
               }}
@@ -253,21 +254,21 @@ export default function BrandTheAthleticSection() {
               fontWeight: 600,
               textTransform: "uppercase" as const,
               letterSpacing: "0.12em",
-              color: "#121212",
+              color: "var(--dd-brand-accent)",
               marginBottom: 12,
-              borderLeft: "3px solid #121212",
+              borderLeft: "3px solid var(--dd-brand-accent)",
               paddingLeft: 10,
             }}
           >
             Articles
           </h3>
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm overflow-x-auto">
+          <div className="dd-brand-card overflow-x-auto p-4">
             <table
               className="w-full text-left"
               style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
             >
               <thead>
-                <tr style={{ borderBottom: "1px solid #e5e5e5" }}>
+                <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
                   <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Title</th>
                   <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Date</th>
                   <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Section</th>
@@ -276,11 +277,11 @@ export default function BrandTheAthleticSection() {
               </thead>
               <tbody>
                 {athleticArticles.map((article) => (
-                  <tr key={article.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <tr key={article.id} style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
                     <td className="py-1.5 pr-4">
                       <Link
-                        href={`/admin/design-docs/athletic-articles/${article.id}` as Route}
-                        style={{ color: "#386C92", textDecoration: "underline", fontWeight: 500 }}
+                        href={buildDesignDocsPath(`athletic-articles/${article.id}`)}
+                        style={{ color: "var(--dd-brand-link)", textDecoration: "underline", fontWeight: 500 }}
                       >
                         {article.title.length > 55 ? `${article.title.slice(0, 52)}…` : article.title}
                       </Link>

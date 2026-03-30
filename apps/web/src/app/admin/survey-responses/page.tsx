@@ -7,6 +7,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 interface SurveyColumnDefinition {
@@ -329,7 +330,7 @@ export default function AdminSurveyResponsesPage() {
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => router.push("/admin")}
+                onClick={() => router.push(ADMIN_ROOT_PATH)}
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
               >
                 Back to Admin Dashboard

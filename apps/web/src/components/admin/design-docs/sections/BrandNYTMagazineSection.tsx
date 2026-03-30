@@ -19,7 +19,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#D0021B",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -90,7 +90,7 @@ export default function BrandNYTMagazineSection() {
             fontFamily: "var(--dd-font-headline)",
             fontWeight: 700,
             fontSize: 36,
-            color: "#000000",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "-0.03em",
             lineHeight: 1.05,
           }}
@@ -102,7 +102,7 @@ export default function BrandNYTMagazineSection() {
             fontFamily: "var(--dd-font-display)",
             fontStyle: "italic",
             fontSize: 15,
-            color: "#999999",
+            color: "var(--dd-brand-text-muted)",
             marginTop: 10,
           }}
         >
@@ -443,7 +443,7 @@ export default function BrandNYTMagazineSection() {
             fontFamily: "var(--dd-font-sans)",
             fontSize: 11,
             fontWeight: 600,
-            color: "#D0021B",
+            color: "var(--dd-brand-accent)",
             textTransform: "uppercase" as const,
             letterSpacing: "0.08em",
             marginBottom: 20,
@@ -805,7 +805,7 @@ export default function BrandNYTMagazineSection() {
 
       {/* AI-Generated Illustrations */}
       <div id="ai-illustrations" />
-      <div className="dd-section-label" style={{ color: "#D0021B", marginTop: 48 }}>AI-Generated Illustrations</div>
+      <div className="dd-section-label" style={{ color: "var(--dd-brand-accent)", marginTop: 48 }}>AI-Generated Illustrations</div>
       <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 24 }}>
         Magazine cover and editorial illustration styles. Toggle between AI models.
       </p>

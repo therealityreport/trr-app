@@ -1,15 +1,15 @@
 # Brand font matches and artifacts
 
-Last updated: 2026-03-22
+Last updated: 2026-03-30
 
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-22
-  current_phase: "refresh flow, stylesheet-backed R2 inventory sync, stronger similarity scoring, and offline visual pipeline scaffold implemented"
-  next_action: "Use real text specimen imagery to review visual-similarity reports and promote approved results into curated rules"
+  include: false
+  state: archived
+  last_updated: 2026-03-30
+  current_phase: "archived continuity note"
+  next_action: "Refer to newer status notes if follow-up work resumes on this thread."
   detail: self
 ```
 

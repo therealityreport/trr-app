@@ -15,6 +15,16 @@ describe("social week detail wiring", () => {
     expect(contents).toMatch(/timeoutMs:\s*40_000/);
   });
 
+  it("caps the initial client week detail comment preview load", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/components/admin/social-week/WeekDetailPageView.tsx",
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const WEEK_DETAIL_MAX_COMMENTS_PER_POST = 25/);
+  });
+
   it("forwards season_id and timezone in week detail fetch", () => {
     const filePath = path.resolve(
       __dirname,

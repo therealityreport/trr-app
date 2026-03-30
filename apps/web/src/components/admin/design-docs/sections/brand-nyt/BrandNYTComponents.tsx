@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { Route } from "next";
+import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
 
 /* ------------------------------------------------------------------ */
@@ -27,10 +27,10 @@ function SectionLabel({
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#326891",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
-        borderLeft: "3px solid #326891",
+        borderLeft: "3px solid var(--dd-brand-accent)",
         paddingLeft: 10,
       }}
     >
@@ -243,7 +243,7 @@ export default function BrandNYTComponents() {
         {componentCatalog.map((comp) => (
           <div
             key={comp.name}
-            className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"
+            className="dd-brand-card p-4"
           >
             <div className="flex items-center gap-2 mb-2">
               <div
@@ -262,7 +262,7 @@ export default function BrandNYTComponents() {
                   fontSize: 10,
                   fontWeight: 600,
                   background: "#e8f0fe",
-                  color: "#326891",
+                  color: "var(--dd-brand-accent)",
                 }}
               >
                 {comp.count}x
@@ -283,16 +283,14 @@ export default function BrandNYTComponents() {
               style={{
                 fontFamily: "var(--dd-font-sans)",
                 fontSize: 11,
-                color: "#326891",
+                color: "var(--dd-brand-accent)",
               }}
             >
               {comp.articleIds.map((aid, i) => (
                 <span key={aid}>
                   {i > 0 && ", "}
                   <Link
-                    href={
-                      `/admin/design-docs/nyt-articles/${aid}` as Route
-                    }
+                    href={buildDesignDocsPath(`nyt-articles/${aid}`)}
                     style={{ textDecoration: "underline" }}
                   >
                     {articleTitleById(aid)}
@@ -322,8 +320,8 @@ export default function BrandNYTComponents() {
         {specialComponents.map((comp) => (
           <div
             key={comp.name}
-            className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"
-            style={{ borderLeft: "3px solid #326891" }}
+            className="dd-brand-card p-4"
+            style={{ borderLeft: "3px solid var(--dd-brand-accent)" }}
           >
             <div
               style={{
@@ -351,16 +349,14 @@ export default function BrandNYTComponents() {
               style={{
                 fontFamily: "var(--dd-font-sans)",
                 fontSize: 11,
-                color: "#326891",
+                color: "var(--dd-brand-accent)",
               }}
             >
               {comp.articleIds.map((aid, i) => (
                 <span key={aid}>
                   {i > 0 && ", "}
                   <Link
-                    href={
-                      `/admin/design-docs/nyt-articles/${aid}` as Route
-                    }
+                    href={buildDesignDocsPath(`nyt-articles/${aid}`)}
                     style={{ textDecoration: "underline" }}
                   >
                     {articleTitleById(aid)}
@@ -376,7 +372,7 @@ export default function BrandNYTComponents() {
       <SectionLabel id="site-header">Site Header</SectionLabel>
 
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{ padding: "28px 32px", marginBottom: 40 }}
       >
         <div
@@ -574,7 +570,7 @@ export default function BrandNYTComponents() {
       <SectionLabel id="site-footer">Site Footer</SectionLabel>
 
       <div
-        className="rounded-xl border border-zinc-200 bg-white shadow-sm"
+        className="dd-brand-card"
         style={{ padding: "28px 32px", marginBottom: 40 }}
       >
         <div
@@ -823,7 +819,7 @@ export default function BrandNYTComponents() {
       </p>
 
       {/* ── Pattern 1: Lead Package (Top Story) ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Lead Package &mdash; Full-width hero with secondary story grid
         </div>
@@ -987,7 +983,7 @@ export default function BrandNYTComponents() {
       </div>
 
       {/* ── Pattern 2: Section River ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Section River &mdash; Vertical story list with optional thumbnails and numbered variant
         </div>
@@ -1192,7 +1188,7 @@ export default function BrandNYTComponents() {
       </div>
 
       {/* ── Pattern 3: Story Grid (3-column) ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Story Grid &mdash; 3-column equal card layout
         </div>
@@ -1318,7 +1314,7 @@ export default function BrandNYTComponents() {
       </div>
 
       {/* ── Pattern 4: Opinion Section ── */}
-      <div className="rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ padding: "28px 32px", marginBottom: 24 }}>
+      <div className="dd-brand-card" style={{ padding: "28px 32px", marginBottom: 24 }}>
         <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--dd-ink-faint)", marginBottom: 16 }}>
           Opinion Section &mdash; Gold accent with columnist headshots and pull quotes
         </div>

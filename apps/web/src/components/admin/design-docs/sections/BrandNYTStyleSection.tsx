@@ -19,7 +19,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         fontWeight: 600,
         textTransform: "uppercase" as const,
         letterSpacing: "0.12em",
-        color: "#6B1D3A",
+        color: "var(--dd-brand-accent)",
         marginBottom: 8,
         marginTop: 32,
       }}
@@ -116,7 +116,7 @@ export default function BrandNYTStyleSection() {
             fontFamily: "var(--dd-font-headline)",
             fontWeight: 300,
             fontSize: 38,
-            color: "#000000",
+            color: "var(--dd-brand-text-primary)",
             letterSpacing: "0.15em",
             textTransform: "uppercase" as const,
             marginBottom: 12,
@@ -128,7 +128,7 @@ export default function BrandNYTStyleSection() {
           style={{
             fontFamily: "var(--dd-font-sans)",
             fontSize: 15,
-            color: "#B0B0B0",
+            color: "var(--dd-brand-text-muted)",
             fontStyle: "italic",
           }}
         >
@@ -444,7 +444,7 @@ export default function BrandNYTStyleSection() {
             fontFamily: "var(--dd-font-sans)",
             fontSize: 11,
             fontWeight: 600,
-            color: "#C4A265",
+            color: "var(--dd-brand-accent)",
             textTransform: "uppercase" as const,
             letterSpacing: "0.08em",
             marginBottom: 16,
@@ -925,7 +925,7 @@ export default function BrandNYTStyleSection() {
 
       {/* AI-Generated Fashion Illustrations */}
       <div id="ai-illustrations" />
-      <div className="dd-section-label" style={{ color: "#6B1D3A", marginTop: 48 }}>AI-Generated Fashion Art</div>
+      <div className="dd-section-label" style={{ color: "var(--dd-brand-accent)", marginTop: 48 }}>AI-Generated Fashion Art</div>
       <p style={{ fontFamily: "var(--dd-font-body)", fontSize: 14, color: "var(--dd-ink-soft)", marginBottom: 24 }}>
         Fashion editorial and style illustration concepts.
       </p>

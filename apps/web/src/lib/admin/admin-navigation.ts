@@ -1,4 +1,10 @@
 import type { Route } from "next";
+import {
+  ADMIN_API_REFERENCES_PATH,
+  ADMIN_DESIGN_DOCS_PATH,
+  ADMIN_SHOWS_PATH,
+  ADMIN_SOCIAL_PATH,
+} from "@/lib/admin/admin-route-paths";
 
 export type AdminNavItem = {
   key: string;
@@ -21,7 +27,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "trr-shows",
     title: "Shows",
-    href: "/admin/shows" as Route,
+    href: ADMIN_SHOWS_PATH,
     description: "Browse the show library from the admin dashboard, then open show workspaces and linked survey flows.",
     badge: "API",
     hasShowsSubmenu: true,
@@ -63,10 +69,10 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "social-media",
     title: "Social Media",
-    href: "/admin/social" as Route,
+    href: ADMIN_SOCIAL_PATH,
     description: "Manage social media pipelines, templates, and publishing workflows.",
     badge: "Social",
-    activeMatchPrefixes: ["/admin/social", "/admin/social-media", "/social-media"],
+    activeMatchPrefixes: ["/social", "/admin/social", "/admin/social-media", "/social-media"],
   },
   {
     key: "networks-streaming",
@@ -116,11 +122,11 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "api-references",
     title: "API References Library",
-    href: "/admin/api-references" as Route,
+    href: ADMIN_API_REFERENCES_PATH,
     description:
       "Generated request-path inventory for admin pages, API routes, backend endpoints, repository surfaces, and polling loops.",
     badge: "Trace",
-    activeMatchPrefixes: ["/admin/api-references"],
+    activeMatchPrefixes: ["/api-references", "/admin/api-references"],
   },
   {
     key: "design-system",
@@ -133,11 +139,11 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   {
     key: "design-docs",
     title: "Design Docs",
-    href: "/admin/design-docs" as Route,
+    href: ADMIN_DESIGN_DOCS_PATH,
     description:
       "Data visualization and editorial design system — typography, colors, charts, layout, and component patterns.",
     badge: "Design",
-    activeMatchPrefixes: ["/admin/design-docs"],
+    activeMatchPrefixes: ["/design-docs", "/admin/design-docs"],
   },
   {
     key: "settings",

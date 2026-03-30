@@ -192,14 +192,39 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
+  it("rewrites the canonical admin-host root to the admin dashboard implementation", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/");
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe("http://admin.localhost:3000/admin");
+  });
+
+  it("redirects /admin to the canonical admin-host root", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest("http://admin.localhost:3000/admin");
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/");
+  });
+
   it.each([
-    ["/social-media", "http://admin.localhost:3000/admin/social"],
-    ["/admin/social-media", "http://admin.localhost:3000/admin/social"],
-    ["/social/reddit", "http://admin.localhost:3000/admin/social"],
-    ["/admin/social/reddit", "http://admin.localhost:3000/admin/social"],
-    ["/social/instagram/bravotv", "http://admin.localhost:3000/admin/social/instagram/bravotv"],
-    ["/shows", "http://admin.localhost:3000/admin/shows"],
+    ["/social-media", "http://admin.localhost:3000/social"],
+    ["/admin/social-media", "http://admin.localhost:3000/social"],
+    ["/social/reddit", "http://admin.localhost:3000/social"],
+    ["/admin/social/reddit", "http://admin.localhost:3000/social"],
     ["/shows/rhoslc", "http://admin.localhost:3000/rhoslc"],
+    ["/admin/design-docs/overview", "http://admin.localhost:3000/design-docs/overview"],
+    ["/admin/api-references", "http://admin.localhost:3000/api-references"],
+    ["/admin/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/dev-dashboard/skills-and-agents"],
   ])("redirects %s to the canonical admin-host URL", (pathname, expectedLocation) => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -213,7 +238,13 @@ describe("admin host proxy", () => {
   });
 
   it.each([
+    ["/shows", "http://admin.localhost:3000/admin/shows"],
     ["/shows/settings", "http://admin.localhost:3000/admin/shows/settings"],
+    ["/social", "http://admin.localhost:3000/admin/social"],
+    ["/social/instagram/bravotv", "http://admin.localhost:3000/admin/social/instagram/bravotv"],
+    ["/design-docs/overview", "http://admin.localhost:3000/admin/design-docs/overview"],
+    ["/api-references", "http://admin.localhost:3000/admin/api-references"],
+    ["/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/admin/dev-dashboard/skills-and-agents"],
     ["/rhoslc", "http://admin.localhost:3000/admin/trr-shows/rhoslc"],
     ["/rhoslc/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
     ["/rhoslc/social/reddit", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social?social_view=reddit"],
@@ -249,6 +280,22 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-rewrite")).toBe(expectedRewrite);
+  });
+
+  it("preserves the incoming search string once when rewriting canonical social profile routes", () => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(
+      "http://admin.localhost:3000/social/instagram/bravotv/catalog?tab=recent&sort=desc",
+    );
+    const response = proxy(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-rewrite")).toBe(
+      "http://admin.localhost:3000/admin/social/instagram/bravotv/catalog?tab=recent&sort=desc",
+    );
   });
 
   it("keeps root show routes on the public host", () => {
@@ -347,7 +394,7 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("allows /admin requests on the current production host when no explicit admin origin is configured", () => {
+  it("redirects /admin requests to / on the current production host when no explicit admin origin is configured", () => {
     process.env.NODE_ENV = "production";
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_APP_HOSTS;
@@ -357,8 +404,8 @@ describe("admin host proxy", () => {
     const request = new NextRequest("https://trr-app.vercel.app/admin");
     const response = proxy(request);
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://trr-app.vercel.app/");
   });
 
   it("allows /api/admin requests on the current production host when no explicit admin origin is configured", () => {
@@ -603,7 +650,7 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("redirects non-admin paths to /admin on admin host when strict routing is enabled", () => {
+  it("redirects non-admin paths to / on admin host when strict routing is enabled", () => {
     process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
     process.env.ADMIN_APP_HOSTS = "localhost";
     process.env.ADMIN_ENFORCE_HOST = "true";
@@ -613,7 +660,7 @@ describe("admin host proxy", () => {
     const response = proxy(request);
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/admin");
+    expect(response.headers.get("location")).toBe("http://admin.localhost:3000/");
   });
 
   it("does not redirect design-system routes to /admin when strict routing is enabled", () => {

@@ -6,6 +6,8 @@ import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
+import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
+import { getSeasonByShowAndNumber } from "@/lib/server/trr-api/trr-shows-repository";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 type ProxyErrorCode =
@@ -99,11 +101,11 @@ const seasonIdResolutionCache = new Map<string, { seasonId: string; expiresAt: n
 const seasonIdResolutionInFlight = new Map<string, Promise<string>>();
 
 const getServiceRoleKey = (): string => {
-  const value = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!value) {
+  try {
+    return getTrrAdminServiceKey().trim();
+  } catch {
     throw new Error("Backend auth not configured");
   }
-  return value.trim();
 };
 
 const normalizeBackendErrorMessage = (data: Record<string, unknown>, fallback: string): string => {
@@ -405,6 +407,11 @@ const readBackendLookupErrorMessage = (data: Record<string, unknown>, fallback: 
 };
 
 const resolveSeasonIdFromBackend = async (showId: string, seasonNumber: number): Promise<string> => {
+  const localSeason = await getSeasonByShowAndNumber(showId, seasonNumber).catch(() => null);
+  if (localSeason?.id) {
+    return localSeason.id;
+  }
+
   for (let pageIndex = 0; pageIndex < SHOW_SEASON_RESOLUTION_MAX_PAGES; pageIndex += 1) {
     const offset = pageIndex * SHOW_SEASON_RESOLUTION_PAGE_SIZE;
     const upstream = await fetchAdminBackendJson(`/admin/trr-api/shows/${showId}/seasons`, {

@@ -58,16 +58,19 @@ function SectionHeader({ id, children }: { id: string; children: string }) {
 }
 
 export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSearchProps) {
+  const isHero = variant === "hero";
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(isHero);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const requestIdRef = useRef(0);
+  const isExpanded = isHero || expanded;
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -90,11 +93,26 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
       if (!containerRef.current) return;
       if (containerRef.current.contains(event.target as Node)) return;
       setOpen(false);
+      if (!isHero) {
+        setExpanded(false);
+      }
     };
 
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, []);
+  }, [isHero]);
+
+  useEffect(() => {
+    if (!isExpanded) return;
+
+    const focusInput = window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(focusInput);
+    };
+  }, [isExpanded]);
 
   useEffect(() => {
     const trimmed = debouncedQuery.trim();
@@ -155,54 +173,84 @@ export default function AdminGlobalSearch({ variant = "header" }: AdminGlobalSea
     return results.shows.length + results.people.length + results.episodes.length;
   }, [results]);
 
-  const shouldShowPanel = open && hasQuery(query) && (Boolean(error) || loading || totalHits >= 0);
-  const isHero = variant === "hero";
+  const shouldShowPanel = isExpanded && open && hasQuery(query) && (Boolean(error) || loading || totalHits >= 0);
 
   return (
     <div
       ref={containerRef}
-      className={isHero ? "relative w-full max-w-5xl" : "relative w-[min(36rem,72vw)]"}
+      className={
+        isHero
+          ? "relative w-full max-w-5xl"
+          : isExpanded
+            ? "relative w-[min(36rem,72vw)]"
+            : "relative w-10"
+      }
     >
-      <div
-        className={
-          isHero
-            ? "flex items-center rounded-2xl border border-black bg-white px-4 py-3"
-            : "flex items-center rounded-full border border-black bg-white px-3 py-1.5"
-        }
-      >
-        <svg
-          aria-hidden="true"
-          className={isHero ? "h-5 w-5 text-black/65" : "h-4 w-4 text-black/65"}
-          viewBox="0 0 24 24"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path d="M11 4a7 7 0 105.292 11.585l3.56 3.559a1 1 0 001.414-1.414l-3.559-3.56A7 7 0 0011 4z" fill="currentColor" />
-        </svg>
-        <input
-          ref={inputRef}
-          type="search"
-          aria-label="Search shows, people, and episodes"
-          placeholder="Search shows, people, episodes"
-          value={query}
-          onFocus={() => setOpen(true)}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setOpen(true);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setOpen(false);
-              inputRef.current?.blur();
-            }
-          }}
+      {isExpanded ? (
+        <div
           className={
             isHero
-              ? "ml-3 h-8 w-full bg-transparent text-base text-black outline-none placeholder:text-black/45"
-              : "ml-2 h-7 w-full bg-transparent text-sm text-black outline-none placeholder:text-black/45"
+              ? "flex items-center rounded-2xl border border-black bg-white px-4 py-3"
+              : "flex items-center rounded-full border border-black bg-white px-3 py-1.5"
           }
-        />
-      </div>
+        >
+          <svg
+            aria-hidden="true"
+            className={isHero ? "h-5 w-5 text-black/65" : "h-4 w-4 text-black/65"}
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M11 4a7 7 0 105.292 11.585l3.56 3.559a1 1 0 001.414-1.414l-3.559-3.56A7 7 0 0011 4z" fill="currentColor" />
+          </svg>
+          <input
+            ref={inputRef}
+            type="search"
+            aria-label="Search shows, people, and episodes"
+            placeholder="Search shows, people, episodes"
+            value={query}
+            onFocus={() => setOpen(true)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setOpen(false);
+                if (!isHero) {
+                  setExpanded(false);
+                }
+                inputRef.current?.blur();
+              }
+            }}
+            className={
+              isHero
+                ? "ml-3 h-8 w-full bg-transparent text-base text-black outline-none placeholder:text-black/45"
+                : "ml-2 h-7 w-full bg-transparent text-sm text-black outline-none placeholder:text-black/45"
+            }
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-label="Open admin search"
+          onClick={() => {
+            setExpanded(true);
+            setOpen(true);
+          }}
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-black bg-white text-black transition hover:bg-black/[0.04]"
+        >
+          <svg
+            aria-hidden="true"
+            className="h-4 w-4 text-black/65"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M11 4a7 7 0 105.292 11.585l3.56 3.559a1 1 0 001.414-1.414l-3.559-3.56A7 7 0 0011 4z" fill="currentColor" />
+          </svg>
+        </button>
+      )}
 
       {shouldShowPanel && (
         <div

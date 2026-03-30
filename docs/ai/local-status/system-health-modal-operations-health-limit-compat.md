@@ -1,6 +1,6 @@
 # System Health Modal Operations Health Limit Compat
 
-Last updated: 2026-03-22
+Last updated: 2026-03-30
 
 ## Status
 - App phase complete.
@@ -23,10 +23,10 @@ Last updated: 2026-03-22
 ## Handoff Snapshot
 ```yaml
 handoff:
-  include: true
-  state: recent
-  last_updated: 2026-03-22
-  current_phase: "system health modal operations-health compatibility fix shipped"
-  next_action: "if operators still see health instability, profile the Modal backend operations-health endpoint and align the deployed validation contract with local backend HEAD"
+  include: false
+  state: archived
+  last_updated: 2026-03-30
+  current_phase: "archived continuity note"
+  next_action: "Refer to newer status notes if follow-up work resumes on this thread."
   detail: self
 ```

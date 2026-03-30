@@ -51,8 +51,8 @@ export default function CreatorContentDashboardPage() {
             <div>
               <AdminBreadcrumbs
                 items={[
-                  ...buildAdminSectionBreadcrumb("Social Analytics", "/admin/social"),
-                  { label: "Creator Content", href: "/admin/social/creator-content" },
+                  ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
+                  { label: "Creator Content", href: "/social/creator-content" },
                 ]}
                 className="mb-1"
               />
@@ -62,7 +62,7 @@ export default function CreatorContentDashboardPage() {
               </p>
             </div>
             <Link
-              href="/admin/social"
+              href="/social"
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Back
