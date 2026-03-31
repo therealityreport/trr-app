@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { adminFetch, adminMutation, adminStream, fetchWithTimeout } from "@/lib/admin/admin-fetch";
+import {
+  adminFetch,
+  adminGetJson,
+  adminMutation,
+  adminStream,
+  fetchWithTimeout,
+  resetAdminGetCoordinatorForTests,
+} from "@/lib/admin/admin-fetch";
 import {
   getAdminOperationSession,
   upsertAdminOperationSession,
@@ -24,6 +31,7 @@ describe("admin-fetch", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.sessionStorage.clear();
+    resetAdminGetCoordinatorForTests();
   });
 
   it("applies timeout and aborts stalled requests", async () => {
@@ -63,6 +71,83 @@ describe("admin-fetch", () => {
 
     expect(response.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("dedupes identical in-flight admin GET JSON reads by request role", async () => {
+    let resolveResponse: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = adminGetJson<{ ok: boolean }>("/api/test", {
+      requestRole: "primary",
+    });
+    const second = adminGetJson<{ ok: boolean }>("/api/test", {
+      requestRole: "primary",
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveResponse?.(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(first).resolves.toEqual({ ok: true });
+    await expect(second).resolves.toEqual({ ok: true });
+  });
+
+  it("retries polling reads with bounded backoff on retryable saturation", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: "Database service unavailable",
+            detail: {
+              code: "DATABASE_SERVICE_UNAVAILABLE",
+              reason: "session_pool_capacity",
+              retryable: true,
+              retry_after_ms: 250,
+            },
+          }),
+          {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = adminGetJson<{ ok: boolean }>("/api/poll", {
+      requestRole: "polling",
+      maxAttempts: 2,
+    });
+
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it("parses SSE events with adminStream", async () => {

@@ -1,15 +1,27 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
-import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
+
+export type AdminReadRequestRole = "primary" | "secondary" | "polling";
 
 export class AdminReadProxyError extends Error {
   status: number;
+  code?: string;
+  retryable?: boolean;
+  detail?: Record<string, unknown>;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, options?: {
+    code?: string;
+    retryable?: boolean;
+    detail?: Record<string, unknown>;
+  }) {
     super(message);
     this.status = status;
+    this.code = options?.code;
+    this.retryable = options?.retryable;
+    this.detail = options?.detail;
   }
 }
 
@@ -18,6 +30,8 @@ export type AdminBackendJsonResult = {
   data: Record<string, unknown>;
   durationMs: number;
 };
+
+export type AdminReadCacheStatus = "hit" | "miss" | "refresh";
 
 const readPositiveIntEnv = (name: string, fallback: number): number => {
   const raw = process.env[name];
@@ -31,29 +45,38 @@ export const ADMIN_READ_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv(
   "TRR_ADMIN_READ_PROXY_SHORT_TIMEOUT_MS",
   5_000,
 );
+export const ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS = readPositiveIntEnv(
+  "TRR_ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS",
+  12_000,
+);
 export const ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS = readPositiveIntEnv(
   "TRR_ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS",
-  8_000,
+  15_000,
+);
+export const ADMIN_READ_PROXY_POLLING_TIMEOUT_MS = readPositiveIntEnv(
+  "TRR_ADMIN_READ_PROXY_POLLING_TIMEOUT_MS",
+  5_000,
 );
 
-const getServiceRoleKey = (): string => {
-  try {
-    return getTrrAdminServiceKey().trim();
-  } catch {
-    throw new AdminReadProxyError("Backend auth not configured", 500);
-  }
-};
+const adminReadDiagnosticsEnabled = (): boolean =>
+  /^(1|true)$/i.test(process.env.TRR_ADMIN_READ_DIAGNOSTICS ?? "");
 
-const getInternalSecret = (): string => {
-  const value = process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
-  if (!value) {
-    throw new AdminReadProxyError(
-      "TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured in the TRR-APP server environment",
-      500,
-    );
+export function buildAdminReadResponseHeaders(options: {
+  cacheStatus: AdminReadCacheStatus;
+  upstreamMs?: number | null;
+  totalMs?: number | null;
+}): Record<string, string> {
+  const headers: Record<string, string> = {
+    "x-trr-cache": options.cacheStatus,
+  };
+  if (options.cacheStatus !== "hit" && Number.isFinite(options.upstreamMs)) {
+    headers["x-trr-upstream-ms"] = String(Math.round(options.upstreamMs ?? 0));
   }
-  return value.trim();
-};
+  if (adminReadDiagnosticsEnabled() && Number.isFinite(options.totalMs)) {
+    headers["x-trr-total-ms"] = String(Math.round(options.totalMs ?? 0));
+  }
+  return headers;
+}
 
 const parseJsonRecord = async (response: Response): Promise<Record<string, unknown>> => {
   const text = await response.text();
@@ -75,6 +98,7 @@ export async function fetchAdminBackendJson(
     headers?: Record<string, string>;
     queryString?: string;
     routeName?: string;
+    requestRole?: AdminReadRequestRole;
   },
 ): Promise<AdminBackendJsonResult> {
   const backendBaseUrl = getBackendApiUrl(path);
@@ -86,15 +110,23 @@ export async function fetchAdminBackendJson(
     : backendBaseUrl;
 
   const controller = new AbortController();
-  const timeoutMs = options?.timeoutMs ?? ADMIN_READ_PROXY_SHORT_TIMEOUT_MS;
+  const requestRole = options?.requestRole ?? "secondary";
+  const timeoutMs =
+    options?.timeoutMs ??
+    (requestRole === "primary"
+      ? path.includes("/gallery") || path.includes("/photos")
+        ? ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS
+        : ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS
+      : requestRole === "polling"
+        ? ADMIN_READ_PROXY_POLLING_TIMEOUT_MS
+        : ADMIN_READ_PROXY_SHORT_TIMEOUT_MS);
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = performance.now();
 
   try {
-    const headers = new Headers({
-      Authorization: `Bearer ${getServiceRoleKey()}`,
-      "X-TRR-Internal-Admin-Secret": getInternalSecret(),
+    const headers = buildInternalAdminHeaders({
       Accept: "application/json",
+      "x-trr-admin-request-role": requestRole,
       ...(options?.headers ?? {}),
     });
 
@@ -111,7 +143,7 @@ export async function fetchAdminBackendJson(
       data,
       durationMs: performance.now() - startedAt,
     };
-    if (options?.routeName) {
+    if (options?.routeName && adminReadDiagnosticsEnabled()) {
       console.info(
         `[admin-read-proxy] route=${options.routeName} status=${result.status} latency_ms=${Math.round(result.durationMs)}`,
       );
@@ -123,17 +155,31 @@ export async function fetchAdminBackendJson(
     }
     if (error instanceof Error && error.name === "AbortError") {
       throw new AdminReadProxyError(
-        `Backend request timed out after ${Math.round(timeoutMs / 1000)}s`,
+        `Admin read request timed out after ${Math.round(timeoutMs / 1000)}s`,
         504,
+        {
+          code: "BACKEND_TIMEOUT",
+          retryable: true,
+          detail: {
+            route: options?.routeName ?? path,
+            request_role: requestRole,
+            timeout_ms: timeoutMs,
+            phase: "awaiting_upstream_response",
+          },
+        },
       );
     }
     if (error instanceof Error && error.message.toLowerCase().includes("fetch failed")) {
       throw new AdminReadProxyError(
         "Could not reach TRR-Backend. Confirm TRR-Backend is running and TRR_API_URL is correct.",
         502,
+        { code: "BACKEND_UNREACHABLE", retryable: true },
       );
     }
-    throw new AdminReadProxyError(error instanceof Error ? error.message : "failed", 500);
+    throw new AdminReadProxyError(error instanceof Error ? error.message : "failed", 500, {
+      code: "BACKEND_PROXY_FAILED",
+      retryable: false,
+    });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -177,5 +223,15 @@ export function buildAdminProxyErrorResponse(error: unknown): NextResponse {
       : error instanceof Error
         ? error.message
         : "failed";
-  return NextResponse.json({ error: message }, { status });
+  const body: Record<string, unknown> = { error: message };
+  if (error instanceof AdminReadProxyError && error.code) {
+    body.code = error.code;
+  }
+  if (error instanceof AdminReadProxyError && typeof error.retryable === "boolean") {
+    body.retryable = error.retryable;
+  }
+  if (error instanceof AdminReadProxyError && error.detail) {
+    body.detail = error.detail;
+  }
+  return NextResponse.json(body, { status });
 }

@@ -102,6 +102,7 @@ type FetchOverrides = {
   news?: (url: string) => Response;
   googleSync?: (url: string) => Response;
   googleSyncStatus?: (url: string) => Response;
+  photos?: (url: string) => Response;
 };
 
 const createFetchMock = (overrides: FetchOverrides = {}) =>
@@ -118,9 +119,13 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
       return jsonResponse({ credits: [] });
     }
     if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`)) {
-      return jsonResponse({ photos: [] });
+      if (overrides.photos) return overrides.photos(url);
+      return jsonResponse({
+        photos: [],
+        pagination: { limit: 120, offset: 0, count: 0, total_count: 0, next_offset: 0, has_more: false },
+      });
     }
-    if (url.endsWith(`/api/admin/trr-api/people/${PERSON_ID}`)) {
+    if (url.startsWith(`/api/admin/trr-api/people/${PERSON_ID}`) && !url.includes("/photos") && !url.includes("/cover-photo")) {
       return jsonResponse({
         person: {
           id: PERSON_ID,
@@ -254,6 +259,150 @@ describe("people page tab runtime behavior", () => {
     expect(screen.getByText("Andy C.")).toBeInTheDocument();
   });
 
+  it("shows saved total on the gallery tab and ignores operations-health failures", async () => {
+    mocks.pathname = `/people/${PERSON_ID}/gallery`;
+    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=gallery`);
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/trr-api/operations/health")) {
+        return jsonResponse({ error: "boom" }, 500);
+      }
+      return jsonResponse({ seasons: [] });
+    });
+    const fetchMock = createFetchMock({
+      photos: () =>
+        jsonResponse({
+          photos: [
+            {
+              id: "photo-1",
+              person_id: PERSON_ID,
+              source: "imdb",
+              url: "https://example.com/source-1.jpg",
+              hosted_url: "https://cdn.example.com/photo-1.jpg",
+              hosted_content_type: "image/jpeg",
+              caption: "Brandi portrait",
+              width: 640,
+              height: 480,
+              thumbnail_focus_x: null,
+              thumbnail_focus_y: null,
+              thumbnail_zoom: null,
+              thumbnail_crop_mode: null,
+              people_count: 1,
+              people_count_source: "manual",
+              face_boxes: [],
+              face_crops: [],
+              bucket_type: null,
+              bucket_key: null,
+              bucket_label: null,
+              resolved_show_id: SHOW_ID,
+              resolved_show_name: "The Real Housewives of Beverly Hills",
+              media_asset_id: null,
+              origin: "cast_photos",
+              source_page_url: null,
+            },
+          ],
+          pagination: {
+            limit: 120,
+            offset: 0,
+            count: 1,
+            total_count: 347,
+            next_offset: 120,
+            has_more: true,
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+
+    await screen.findByRole("heading", { name: "Andy Cohen" });
+    const savedTotal = await screen.findByText("Saved total: 347 photos");
+    expect(savedTotal).toBeInTheDocument();
+    expect(savedTotal.parentElement).toHaveTextContent(/0 filtered,\s*1\+ loaded/i);
+    expect(screen.queryByText(/Import target:/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load active admin operations/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the person shell before gallery completes and uses the deferred-count primary slice", async () => {
+    mocks.pathname = `/people/${PERSON_ID}/gallery`;
+    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=gallery`);
+    let resolvePhotos: ((response: Response) => void) | null = null;
+    mocks.fetchAdminWithAuth.mockResolvedValue(jsonResponse({ active_operations: [] }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : String(input);
+
+      if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`)) {
+        return await new Promise<Response>((resolve) => {
+          resolvePhotos = resolve;
+        });
+      }
+      if (url.startsWith(`/api/admin/trr-api/people/${PERSON_ID}`) && !url.includes("/photos") && !url.includes("/cover-photo")) {
+        return jsonResponse({
+          person: {
+            id: PERSON_ID,
+            full_name: "Andy Cohen",
+            known_for: null,
+            external_ids: {},
+            alternative_names: {
+              tmdb: ["Andrew Cohen"],
+            },
+            created_at: "2026-02-24T00:00:00.000Z",
+            updated_at: "2026-02-24T00:00:00.000Z",
+          },
+        });
+      }
+      if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/cover-photo`)) {
+        return jsonResponse({ coverPhoto: null });
+      }
+      if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/external-ids`)) {
+        return jsonResponse({ external_ids: [] });
+      }
+      return jsonResponse({ error: "not mocked" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+
+    await screen.findByRole("heading", { name: "Andy Cohen" });
+    expect(screen.queryByText("Loading person data...")).not.toBeInTheDocument();
+
+    const photosRequest = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`),
+    );
+    expect(String(photosRequest?.[0])).toContain("limit=48");
+    expect(String(photosRequest?.[0])).toContain("include_total_count=false");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/cover-photo"))).toBe(false);
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([url]) =>
+        String(url).includes("/api/admin/trr-api/operations/health"),
+      ),
+    ).toBe(false);
+
+    resolvePhotos?.(
+      jsonResponse({
+        photos: [],
+        pagination: {
+          limit: 48,
+          offset: 0,
+          count: 0,
+          total_count: null,
+          total_count_status: "deferred",
+          next_offset: 0,
+          has_more: false,
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/cover-photo"))).toBe(true);
+    });
+  });
+
   it("keeps news data available even when videos fetch fails", async () => {
     const fetchMock = createFetchMock({
       videos: () => jsonResponse({ error: "videos boom" }, 500),
@@ -336,11 +485,19 @@ describe("people page tab runtime behavior", () => {
     await screen.findByRole("heading", { name: "Andy Cohen" });
 
     fireEvent.click(screen.getByRole("button", { name: /^Fandom/i }));
-    await screen.findByText(/fandom failed|failed to fetch fandom data/i);
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes("/fandom")).length,
+      ).toBeGreaterThanOrEqual(1);
+    });
+    await screen.findByRole("button", { name: "Refresh" });
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await screen.findByRole("heading", { name: "Andy Cohen" });
-    await screen.findByText("Host and producer.");
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes("/fandom")).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it("renders credits show -> season -> episode accordion content", async () => {

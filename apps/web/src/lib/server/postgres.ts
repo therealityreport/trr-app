@@ -68,6 +68,11 @@ type CandidateDetail = {
   connectionClass: ConnectionClass;
 };
 
+type PostgresPoolSizing = {
+  poolMax: number;
+  maxConcurrentOperations: number;
+};
+
 const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app-server";
 const warnedNonDefaultConnectionClasses = new Set<string>();
 let warnedDirectFallbackOverride = false;
@@ -170,7 +175,7 @@ export const resolvePostgresConnectionString = (env: EnvLike = process.env): str
   const connectionString = candidates[0];
   if (!connectionString) {
     throw new Error(
-      "No database connection string is set. Configure TRR_DB_URL or TRR_DB_FALLBACK_URL.",
+      "No database connection string is set. Configure TRR_DB_URL (recommended in TRR-APP/apps/web/.env.local for make dev) or TRR_DB_FALLBACK_URL. Runtime reads do not use SUPABASE_DB_URL or DATABASE_URL.",
     );
   }
   return connectionString;
@@ -237,16 +242,29 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
 
+export const resolvePostgresPoolSizing = (
+  connectionString: string,
+  env: EnvLike = process.env,
+): PostgresPoolSizing => {
+  const isDevelopment = env.NODE_ENV === "development";
+  const isSessionPooler = isSupavisorSessionPoolerConnectionString(connectionString);
+  return {
+    maxConcurrentOperations:
+      parsePositiveInt(env.POSTGRES_MAX_CONCURRENT_OPERATIONS) ??
+      (isSessionPooler ? (isDevelopment ? 4 : 2) : isDevelopment ? 2 : 12),
+    poolMax:
+      parsePositiveInt(env.POSTGRES_POOL_MAX) ??
+      (isSessionPooler ? (isDevelopment ? 4 : 4) : isDevelopment ? 4 : 10),
+  };
+};
+
 const getMaxConcurrentOperations = (): number => {
   const configured = parsePositiveInt(process.env.POSTGRES_MAX_CONCURRENT_OPERATIONS);
   if (configured) return configured;
   const candidates = resolvePostgresConnectionCandidates(process.env);
   const candidateIndex = poolState?.candidateIndex ?? activeCandidateIndex;
   const connectionString = candidates[candidateIndex] ?? getConnectionString();
-  if (connectionString && isSupavisorSessionPoolerConnectionString(connectionString)) {
-    return 1;
-  }
-  return process.env.NODE_ENV === "development" ? 2 : 12;
+  return resolvePostgresPoolSizing(connectionString, process.env).maxConcurrentOperations;
 };
 
 const acquireOperationSlot = async (): Promise<void> => {
@@ -290,9 +308,7 @@ const getPool = (): Pool => {
   const connectionString = selectedCandidate?.value ?? getConnectionString();
   const isDevelopment = process.env.NODE_ENV === "development";
   const isSessionPooler = isSupavisorSessionPoolerConnectionString(connectionString);
-  const max =
-    parsePositiveInt(process.env.POSTGRES_POOL_MAX) ??
-    (isSessionPooler ? (isDevelopment ? 2 : 4) : isDevelopment ? 4 : 10);
+  const { poolMax: max } = resolvePostgresPoolSizing(connectionString, process.env);
   const connectionTimeoutMillis =
     parsePositiveInt(process.env.POSTGRES_POOL_CONNECTION_TIMEOUT_MS) ??
     (isSessionPooler ? 5_000 : isDevelopment ? 8_000 : 10_000);

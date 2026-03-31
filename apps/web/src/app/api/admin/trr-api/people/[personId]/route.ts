@@ -4,10 +4,10 @@ import {
   updatePersonCanonicalProfileSourceOrder,
 } from "@/lib/server/trr-api/trr-shows-repository";
 import {
+  AdminReadProxyError,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
   invalidateAdminBackendCache,
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   buildUserScopedRouteCacheKey,
@@ -47,7 +47,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `person:${personId}`, request.nextUrl.searchParams);
+    const cacheSearchParams = new URLSearchParams(request.nextUrl.searchParams);
+    const requestRoleRaw = (cacheSearchParams.get("request_role") ?? "").trim().toLowerCase();
+    const requestRole =
+      requestRoleRaw === "secondary" || requestRoleRaw === "polling" ? requestRoleRaw : "primary";
+    cacheSearchParams.delete("request_role");
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `person:${personId}`, cacheSearchParams);
     const cachedPayload = getRouteResponseCache<Record<string, unknown>>(
       PERSON_DETAIL_CACHE_NAMESPACE,
       cacheKey,
@@ -61,19 +66,39 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       cacheKey,
       async () => {
         const upstream = await fetchAdminBackendJson(`/admin/people/${personId}`, {
-          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
           routeName: "person-detail",
+          requestRole,
         });
         if (upstream.status === 404) {
           throw new Error("Person not found");
         }
         if (upstream.status !== 200) {
-          throw new Error(
+          const detail =
+            upstream.data.detail && typeof upstream.data.detail === "object"
+              ? (upstream.data.detail as Record<string, unknown>)
+              : {};
+          throw new AdminReadProxyError(
             typeof upstream.data.error === "string"
               ? upstream.data.error
               : typeof upstream.data.detail === "string"
                 ? upstream.data.detail
-                : "Failed to fetch person",
+                : typeof detail.message === "string"
+                  ? detail.message
+                  : "Failed to fetch person",
+            upstream.status,
+            {
+              code:
+                (typeof upstream.data.code === "string" && upstream.data.code) ||
+                (typeof detail.code === "string" && detail.code) ||
+                undefined,
+              retryable:
+                typeof upstream.data.retryable === "boolean"
+                  ? upstream.data.retryable
+                  : typeof detail.retryable === "boolean"
+                    ? Boolean(detail.retryable)
+                    : upstream.status === 429 || upstream.status === 502 || upstream.status === 503 || upstream.status === 504,
+              detail,
+            },
           );
         }
         const nextPayload = { person: upstream.data.person ?? null };

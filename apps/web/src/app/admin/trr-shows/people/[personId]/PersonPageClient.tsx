@@ -11,7 +11,7 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildPersonBreadcrumb, humanizeSlug } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
-import { AdminRequestError, adminMutation, adminStream } from "@/lib/admin/admin-fetch";
+import { AdminRequestError, adminGetJson, adminMutation, adminStream } from "@/lib/admin/admin-fetch";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
   canonicalizeOperationStatus,
@@ -1106,8 +1106,9 @@ const PERSON_PAGE_STREAM_START_DEADLINE_MS = 120_000;
 const PERSON_PIPELINE_SWITCH_TO_OPERATION_MONITOR_PREFIX = "__person_pipeline_switch_to_operation_monitor__:";
 const PHOTO_PIPELINE_STEP_TIMEOUT_MS = 480_000;
 const PHOTO_LIST_LOAD_TIMEOUT_MS = 60_000;
-const PERSON_GALLERY_PAGE_SIZE = 120;
-const PERSON_GALLERY_VISIBLE_INCREMENT = 120;
+const PERSON_GALLERY_INITIAL_PAGE_SIZE = 48;
+const PERSON_GALLERY_VISIBLE_INCREMENT = 48;
+const PERSON_SECONDARY_READ_CONCURRENCY = 2;
 const BRAVO_VIDEO_THUMBNAIL_SYNC_TIMEOUT_MS = 90_000;
 const NEWS_LOAD_TIMEOUT_MS = 45_000;
 const NEWS_SYNC_TIMEOUT_MS = 60_000;
@@ -1130,6 +1131,8 @@ type PersonGalleryPagination = {
   count: number;
   limit: number;
   offset: number;
+  total_count: number | null;
+  total_count_status?: "exact" | "deferred";
   next_offset: number;
   has_more: boolean;
 };
@@ -1168,6 +1171,8 @@ const readPersonGalleryPagination = (
       count: pageCount,
       limit: fallbackLimit,
       offset: fallbackOffset,
+      total_count: null,
+      total_count_status: "deferred",
       next_offset: fallbackNextOffset,
       has_more: pageCount >= fallbackLimit,
     };
@@ -1189,6 +1194,16 @@ const readPersonGalleryPagination = (
     count: normalizeInt(entry.count, pageCount),
     limit: normalizeInt(entry.limit, fallbackLimit),
     offset: normalizeInt(entry.offset, fallbackOffset),
+    total_count:
+      typeof entry.total_count === "number" && Number.isFinite(entry.total_count)
+        ? Math.max(0, Math.floor(entry.total_count))
+        : null,
+    total_count_status:
+      entry.total_count_status === "exact" || entry.total_count_status === "deferred"
+        ? entry.total_count_status
+        : typeof entry.total_count === "number"
+          ? "exact"
+          : "deferred",
     next_offset: normalizeInt(entry.next_offset, fallbackNextOffset),
     has_more: Boolean(entry.has_more),
   };
@@ -3490,10 +3505,13 @@ export default function PersonProfilePage() {
   const [canonicalSourceOrderError, setCanonicalSourceOrderError] = useState<string | null>(null);
   const [canonicalSourceOrderNotice, setCanonicalSourceOrderNotice] = useState<string | null>(null);
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
+  const [photosSavedTotal, setPhotosSavedTotal] = useState<number | null>(0);
+  const [photosSavedTotalStatus, setPhotosSavedTotalStatus] = useState<"exact" | "deferred">("exact");
   const [photosVisibleCount, setPhotosVisibleCount] = useState(PERSON_GALLERY_VISIBLE_INCREMENT);
   const [photosHasMore, setPhotosHasMore] = useState(false);
   const [photosNextOffset, setPhotosNextOffset] = useState(0);
   const [photosLoadingMore, setPhotosLoadingMore] = useState(false);
+  const [primaryGalleryReady, setPrimaryGalleryReady] = useState(false);
   const [showBrokenRows, setShowBrokenRows] = useState(false);
   const [galleryFallbackTelemetry, setGalleryFallbackTelemetry] = useState({
     fallbackRecoveredCount: 0,
@@ -3627,6 +3645,8 @@ export default function PersonProfilePage() {
   const photosNextOffsetRef = useRef(photosNextOffset);
   const photosRequestKeyRef = useRef<string | null>(null);
   const photosInFlightRef = useRef<Promise<TrrPersonPhoto[]> | null>(null);
+  const secondaryReadQueueRef = useRef<Array<() => void>>([]);
+  const secondaryReadsInFlightRef = useRef(0);
   const showBrokenPhotoRefetchInitializedRef = useRef(false);
   const recentViewRequestKeyRef = useRef<string | null>(null);
 
@@ -5333,37 +5353,73 @@ export default function PersonProfilePage() {
     [user],
   );
 
+  const flushSecondaryReadQueue = useCallback(() => {
+    while (
+      secondaryReadsInFlightRef.current < PERSON_SECONDARY_READ_CONCURRENCY &&
+      secondaryReadQueueRef.current.length > 0
+    ) {
+      const next = secondaryReadQueueRef.current.shift();
+      if (!next) break;
+      secondaryReadsInFlightRef.current += 1;
+      next();
+    }
+  }, []);
+
+  const runSecondaryRead = useCallback(
+    (task: () => Promise<unknown>): Promise<unknown> =>
+      new Promise((resolve, reject) => {
+        const start = () => {
+          void task()
+            .then(resolve)
+            .catch(reject)
+            .finally(() => {
+              secondaryReadsInFlightRef.current = Math.max(0, secondaryReadsInFlightRef.current - 1);
+              flushSecondaryReadQueue();
+            });
+        };
+        secondaryReadQueueRef.current.push(start);
+        flushSecondaryReadQueue();
+      }),
+    [flushSecondaryReadQueue],
+  );
+
   const fetchBestActivePersonPipelineOperation = useCallback(
     async (operationTypes?: readonly PersonPipelineOperationType[]) => {
       if (!personId) return null;
-      const headers = await getAuthHeaders();
-      const response = await fetchAdminWithAuth(
-        "/api/admin/trr-api/operations/health?limit=100",
-        {
-          method: "GET",
-          headers,
-        },
-        { allowDevAdminBypass: true },
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to load active admin operations (${response.status})`);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchAdminWithAuth(
+          "/api/admin/trr-api/operations/health?limit=100",
+          {
+            method: "GET",
+            headers,
+          },
+          { allowDevAdminBypass: true },
+        );
+        if (!response.ok) {
+          console.warn("Failed to load active admin operations", { status: response.status, personId });
+          return null;
+        }
+        const payload = (await response.json().catch(() => ({}))) as {
+          active_operations?: unknown;
+        };
+        const requestedTypes = new Set(
+          (operationTypes && operationTypes.length > 0 ? operationTypes : PERSON_PIPELINE_OPERATION_TYPES).map((value) =>
+            String(value),
+          ),
+        );
+        const activeOperations = Array.isArray(payload.active_operations) ? payload.active_operations : [];
+        const candidates = activeOperations
+          .map((entry) => (asRecord(entry) as AdminOperationHealthEntry | null))
+          .filter((entry): entry is AdminOperationHealthEntry => Boolean(entry?.id))
+          .filter((entry) => requestedTypes.has(String(entry.operation_type || "")))
+          .filter((entry) => extractPersonIdFromOperationHealthEntry(entry) === personId)
+          .sort((left, right) => scorePersonPipelineOperationCandidate(right) - scorePersonPipelineOperationCandidate(left));
+        return candidates[0] ?? null;
+      } catch (error) {
+        console.warn("Failed to load active admin operations", { personId, error });
+        return null;
       }
-      const payload = (await response.json().catch(() => ({}))) as {
-        active_operations?: unknown;
-      };
-      const requestedTypes = new Set(
-        (operationTypes && operationTypes.length > 0 ? operationTypes : PERSON_PIPELINE_OPERATION_TYPES).map((value) =>
-          String(value),
-        ),
-      );
-      const activeOperations = Array.isArray(payload.active_operations) ? payload.active_operations : [];
-      const candidates = activeOperations
-        .map((entry) => (asRecord(entry) as AdminOperationHealthEntry | null))
-        .filter((entry): entry is AdminOperationHealthEntry => Boolean(entry?.id))
-        .filter((entry) => requestedTypes.has(String(entry.operation_type || "")))
-        .filter((entry) => extractPersonIdFromOperationHealthEntry(entry) === personId)
-        .sort((left, right) => scorePersonPipelineOperationCandidate(right) - scorePersonPipelineOperationCandidate(left));
-      return candidates[0] ?? null;
     },
     [getAuthHeaders, personId],
   );
@@ -5386,11 +5442,7 @@ export default function PersonProfilePage() {
     const resolveSlug = async () => {
       try {
         const headers = await getAuthHeaders();
-        const response = await fetch(
-          `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(showIdParam)}`,
-          { headers, cache: "no-store" }
-        );
-        const data = (await response.json().catch(() => ({}))) as {
+        const data = await adminGetJson<{
           error?: string;
           resolved?: {
             show_id?: string | null;
@@ -5398,10 +5450,11 @@ export default function PersonProfilePage() {
             slug?: string | null;
             show_name?: string | null;
           };
-        };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to resolve show slug");
-        }
+        }>(`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(showIdParam)}`, {
+          headers,
+          requestRole: "primary",
+          dedupeKey: `show:resolve:${showIdParam}`,
+        });
         const resolvedId =
           typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
             ? data.resolved.show_id
@@ -5458,17 +5511,15 @@ export default function PersonProfilePage() {
         const headers = await getAuthHeaders();
         const query = new URLSearchParams({ slug: personRouteParam });
         if (showIdParam) query.set("showId", showIdParam);
-        const response = await fetch(`/api/admin/trr-api/people/resolve-slug?${query.toString()}`, {
-          headers,
-          cache: "no-store",
-        });
-        const data = (await response.json().catch(() => ({}))) as {
+        query.set("request_role", "primary");
+        const data = await adminGetJson<{
           error?: string;
           resolved?: { person_id?: string | null; canonical_slug?: string | null; slug?: string | null };
-        };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to resolve person slug");
-        }
+        }>(`/api/admin/trr-api/people/resolve-slug?${query.toString()}`, {
+          headers,
+          requestRole: "primary",
+          dedupeKey: `person:resolve:${query.toString()}`,
+        });
         const resolvedId =
           typeof data.resolved?.person_id === "string" && looksLikeUuid(data.resolved.person_id)
             ? data.resolved.person_id
@@ -5572,9 +5623,12 @@ export default function PersonProfilePage() {
     try {
       const headers = await getAuthHeaders();
       if (signal?.aborted) return null;
-      const response = await fetch(`/api/admin/trr-api/people/${personId}`, { headers, signal });
-      if (!response.ok) throw new Error("Failed to fetch person");
-      const data = await response.json();
+      const data = await adminGetJson<{ person?: TrrPerson | null }>(`/api/admin/trr-api/people/${personId}?request_role=primary`, {
+        headers,
+        externalSignal: signal,
+        requestRole: "primary",
+        dedupeKey: `person:${personId}:detail`,
+      });
       if (signal?.aborted) return null;
       setPerson(data.person);
       const nextSourceOrder = readCanonicalSourceOrderFromExternalIds(
@@ -5788,12 +5842,16 @@ export default function PersonProfilePage() {
     append?: boolean;
     ensurePhotoId?: string | null;
     loadAll?: boolean;
+    includeTotalCount?: boolean;
+    requestRole?: "primary" | "secondary";
   }): Promise<TrrPersonPhoto[]> => {
     if (!personId) return [];
     const signal = options?.signal;
     const includeBroken = options?.includeBroken ?? showBrokenRowsRef.current;
     const append = options?.append === true;
     const loadAll = options?.loadAll === true;
+    const includeTotalCount = options?.includeTotalCount !== false;
+    const requestRole = options?.requestRole ?? (append || loadAll ? "secondary" : "primary");
     const ensurePhotoId =
       typeof options?.ensurePhotoId === "string" && options.ensurePhotoId.trim().length > 0
         ? options.ensurePhotoId.trim()
@@ -5805,6 +5863,8 @@ export default function PersonProfilePage() {
       includeBroken ? "broken" : "clean",
       append ? "append" : "replace",
       loadAll ? "all" : "page",
+      includeTotalCount ? "count" : "deferred-count",
+      requestRole,
       ensurePhotoId ?? "",
       requestStartOffset,
     ].join(":");
@@ -5815,7 +5875,7 @@ export default function PersonProfilePage() {
     const requestPromise = (async (): Promise<TrrPersonPhoto[]> => {
       try {
         const headers = await getAuthHeaders();
-        const pageSize = PERSON_GALLERY_PAGE_SIZE;
+        const pageSize = PERSON_GALLERY_INITIAL_PAGE_SIZE;
         const fetchedPhotos: TrrPersonPhoto[] = append ? [...photosRef.current] : [];
         let offset = requestStartOffset;
         let pageCount = 0;
@@ -5825,21 +5885,53 @@ export default function PersonProfilePage() {
           if (pageCount > MAX_PHOTO_FETCH_PAGES) {
             throw new Error("Photo pagination exceeded safety limit.");
           }
-          let response: Response;
           try {
             const params = new URLSearchParams({
               limit: String(pageSize),
               offset: String(offset),
+              request_role: requestRole,
             });
             if (includeBroken) {
               params.set("include_broken", "true");
             }
-            response = await fetchWithTimeout(
-              `/api/admin/trr-api/people/${personId}/photos?${params.toString()}`,
-              { headers },
-              PHOTO_LIST_LOAD_TIMEOUT_MS,
-              signal
-            );
+            if (!includeTotalCount) {
+              params.set("include_total_count", "false");
+            }
+            const data = await adminGetJson<{
+              photos?: TrrPersonPhoto[];
+              pagination?: PersonGalleryPagination;
+            }>(`/api/admin/trr-api/people/${personId}/photos?${params.toString()}`, {
+              headers,
+              externalSignal: signal,
+              requestRole,
+              dedupeKey: `person:${personId}:photos:${params.toString()}`,
+            });
+            if (signal?.aborted) return [];
+            const pagePhotos = Array.isArray(data.photos) ? data.photos : [];
+            const pagination = readPersonGalleryPagination(data.pagination, {
+              fallbackOffset: offset,
+              fallbackLimit: pageSize,
+              pageCount: pagePhotos.length,
+            });
+            const nextPhotos = append ? mergePersonPhotoPages(fetchedPhotos, pagePhotos) : pagePhotos;
+            fetchedPhotos.splice(0, fetchedPhotos.length, ...nextPhotos);
+            setPhotosSavedTotal(pagination.total_count);
+            setPhotosSavedTotalStatus(pagination.total_count_status ?? "deferred");
+            setPhotosHasMore(pagination.has_more);
+            setPhotosNextOffset(pagination.next_offset);
+            const foundEnsuredPhoto = ensurePhotoId
+              ? fetchedPhotos.some((candidate) => candidate.id === ensurePhotoId)
+              : false;
+            if (!pagination.has_more) {
+              break;
+            }
+            if (!loadAll && !ensurePhotoId) {
+              break;
+            }
+            if (ensurePhotoId && foundEnsuredPhoto) {
+              break;
+            }
+            offset = pagination.next_offset;
           } catch (error) {
             if (signal?.aborted || isSignalAbortedWithoutReasonError(error)) {
               return append ? photosRef.current : [];
@@ -5851,38 +5943,6 @@ export default function PersonProfilePage() {
             }
             throw error;
           }
-          if (signal?.aborted) return [];
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            const message =
-              data.error && data.detail
-                ? `${data.error}: ${data.detail}`
-                : data.error || "Failed to fetch photos";
-            throw new Error(message);
-          }
-          const pagePhotos = Array.isArray(data.photos) ? (data.photos as TrrPersonPhoto[]) : [];
-          const pagination = readPersonGalleryPagination(data.pagination, {
-            fallbackOffset: offset,
-            fallbackLimit: pageSize,
-            pageCount: pagePhotos.length,
-          });
-          const nextPhotos = append ? mergePersonPhotoPages(fetchedPhotos, pagePhotos) : pagePhotos;
-          fetchedPhotos.splice(0, fetchedPhotos.length, ...nextPhotos);
-          setPhotosHasMore(pagination.has_more);
-          setPhotosNextOffset(pagination.next_offset);
-          const foundEnsuredPhoto = ensurePhotoId
-            ? fetchedPhotos.some((candidate) => candidate.id === ensurePhotoId)
-            : false;
-          if (!pagination.has_more) {
-            break;
-          }
-          if (!loadAll && !ensurePhotoId) {
-            break;
-          }
-          if (ensurePhotoId && foundEnsuredPhoto) {
-            break;
-          }
-          offset = pagination.next_offset;
         }
         if (signal?.aborted) return [];
         setGalleryFallbackTelemetry({
@@ -5899,6 +5959,9 @@ export default function PersonProfilePage() {
         }
         console.error("Failed to fetch photos:", err);
         setPhotosError(err instanceof Error ? err.message : "Failed to fetch photos");
+        if (!append) {
+          setPhotosSavedTotal(0);
+        }
         return append ? photosRef.current : [];
       }
     })();
@@ -6058,12 +6121,15 @@ export default function PersonProfilePage() {
     if (signal?.aborted) return;
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/cover-photo`,
-        { headers, signal }
+      const data = await adminGetJson<{ coverPhoto?: CoverPhoto | null }>(
+        `/api/admin/trr-api/people/${personId}/cover-photo?request_role=secondary`,
+        {
+          headers,
+          externalSignal: signal,
+          requestRole: "secondary",
+          dedupeKey: `person:${personId}:cover-photo`,
+        }
       );
-      if (!response.ok) return;
-      const data = await response.json();
       if (signal?.aborted) return;
       setCoverPhoto(data.coverPhoto);
     } catch (err) {
@@ -9561,6 +9627,7 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     if (!hasAccess || !personId) return;
+    if (!primaryGalleryReady) return;
     if (resumedPersonPipelineRef.current) return;
     let cancelled = false;
     let resumableSession: AdminOperationSessionRecord | null = null;
@@ -9783,6 +9850,7 @@ export default function PersonProfilePage() {
     fetchBestActivePersonPipelineOperation,
     formatPipelineStreamError,
     isLikelyStalePersonPipelineSession,
+    primaryGalleryReady,
   ]);
 
   const handleCancelPersonPipeline = useCallback(async () => {
@@ -9984,6 +10052,7 @@ export default function PersonProfilePage() {
   useEffect(() => {
     if (!hasAccess) return;
     if (!personId) return;
+    setPrimaryGalleryReady(false);
     showBrokenPhotoRefetchInitializedRef.current = false;
     let cancelled = false;
     const controller = new AbortController();
@@ -10001,13 +10070,22 @@ export default function PersonProfilePage() {
             setLoading(false);
           }
         }
-        await fetchPhotos({ signal });
+        await fetchPhotos({ signal, includeTotalCount: false, requestRole: "primary" });
         if (signal.aborted) return;
-        await fetchCoverPhoto({ signal });
+        if (!cancelled) {
+          setPrimaryGalleryReady(true);
+        }
+        void runSecondaryRead(async () => {
+          if (signal.aborted) return;
+          await fetchCoverPhoto({ signal });
+        });
       } catch (err) {
         if (signal.aborted) return;
         console.error("Failed to load person page data:", err);
       } finally {
+        if (!cancelled && !signal.aborted) {
+          setPrimaryGalleryReady(true);
+        }
         if (!cancelled && !personLoaded) {
           setLoading(false);
         }
@@ -10018,38 +10096,45 @@ export default function PersonProfilePage() {
     return () => {
       cancelled = true;
       controller.abort();
+      secondaryReadQueueRef.current = [];
     };
-  }, [hasAccess, fetchCoverPhoto, fetchPerson, fetchPhotos, personId]);
+  }, [hasAccess, fetchCoverPhoto, fetchPerson, fetchPhotos, personId, runSecondaryRead]);
 
   useEffect(() => {
     if (activeTab !== "settings") return;
     if (!hasAccess || !personId || externalIdsLoading || externalIdDrafts.length > 0) return;
     const controller = new AbortController();
-    void fetchExternalIds({ signal: controller.signal, fallbackPerson: person });
+    void runSecondaryRead(async () => {
+      await fetchExternalIds({ signal: controller.signal, fallbackPerson: person });
+    });
     return () => {
       controller.abort();
     };
-  }, [activeTab, externalIdDrafts.length, externalIdsLoading, fetchExternalIds, hasAccess, person, personId]);
+  }, [activeTab, externalIdDrafts.length, externalIdsLoading, fetchExternalIds, hasAccess, person, personId, runSecondaryRead]);
 
   useEffect(() => {
     if (activeTab !== "credits") return;
     if (!hasAccess || !personId || creditsLoading || credits.length > 0) return;
     const controller = new AbortController();
-    void fetchCredits({ signal: controller.signal });
+    void runSecondaryRead(async () => {
+      await fetchCredits({ signal: controller.signal });
+    });
     return () => {
       controller.abort();
     };
-  }, [activeTab, credits.length, creditsLoading, fetchCredits, hasAccess, personId]);
+  }, [activeTab, credits.length, creditsLoading, fetchCredits, hasAccess, personId, runSecondaryRead]);
 
   useEffect(() => {
     if (activeTab !== "videos") return;
     if (!showIdForApi || bravoVideosLoaded) return;
     const controller = new AbortController();
-    void fetchBravoVideos({ signal: controller.signal });
+    void runSecondaryRead(async () => {
+      await fetchBravoVideos({ signal: controller.signal });
+    });
     return () => {
       controller.abort();
     };
-  }, [activeTab, bravoVideosLoaded, fetchBravoVideos, showIdForApi]);
+  }, [activeTab, bravoVideosLoaded, fetchBravoVideos, runSecondaryRead, showIdForApi]);
 
   useEffect(() => {
     if (!hasAccess || !personId) return;
@@ -10059,7 +10144,12 @@ export default function PersonProfilePage() {
       return;
     }
     const controller = new AbortController();
-    void fetchPhotos({ signal: controller.signal, includeBroken: showBrokenRows });
+    void fetchPhotos({
+      signal: controller.signal,
+      includeBroken: showBrokenRows,
+      includeTotalCount: false,
+      requestRole: "secondary",
+    });
     return () => {
       controller.abort();
     };
@@ -10070,7 +10160,12 @@ export default function PersonProfilePage() {
     if (effectiveOperationStatus !== "running" && effectiveOperationStatus !== "queued") return;
 
     const controller = new AbortController();
-    void fetchPhotos({ signal: controller.signal, includeBroken: showBrokenRows });
+    void fetchPhotos({
+      signal: controller.signal,
+      includeBroken: showBrokenRows,
+      includeTotalCount: false,
+      requestRole: "secondary",
+    });
     return () => {
       controller.abort();
     };
@@ -10080,21 +10175,25 @@ export default function PersonProfilePage() {
     if (activeTab !== "news") return;
     if (!showIdForApi || !personId) return;
     const controller = new AbortController();
-    void loadUnifiedNews();
+    void runSecondaryRead(async () => {
+      await loadUnifiedNews();
+    });
     return () => {
       controller.abort();
     };
-  }, [activeTab, loadUnifiedNews, personId, showIdForApi]);
+  }, [activeTab, loadUnifiedNews, personId, runSecondaryRead, showIdForApi]);
 
   useEffect(() => {
     if (activeTab !== "fandom") return;
     if (!hasAccess || fandomLoaded) return;
     const controller = new AbortController();
-    void fetchFandomData({ signal: controller.signal });
+    void runSecondaryRead(async () => {
+      await fetchFandomData({ signal: controller.signal });
+    });
     return () => {
       controller.abort();
     };
-  }, [activeTab, fandomLoaded, fetchFandomData, hasAccess]);
+  }, [activeTab, fandomLoaded, fetchFandomData, hasAccess, runSecondaryRead]);
 
   const newsSourceOptions = useMemo(
     () => newsFacets.sources,
@@ -11349,11 +11448,6 @@ export default function PersonProfilePage() {
                 </div>
               </div>
               <div className="mb-4 space-y-2">
-                {effectiveGalleryImportLabel && (
-                  <p className="text-xs font-medium text-zinc-500">
-                    Import target: {effectiveGalleryImportLabel}
-                  </p>
-                )}
                 <RefreshProgressBar
                   show={
                     refreshingImages ||
@@ -11553,10 +11647,19 @@ export default function PersonProfilePage() {
               )}
 
               <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-zinc-500">
-                  Showing {filteredPhotos.length} of {photos.length}
-                  {photosHasMore ? "+" : ""} loaded photos
-                </p>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-zinc-700">
+                    Saved total:{" "}
+                    {photosSavedTotal === null ? "calculating..." : `${photosSavedTotal.toLocaleString()} photos`}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {filteredPhotos.length.toLocaleString()} filtered, {photos.length.toLocaleString()}
+                    {photosHasMore ? "+" : ""} loaded
+                  </p>
+                  {photosSavedTotalStatus === "deferred" && (
+                    <p className="text-xs text-zinc-500">Exact saved count is loading in the background.</p>
+                  )}
+                </div>
                 <p className="text-xs text-zinc-500">
                   Fallback diagnostics: {galleryFallbackTelemetry.fallbackRecoveredCount} recovered,{" "}
                   {galleryFallbackTelemetry.allCandidatesFailedCount} failed,{" "}

@@ -8,6 +8,7 @@ import {
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 import {
+  AdminReadProxyError,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
   ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
@@ -59,12 +60,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .filter(Boolean);
     const includeBrokenRaw = (searchParams.get("include_broken") ?? "").trim().toLowerCase();
     const includeBroken = includeBrokenRaw === "1" || includeBrokenRaw === "true";
+    const includeTotalCountRaw = (searchParams.get("include_total_count") ?? "").trim().toLowerCase();
+    const includeTotalCount = !(includeTotalCountRaw === "0" || includeTotalCountRaw === "false");
+    const requestRoleRaw = (searchParams.get("request_role") ?? "").trim().toLowerCase();
+    const requestRole =
+      requestRoleRaw === "primary" || requestRoleRaw === "polling" ? requestRoleRaw : "secondary";
 
     const requestedLimit = Math.max(1, Math.min(limit, 500));
+    const cacheSearchParams = new URLSearchParams(searchParams);
+    cacheSearchParams.delete("request_role");
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
       `${personId}:photos`,
-      searchParams,
+      cacheSearchParams,
     );
     const cachedPayload = getRouteResponseCache<{
       photos: Array<Record<string, unknown>>;
@@ -72,6 +80,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         limit: number;
         offset: number;
         count: number;
+        total_count: number | null;
+        total_count_status?: string;
         next_offset: number;
         has_more: boolean;
       };
@@ -94,20 +104,44 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         if (includeBroken) {
           backendParams.set("include_broken", "true");
         }
+        if (!includeTotalCount) {
+          backendParams.set("include_total_count", "false");
+        }
         const upstream = await fetchAdminBackendJson(
           `/admin/people/${personId}/gallery?${backendParams.toString()}`,
           {
             timeoutMs: ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
             routeName: "person-gallery",
+            requestRole,
           },
         );
         if (upstream.status !== 200) {
-          throw new Error(
+          const detail =
+            upstream.data.detail && typeof upstream.data.detail === "object"
+              ? (upstream.data.detail as Record<string, unknown>)
+              : {};
+          throw new AdminReadProxyError(
             typeof upstream.data.error === "string"
               ? upstream.data.error
               : typeof upstream.data.detail === "string"
                 ? upstream.data.detail
-                : "Failed to fetch photos",
+                : typeof detail.message === "string"
+                  ? detail.message
+                  : "Failed to fetch photos",
+            upstream.status,
+            {
+              code:
+                (typeof upstream.data.code === "string" && upstream.data.code) ||
+                (typeof detail.code === "string" && detail.code) ||
+                undefined,
+              retryable:
+                typeof upstream.data.retryable === "boolean"
+                  ? upstream.data.retryable
+                  : typeof detail.retryable === "boolean"
+                    ? Boolean(detail.retryable)
+                    : upstream.status === 429 || upstream.status === 502 || upstream.status === 503 || upstream.status === 504,
+              detail,
+            },
           );
         }
         const pagePhotos = Array.isArray(upstream.data.photos)
@@ -123,6 +157,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             limit: requestedLimit,
             offset,
             count: pagePhotos.length,
+            total_count:
+              typeof upstreamPagination.total_count === "number" ? upstreamPagination.total_count : null,
+            total_count_status:
+              typeof upstreamPagination.total_count_status === "string"
+                ? upstreamPagination.total_count_status
+                : typeof upstreamPagination.total_count === "number"
+                  ? "exact"
+                  : "deferred",
             next_offset:
               typeof upstreamPagination.next_offset === "number"
                 ? upstreamPagination.next_offset

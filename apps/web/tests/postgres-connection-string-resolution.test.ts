@@ -3,6 +3,7 @@ import {
   classifyConnectionClass,
   isSupavisorSessionPoolerConnectionString,
   resolvePostgresConnectionCandidates,
+  resolvePostgresPoolSizing,
   resolvePostgresConnectionString,
   resolvePostgresSslConfig,
 } from "@/lib/server/postgres";
@@ -53,7 +54,7 @@ describe("resolvePostgresConnectionString", () => {
 
   it("throws when no DB URL env vars are configured", () => {
     expect(() => resolvePostgresConnectionString({})).toThrow(
-      "No database connection string is set. Configure TRR_DB_URL or TRR_DB_FALLBACK_URL.",
+      "No database connection string is set. Configure TRR_DB_URL (recommended in TRR-APP/apps/web/.env.local for make dev) or TRR_DB_FALLBACK_URL. Runtime reads do not use SUPABASE_DB_URL or DATABASE_URL.",
     );
   });
 });
@@ -106,5 +107,31 @@ describe("classifyConnectionClass", () => {
     expect(classifyConnectionClass("postgresql://postgres:secret@db.example.supabase.co:5432/postgres")).toBe(
       "direct",
     );
+  });
+});
+
+describe("resolvePostgresPoolSizing", () => {
+  it("uses modestly larger session defaults in local development", () => {
+    const sizing = resolvePostgresPoolSizing(
+      "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      { NODE_ENV: "development" },
+    );
+
+    expect(sizing).toEqual({
+      maxConcurrentOperations: 4,
+      poolMax: 4,
+    });
+  });
+
+  it("keeps deployed session defaults conservative", () => {
+    const sizing = resolvePostgresPoolSizing(
+      "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      { NODE_ENV: "production" },
+    );
+
+    expect(sizing).toEqual({
+      maxConcurrentOperations: 2,
+      poolMax: 4,
+    });
   });
 });

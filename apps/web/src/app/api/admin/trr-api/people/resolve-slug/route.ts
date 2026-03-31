@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
+  AdminReadProxyError,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import {
   buildUserScopedRouteCacheKey,
@@ -37,7 +37,12 @@ export async function GET(request: NextRequest) {
     }
 
     const showInput = searchParams.get("showId")?.trim() ?? "";
-    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "resolve-person-slug", searchParams);
+    const requestRoleRaw = (searchParams.get("request_role") ?? "").trim().toLowerCase();
+    const requestRole =
+      requestRoleRaw === "secondary" || requestRoleRaw === "polling" ? requestRoleRaw : "primary";
+    const cacheSearchParams = new URLSearchParams(searchParams);
+    cacheSearchParams.delete("request_role");
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "resolve-person-slug", cacheSearchParams);
     const cachedPayload = getRouteResponseCache<Record<string, unknown>>(
       PERSON_RESOLVE_SLUG_CACHE_NAMESPACE,
       cacheKey,
@@ -61,8 +66,8 @@ export async function GET(request: NextRequest) {
         const upstream = await fetchAdminBackendJson(
           `/admin/people/resolve-slug?${backendParams.toString()}`,
           {
-            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
             routeName: "person-resolve-slug",
+            requestRole,
           },
         );
         if (upstream.status === 404) {
@@ -71,12 +76,32 @@ export async function GET(request: NextRequest) {
           );
         }
         if (upstream.status !== 200) {
-          throw new Error(
+          const detail =
+            upstream.data.detail && typeof upstream.data.detail === "object"
+              ? (upstream.data.detail as Record<string, unknown>)
+              : {};
+          throw new AdminReadProxyError(
             typeof upstream.data.error === "string"
               ? upstream.data.error
               : typeof upstream.data.detail === "string"
                 ? upstream.data.detail
-                : "Failed to resolve person slug",
+                : typeof detail.message === "string"
+                  ? detail.message
+                  : "Failed to resolve person slug",
+            upstream.status,
+            {
+              code:
+                (typeof upstream.data.code === "string" && upstream.data.code) ||
+                (typeof detail.code === "string" && detail.code) ||
+                undefined,
+              retryable:
+                typeof upstream.data.retryable === "boolean"
+                  ? upstream.data.retryable
+                  : typeof detail.retryable === "boolean"
+                    ? Boolean(detail.retryable)
+                    : upstream.status === 429 || upstream.status === 502 || upstream.status === 503 || upstream.status === 504,
+              detail,
+            },
           );
         }
         const nextPayload = {

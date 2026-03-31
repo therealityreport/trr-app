@@ -12,10 +12,15 @@ export type AdminFetchWithTimeoutInit = RequestInit & {
   externalSignal?: AbortSignal;
 };
 
+export type AdminRequestRole = "primary" | "secondary" | "polling";
+
 export type AdminNormalizedError = {
   error: string;
   status: number;
   retryable: boolean;
+  code?: string;
+  reason?: string;
+  retryAfterMs?: number;
 };
 
 export type AdminStreamEventPayload = Record<string, unknown> | string | null;
@@ -27,14 +32,75 @@ export type AdminStreamEvent = {
 export class AdminRequestError extends Error {
   status: number;
   retryable: boolean;
+  code?: string;
+  reason?: string;
+  retryAfterMs?: number;
 
-  constructor({ error, status, retryable }: AdminNormalizedError) {
+  constructor({ error, status, retryable, code, reason, retryAfterMs }: AdminNormalizedError) {
     super(error);
     this.name = "AdminRequestError";
     this.status = status;
     this.retryable = retryable;
+    this.code = code;
+    this.reason = reason;
+    this.retryAfterMs = retryAfterMs;
   }
 }
+
+type AdminGetJsonInit = Omit<AdminFetchWithTimeoutInit, "method" | "body" | "timeoutMs"> & {
+  timeoutMs?: number;
+  requestRole?: AdminRequestRole;
+  dedupeKey?: string;
+  maxAttempts?: number;
+  backoffBaseMs?: number;
+  backoffMaxMs?: number;
+};
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __trrAdminGetJsonInFlight: Map<string, Promise<unknown>> | undefined;
+}
+
+const ADMIN_PRIMARY_ENTITY_TIMEOUT_MS = 12_000;
+const ADMIN_PRIMARY_GALLERY_TIMEOUT_MS = 15_000;
+const ADMIN_SECONDARY_TIMEOUT_MS = 5_000;
+const ADMIN_POLLING_TIMEOUT_MS = 5_000;
+const ADMIN_POLLING_BACKOFF_BASE_MS = 250;
+const ADMIN_POLLING_BACKOFF_MAX_MS = 2_000;
+
+const ADMIN_GET_JSON_IN_FLIGHT = globalThis.__trrAdminGetJsonInFlight ?? new Map<string, Promise<unknown>>();
+if (!globalThis.__trrAdminGetJsonInFlight) {
+  globalThis.__trrAdminGetJsonInFlight = ADMIN_GET_JSON_IN_FLIGHT;
+}
+
+const inputToKey = (input: RequestInfo | URL): string =>
+  input instanceof URL ? input.toString() : typeof input === "string" ? input : String(input);
+
+const looksLikeGalleryRead = (input: RequestInfo | URL): boolean => {
+  const value = inputToKey(input).toLowerCase();
+  return value.includes("/photos") || value.includes("/gallery");
+};
+
+const resolveTimeoutMs = (
+  input: RequestInfo | URL,
+  requestRole: AdminRequestRole,
+  timeoutMs?: number,
+): number => {
+  if (typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    return timeoutMs;
+  }
+  if (requestRole === "primary") {
+    return looksLikeGalleryRead(input) ? ADMIN_PRIMARY_GALLERY_TIMEOUT_MS : ADMIN_PRIMARY_ENTITY_TIMEOUT_MS;
+  }
+  return requestRole === "polling" ? ADMIN_POLLING_TIMEOUT_MS : ADMIN_SECONDARY_TIMEOUT_MS;
+};
+
+const defaultDedupeKey = (input: RequestInfo | URL, requestRole: AdminRequestRole): string =>
+  `GET:${requestRole}:${inputToKey(input)}`;
+
+const sleep = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
 
 export const fetchWithTimeout = async (
   input: RequestInfo | URL,
@@ -87,6 +153,19 @@ const isAbortLikeError = (error: unknown): boolean => {
   );
 };
 
+const parseRetryAfterMs = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.min(Math.floor(value), 30_000);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return Math.min(parsed, 30_000);
+    }
+  }
+  return undefined;
+};
+
 const normalizeErrorPayload = async (response: Response): Promise<AdminNormalizedError> => {
   let payload: Record<string, unknown> | null = null;
   try {
@@ -98,12 +177,40 @@ const normalizeErrorPayload = async (response: Response): Promise<AdminNormalize
   const message =
     (typeof payload?.error === "string" && payload.error.trim()) ||
     (typeof payload?.detail === "string" && payload.detail.trim()) ||
+    ((payload?.detail &&
+      typeof payload.detail === "object" &&
+      typeof (payload.detail as Record<string, unknown>).message === "string" &&
+      ((payload.detail as Record<string, unknown>).message as string).trim()) ||
+      "") ||
     `${response.status} ${response.statusText || "Request failed"}`;
+  const detail =
+    payload?.detail && typeof payload.detail === "object" ? (payload.detail as Record<string, unknown>) : null;
+  const code =
+    (typeof payload?.code === "string" && payload.code.trim()) ||
+    (typeof detail?.code === "string" && detail.code.trim()) ||
+    undefined;
+  const reason =
+    (typeof payload?.reason === "string" && payload.reason.trim()) ||
+    (typeof detail?.reason === "string" && detail.reason.trim()) ||
+    undefined;
+  const retryable =
+    typeof payload?.retryable === "boolean"
+      ? payload.retryable
+      : typeof detail?.retryable === "boolean"
+        ? detail.retryable
+        : isRetryableStatus(response.status);
+  const retryAfterMs =
+    parseRetryAfterMs(payload?.retry_after_ms) ??
+    parseRetryAfterMs(detail?.retry_after_ms) ??
+    parseRetryAfterMs(response.headers.get("retry-after"));
 
   return {
     error: message,
     status: response.status,
-    retryable: isRetryableStatus(response.status),
+    retryable,
+    code,
+    reason,
+    retryAfterMs,
   };
 };
 
@@ -113,6 +220,9 @@ const normalizeThrownError = (error: unknown): AdminNormalizedError => {
       error: error.message,
       status: error.status,
       retryable: error.retryable,
+      code: error.code,
+      reason: error.reason,
+      retryAfterMs: error.retryAfterMs,
     };
   }
   if (isAbortLikeError(error)) {
@@ -120,6 +230,7 @@ const normalizeThrownError = (error: unknown): AdminNormalizedError => {
       error: "Request timed out",
       status: 408,
       retryable: true,
+      code: "REQUEST_TIMEOUT",
     };
   }
   return {
@@ -129,22 +240,103 @@ const normalizeThrownError = (error: unknown): AdminNormalizedError => {
   };
 };
 
+const isRetryableSaturation = (error: AdminNormalizedError): boolean => {
+  const message = error.error.toLowerCase();
+  const reason = String(error.reason || "").toLowerCase();
+  const code = String(error.code || "").toUpperCase();
+  return (
+    error.retryable &&
+    (code === "DATABASE_SERVICE_UNAVAILABLE" ||
+      code === "BACKEND_SATURATED" ||
+      reason === "pool_capacity" ||
+      reason === "session_pool_capacity" ||
+      reason === "queue_pressure" ||
+      message.includes("connection pool exhausted") ||
+      message.includes("database pool initialization failed") ||
+      message.includes("maxclientsinsessionmode"))
+  );
+};
+
 export const adminGetJson = async <T>(
   input: RequestInfo | URL,
-  init: Omit<AdminFetchWithTimeoutInit, "method" | "body"> & { timeoutMs: number }
+  init: AdminGetJsonInit = {},
 ): Promise<T> => {
-  try {
-    const response = await adminFetch(input, {
-      ...init,
-      method: "GET",
-    });
-    if (!response.ok) {
-      throw new AdminRequestError(await normalizeErrorPayload(response));
-    }
-    return (await response.json()) as T;
-  } catch (error) {
-    throw new AdminRequestError(normalizeThrownError(error));
+  const {
+    timeoutMs: configuredTimeoutMs,
+    requestRole: configuredRequestRole,
+    dedupeKey: configuredDedupeKey,
+    maxAttempts: configuredMaxAttempts,
+    backoffBaseMs: configuredBackoffBaseMs,
+    backoffMaxMs: configuredBackoffMaxMs,
+    ...requestInit
+  } = init;
+  const requestRole = configuredRequestRole ?? "secondary";
+  const timeoutMs = resolveTimeoutMs(input, requestRole, configuredTimeoutMs);
+  const dedupeKey = configuredDedupeKey ?? defaultDedupeKey(input, requestRole);
+  const maxAttempts =
+    Number.isFinite(configuredMaxAttempts) && (configuredMaxAttempts ?? 0) > 0
+      ? Math.max(1, Math.floor(configuredMaxAttempts as number))
+      : 1;
+  const backoffBaseMs =
+    Number.isFinite(configuredBackoffBaseMs) && (configuredBackoffBaseMs ?? 0) > 0
+      ? Math.floor(configuredBackoffBaseMs as number)
+      : ADMIN_POLLING_BACKOFF_BASE_MS;
+  const backoffMaxMs =
+    Number.isFinite(configuredBackoffMaxMs) && (configuredBackoffMaxMs ?? 0) > 0
+      ? Math.floor(configuredBackoffMaxMs as number)
+      : ADMIN_POLLING_BACKOFF_MAX_MS;
+
+  const existing = ADMIN_GET_JSON_IN_FLIGHT.get(dedupeKey);
+  if (existing) {
+    return (await existing) as T;
   }
+
+  const request = (async (): Promise<T> => {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const response = await adminFetch(input, {
+          ...requestInit,
+          timeoutMs,
+          method: "GET",
+        });
+        if (!response.ok) {
+          throw new AdminRequestError(await normalizeErrorPayload(response));
+        }
+        return (await response.json()) as T;
+      } catch (error) {
+        const normalized = normalizeThrownError(error);
+        const shouldRetry =
+          requestRole === "polling" &&
+          attempt < maxAttempts &&
+          isRetryableSaturation(normalized);
+        if (!shouldRetry) {
+          throw new AdminRequestError(normalized);
+        }
+        const retryDelayMs =
+          normalized.retryAfterMs ??
+          Math.min(backoffBaseMs * 2 ** (attempt - 1), backoffMaxMs);
+        await sleep(retryDelayMs);
+      }
+    }
+    throw new AdminRequestError({
+      error: "Request failed",
+      status: 500,
+      retryable: false,
+    });
+  })();
+
+  ADMIN_GET_JSON_IN_FLIGHT.set(dedupeKey, request);
+  try {
+    return await request;
+  } finally {
+    if (ADMIN_GET_JSON_IN_FLIGHT.get(dedupeKey) === request) {
+      ADMIN_GET_JSON_IN_FLIGHT.delete(dedupeKey);
+    }
+  }
+};
+
+export const resetAdminGetCoordinatorForTests = (): void => {
+  ADMIN_GET_JSON_IN_FLIGHT.clear();
 };
 
 export const adminMutation = async <T>(
