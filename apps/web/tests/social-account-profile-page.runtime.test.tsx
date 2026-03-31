@@ -11,13 +11,16 @@ vi.mock("next/link", () => ({
   default: ({
     children,
     href,
-    prefetch: _prefetch,
+    prefetch,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  ),
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => {
+    void prefetch;
+    return (
+      <a href={href} {...props}>
+        {children}
+      </a>
+    );
+  },
 }));
 
 vi.mock("@/lib/admin/client-auth", () => ({
@@ -78,7 +81,7 @@ const baseSummary = {
   total_engagement: 1200,
   total_views: 5000,
   last_post_at: "2026-03-17T14:00:00.000Z",
-  catalog_total_posts: 10,
+  catalog_total_posts: 12,
   catalog_assigned_posts: 6,
   catalog_unassigned_posts: 2,
   catalog_pending_review_posts: 2,
@@ -171,6 +174,44 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText("Social account profile not found.")).not.toBeInTheDocument();
   });
 
+  it("does not fan out secondary reads while the summary is saturated", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(
+          {
+            error: "Local TRR-Backend is saturated. Showing last successful data while retrying.",
+            code: "BACKEND_SATURATED",
+            retryable: true,
+            retry_after_seconds: 2,
+            upstream_status: 500,
+            upstream_detail: {
+              code: "DATABASE_SERVICE_UNAVAILABLE",
+              reason: "session_pool_capacity",
+              message:
+                "Database service unavailable: Supabase session-pool capacity is saturated. Reduce local DB concurrency or use the explicit local fallback lane.",
+            },
+          },
+          503,
+        );
+      }
+      throw new Error(`Unexpected request during summary saturation: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/backend is saturated/i)).toBeInTheDocument();
+    });
+
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/freshness")),
+    ).toBe(false);
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/gap-analysis")),
+    ).toBe(false);
+  });
+
   it("renders collaborator-backed Instagram posts without requiring a new run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -259,6 +300,310 @@ describe("SocialAccountProfilePage", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
+    });
+  });
+
+  it("shows tail-gap guidance and queues resume tail from the integrity banner", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 12,
+          catalog_total_posts: 10,
+          catalog_recent_runs: [
+            {
+              run_id: "run-tail-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+          stored_total_posts: 10,
+          live_total_posts_current: 12,
+          delta_posts: 2,
+          needs_recent_sync: false,
+          has_resumable_frontier: true,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "queued",
+          operation_id: "gap-op-tail-1",
+          result: null,
+          stale: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-tail-1",
+          stale: false,
+          result: {
+            platform: "instagram",
+            account_handle: "bravotv",
+            gap_type: "tail_gap",
+            catalog_posts: 10,
+            materialized_posts: 12,
+            expected_total_posts: 12,
+            live_total_posts_current: 12,
+            missing_from_catalog_count: 2,
+            sample_missing_source_ids: ["old-post-1"],
+            has_resumable_frontier: true,
+            needs_recent_sync: false,
+            recommended_action: "resume_tail",
+            latest_catalog_run_status: "completed",
+            active_run_status: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/resume-tail")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
+        return jsonResponse({ run_id: "catalog-run-tail-12345678", status: "queued" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Resume Tail Now" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume Tail Now" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Resume tail queued (catalog-).")).toBeInTheDocument();
+    });
+  });
+
+  it("shows head-gap guidance and queues sync newer from the integrity banner", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 12,
+          catalog_total_posts: 10,
+          catalog_recent_runs: [
+            {
+              run_id: "run-head-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+          stored_total_posts: 10,
+          live_total_posts_current: 12,
+          delta_posts: 2,
+          needs_recent_sync: true,
+          has_resumable_frontier: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "queued",
+          operation_id: "gap-op-head-1",
+          result: null,
+          stale: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-head-1",
+          stale: false,
+          result: {
+            platform: "instagram",
+            account_handle: "bravotv",
+            gap_type: "head_gap",
+            catalog_posts: 10,
+            materialized_posts: 12,
+            expected_total_posts: 12,
+            live_total_posts_current: 12,
+            missing_from_catalog_count: 2,
+            sample_missing_source_ids: ["new-post-1"],
+            has_resumable_frontier: false,
+            needs_recent_sync: true,
+            recommended_action: "sync_newer",
+            latest_catalog_run_status: "completed",
+            active_run_status: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/sync-newer")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
+        return jsonResponse({ run_id: "catalog-run-head-12345678", status: "queued" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Sync Newer Now" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sync Newer Now" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Sync newer posts queued (catalog-).")).toBeInTheDocument();
+    });
+  });
+
+  it("shows interior-gap guidance and queues a bounded repair window", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 12,
+          catalog_total_posts: 10,
+          catalog_recent_runs: [
+            {
+              run_id: "run-interior-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+          stored_total_posts: 10,
+          live_total_posts_current: 12,
+          delta_posts: 2,
+          needs_recent_sync: false,
+          has_resumable_frontier: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "queued",
+          operation_id: "gap-op-window-1",
+          result: null,
+          stale: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-window-1",
+          stale: false,
+          result: {
+            platform: "instagram",
+            account_handle: "bravotv",
+            gap_type: "interior_gaps",
+            catalog_posts: 10,
+            materialized_posts: 12,
+            expected_total_posts: 12,
+            live_total_posts_current: 12,
+            missing_from_catalog_count: 2,
+            missing_oldest_post_at: "2026-03-01T12:00:00Z",
+            missing_newest_post_at: "2026-03-02T12:00:00Z",
+            sample_missing_source_ids: ["mid-post-1", "mid-post-2"],
+            has_resumable_frontier: false,
+            needs_recent_sync: false,
+            recommended_action: "bounded_window_backfill",
+            repair_window_start: "2026-03-01T12:00:00Z",
+            repair_window_end: "2026-03-02T12:00:00Z",
+            latest_catalog_run_status: "completed",
+            active_run_status: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(
+          JSON.stringify({
+            backfill_scope: "bounded_window",
+            date_start: "2026-03-01T12:00:00Z",
+            date_end: "2026-03-02T12:00:00Z",
+          }),
+        );
+        return jsonResponse({ run_id: "catalog-run-window-12345678", status: "queued" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Repair Missing Window" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Repair Missing Window" }));
 
     await waitFor(() => {
       expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
@@ -390,7 +735,7 @@ describe("SocialAccountProfilePage", () => {
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
 
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Stats" })).toBeInTheDocument();
@@ -641,6 +986,84 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(screen.queryByText("420 scraped")).not.toBeInTheDocument();
   });
+
+  it(
+    "backs off catalog progress polling when the backend is saturated",
+    async () => {
+      let summaryCalls = 0;
+      let progressCalls = 0;
+
+      mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/summary")) {
+          summaryCalls += 1;
+          return jsonResponse({
+            ...baseSummary,
+            catalog_recent_runs: [
+              {
+                run_id: "run-saturated-1",
+                status: "running",
+                created_at: "2026-03-20T15:14:42.000Z",
+              },
+            ],
+          });
+        }
+        if (url.includes("/catalog/runs/run-saturated-1/progress")) {
+          progressCalls += 1;
+          return jsonResponse(
+            {
+              error: "Local TRR-Backend is saturated. Showing last successful data while retrying.",
+              code: "BACKEND_SATURATED",
+              retryable: true,
+              retry_after_seconds: 2,
+              upstream_status: 500,
+              upstream_detail: {
+                code: "DATABASE_SERVICE_UNAVAILABLE",
+                reason: "session_pool_capacity",
+                message:
+                  "Database service unavailable: Supabase session-pool capacity is saturated. Reduce local DB concurrency or use the explicit local fallback lane.",
+              },
+            },
+            503,
+          );
+        }
+        throw new Error(`Unhandled request: ${url}`);
+      });
+
+      render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+      await waitFor(() => {
+        expect(progressCalls).toBe(1);
+      });
+      expect(summaryCalls).toBe(1);
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1_900));
+      });
+      expect(progressCalls).toBe(1);
+
+      await waitFor(
+        () => {
+          expect(progressCalls).toBe(2);
+        },
+        { timeout: 1_500 },
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 3_900));
+      });
+      expect(progressCalls).toBe(2);
+
+      await waitFor(
+        () => {
+          expect(progressCalls).toBe(3);
+        },
+        { timeout: 1_500 },
+      );
+      expect(summaryCalls).toBe(1);
+    },
+    12_000,
+  );
 
   it("renders frontier-mode labels and suppresses shard copy for newest-first runs", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -1955,7 +2378,7 @@ describe("SocialAccountProfilePage", () => {
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
 
     await waitFor(() => {
       expect(screen.getByText("8,359,747")).toBeInTheDocument();
@@ -2152,6 +2575,175 @@ describe("SocialAccountProfilePage", () => {
     });
     expect(screen.queryByRole("heading", { name: "Distribution" })).not.toBeInTheDocument();
     expect(screen.queryByText("The Real Housewives of Salt Lake City")).not.toBeInTheDocument();
+  });
+
+  it("renders summary hashtags on the Instagram stats tab without loading full hashtag history", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          top_hashtags: [
+            {
+              hashtag: "summaryonly",
+              display_hashtag: "#summaryonly",
+              usage_count: 44,
+              first_seen_at: "2026-02-23T23:00:26.000Z",
+              latest_seen_at: "2026-03-20T14:00:29.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/hashtags")) {
+        throw new Error(`Stats tab should not load full hashtags: ${url}`);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("#summaryonly")).toBeInTheDocument();
+    });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/hashtags"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps stats-tab hashtags summary-backed when operators change the window selector", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          top_hashtags: [
+            {
+              hashtag: "summaryonly",
+              display_hashtag: "#summaryonly",
+              usage_count: 44,
+              first_seen_at: "2026-02-23T23:00:26.000Z",
+              latest_seen_at: "2026-03-20T14:00:29.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/hashtags")) {
+        throw new Error(`Stats tab should not request hashtag windows: ${url}`);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("#summaryonly")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Window" }), {
+      target: { value: "30d" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("#summaryonly")).toBeInTheDocument();
+    });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/hashtags?window=30d"),
+      ),
+    ).toBe(false);
+  });
+
+  it("preserves cached all-time hashtags when a later retry for that window is retryably saturated", async () => {
+    let allTimeRequestCount = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/hashtags?window=30d")) {
+        return jsonResponse({
+          items: [
+            {
+              hashtag: "monthonly",
+              display_hashtag: "#monthonly",
+              usage_count: 12,
+              first_seen_at: "2026-03-01T12:00:00.000Z",
+              latest_seen_at: "2026-03-20T14:00:29.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/hashtags/timeline")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          years: [],
+          series: [],
+          top_rank_limit: 10,
+          off_chart_rank: 11,
+        });
+      }
+      if (url.includes("/hashtags")) {
+        allTimeRequestCount += 1;
+        if (allTimeRequestCount === 1) {
+          return jsonResponse({
+            items: [
+              {
+                hashtag: "alltime",
+                display_hashtag: "#alltime",
+                usage_count: 88,
+                first_seen_at: "2026-01-01T12:00:00.000Z",
+                latest_seen_at: "2026-03-20T14:00:29.000Z",
+              },
+            ],
+          });
+        }
+        return jsonResponse(
+          {
+            error: "Local TRR-Backend is saturated. Showing last successful data while retrying.",
+            code: "BACKEND_SATURATED",
+            retryable: true,
+            upstream_status: 503,
+            upstream_detail_code: "DATABASE_SERVICE_UNAVAILABLE",
+            upstream_detail: {
+              code: "DATABASE_SERVICE_UNAVAILABLE",
+              reason: "session_pool_capacity",
+              message:
+                "Database service unavailable: Supabase session-pool capacity is saturated. Reduce local DB concurrency or use the explicit local fallback lane.",
+            },
+          },
+          503,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("#alltime")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Window" }), {
+      target: { value: "30d" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("#monthonly")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Window" }), {
+      target: { value: "all" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Hashtag data is retryable while the backend is busy.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("#alltime")).toBeInTheDocument();
+    expect(screen.queryByText("No hashtags found yet.")).not.toBeInTheDocument();
   });
 
   it("treats scrape-complete classify backlog as completed for actions and status copy", async () => {
@@ -2636,9 +3228,235 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("2 newer posts detected")).toBeInTheDocument();
+      expect(screen.getByText("2 newer posts detected. Stored 12 posts; live profile shows 14.")).toBeInTheDocument();
     });
-    expect(screen.getByText("Stored 12 posts · live profile shows 14 · checked 3/20/2026, 8:30:00 AM")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Catalog Diagnostics" })).toBeInTheDocument();
+  });
+
+  it("keeps gap analysis deferred on the stats tab until operators request it", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 20,
+          live_total_posts: 20,
+          catalog_total_posts: 12,
+          live_catalog_total_posts: 12,
+          catalog_recent_runs: [
+            {
+              run_id: "run-gap-deferred-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          live_total_posts_current: 20,
+          stored_total_posts: 12,
+          delta_posts: 8,
+          needs_recent_sync: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        throw new Error(`Gap analysis should stay deferred on first stats mount: ${url}`);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Catalog Diagnostics" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("Gap analysis is deferred until you request it.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/gap-analysis")),
+    ).toBe(false);
+  });
+
+  it("runs gap analysis only after an explicit stats-tab trigger", async () => {
+    let gapStatusPollCount = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 20,
+          live_total_posts: 20,
+          catalog_total_posts: 12,
+          live_catalog_total_posts: 12,
+          catalog_recent_runs: [
+            {
+              run_id: "run-gap-manual-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          live_total_posts_current: 20,
+          stored_total_posts: 12,
+          delta_posts: 8,
+          needs_recent_sync: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "queued",
+          operation_id: "gap-op-1",
+          result: null,
+          stale: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        gapStatusPollCount += 1;
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-1",
+          stale: false,
+          result: {
+            platform: "instagram",
+            account_handle: "bravotv",
+            gap_type: "tail_gap",
+            catalog_posts: 12,
+            materialized_posts: 20,
+            expected_total_posts: 20,
+            live_total_posts_current: 20,
+            missing_from_catalog_count: 8,
+            sample_missing_source_ids: ["POST-20", "POST-19"],
+            has_resumable_frontier: true,
+            needs_recent_sync: false,
+            recommended_action: "resume_tail",
+            repair_window_start: null,
+            repair_window_end: null,
+            catalog_oldest_post_at: "2026-03-01T12:00:00Z",
+            catalog_newest_post_at: "2026-03-12T12:00:00Z",
+            latest_catalog_run_status: "completed",
+            active_run_status: null,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Resume Tail Now" })).toBeInTheDocument();
+    });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.filter(([input]) => String(input).includes("/catalog/gap-analysis/run")).length,
+    ).toBe(1);
+    expect(gapStatusPollCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("groups catalog diagnostic failures without rendering duplicate raw backend banners", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 20,
+          live_total_posts: 20,
+          catalog_total_posts: 12,
+          live_catalog_total_posts: 12,
+          catalog_recent_runs: [
+            {
+              run_id: "run-gap-errors-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse(
+          {
+            error: "Local TRR-Backend is saturated. Showing last successful data while retrying.",
+            code: "BACKEND_SATURATED",
+            retryable: true,
+            retry_after_seconds: 2,
+            upstream_status: 503,
+          },
+          503,
+        );
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "queued",
+          operation_id: "gap-op-errors-1",
+          result: null,
+          stale: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "failed",
+          operation_id: "gap-op-errors-1",
+          result: null,
+          stale: false,
+          last_error: {
+            error: "TRR-Backend request timed out.",
+            code: "UPSTREAM_TIMEOUT",
+            retryable: true,
+            upstream_status: 504,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Catalog Diagnostics" })).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Freshness check is retryable while the backend is busy.")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Gap analysis timed out before completion. Retry when you need repair guidance.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Local TRR-Backend is saturated. Showing last successful data while retrying.")).not.toBeInTheDocument();
+    expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 
   it("renders the catalog tab empty state", async () => {

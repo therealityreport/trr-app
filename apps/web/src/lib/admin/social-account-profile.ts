@@ -220,6 +220,59 @@ export type SocialAccountCatalogFreshness = {
   frontier_posts_checked?: number | null;
 };
 
+export type SocialAccountCatalogGapAnalysis = {
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  gap_type: "active_run" | "complete" | "head_gap" | "interior_gaps" | "source_total_drift" | "tail_gap";
+  catalog_posts: number;
+  materialized_posts: number;
+  expected_total_posts?: number | null;
+  live_total_posts_current?: number | null;
+  missing_from_catalog_count: number;
+  missing_oldest_post_at?: string | null;
+  missing_newest_post_at?: string | null;
+  sample_missing_source_ids: string[];
+  has_resumable_frontier?: boolean;
+  needs_recent_sync?: boolean;
+  recommended_action:
+    | "backfill_posts"
+    | "bounded_window_backfill"
+    | "none"
+    | "resume_tail"
+    | "sync_newer"
+    | "wait_for_active_run";
+  repair_window_start?: string | null;
+  repair_window_end?: string | null;
+  catalog_oldest_post_at?: string | null;
+  catalog_newest_post_at?: string | null;
+  latest_catalog_run_status?: string | null;
+  active_run_status?: string | null;
+  duration_ms?: number | null;
+  stage_timings?: Record<string, number> | null;
+};
+
+export type SocialAccountCatalogGapAnalysisStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+
+export type SocialAccountCatalogGapAnalysisStatusResponse = {
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  status: SocialAccountCatalogGapAnalysisStatus;
+  operation_id?: string | null;
+  result?: SocialAccountCatalogGapAnalysis | null;
+  stale?: boolean;
+  attached?: boolean;
+  duration_ms?: number | null;
+  stage_timings?: Record<string, number> | null;
+  last_requested_at?: string | null;
+  last_completed_at?: string | null;
+  last_error?: Record<string, unknown> | null;
+};
+
 export type SocialAccountCatalogRunProgressSnapshot = {
   season_id?: string | null;
   run_id: string;

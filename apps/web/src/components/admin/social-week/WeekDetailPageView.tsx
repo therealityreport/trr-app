@@ -4847,7 +4847,9 @@ export default function WeekDetailPage() {
 
   useEffect(() => {
     hasLoadedWeekDetailRef.current = false;
+    weekDetailRequestSeqRef.current += 1;
     weekDetailContextRef.current = "";
+    weekSummaryRequestSeqRef.current += 1;
     weekMetricsRequestSeqRef.current += 1;
     weekMetricsContextRef.current = "";
     weekDetailInFlightRef.current.clear();
@@ -6248,6 +6250,15 @@ export default function WeekDetailPage() {
   useEffect(() => {
     if (!hasValidNumericPathParams || !isAdmin) return;
     let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const clearPendingPoll = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
     const refreshWorkerHealth = async () => {
       try {
         const health = await fetchSyncWorkerHealth();
@@ -6260,13 +6271,35 @@ export default function WeekDetailPage() {
         }
       }
     };
-    void refreshWorkerHealth();
-    const intervalId = window.setInterval(() => {
+
+    const scheduleNextPoll = () => {
+      clearPendingPoll();
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        void refreshWorkerHealth();
+        scheduleNextPoll();
+      }, 30_000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        clearPendingPoll();
+        return;
+      }
       void refreshWorkerHealth();
-    }, 30_000);
+      scheduleNextPoll();
+    };
+
+    void refreshWorkerHealth();
+    scheduleNextPoll();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      clearPendingPoll();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [fetchSyncWorkerHealth, hasValidNumericPathParams, isAdmin]);
 

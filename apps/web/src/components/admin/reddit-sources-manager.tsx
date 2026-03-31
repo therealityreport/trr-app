@@ -5745,6 +5745,24 @@ export default function RedditSourcesManager({
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let visibilityListenerRegistered = false;
+
+    const clearPendingPoll = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      clearPendingPoll();
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      timer = setTimeout(() => {
+        void poll();
+      }, CONTAINER_RUN_POLL_INTERVAL_MS);
+    };
 
     const poll = async () => {
       try {
@@ -5767,9 +5785,7 @@ export default function RedditSourcesManager({
           }
           return;
         }
-        timer = setTimeout(() => {
-          void poll();
-        }, CONTAINER_RUN_POLL_INTERVAL_MS);
+        scheduleNextPoll();
       } catch (error) {
         if (cancelled) return;
         setBackfillRunning(false);
@@ -5777,12 +5793,23 @@ export default function RedditSourcesManager({
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        clearPendingPoll();
+        return;
+      }
+      void poll();
+    };
+
     void poll();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    visibilityListenerRegistered = true;
 
     return () => {
       cancelled = true;
-      if (timer) {
-        clearTimeout(timer);
+      clearPendingPoll();
+      if (visibilityListenerRegistered) {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
       }
     };
   }, [applyBackfillOperationPayload, backfillOperationId, backfillRunning, fetchBackfillOperation]);

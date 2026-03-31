@@ -8,6 +8,9 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import SocialAccountProfileHashtagTimelineChart from "@/components/admin/SocialAccountProfileHashtagTimelineChart";
 import {
+  type SocialAccountCatalogGapAnalysis,
+  type SocialAccountCatalogGapAnalysisStatus,
+  type SocialAccountCatalogGapAnalysisStatusResponse,
   type SocialAccountCatalogFreshness,
   type CatalogBackfillRequest,
   type CatalogReviewResolveRequest,
@@ -93,21 +96,36 @@ type CollaboratorsTagsResponse = {
   mentions: SocialAccountProfileCollaboratorTagAggregate[];
 };
 
-type SummaryResponse = SocialAccountProfileSummary & {
+type ProxyErrorPayload = {
   error?: string;
+  detail?: string;
+  code?: string;
+  retryable?: boolean;
+  retry_after_seconds?: number;
+  trace_id?: string;
   upstream_status?: number;
   upstream_detail?: unknown;
   upstream_detail_code?: string;
 };
+
+type SocialAccountRequestError = Error & {
+  code?: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+  isBackendSaturated?: boolean;
+  upstreamStatus?: number;
+};
+
+type SummaryResponse = SocialAccountProfileSummary & ProxyErrorPayload;
 
 type SummaryLoadResult = {
   data: SocialAccountProfileSummary;
   uninitialized: boolean;
 };
 
-type CatalogRunProgressResponse = SocialAccountCatalogRunProgressSnapshot & {
-  error?: string;
-};
+type CatalogRunProgressResponse = SocialAccountCatalogRunProgressSnapshot & ProxyErrorPayload;
+
+type CatalogGapAnalysisStatusPayload = SocialAccountCatalogGapAnalysisStatusResponse & ProxyErrorPayload;
 
 type CatalogRunProgressStageStats = {
   total: number;
@@ -152,6 +170,11 @@ const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
 const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
 const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const CATALOG_PROGRESS_POLL_INTERVAL_MS = 5_000;
+const CATALOG_PROGRESS_SATURATION_BACKOFF_BASE_MS = 2_000;
+const CATALOG_PROGRESS_SATURATION_BACKOFF_MAX_MS = 30_000;
+const CATALOG_GAP_ANALYSIS_POLL_INTERVAL_MS = 4_000;
+const CATALOG_GAP_ANALYSIS_BACKOFF_BASE_MS = 2_000;
+const CATALOG_GAP_ANALYSIS_BACKOFF_MAX_MS = 30_000;
 const HASHTAG_WINDOW_OPTIONS = [
   { value: "all", label: "All Time" },
   { value: "30d", label: "This Month" },
@@ -226,6 +249,196 @@ const buildEmptySocialAccountProfileSummary = (
   top_tags: [],
   source_status: [],
 });
+
+const hasBackendSaturationText = (value: string): boolean => {
+  const message = value.toLowerCase();
+  return (
+    message.includes("connection pool exhausted") ||
+    message.includes("database pool initialization failed") ||
+    message.includes("maxclientsinsessionmode") ||
+    message.includes("session-pool capacity") ||
+    message.includes("session pool capacity") ||
+    message.includes("backend is saturated")
+  );
+};
+
+const isBackendSaturatedPayload = (payload: ProxyErrorPayload): boolean => {
+  const upstreamDetail =
+    payload.upstream_detail && typeof payload.upstream_detail === "object"
+      ? (payload.upstream_detail as Record<string, unknown>)
+      : null;
+  const upstreamReason =
+    typeof upstreamDetail?.reason === "string" && upstreamDetail.reason.trim()
+      ? upstreamDetail.reason.trim().toLowerCase()
+      : "";
+  const upstreamCode =
+    (typeof payload.upstream_detail_code === "string" && payload.upstream_detail_code.trim()) ||
+    (typeof upstreamDetail?.code === "string" && upstreamDetail.code.trim()) ||
+    (typeof payload.code === "string" && payload.code.trim()) ||
+    "";
+  const detailMessage = [payload.error, payload.detail, upstreamDetail?.message, upstreamDetail?.error]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ");
+  return (
+    payload.code === "BACKEND_SATURATED" ||
+    upstreamReason === "session_pool_capacity" ||
+    (upstreamCode === "DATABASE_SERVICE_UNAVAILABLE" && upstreamReason === "session_pool_capacity") ||
+    hasBackendSaturationText(detailMessage)
+  );
+};
+
+const buildSocialAccountRequestError = (
+  payload: ProxyErrorPayload,
+  fallbackMessage: string,
+): SocialAccountRequestError => {
+  const upstreamDetail =
+    payload.upstream_detail && typeof payload.upstream_detail === "object"
+      ? (payload.upstream_detail as Record<string, unknown>)
+      : null;
+  const message =
+    (typeof payload.error === "string" && payload.error.trim()) ||
+    (typeof payload.detail === "string" && payload.detail.trim()) ||
+    (typeof upstreamDetail?.message === "string" && upstreamDetail.message.trim()) ||
+    fallbackMessage;
+  const retryAfterMs =
+    typeof payload.retry_after_seconds === "number" && Number.isFinite(payload.retry_after_seconds)
+      ? Math.max(0, payload.retry_after_seconds * 1000)
+      : undefined;
+  const error = new Error(message) as SocialAccountRequestError;
+  error.code = typeof payload.code === "string" && payload.code.trim() ? payload.code.trim() : undefined;
+  error.retryable = Boolean(payload.retryable);
+  error.retryAfterMs = retryAfterMs;
+  error.isBackendSaturated = isBackendSaturatedPayload(payload);
+  error.upstreamStatus = typeof payload.upstream_status === "number" ? payload.upstream_status : undefined;
+  return error;
+};
+
+const toSocialAccountRequestError = (
+  error: unknown,
+  fallbackMessage: string,
+): SocialAccountRequestError => {
+  if (error instanceof Error) {
+    const existing = error as SocialAccountRequestError;
+    if (
+      existing.code ||
+      existing.retryable !== undefined ||
+      existing.retryAfterMs !== undefined ||
+      existing.isBackendSaturated !== undefined ||
+      existing.upstreamStatus !== undefined
+    ) {
+      return existing;
+    }
+    const normalized = new Error(existing.message || fallbackMessage) as SocialAccountRequestError;
+    normalized.code = existing.code;
+    normalized.retryable = existing.retryable;
+    normalized.retryAfterMs = existing.retryAfterMs;
+    normalized.isBackendSaturated = existing.isBackendSaturated;
+    normalized.upstreamStatus = existing.upstreamStatus;
+    return normalized;
+  }
+  return new Error(fallbackMessage) as SocialAccountRequestError;
+};
+
+const isBackendSaturationError = (error: unknown): error is SocialAccountRequestError => {
+  return Boolean((error as SocialAccountRequestError | undefined)?.isBackendSaturated);
+};
+
+const isTimeoutRequestError = (error: SocialAccountRequestError | null | undefined): boolean => {
+  if (!error) return false;
+  return (
+    error.code === "UPSTREAM_TIMEOUT" ||
+    error.upstreamStatus === 504 ||
+    error.message.toLowerCase().includes("timed out")
+  );
+};
+
+const formatCatalogDiagnosticErrorMessage = (
+  label: "Freshness check" | "Gap analysis",
+  error: SocialAccountRequestError | null,
+): string | null => {
+  if (!error) return null;
+  if (isBackendSaturationError(error)) {
+    return `${label} is retryable while the backend is busy.`;
+  }
+  if (isTimeoutRequestError(error)) {
+    return label === "Gap analysis"
+      ? "Gap analysis timed out before completion. Retry when you need repair guidance."
+      : "Freshness check timed out before completion. Retry in a moment.";
+  }
+  return `${label} failed. ${error.message}`;
+};
+
+const toCatalogGapAnalysisStatusError = (
+  value: unknown,
+  fallbackMessage: string,
+): SocialAccountRequestError | null => {
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string" && value.trim()) {
+      return new Error(value.trim()) as SocialAccountRequestError;
+    }
+    return null;
+  }
+  const payload = value as ProxyErrorPayload & { message?: string; detail?: string };
+  if (payload.error || payload.detail || payload.code || payload.retryable || payload.upstream_status) {
+    return buildSocialAccountRequestError(payload, fallbackMessage);
+  }
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return new Error(payload.message.trim()) as SocialAccountRequestError;
+  }
+  return null;
+};
+
+const buildHashtagDraftAssignments = (
+  items: SocialAccountProfileHashtag[],
+): Record<string, SocialAccountProfileHashtagAssignment[]> => {
+  return Object.fromEntries(
+    items.map((item) => [
+      item.hashtag,
+      item.assignments?.map((assignment) => ({ ...assignment })) ?? [],
+    ]),
+  );
+};
+
+const cloneHashtagItems = (items: SocialAccountProfileHashtag[]): SocialAccountProfileHashtag[] => {
+  return items.map((item) => ({
+    ...item,
+    assignments: item.assignments?.map((assignment) => ({ ...assignment })) ?? [],
+    assigned_shows: item.assigned_shows?.map((show) => ({ ...show })) ?? [],
+    assigned_seasons: item.assigned_seasons?.map((season) => ({ ...season })) ?? [],
+    observed_shows: item.observed_shows?.map((show) => ({ ...show })) ?? [],
+    observed_seasons: item.observed_seasons?.map((season) => ({ ...season })) ?? [],
+  }));
+};
+
+const formatHashtagRequestErrorMessage = (error: SocialAccountRequestError | null): string | null => {
+  if (!error) return null;
+  if (isBackendSaturationError(error)) {
+    return "Hashtag data is retryable while the backend is busy.";
+  }
+  if (isTimeoutRequestError(error)) {
+    return "Hashtag load timed out before completion. Retry when needed.";
+  }
+  return error.message || "Failed to load social account profile hashtags";
+};
+
+const resolveCatalogProgressBackoffMs = (error: SocialAccountRequestError, saturationAttempt: number): number => {
+  const exponentialDelayMs = Math.min(
+    CATALOG_PROGRESS_SATURATION_BACKOFF_MAX_MS,
+    CATALOG_PROGRESS_SATURATION_BACKOFF_BASE_MS * 2 ** saturationAttempt,
+  );
+  return Math.max(error.retryAfterMs ?? 0, exponentialDelayMs);
+};
+
+const resolveCatalogGapAnalysisBackoffMs = (
+  error: SocialAccountRequestError | null,
+  saturationAttempt: number,
+): number => {
+  const exponentialDelayMs = Math.min(
+    CATALOG_GAP_ANALYSIS_BACKOFF_MAX_MS,
+    CATALOG_GAP_ANALYSIS_BACKOFF_BASE_MS * 2 ** saturationAttempt,
+  );
+  return Math.max(error?.retryAfterMs ?? 0, exponentialDelayMs);
+};
 
 const getPostMatchBadge = (post: Pick<SocialAccountProfilePost, "match_mode" | "source_surface">): {
   label: string;
@@ -558,6 +771,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [summaryUninitialized, setSummaryUninitialized] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summarySaturationActive, setSummarySaturationActive] = useState(false);
 
   const [posts, setPosts] = useState<PostsResponse | null>(null);
   const [postsLoading, setPostsLoading] = useState(false);
@@ -588,7 +802,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const [hashtags, setHashtags] = useState<SocialAccountProfileHashtag[]>([]);
   const [hashtagsLoading, setHashtagsLoading] = useState(false);
-  const [hashtagsError, setHashtagsError] = useState<string | null>(null);
+  const [hashtagsError, setHashtagsError] = useState<SocialAccountRequestError | null>(null);
+  const [hashtagsLoadedRequestKey, setHashtagsLoadedRequestKey] = useState<string | null>(null);
   const [hashtagWindow, setHashtagWindow] = useState<(typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]>("all");
   const [savingHashtag, setSavingHashtag] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -598,7 +813,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [hashtagTimelineError, setHashtagTimelineError] = useState<string | null>(null);
   const [catalogFreshness, setCatalogFreshness] = useState<SocialAccountCatalogFreshness | null>(null);
   const [catalogFreshnessLoading, setCatalogFreshnessLoading] = useState(false);
-  const [catalogFreshnessError, setCatalogFreshnessError] = useState<string | null>(null);
+  const [catalogFreshnessError, setCatalogFreshnessError] = useState<SocialAccountRequestError | null>(null);
+  const [catalogGapAnalysis, setCatalogGapAnalysis] = useState<SocialAccountCatalogGapAnalysis | null>(null);
+  const [catalogGapAnalysisStatus, setCatalogGapAnalysisStatus] = useState<SocialAccountCatalogGapAnalysisStatus>("idle");
+  const [catalogGapAnalysisOperationId, setCatalogGapAnalysisOperationId] = useState<string | null>(null);
+  const [catalogGapAnalysisStale, setCatalogGapAnalysisStale] = useState(false);
+  const [catalogGapAnalysisLoading, setCatalogGapAnalysisLoading] = useState(false);
+  const [catalogGapAnalysisError, setCatalogGapAnalysisError] = useState<SocialAccountRequestError | null>(null);
+  const [catalogGapAnalysisRequestNonce, setCatalogGapAnalysisRequestNonce] = useState(0);
 
   const [collaboratorsTags, setCollaboratorsTags] = useState<CollaboratorsTagsResponse | null>(null);
   const [collaboratorsLoading, setCollaboratorsLoading] = useState(false);
@@ -607,14 +829,26 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogRunProgress, setCatalogRunProgress] = useState<SocialAccountCatalogRunProgressSnapshot | null>(null);
   const [catalogRunProgressError, setCatalogRunProgressError] = useState<string | null>(null);
   const [catalogRunProgressLoading, setCatalogRunProgressLoading] = useState(false);
+  const [catalogProgressSaturationActive, setCatalogProgressSaturationActive] = useState(false);
   const [cancellingCatalogRun, setCancellingCatalogRun] = useState(false);
   const [dismissingCatalogRunId, setDismissingCatalogRunId] = useState<string | null>(null);
   const [catalogProgressLastSuccessAt, setCatalogProgressLastSuccessAt] = useState<string | null>(null);
   const [catalogLogsExpanded, setCatalogLogsExpanded] = useState(false);
   const catalogTerminalSummaryRefreshRunIdRef = useRef<string | null>(null);
   const catalogFreshnessProbeKeyRef = useRef<string | null>(null);
+  const hashtagResponseCacheRef = useRef<
+    Map<
+      string,
+      {
+        items: SocialAccountProfileHashtag[];
+        draftAssignments: Record<string, SocialAccountProfileHashtagAssignment[]>;
+      }
+    >
+  >(new Map());
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
   const hasSummary = summary !== null;
+  const shouldDeferSecondaryCatalogReads =
+    !hasSummary || summaryLoading || summarySaturationActive || catalogProgressSaturationActive;
   const summaryRequestKey = `summary:${platform}:${handle}`;
   const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}`;
   const hashtagTimelineRequestKey = `hashtags-timeline:${platform}:${handle}:${hashtagWindow}`;
@@ -627,6 +861,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setSummaryUninitialized(false);
     setSummaryLoading(false);
     setSummaryError(null);
+    setSummarySaturationActive(false);
     setPosts(null);
     setPostsLoading(false);
     setPostsError(null);
@@ -641,11 +876,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setHashtags([]);
     setHashtagsLoading(false);
     setHashtagsError(null);
+    setHashtagsLoadedRequestKey(null);
     setDraftAssignments({});
+    hashtagResponseCacheRef.current.clear();
     setCatalogProgressRunId(null);
     setCatalogRunProgress(null);
     setCatalogRunProgressError(null);
     setCatalogRunProgressLoading(false);
+    setCatalogProgressSaturationActive(false);
     setCatalogProgressLastSuccessAt(null);
     setCatalogLogsExpanded(false);
     catalogTerminalSummaryRefreshRunIdRef.current = null;
@@ -657,6 +895,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogFreshness(null);
     setCatalogFreshnessLoading(false);
     setCatalogFreshnessError(null);
+    setCatalogGapAnalysis(null);
+    setCatalogGapAnalysisStatus("idle");
+    setCatalogGapAnalysisOperationId(null);
+    setCatalogGapAnalysisStale(false);
+    setCatalogGapAnalysisLoading(false);
+    setCatalogGapAnalysisError(null);
+    setCatalogGapAnalysisRequestNonce(0);
     setCollaboratorsTags(null);
     setCollaboratorsLoading(false);
     setCollaboratorsError(null);
@@ -687,13 +932,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       const payload = (await response.json().catch(() => ({}))) as SummaryResponse;
       if (!response.ok) {
         if (response.status === 404) {
+          setSummarySaturationActive(false);
           return {
             data: buildEmptySocialAccountProfileSummary(platform, handle),
             uninitialized: true,
           };
         }
-        throw new Error(payload.error || "Failed to load social account profile summary");
+        const requestError = buildSocialAccountRequestError(payload, "Failed to load social account profile summary");
+        setSummarySaturationActive(Boolean(requestError.isBackendSaturated));
+        throw requestError;
       }
+      setSummarySaturationActive(false);
       return {
         data: payload,
         uninitialized: false,
@@ -802,16 +1051,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       );
       const payload = (await response.json().catch(() => ({}))) as HashtagsResponse & { error?: string };
       if (!response.ok) {
-        throw new Error(payload.error || "Failed to load social account profile hashtags");
+        throw buildSocialAccountRequestError(payload, "Failed to load social account profile hashtags");
       }
       return payload;
     });
-    setHashtags(data.items ?? []);
-    setDraftAssignments(
-      Object.fromEntries(
-        (data.items ?? []).map((item) => [item.hashtag, item.assignments?.map((assignment) => ({ ...assignment })) ?? []]),
-      ),
-    );
+    const nextItems = cloneHashtagItems(data.items ?? []);
+    const nextDraftAssignments = buildHashtagDraftAssignments(nextItems);
+    hashtagResponseCacheRef.current.set(hashtagsRequestKey, {
+      items: cloneHashtagItems(nextItems),
+      draftAssignments: nextDraftAssignments,
+    });
+    setHashtags(nextItems);
+    setHashtagsLoadedRequestKey(hashtagsRequestKey);
+    setDraftAssignments(nextDraftAssignments);
   }, [fetchAdminWithAuth, handle, hashtagWindow, hashtagsRequestKey, platform, user]);
 
   const refreshHashtagTimeline = useCallback(async () => {
@@ -851,6 +1103,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       } catch (error) {
         if (cancelled) return;
         setSummaryUninitialized(false);
+        if (!isBackendSaturationError(error)) {
+          setSummarySaturationActive(false);
+        }
         setSummaryError(error instanceof Error ? error.message : "Failed to load social account profile summary");
       } finally {
         if (!cancelled) setSummaryLoading(false);
@@ -864,7 +1119,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [checking, handle, hasAccess, platform, refreshSummary, user]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || !supportsCatalog || summaryUninitialized) return;
+    if (checking || !user || !hasAccess || !supportsCatalog || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
+      return;
+    }
     const liveCatalogTotal = Number(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts ?? 0);
     const hasCatalogHistory = Number(summary?.catalog_recent_runs?.length ?? 0) > 0;
     if (liveCatalogTotal > 0 || !hasCatalogHistory) {
@@ -911,6 +1168,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     summary?.catalog_total_posts,
     summary?.live_catalog_total_posts,
     summaryUninitialized,
+    shouldDeferSecondaryCatalogReads,
     supportsCatalog,
     user,
   ]);
@@ -989,8 +1247,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [activeTab, catalogFilter, catalogPage, checking, fetchAdminWithAuth, handle, hasAccess, platform, summaryUninitialized, supportsCatalog, user]);
 
   useEffect(() => {
-    const shouldLoadHashtags = activeTab === "hashtags" || (activeTab === "stats" && hashtagWindow !== "all");
-    if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized) return;
+    const shouldLoadHashtags = activeTab === "hashtags";
+    if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
+      return;
+    }
     let cancelled = false;
 
     const loadHashtags = async () => {
@@ -1001,7 +1261,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (cancelled) return;
       } catch (error) {
         if (cancelled) return;
-        setHashtagsError(error instanceof Error ? error.message : "Failed to load social account profile hashtags");
+        const requestError = toSocialAccountRequestError(error, "Failed to load social account profile hashtags");
+        const cached = hashtagResponseCacheRef.current.get(hashtagsRequestKey);
+        if (cached) {
+          setHashtags(cloneHashtagItems(cached.items));
+          setDraftAssignments(
+            Object.fromEntries(
+              Object.entries(cached.draftAssignments).map(([hashtag, assignments]) => [
+                hashtag,
+                assignments.map((assignment) => ({ ...assignment })),
+              ]),
+            ),
+          );
+        } else {
+          setHashtags([]);
+          setDraftAssignments({});
+        }
+        setHashtagsLoadedRequestKey(hashtagsRequestKey);
+        setHashtagsError(requestError);
       } finally {
         if (!cancelled) setHashtagsLoading(false);
       }
@@ -1011,7 +1288,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeTab, checking, hashtagWindow, hasAccess, refreshHashtags, summaryUninitialized, user]);
+  }, [
+    activeTab,
+    checking,
+    hashtagWindow,
+    hasAccess,
+    hashtagsRequestKey,
+    platform,
+    refreshHashtags,
+    shouldDeferSecondaryCatalogReads,
+    summaryUninitialized,
+    user,
+  ]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || activeTab !== "hashtags" || platform !== "instagram" || summaryUninitialized) {
@@ -1133,15 +1421,123 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return runs[0] ?? null;
   }, [summary?.catalog_recent_runs]);
 
+  const latestCatalogRunStatus = useMemo(() => normalizeCatalogRunStatus(latestCatalogRun?.status), [latestCatalogRun?.status]);
+  const activeCatalogRunStatusNormalized = useMemo(
+    () => normalizeCatalogRunStatus(activeCatalogRun?.status),
+    [activeCatalogRun?.status],
+  );
+
+  const displayCatalogTotalPosts = useMemo(() => {
+    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0) {
+      return Number(summary?.live_catalog_total_posts ?? 0);
+    }
+    if (supportsCatalog && Number(catalogCardPreview?.total ?? 0) > 0) {
+      return Number(catalogCardPreview?.total ?? 0);
+    }
+    return Number(summary?.catalog_total_posts ?? 0);
+  }, [
+    catalogCardPreview?.total,
+    summary?.catalog_total_posts,
+    summary?.live_catalog_total_posts,
+    supportsCatalog,
+  ]);
+
+  const displayTotalPosts = useMemo(() => {
+    if (Number(summary?.live_total_posts ?? 0) > 0) {
+      return Number(summary?.live_total_posts ?? 0);
+    }
+    return Number(summary?.total_posts ?? 0);
+  }, [summary?.live_total_posts, summary?.total_posts]);
+
+  const catalogCountsMismatch = useMemo(() => {
+    return supportsCatalog && displayTotalPosts !== displayCatalogTotalPosts;
+  }, [displayCatalogTotalPosts, displayTotalPosts, supportsCatalog]);
+
+  const applyCatalogGapAnalysisStatus = useCallback(
+    (payload: CatalogGapAnalysisStatusPayload) => {
+      const normalizedStatus = payload.status ?? "idle";
+      const operationId =
+        typeof payload.operation_id === "string" && payload.operation_id.trim()
+          ? payload.operation_id.trim()
+          : null;
+      setCatalogGapAnalysis(payload.result ?? null);
+      setCatalogGapAnalysisStatus(normalizedStatus);
+      setCatalogGapAnalysisOperationId(operationId);
+      setCatalogGapAnalysisStale(Boolean(payload.stale));
+      setCatalogGapAnalysisLoading(normalizedStatus === "queued" || normalizedStatus === "running");
+      if (normalizedStatus === "failed") {
+        setCatalogGapAnalysisError(
+          toCatalogGapAnalysisStatusError(payload.last_error, "Failed to analyze social account catalog gaps"),
+        );
+      } else {
+        setCatalogGapAnalysisError(null);
+      }
+    },
+    [],
+  );
+
+  const canRequestCatalogGapAnalysis = useMemo(() => {
+    return (
+      supportsCatalog &&
+      platform === "instagram" &&
+      !summaryUninitialized &&
+      !shouldDeferSecondaryCatalogReads &&
+      catalogCountsMismatch &&
+      !activeCatalogRun &&
+      latestCatalogRunStatus === "completed" &&
+      !activeCatalogRunStatusNormalized
+    );
+  }, [
+    activeCatalogRun,
+    activeCatalogRunStatusNormalized,
+    catalogCountsMismatch,
+    latestCatalogRunStatus,
+    platform,
+    shouldDeferSecondaryCatalogReads,
+    summaryUninitialized,
+    supportsCatalog,
+  ]);
+
+  const requestCatalogGapAnalysis = useCallback(() => {
+    setCatalogGapAnalysisError(null);
+    setCatalogGapAnalysisStale(Boolean(catalogGapAnalysis));
+    setCatalogGapAnalysisRequestNonce((current) => current + 1);
+  }, [catalogGapAnalysis]);
+
   const displayedStatsHashtags = useMemo(() => {
+    if (activeTab === "stats" && platform === "instagram") {
+      return summary?.top_hashtags ?? [];
+    }
     if (hashtags.length > 0 || hashtagWindow !== "all") {
       return hashtags;
     }
     return summary?.top_hashtags ?? [];
-  }, [hashtagWindow, hashtags, summary?.top_hashtags]);
+  }, [activeTab, hashtagWindow, hashtags, platform, summary?.top_hashtags]);
+
+  const statsHashtagsPending = useMemo(() => {
+    return false;
+  }, [activeTab, hashtagsLoadedRequestKey, hashtagsRequestKey, platform]);
+
+  const hashtagsErrorMessage = useMemo(() => formatHashtagRequestErrorMessage(hashtagsError), [hashtagsError]);
+  const hashtagsErrorToneClass = useMemo(() => {
+    return isBackendSaturationError(hashtagsError) ? "text-amber-800" : "text-red-700";
+  }, [hashtagsError]);
 
   useEffect(() => {
-    if (checking || !user || !hasAccess || !supportsCatalog || platform !== "instagram" || summaryUninitialized) return;
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !supportsCatalog ||
+      platform !== "instagram" ||
+      summaryUninitialized ||
+      shouldDeferSecondaryCatalogReads
+    ) {
+      setCatalogFreshness(null);
+      setCatalogFreshnessError(null);
+      setCatalogFreshnessLoading(false);
+      return;
+    }
 
     const latestStatus = normalizeCatalogRunStatus(latestCatalogRun?.status);
     const activeStatus = normalizeCatalogRunStatus(activeCatalogRun?.status);
@@ -1172,16 +1568,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           },
           { preferredUser: user },
         );
-        const data = (await response.json().catch(() => ({}))) as SocialAccountCatalogFreshness & { error?: string };
+        const data = (await response.json().catch(() => ({}))) as (SocialAccountCatalogFreshness & ProxyErrorPayload);
         if (!response.ok) {
-          throw new Error(data.error || "Failed to check catalog freshness");
+          throw buildSocialAccountRequestError(data, "Failed to check catalog freshness");
         }
         if (cancelled) return;
         setCatalogFreshness(data);
       } catch (error) {
         if (cancelled) return;
         setCatalogFreshness(null);
-        setCatalogFreshnessError(error instanceof Error ? error.message : "Failed to check catalog freshness");
+        setCatalogFreshnessError(toSocialAccountRequestError(error, "Failed to check catalog freshness"));
       } finally {
         if (!cancelled) {
           setCatalogFreshnessLoading(false);
@@ -1193,7 +1589,203 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [activeCatalogRun, checking, fetchAdminWithAuth, handle, hasAccess, latestCatalogRun?.run_id, latestCatalogRun?.status, platform, summaryUninitialized, supportsCatalog, user]);
+  }, [
+    activeCatalogRun,
+    checking,
+    fetchAdminWithAuth,
+    handle,
+    hasAccess,
+    latestCatalogRun?.run_id,
+    latestCatalogRun?.status,
+    platform,
+    shouldDeferSecondaryCatalogReads,
+    summaryUninitialized,
+    supportsCatalog,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !supportsCatalog ||
+      platform !== "instagram" ||
+      summaryUninitialized ||
+      !catalogCountsMismatch ||
+      shouldDeferSecondaryCatalogReads ||
+      catalogGapAnalysisRequestNonce <= 0
+    ) {
+      if (!catalogCountsMismatch || shouldDeferSecondaryCatalogReads) {
+        setCatalogGapAnalysis(null);
+        setCatalogGapAnalysisStatus("idle");
+        setCatalogGapAnalysisOperationId(null);
+        setCatalogGapAnalysisStale(false);
+        setCatalogGapAnalysisError(null);
+        setCatalogGapAnalysisLoading(false);
+      }
+      return;
+    }
+
+    const latestStatus = normalizeCatalogRunStatus(latestCatalogRun?.status);
+    const activeStatus = normalizeCatalogRunStatus(activeCatalogRun?.status);
+    if (activeCatalogRun || latestStatus !== "completed" || activeStatus) {
+      setCatalogGapAnalysis(null);
+      setCatalogGapAnalysisStatus("idle");
+      setCatalogGapAnalysisOperationId(null);
+      setCatalogGapAnalysisStale(false);
+      setCatalogGapAnalysisError(null);
+      setCatalogGapAnalysisLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const runCatalogGapAnalysis = async () => {
+      setCatalogGapAnalysisLoading(true);
+      setCatalogGapAnalysisStatus("queued");
+      setCatalogGapAnalysisError(null);
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/gap-analysis/run`,
+          { method: "POST" },
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as CatalogGapAnalysisStatusPayload;
+        if (!response.ok) {
+          throw buildSocialAccountRequestError(data, "Failed to start social account catalog gap analysis");
+        }
+        if (cancelled) return;
+        applyCatalogGapAnalysisStatus(data);
+      } catch (error) {
+        if (cancelled) return;
+        setCatalogGapAnalysisStatus("idle");
+        setCatalogGapAnalysisLoading(false);
+        setCatalogGapAnalysisError(
+          toSocialAccountRequestError(error, "Failed to start social account catalog gap analysis"),
+        );
+      }
+    };
+
+    void runCatalogGapAnalysis();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeCatalogRun,
+    applyCatalogGapAnalysisStatus,
+    catalogCountsMismatch,
+    catalogGapAnalysisRequestNonce,
+    checking,
+    fetchAdminWithAuth,
+    handle,
+    hasAccess,
+    latestCatalogRun?.status,
+    platform,
+    shouldDeferSecondaryCatalogReads,
+    summaryUninitialized,
+    supportsCatalog,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !supportsCatalog ||
+      platform !== "instagram" ||
+      summaryUninitialized ||
+      !catalogCountsMismatch ||
+      shouldDeferSecondaryCatalogReads ||
+      !catalogGapAnalysisOperationId ||
+      (catalogGapAnalysisStatus !== "queued" && catalogGapAnalysisStatus !== "running")
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    let saturationAttempt = 0;
+
+    const clearPendingPoll = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    const scheduleNextPoll = (delayMs: number) => {
+      clearPendingPoll();
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        void loadCatalogGapAnalysisStatus();
+      }, delayMs);
+    };
+
+    const loadCatalogGapAnalysisStatus = async () => {
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/gap-analysis`,
+          undefined,
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as CatalogGapAnalysisStatusPayload;
+        if (!response.ok) {
+          throw buildSocialAccountRequestError(data, "Failed to fetch social account catalog gap analysis");
+        }
+        if (cancelled) return;
+        saturationAttempt = 0;
+        applyCatalogGapAnalysisStatus(data);
+        if (data.status === "queued" || data.status === "running") {
+          scheduleNextPoll(CATALOG_GAP_ANALYSIS_POLL_INTERVAL_MS);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const requestError = toSocialAccountRequestError(error, "Failed to fetch social account catalog gap analysis");
+        if (requestError.retryable) {
+          saturationAttempt += 1;
+          scheduleNextPoll(resolveCatalogGapAnalysisBackoffMs(requestError, saturationAttempt));
+          return;
+        }
+        setCatalogGapAnalysisStatus("failed");
+        setCatalogGapAnalysisLoading(false);
+        setCatalogGapAnalysisError(requestError);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        clearPendingPoll();
+        return;
+      }
+      void loadCatalogGapAnalysisStatus();
+    };
+
+    void loadCatalogGapAnalysisStatus();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      clearPendingPoll();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [
+    applyCatalogGapAnalysisStatus,
+    catalogCountsMismatch,
+    catalogGapAnalysisOperationId,
+    catalogGapAnalysisStatus,
+    checking,
+    fetchAdminWithAuth,
+    handle,
+    hasAccess,
+    platform,
+    shouldDeferSecondaryCatalogReads,
+    summaryUninitialized,
+    supportsCatalog,
+    user,
+  ]);
 
   const trimmedPostSearchQuery = useMemo(() => postSearchQuery.trim(), [postSearchQuery]);
 
@@ -1391,15 +1983,190 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return getCatalogDispatchStatusMessage(catalogRunProgress);
   }, [catalogRunProgress]);
 
+  const catalogGapAnalysisPresentation = useMemo(() => {
+    if (!catalogGapAnalysis) return null;
+    const sampleIds = catalogGapAnalysis.sample_missing_source_ids.slice(0, 5).join(", ");
+    if (catalogGapAnalysis.gap_type === "tail_gap") {
+      return {
+        tone: "border-amber-200 bg-amber-50 text-amber-900",
+        title: "Catalog backfill stopped before the historical tail completed",
+        detail: catalogGapAnalysis.has_resumable_frontier
+          ? "Use Resume Tail to continue from the saved frontier instead of starting another full-history backfill."
+          : "Older posts are missing from the catalog and no saved frontier is available.",
+        sampleIds,
+      };
+    }
+    if (catalogGapAnalysis.gap_type === "head_gap") {
+      return {
+        tone: "border-blue-200 bg-blue-50 text-blue-900",
+        title: "Catalog is missing newer posts at the head",
+        detail: "Use Sync Newer to fetch posts published after the newest stored catalog post.",
+        sampleIds,
+      };
+    }
+    if (catalogGapAnalysis.gap_type === "interior_gaps") {
+      return {
+        tone: "border-red-200 bg-red-50 text-red-900",
+        title: "Catalog has interior gaps",
+        detail: "The missing posts are neither purely newer nor purely older, so a bounded repair window is recommended.",
+        sampleIds,
+      };
+    }
+    if (catalogGapAnalysis.gap_type === "source_total_drift") {
+      return {
+        tone: "border-zinc-300 bg-zinc-100 text-zinc-800",
+        title: "Live profile totals are ahead of stored catalog evidence",
+        detail: "This mismatch is currently explained by source-total drift rather than confirmed missing stored posts.",
+        sampleIds,
+      };
+    }
+    if (catalogGapAnalysis.gap_type === "active_run") {
+      return {
+        tone: "border-zinc-300 bg-zinc-100 text-zinc-800",
+        title: "Gap analysis is waiting on the active run",
+        detail: "Wait for the current catalog run to finish before choosing another repair action.",
+        sampleIds,
+      };
+    }
+    return {
+      tone: "border-emerald-200 bg-emerald-50 text-emerald-900",
+      title: "Catalog counts reconcile cleanly",
+      detail: "No stored-data gap was found between owner materialized posts and owner catalog rows.",
+      sampleIds,
+    };
+  }, [catalogGapAnalysis]);
+
+  const catalogGapAnalysisDeferred = useMemo(() => {
+    return (
+      canRequestCatalogGapAnalysis &&
+      catalogGapAnalysisStatus === "idle" &&
+      !catalogGapAnalysisLoading &&
+      !catalogGapAnalysis
+    );
+  }, [
+    canRequestCatalogGapAnalysis,
+    catalogGapAnalysis,
+    catalogGapAnalysisLoading,
+    catalogGapAnalysisStatus,
+  ]);
+
+  const catalogDiagnosticsVisible = useMemo(() => {
+    return (
+      supportsCatalog &&
+      platform === "instagram" &&
+      (catalogFreshnessLoading ||
+        catalogFreshness !== null ||
+        catalogFreshnessError !== null ||
+        catalogCountsMismatch ||
+        catalogGapAnalysisLoading ||
+        catalogGapAnalysis !== null ||
+        catalogGapAnalysisError !== null)
+    );
+  }, [
+    catalogCountsMismatch,
+    catalogFreshness,
+    catalogFreshnessError,
+    catalogFreshnessLoading,
+    catalogGapAnalysis,
+    catalogGapAnalysisError,
+    catalogGapAnalysisLoading,
+    platform,
+    supportsCatalog,
+  ]);
+
+  const catalogFreshnessStatusCopy = useMemo(() => {
+    if (catalogFreshnessLoading) {
+      return {
+        tone: "text-zinc-600",
+        text: "Freshness check is running.",
+      };
+    }
+    if (catalogFreshnessError) {
+      return {
+        tone: "text-red-700",
+        text: formatCatalogDiagnosticErrorMessage("Freshness check", catalogFreshnessError),
+      };
+    }
+    if (catalogFreshness && catalogFreshness.eligible) {
+      return {
+        tone: catalogFreshness.needs_recent_sync ? "text-amber-800" : "text-emerald-800",
+        text: catalogFreshness.needs_recent_sync
+          ? `${formatInteger(catalogFreshness.delta_posts)} newer post${
+              catalogFreshness.delta_posts === 1 ? "" : "s"
+            } detected. Stored ${formatInteger(catalogFreshness.stored_total_posts)} posts${
+              catalogFreshness.live_total_posts_current !== null &&
+              catalogFreshness.live_total_posts_current !== undefined
+                ? `; live profile shows ${formatInteger(catalogFreshness.live_total_posts_current)}`
+                : ""
+            }.`
+          : `Catalog is up to date. Stored ${formatInteger(catalogFreshness.stored_total_posts)} posts${
+              catalogFreshness.live_total_posts_current !== null &&
+              catalogFreshness.live_total_posts_current !== undefined
+                ? `; live profile shows ${formatInteger(catalogFreshness.live_total_posts_current)}`
+                : ""
+            }.`,
+      };
+    }
+    return null;
+  }, [catalogFreshness, catalogFreshnessError, catalogFreshnessLoading]);
+
+  const catalogGapAnalysisStatusCopy = useMemo(() => {
+    if (!catalogCountsMismatch) {
+      return {
+        tone: "text-emerald-800",
+        text: "Gap analysis is not needed while totals reconcile cleanly.",
+      };
+    }
+    if (catalogGapAnalysisLoading) {
+      return {
+        tone: "text-zinc-600",
+        text: catalogGapAnalysisStale
+          ? "Gap analysis is running in the background. Showing the last completed result while it refreshes."
+          : "Gap analysis is running in the background.",
+      };
+    }
+    if (catalogGapAnalysisError) {
+      return {
+        tone: "text-red-700",
+        text: formatCatalogDiagnosticErrorMessage("Gap analysis", catalogGapAnalysisError),
+      };
+    }
+    if (catalogGapAnalysisPresentation) {
+      return {
+        tone: "text-zinc-700",
+        text: catalogGapAnalysisPresentation.title,
+      };
+    }
+    if (catalogGapAnalysisDeferred) {
+      return {
+        tone: "text-zinc-600",
+        text: "Gap analysis is deferred until you request it.",
+      };
+    }
+    return null;
+  }, [
+    catalogCountsMismatch,
+    catalogGapAnalysisDeferred,
+    catalogGapAnalysisError,
+    catalogGapAnalysisLoading,
+    catalogGapAnalysisPresentation,
+    catalogGapAnalysisStale,
+  ]);
+
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog) return;
-    if (!backgroundCatalogRunId) return;
+    if (!backgroundCatalogRunId) {
+      setCatalogProgressSaturationActive(false);
+      return;
+    }
 
     let cancelled = false;
     let timeoutId: number | null = null;
+    let saturationAttempt = 0;
 
     const loadProgress = async () => {
       if (cancelled) return;
+      let nextDelayMs = CATALOG_PROGRESS_POLL_INTERVAL_MS;
       setCatalogRunProgressLoading(true);
       try {
         const response = await fetchAdminWithAuth(
@@ -1409,15 +2176,25 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         );
         const data = (await response.json().catch(() => ({}))) as CatalogRunProgressResponse;
         if (!response.ok) {
-          throw new Error(data.error || "Failed to load social account catalog run progress");
+          throw buildSocialAccountRequestError(data, "Failed to load social account catalog run progress");
         }
         if (cancelled) return;
+        saturationAttempt = 0;
+        setCatalogProgressSaturationActive(false);
         setCatalogRunProgress(data);
         setCatalogRunProgressError(null);
         setCatalogProgressLastSuccessAt(new Date().toISOString());
         if (TERMINAL_CATALOG_RUN_STATUSES.has(String(data.run_status || "").trim().toLowerCase())) return;
       } catch (error) {
         if (cancelled) return;
+        if (isBackendSaturationError(error)) {
+          setCatalogProgressSaturationActive(true);
+          nextDelayMs = resolveCatalogProgressBackoffMs(error, saturationAttempt);
+          saturationAttempt += 1;
+        } else {
+          setCatalogProgressSaturationActive(false);
+          saturationAttempt = 0;
+        }
         setCatalogRunProgressError(
           error instanceof Error ? error.message : "Failed to load social account catalog run progress",
         );
@@ -1430,7 +2207,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       if (cancelled) return;
       timeoutId = window.setTimeout(() => {
         void loadProgress();
-      }, CATALOG_PROGRESS_POLL_INTERVAL_MS);
+      }, nextDelayMs);
     };
 
     void loadProgress();
@@ -1445,11 +2222,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   useEffect(() => {
     const runId = String(catalogRunProgress?.run_id || "").trim();
     const runStatus = String(catalogRunProgress?.run_status || "").trim().toLowerCase();
+    if (catalogProgressSaturationActive) return;
     if (!runId || !TERMINAL_CATALOG_RUN_STATUSES.has(runStatus)) return;
     if (catalogTerminalSummaryRefreshRunIdRef.current === runId) return;
     catalogTerminalSummaryRefreshRunIdRef.current = runId;
     void refreshSummary().catch(() => {});
-  }, [catalogRunProgress?.run_id, catalogRunProgress?.run_status, refreshSummary]);
+  }, [catalogProgressSaturationActive, catalogRunProgress?.run_id, catalogRunProgress?.run_status, refreshSummary]);
 
   const catalogStageEntries = useMemo(() => {
     return Object.entries(catalogRunProgress?.stages ?? {})
@@ -1570,28 +2348,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     summary?.live_catalog_total_posts,
     supportsCatalog,
   ]);
-
-  const displayCatalogTotalPosts = useMemo(() => {
-    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0) {
-      return Number(summary?.live_catalog_total_posts ?? 0);
-    }
-    if (supportsCatalog && Number(catalogCardPreview?.total ?? 0) > 0) {
-      return Number(catalogCardPreview?.total ?? 0);
-    }
-    return Number(summary?.catalog_total_posts ?? 0);
-  }, [
-    catalogCardPreview?.total,
-    summary?.catalog_total_posts,
-    summary?.live_catalog_total_posts,
-    supportsCatalog,
-  ]);
-
-  const displayTotalPosts = useMemo(() => {
-    if (Number(summary?.live_total_posts ?? 0) > 0) {
-      return Number(summary?.live_total_posts ?? 0);
-    }
-    return Number(summary?.total_posts ?? 0);
-  }, [summary?.live_total_posts, summary?.total_posts]);
 
   const catalogHandleCards = useMemo((): CatalogRunProgressHandleCard[] => {
     const frontierMode =
@@ -1827,6 +2583,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogActionMessage(null);
     setCatalogFreshness(null);
     setCatalogFreshnessError(null);
+    setCatalogGapAnalysis(null);
+    setCatalogGapAnalysisError(null);
     try {
       const actionSlug =
         action === "backfill" ? "backfill"
@@ -2148,33 +2906,105 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
                 {supportsCatalog && platform === "instagram" ? (
                   <div className="mt-3 space-y-2">
-                    {catalogFreshnessLoading ? (
-                      <p className="text-sm text-zinc-500">Checking whether the catalog is up to date…</p>
+                    {catalogDiagnosticsVisible ? (
+                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm">
+                        <h3 className="font-semibold text-zinc-900">Catalog Diagnostics</h3>
+                        <div className="mt-2 space-y-2">
+                          {catalogFreshnessStatusCopy ? (
+                            <p className={`text-sm ${catalogFreshnessStatusCopy.tone}`}>{catalogFreshnessStatusCopy.text}</p>
+                          ) : null}
+                          {catalogGapAnalysisStatusCopy ? (
+                            <p className={`text-sm ${catalogGapAnalysisStatusCopy.tone}`}>{catalogGapAnalysisStatusCopy.text}</p>
+                          ) : null}
+                        </div>
+                        {canRequestCatalogGapAnalysis && (!catalogGapAnalysis || catalogGapAnalysisError) ? (
+                          <button
+                            type="button"
+                            onClick={() => requestCatalogGapAnalysis()}
+                            disabled={catalogGapAnalysisLoading}
+                            className="mt-3 inline-flex rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {catalogGapAnalysisLoading
+                              ? "Analyzing Gap…"
+                              : catalogGapAnalysisError
+                                ? "Retry Gap Analysis"
+                                : "Run Gap Analysis"}
+                          </button>
+                        ) : null}
+                      </div>
                     ) : null}
-                    {catalogFreshnessError ? <p className="text-sm text-red-700">{catalogFreshnessError}</p> : null}
-                    {catalogFreshness && catalogFreshness.eligible ? (
-                      <div
-                        className={`rounded-xl border px-3 py-3 text-sm ${
-                          catalogFreshness.needs_recent_sync
-                            ? "border-amber-200 bg-amber-50 text-amber-800"
-                            : "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        }`}
-                      >
-                        <p className="font-semibold">
-                          {catalogFreshness.needs_recent_sync
-                            ? `${formatInteger(catalogFreshness.delta_posts)} newer post${
-                                catalogFreshness.delta_posts === 1 ? "" : "s"
-                              } detected`
-                            : "Catalog is up to date"}
-                        </p>
+                    {catalogGapAnalysis && catalogGapAnalysisPresentation ? (
+                      <div className={`rounded-xl border px-3 py-3 text-sm ${catalogGapAnalysisPresentation.tone}`}>
+                        <p className="font-semibold">{catalogGapAnalysisPresentation.title}</p>
+                        {catalogGapAnalysisStale && catalogGapAnalysisLoading ? (
+                          <p className="mt-1 text-xs">
+                            Showing the last completed gap-analysis result while a refresh is still running.
+                          </p>
+                        ) : null}
                         <p className="mt-1 text-xs">
-                          Stored {formatInteger(catalogFreshness.stored_total_posts)} posts
-                          {catalogFreshness.live_total_posts_current !== null &&
-                          catalogFreshness.live_total_posts_current !== undefined
-                            ? ` · live profile shows ${formatInteger(catalogFreshness.live_total_posts_current)}`
-                            : ""}
-                          {catalogFreshness.checked_at ? ` · checked ${formatDateTime(catalogFreshness.checked_at)}` : ""}
+                          {catalogGapAnalysisPresentation.detail} Materialized {formatInteger(catalogGapAnalysis.materialized_posts)} ·
+                          catalog {formatInteger(catalogGapAnalysis.catalog_posts)} · missing{" "}
+                          {formatInteger(catalogGapAnalysis.missing_from_catalog_count)}.
                         </p>
+                        {catalogGapAnalysisPresentation.sampleIds ? (
+                          <p className="mt-1 text-xs">
+                            Sample missing source ids: <span className="font-semibold">{catalogGapAnalysisPresentation.sampleIds}</span>
+                          </p>
+                        ) : null}
+                        {catalogGapAnalysis.gap_type === "interior_gaps" &&
+                        catalogGapAnalysis.repair_window_start &&
+                        catalogGapAnalysis.repair_window_end ? (
+                          <p className="mt-1 text-xs">
+                            Recommended repair window: {formatDateTime(catalogGapAnalysis.repair_window_start)} to{" "}
+                            {formatDateTime(catalogGapAnalysis.repair_window_end)}
+                          </p>
+                        ) : null}
+                        {catalogGapAnalysis.recommended_action === "resume_tail" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void runCatalogAction("resume_tail", {
+                                source_scope: "bravo",
+                              })
+                            }
+                            disabled={catalogActionsBlocked}
+                            className="mt-3 inline-flex rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {runningCatalogAction === "resume_tail" ? "Queueing…" : "Resume Tail Now"}
+                          </button>
+                        ) : null}
+                        {catalogGapAnalysis.recommended_action === "sync_newer" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void runCatalogAction("sync_newer", {
+                                source_scope: "bravo",
+                              })
+                            }
+                            disabled={catalogActionsBlocked}
+                            className="mt-3 inline-flex rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {runningCatalogAction === "sync_newer" ? "Queueing…" : "Sync Newer Now"}
+                          </button>
+                        ) : null}
+                        {catalogGapAnalysis.recommended_action === "bounded_window_backfill" &&
+                        catalogGapAnalysis.repair_window_start &&
+                        catalogGapAnalysis.repair_window_end ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void runCatalogAction("backfill", {
+                                backfill_scope: "bounded_window",
+                                date_start: catalogGapAnalysis.repair_window_start,
+                                date_end: catalogGapAnalysis.repair_window_end,
+                              })
+                            }
+                            disabled={catalogActionsBlocked}
+                            className="mt-3 inline-flex rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {runningCatalogAction === "backfill" ? "Queueing…" : "Repair Missing Window"}
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -2695,13 +3525,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     </label>
                   </div>
                   <div className="mt-4 space-y-2">
-                    {hashtagsLoading ? (
+                    {hashtagsLoading || statsHashtagsPending ? (
                       <p className="text-sm text-zinc-500">Loading hashtags…</p>
-                    ) : hashtagsError ? (
-                      <p className="text-sm text-red-700">{hashtagsError}</p>
-                    ) : displayedStatsHashtags.length === 0 ? (
+                    ) : null}
+                    {!hashtagsLoading && !statsHashtagsPending && hashtagsErrorMessage ? (
+                      <p className={`text-sm ${hashtagsErrorToneClass}`}>{hashtagsErrorMessage}</p>
+                    ) : null}
+                    {!hashtagsLoading && !statsHashtagsPending && displayedStatsHashtags.length === 0 && !hashtagsErrorMessage ? (
                       <p className="text-sm text-zinc-500">No hashtags found yet.</p>
-                    ) : (
+                    ) : null}
+                    {!hashtagsLoading && !statsHashtagsPending && displayedStatsHashtags.length > 0 ? (
                       displayedStatsHashtags.slice(0, 10).map((item) => (
                         <div key={item.hashtag} className="flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3">
                           <div>
@@ -2713,7 +3546,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <span className="text-sm font-semibold text-zinc-700">{formatInteger(item.usage_count)}</span>
                         </div>
                       ))
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
@@ -3048,100 +3881,101 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   </label>
                 </div>
                 {hashtagsLoading ? <p className="mt-4 text-sm text-zinc-500">Loading hashtags…</p> : null}
-                {hashtagsError ? <p className="mt-4 text-sm text-red-700">{hashtagsError}</p> : null}
-                {!hashtagsLoading && !hashtagsError ? (
+                {!hashtagsLoading && hashtagsErrorMessage ? (
+                  <p className={`mt-4 text-sm ${hashtagsErrorToneClass}`}>{hashtagsErrorMessage}</p>
+                ) : null}
+                {!hashtagsLoading && hashtags.length > 0 ? (
                   <div className="mt-4 space-y-4">
-                    {hashtags.length === 0 ? (
-                      <p className="text-sm text-zinc-500">No hashtags found for this account.</p>
-                    ) : (
-                      hashtags.map((item) => {
-                        const assignments = draftAssignments[item.hashtag] ?? [];
-                        return (
-                          <div key={item.hashtag} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                              <div>
-                                <p className="text-lg font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
-                                <p className="text-xs text-zinc-500">
-                                  {formatInteger(item.usage_count)} uses · First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.latest_seen_at)}
-                                </p>
-                                <p className="mt-2 text-xs text-zinc-500">
-                                  Observed on {(item.observed_shows ?? []).map((show) => show.show_name).filter(Boolean).join(", ") || "no assigned shows yet"}
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => addHashtagAssignmentRow(item.hashtag)}
-                                  disabled={showOptions.length === 0}
-                                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  Add Assignment
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void saveHashtagAssignments(item.hashtag)}
-                                  disabled={savingHashtag === item.hashtag}
-                                  className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {savingHashtag === item.hashtag ? "Saving…" : "Save"}
-                                </button>
-                              </div>
+                    {hashtags.map((item) => {
+                      const assignments = draftAssignments[item.hashtag] ?? [];
+                      return (
+                        <div key={item.hashtag} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <p className="text-lg font-semibold text-zinc-900">{item.display_hashtag ?? `#${item.hashtag}`}</p>
+                              <p className="text-xs text-zinc-500">
+                                {formatInteger(item.usage_count)} uses · First seen {formatDateTime(item.first_seen_at)} · Last seen {formatDateTime(item.latest_seen_at)}
+                              </p>
+                              <p className="mt-2 text-xs text-zinc-500">
+                                Observed on {(item.observed_shows ?? []).map((show) => show.show_name).filter(Boolean).join(", ") || "no assigned shows yet"}
+                              </p>
                             </div>
-
-                            <div className="mt-4 space-y-3">
-                              {assignments.length === 0 ? (
-                                <p className="text-sm text-zinc-500">No assignments saved for this hashtag yet.</p>
-                              ) : (
-                                assignments.map((assignment, index) => {
-                                  const selectedShowId = assignment.show_id ?? showOptions[0]?.show_id ?? "";
-                                  return (
-                                    <div key={`${item.hashtag}-${assignment.show_id ?? "show"}-${index}`} className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-3 lg:grid-cols-[1fr_auto]">
-                                      <label className="text-sm font-medium text-zinc-700">
-                                        Show
-                                        <select
-                                          value={selectedShowId}
-                                          onChange={(event) => {
-                                            const nextShowId = event.target.value;
-                                            updateHashtagAssignments(
-                                              item.hashtag,
-                                              assignments.map((entry, entryIndex) =>
-                                                entryIndex === index ? { ...entry, show_id: nextShowId } : entry,
-                                              ),
-                                            );
-                                          }}
-                                          className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
-                                        >
-                                          {showOptions.map((show) => (
-                                            <option key={show.show_id} value={show.show_id}>
-                                              {show.show_name}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </label>
-                                      <div className="flex items-end">
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            updateHashtagAssignments(
-                                              item.hashtag,
-                                              assignments.filter((_, entryIndex) => entryIndex !== index),
-                                            )
-                                          }
-                                          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
-                                        >
-                                          Remove
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })
-                              )}
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => addHashtagAssignmentRow(item.hashtag)}
+                                disabled={showOptions.length === 0}
+                                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Add Assignment
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void saveHashtagAssignments(item.hashtag)}
+                                disabled={savingHashtag === item.hashtag}
+                                className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {savingHashtag === item.hashtag ? "Saving…" : "Save"}
+                              </button>
                             </div>
                           </div>
-                        );
-                      })
-                    )}
+
+                          <div className="mt-4 space-y-3">
+                            {assignments.length === 0 ? (
+                              <p className="text-sm text-zinc-500">No assignments saved for this hashtag yet.</p>
+                            ) : (
+                              assignments.map((assignment, index) => {
+                                const selectedShowId = assignment.show_id ?? showOptions[0]?.show_id ?? "";
+                                return (
+                                  <div key={`${item.hashtag}-${assignment.show_id ?? "show"}-${index}`} className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-3 lg:grid-cols-[1fr_auto]">
+                                    <label className="text-sm font-medium text-zinc-700">
+                                      Show
+                                      <select
+                                        value={selectedShowId}
+                                        onChange={(event) => {
+                                          const nextShowId = event.target.value;
+                                          updateHashtagAssignments(
+                                            item.hashtag,
+                                            assignments.map((entry, entryIndex) =>
+                                              entryIndex === index ? { ...entry, show_id: nextShowId } : entry,
+                                            ),
+                                          );
+                                        }}
+                                        className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
+                                      >
+                                        {showOptions.map((show) => (
+                                          <option key={show.show_id} value={show.show_id}>
+                                            {show.show_name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <div className="flex items-end">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          updateHashtagAssignments(
+                                            item.hashtag,
+                                            assignments.filter((_, entryIndex) => entryIndex !== index),
+                                          )
+                                        }
+                                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
+                ) : null}
+                {!hashtagsLoading && hashtags.length === 0 && !hashtagsErrorMessage ? (
+                  <p className="mt-4 text-sm text-zinc-500">No hashtags found for this account.</p>
                 ) : null}
                 {supportsCatalog ? (
                   <div className="mt-8 border-t border-zinc-200 pt-6">

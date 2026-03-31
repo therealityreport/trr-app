@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import BrandsTabs from "@/components/admin/BrandsTabs";
@@ -359,6 +359,7 @@ export default function AdminNetworksPage() {
   const [overridesErrorCode, setOverridesErrorCode] = useState<string | null>(null);
   const [savingOverrideKey, setSavingOverrideKey] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(isProductionCompaniesPage ? "production" : "all");
+  const overridesBootstrappedRef = useRef(false);
 
   useEffect(() => {
     if (isProductionCompaniesPage) {
@@ -463,9 +464,25 @@ export default function AdminNetworksPage() {
   useEffect(() => {
     if (!checking && userIdentity && hasAccess) {
       void loadNetworksStreamingSummary();
-      void loadOverrides();
     }
-  }, [checking, hasAccess, loadNetworksStreamingSummary, loadOverrides, userIdentity]);
+    if (checking || !userIdentity || !hasAccess) {
+      overridesBootstrappedRef.current = false;
+    }
+  }, [checking, hasAccess, loadNetworksStreamingSummary, userIdentity]);
+
+  useEffect(() => {
+    if (checking || !userIdentity || !hasAccess || !summary) {
+      if (checking || !userIdentity || !hasAccess) {
+        overridesBootstrappedRef.current = false;
+      }
+      return;
+    }
+    if (overridesBootstrappedRef.current) {
+      return;
+    }
+    overridesBootstrappedRef.current = true;
+    void loadOverrides();
+  }, [checking, hasAccess, loadOverrides, summary, userIdentity]);
 
   useEffect(() => {
     if (!syncing || checking || !userIdentity || !hasAccess) return;
