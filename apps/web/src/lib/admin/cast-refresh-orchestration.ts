@@ -1,3 +1,5 @@
+import type { JobLiveCounts } from "./job-live-counts";
+
 export interface CastRefreshMember {
   person_id: string;
 }
@@ -22,7 +24,7 @@ export interface CastRefreshPhaseProgress {
   total: number | null;
   stage?: string | null;
   message?: string | null;
-  liveCounts?: Record<string, number> | null;
+  liveCounts?: JobLiveCounts | Record<string, number> | null;
 }
 
 export interface CastRefreshPhaseState {
