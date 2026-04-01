@@ -9602,7 +9602,7 @@ export default function TrrShowDetailPage() {
                       event === "dispatched_to_modal" ? "running" : "queued"
                     ) || (event === "dispatched_to_modal" ? "running" : "queued");
                   const operationMessage =
-                    operationStatus === "attached"
+                    kickoffHandle.rawStatus === "attached"
                       ? `Attached to ${label} refresh${metaSuffix}.`
                       : operationStatus === "running"
                         ? `${label} refresh running${metaSuffix}.`
