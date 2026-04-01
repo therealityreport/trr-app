@@ -41,6 +41,7 @@ import { NFL_FREE_AGENTS_2026 } from "./free-agent-data";
 import type { BarChartData } from "./InteractiveBarChart";
 import type { LineChartData } from "./InteractiveLineChart";
 import type {
+  FilterCardPlayerData,
   MedalTableData,
   MedalTableGridData,
   DatawrapperTableData,
@@ -1348,7 +1349,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   data={{
                     title: "Top 150 NFL Free Agents",
                     colorScheme: block.colorScheme,
-                    players: NFL_FREE_AGENTS_2026 as any,
+                    players: NFL_FREE_AGENTS_2026 as readonly FilterCardPlayerData[],
                     positionBreakdown: { Edge: 19, WR: 15, CB: 14, T: 13, S: 13, TE: 13, LB: 12, RB: 12, IDL: 12, G: 12, QB: 10, C: 5 },
                     statusBreakdown: { Agreed: 117, "Still available": 33 },
                   }}
