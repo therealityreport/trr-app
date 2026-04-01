@@ -12481,7 +12481,7 @@ export default function TrrShowDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={refreshShowCast}
+                    onClick={() => refreshShowCast()}
                     disabled={isCastRefreshBusy}
                     title={isCastRefreshBusy ? "Cast sync in progress" : undefined}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"

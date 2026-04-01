@@ -467,7 +467,7 @@ function TypeScaleSection() {
           gap: 10,
         }}
       >
-        {FOUNDATION.typography.scale.slice(0, 12).map((entry) => (
+        {FOUNDATION.typography.scale.slice(0, 12).map((entry: { size: string; usage: string; context: string }) => (
           (() => {
             const numericSize =
               typeof entry.size === "number" ? entry.size : Number.parseFloat(String(entry.size));

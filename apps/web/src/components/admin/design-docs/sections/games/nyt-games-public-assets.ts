@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { buildHostedMediaUrl } from "@/lib/hosted-media";
 import inventoryArtifact from "./generated/nyt-games-source-inventory.json";
 
@@ -13,7 +14,7 @@ export interface NYTGamesAssetDisplaySize {
   height: number;
   backgroundSize?: string;
   backgroundPosition?: string;
-  objectFit?: string;
+  objectFit?: CSSProperties["objectFit"];
 }
 
 export interface NYTGamesAssetDisplay {

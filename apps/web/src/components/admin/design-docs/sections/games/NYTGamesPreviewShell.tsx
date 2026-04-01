@@ -26,7 +26,7 @@ interface NYTGamesDocsViewportContextValue {
   viewport: NYTGamesDocsViewport;
   isMobile: boolean;
   setViewport: (viewport: NYTGamesDocsViewport) => void;
-  sections: NYTGamesDocsSectionEntry[];
+  sections: readonly NYTGamesDocsSectionEntry[];
   registerSection: (entry: NYTGamesDocsSectionEntry) => () => void;
 }
 
