@@ -20,6 +20,7 @@ export type CastRefreshPhaseStatus =
 export interface CastRefreshPhaseProgress {
   current: number | null;
   total: number | null;
+  stage?: string | null;
   message?: string | null;
   liveCounts?: Record<string, number> | null;
 }

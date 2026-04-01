@@ -5631,7 +5631,7 @@ export default function PersonProfilePage() {
         dedupeKey: `person:${personId}:detail`,
       });
       if (signal?.aborted) return null;
-      setPerson(data.person);
+      setPerson(data.person ?? null);
       const nextSourceOrder = readCanonicalSourceOrderFromExternalIds(
         data.person?.external_ids as Record<string, unknown> | null | undefined
       );
@@ -6166,7 +6166,7 @@ export default function PersonProfilePage() {
         }
       );
       if (signal?.aborted) return;
-      setCoverPhoto(data.coverPhoto);
+      setCoverPhoto(data.coverPhoto ?? null);
       logAdminPageReadDiagnostic({
         pageFamily: "people-gallery",
         resource: "cover-photo",
