@@ -3361,12 +3361,13 @@ export default function TrrShowDetailPage() {
             },
           }
         );
+        const cp = completePayload as Record<string, unknown> | null;
         const summary =
-          completePayload &&
-          typeof completePayload.summary === "object" &&
-          completePayload.summary !== null
-            ? (completePayload.summary as Record<string, unknown>)
-            : completePayload ?? {};
+          cp &&
+          typeof cp.summary === "object" &&
+          cp.summary !== null
+            ? (cp.summary as Record<string, unknown>)
+            : cp ?? {};
         onProgress?.({
           stage: "Complete",
           message: "Cast bios/profile sync complete.",
