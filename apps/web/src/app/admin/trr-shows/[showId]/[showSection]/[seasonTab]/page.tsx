@@ -19,6 +19,7 @@ const ALLOWED_SEASON_TABS = new Set([
   "news",
   "fandom",
   "cast",
+  "credits",
   "surveys",
   "social",
   "details",
@@ -79,7 +80,8 @@ export default async function SeasonTabAliasPage({ params, searchParams }: Seaso
   >;
   const normalizedSlug = showSection.trim().toLowerCase();
   const normalizedTab = seasonTab.trim().toLowerCase();
-  const canonicalTab = normalizedTab === "details" ? "overview" : normalizedTab;
+  const canonicalTab =
+    normalizedTab === "details" ? "overview" : normalizedTab === "credits" ? "cast" : normalizedTab;
 
   const seasonMatch = normalizedSlug.match(/^season-([0-9]{1,3})$/);
   if (!seasonMatch) {
@@ -87,6 +89,10 @@ export default async function SeasonTabAliasPage({ params, searchParams }: Seaso
   }
   if (!ALLOWED_SEASON_TABS.has(normalizedTab)) {
     notFound();
+  }
+
+  if (normalizedTab === "cast") {
+    redirect(`/admin/trr-shows/${encodeURIComponent(showId)}/${encodeURIComponent(showSection)}/credits` as Route);
   }
 
   const seasonNumber = Number.parseInt(seasonMatch[1], 10);

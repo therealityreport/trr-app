@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireAdmin } from "@/lib/server/auth";
+import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  invalidateRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
+import {
+  SURVEY_SEASON_CAST_CACHE_NAMESPACE,
+  SURVEY_SEASON_CAST_CACHE_TTL_MS,
+} from "@/lib/server/admin/survey-route-cache";
 import { getSeasonCastWithEpisodeCounts } from "@/lib/server/trr-api/trr-shows-repository";
 import {
   listSeasonCastSurveyRoles,
@@ -37,7 +48,7 @@ function isSeasonSurveyRole(value: unknown): value is SeasonSurveyCastRole {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
 
     const { showId, seasonNumber } = await params;
     if (!showId) {
@@ -50,40 +61,68 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
+    const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    searchParams.delete("refresh");
     const selectedOnly = parseSelectedOnly(searchParams);
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `${showId}:${seasonNum}`, searchParams);
+    const promiseKey = forceRefresh ? `${cacheKey}:refresh` : cacheKey;
 
-    const [cast, roles] = await Promise.all([
-      getSeasonCastWithEpisodeCounts(showId, seasonNum, { limit: 500, offset: 0 }),
-      listSeasonCastSurveyRoles(showId, seasonNum),
-    ]);
+    if (!forceRefresh) {
+      const cached = getRouteResponseCache<Record<string, unknown>>(
+        SURVEY_SEASON_CAST_CACHE_NAMESPACE,
+        cacheKey,
+      );
+      if (cached) {
+        return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+      }
+    }
 
-    const roleMap = new Map<string, SeasonSurveyCastRole>();
-    for (const row of roles) roleMap.set(row.person_id, row.role);
+    const payload = await getOrCreateRouteResponsePromise(
+      SURVEY_SEASON_CAST_CACHE_NAMESPACE,
+      promiseKey,
+      async () => {
+        const [cast, roles] = await Promise.all([
+          getSeasonCastWithEpisodeCounts(showId, seasonNum, { limit: 500, offset: 0 }),
+          listSeasonCastSurveyRoles(showId, seasonNum),
+        ]);
 
-    const merged: CastItem[] = cast
-      .map((member) => ({
-        ...member,
-        survey_role: roleMap.get(member.person_id) ?? null,
-      }))
-      .filter((member) => (selectedOnly ? Boolean(member.survey_role) : true));
+        const roleMap = new Map<string, SeasonSurveyCastRole>();
+        for (const row of roles) roleMap.set(row.person_id, row.role);
 
-    // Sort: main, friend_of, excluded; within each: episodes desc then name asc.
-    const roleRank = (role: SeasonSurveyCastRole | null): number => {
-      if (role === "main") return 0;
-      if (role === "friend_of") return 1;
-      return 2;
-    };
-    merged.sort((a, b) => {
-      const byRole = roleRank(a.survey_role) - roleRank(b.survey_role);
-      if (byRole !== 0) return byRole;
-      const byEpisodes = b.episodes_in_season - a.episodes_in_season;
-      if (byEpisodes !== 0) return byEpisodes;
-      const aName = (a.person_name ?? "").toLowerCase();
-      const bName = (b.person_name ?? "").toLowerCase();
-      return aName.localeCompare(bName);
-    });
+        const merged: CastItem[] = cast
+          .map((member) => ({
+            ...member,
+            survey_role: roleMap.get(member.person_id) ?? null,
+          }))
+          .filter((member) => (selectedOnly ? Boolean(member.survey_role) : true));
 
-    return NextResponse.json({ cast: merged, selectedOnly });
+        const roleRank = (role: SeasonSurveyCastRole | null): number => {
+          if (role === "main") return 0;
+          if (role === "friend_of") return 1;
+          return 2;
+        };
+        merged.sort((a, b) => {
+          const byRole = roleRank(a.survey_role) - roleRank(b.survey_role);
+          if (byRole !== 0) return byRole;
+          const byEpisodes = b.episodes_in_season - a.episodes_in_season;
+          if (byEpisodes !== 0) return byEpisodes;
+          const aName = (a.person_name ?? "").toLowerCase();
+          const bName = (b.person_name ?? "").toLowerCase();
+          return aName.localeCompare(bName);
+        });
+
+        const nextPayload = { cast: merged, selectedOnly };
+        setRouteResponseCache(
+          SURVEY_SEASON_CAST_CACHE_NAMESPACE,
+          cacheKey,
+          nextPayload,
+          SURVEY_SEASON_CAST_CACHE_TTL_MS,
+        );
+        return nextPayload;
+      },
+    );
+
+    return NextResponse.json(payload);
   } catch (error) {
     console.error("[api] Failed to get season survey cast", error);
     const message = error instanceof Error ? error.message : "failed";
@@ -157,6 +196,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const roles = await listSeasonCastSurveyRoles(showId, seasonNum);
+    invalidateRouteResponseCache(
+      SURVEY_SEASON_CAST_CACHE_NAMESPACE,
+      `${user.uid}:${showId}:${seasonNum}:`,
+    );
     return NextResponse.json({ roles });
   } catch (error) {
     console.error("[api] Failed to update season survey cast roles", error);
@@ -165,4 +208,3 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: message }, { status });
   }
 }
-

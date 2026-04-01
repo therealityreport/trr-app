@@ -29,6 +29,7 @@ import {
 } from "@/lib/server/admin/networks-streaming-repository";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { getShowById } from "@/lib/server/trr-api/trr-shows-repository";
+import { peekInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 type GenericTargetType = Extract<
   BrandProfileTargetType,
@@ -161,7 +162,7 @@ const fetchBackendJson = async <T>(
   searchParams?: URLSearchParams,
 ): Promise<T | null> => {
   const backendUrl = getBackendApiUrl(path);
-  const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const serviceRoleKey = peekInternalAdminBearerToken()?.trim();
   if (!backendUrl || !serviceRoleKey) return null;
 
   const upstream = new URL(backendUrl);

@@ -21,8 +21,8 @@ describe("refresh log pipeline helpers", () => {
   it("falls back to stage mapping and then text heuristics", () => {
     expect(
       resolveRefreshLogTopicKey({
-        stageKey: "cast_credits_episode_appearances",
-        category: "Cast & Credits",
+        stageKey: "credits_episode_appearances_sync",
+        category: "Credits",
         message: "episode appearances synced",
       })
     ).toBe("show_core");

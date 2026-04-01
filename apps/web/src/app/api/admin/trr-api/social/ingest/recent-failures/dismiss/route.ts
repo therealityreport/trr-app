@@ -13,14 +13,22 @@ export async function POST(request: NextRequest) {
   try {
     await requireAdmin(request);
 
-    const rawBody = (await request.json().catch(() => ({}))) as { job_ids?: unknown };
+    const rawBody = (await request.json().catch(() => ({}))) as {
+      job_ids?: unknown;
+      dismiss_all_visible?: unknown;
+    };
     const normalizedJobIds = (Array.isArray(rawBody.job_ids) ? rawBody.job_ids : [])
       .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
       .filter(Boolean);
+    const dismissAllVisible = rawBody.dismiss_all_visible === true;
 
-    if (normalizedJobIds.length === 0) {
+    if (normalizedJobIds.length === 0 && !dismissAllVisible) {
       return NextResponse.json(
-        { error: "job_ids must contain at least one valid UUID", code: "BAD_REQUEST", retryable: false },
+        {
+          error: "job_ids must contain at least one valid UUID or dismiss_all_visible must be true",
+          code: "BAD_REQUEST",
+          retryable: false,
+        },
         { status: 400 },
       );
     }
@@ -34,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     const data = await fetchSocialBackendJson("/ingest/recent-failures/dismiss", {
       method: "POST",
-      body: JSON.stringify({ job_ids: normalizedJobIds }),
+      body: JSON.stringify({ job_ids: normalizedJobIds, dismiss_all_visible: dismissAllVisible }),
       headers: {
         "content-type": "application/json",
       },

@@ -13,6 +13,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import { AdminRequestError, adminGetJson, adminMutation, adminStream } from "@/lib/admin/admin-fetch";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { logAdminPageReadDiagnostic, measurePayloadBytes } from "@/lib/admin/page-read-diagnostics";
 import {
   canonicalizeOperationStatus,
   isCanonicalTerminalStatus,
@@ -5873,6 +5874,13 @@ export default function PersonProfilePage() {
     }
 
     const requestPromise = (async (): Promise<TrrPersonPhoto[]> => {
+      const startedAt = Date.now();
+      logAdminPageReadDiagnostic({
+        pageFamily: "people-gallery",
+        resource: append ? "gallery-append" : "gallery-primary-slice",
+        requestRole,
+        phase: "start",
+      });
       try {
         const headers = await getAuthHeaders();
         const pageSize = PERSON_GALLERY_INITIAL_PAGE_SIZE;
@@ -5952,12 +5960,32 @@ export default function PersonProfilePage() {
         });
         setPhotos([...fetchedPhotos]);
         setPhotosError(null);
+        logAdminPageReadDiagnostic({
+          pageFamily: "people-gallery",
+          resource: append ? "gallery-append" : "gallery-primary-slice",
+          requestRole,
+          phase: "success",
+          durationMs: Date.now() - startedAt,
+          payloadBytes: measurePayloadBytes({
+            photos: fetchedPhotos.slice(0, pageSize),
+            visibleCount: fetchedPhotos.length,
+            includeTotalCount,
+          }),
+        });
         return [...fetchedPhotos];
       } catch (err) {
         if (signal?.aborted || isAbortError(err) || isSignalAbortedWithoutReasonError(err)) {
           return append ? photosRef.current : [];
         }
         console.error("Failed to fetch photos:", err);
+        logAdminPageReadDiagnostic({
+          pageFamily: "people-gallery",
+          resource: append ? "gallery-append" : "gallery-primary-slice",
+          requestRole,
+          phase: "error",
+          durationMs: Date.now() - startedAt,
+          message: err instanceof Error ? err.message : "Failed to fetch photos",
+        });
         setPhotosError(err instanceof Error ? err.message : "Failed to fetch photos");
         if (!append) {
           setPhotosSavedTotal(0);
@@ -6119,6 +6147,13 @@ export default function PersonProfilePage() {
     if (!personId) return;
     const signal = options?.signal;
     if (signal?.aborted) return;
+    const startedAt = Date.now();
+    logAdminPageReadDiagnostic({
+      pageFamily: "people-gallery",
+      resource: "cover-photo",
+      requestRole: "secondary",
+      phase: "start",
+    });
     try {
       const headers = await getAuthHeaders();
       const data = await adminGetJson<{ coverPhoto?: CoverPhoto | null }>(
@@ -6132,9 +6167,25 @@ export default function PersonProfilePage() {
       );
       if (signal?.aborted) return;
       setCoverPhoto(data.coverPhoto);
+      logAdminPageReadDiagnostic({
+        pageFamily: "people-gallery",
+        resource: "cover-photo",
+        requestRole: "secondary",
+        phase: "success",
+        durationMs: Date.now() - startedAt,
+        payloadBytes: measurePayloadBytes(data.coverPhoto),
+      });
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) return;
       console.error("Failed to fetch cover photo:", err);
+      logAdminPageReadDiagnostic({
+        pageFamily: "people-gallery",
+        resource: "cover-photo",
+        requestRole: "secondary",
+        phase: "error",
+        durationMs: Date.now() - startedAt,
+        message: err instanceof Error ? err.message : "Failed to fetch cover photo",
+      });
     }
   }, [personId, getAuthHeaders]);
 

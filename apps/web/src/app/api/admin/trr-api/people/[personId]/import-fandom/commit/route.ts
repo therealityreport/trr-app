@@ -7,6 +7,7 @@ import {
 } from "@/lib/admin/fandom-sync-types";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import { invalidateAdminBackendCache } from "@/lib/server/trr-api/admin-read-proxy";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 const PERSON_PHOTOS_CACHE_NAMESPACE = "admin-person-photos";
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!backendUrl) {
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
     }

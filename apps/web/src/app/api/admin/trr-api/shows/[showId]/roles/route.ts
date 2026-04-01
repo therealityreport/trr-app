@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { resolveAdminShowId } from "@/lib/server/admin/resolve-show-id";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 import {
   buildUserScopedRouteCacheKey,
   getRouteResponseCache,
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const url = new URL(backendUrl);
     searchParams.forEach((value, key) => url.searchParams.set(key, value));
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
       return NextResponse.json(
         {
@@ -217,7 +218,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const backendUrl = getBackendApiUrl(`/admin/shows/${showId}/roles`);
     if (!backendUrl) return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
 
     const body = await request.json().catch(() => ({}));

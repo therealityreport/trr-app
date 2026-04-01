@@ -4,12 +4,14 @@ import { NextRequest } from "next/server";
 const {
   requireAdminMock,
   getCreditsByPersonIdMock,
+  getCuratedCastShowIdsByPersonIdMock,
   getCreditsForPersonShowScopeMock,
   getEpisodeCreditsByPersonIdMock,
   getEpisodeCreditsByPersonShowIdMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getCreditsByPersonIdMock: vi.fn(),
+  getCuratedCastShowIdsByPersonIdMock: vi.fn(),
   getCreditsForPersonShowScopeMock: vi.fn(),
   getEpisodeCreditsByPersonIdMock: vi.fn(),
   getEpisodeCreditsByPersonShowIdMock: vi.fn(),
@@ -21,6 +23,7 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   getCreditsByPersonId: getCreditsByPersonIdMock,
+  getCuratedCastShowIdsByPersonId: getCuratedCastShowIdsByPersonIdMock,
   getCreditsForPersonShowScope: getCreditsForPersonShowScopeMock,
   getEpisodeCreditsByPersonId: getEpisodeCreditsByPersonIdMock,
   getEpisodeCreditsByPersonShowId: getEpisodeCreditsByPersonShowIdMock,
@@ -32,11 +35,13 @@ describe("person credits route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getCreditsByPersonIdMock.mockReset();
+    getCuratedCastShowIdsByPersonIdMock.mockReset();
     getCreditsForPersonShowScopeMock.mockReset();
     getEpisodeCreditsByPersonIdMock.mockReset();
     getEpisodeCreditsByPersonShowIdMock.mockReset();
 
     requireAdminMock.mockResolvedValue(undefined);
+    getCuratedCastShowIdsByPersonIdMock.mockResolvedValue(new Set<string>());
     getEpisodeCreditsByPersonIdMock.mockResolvedValue([]);
   });
 
@@ -63,6 +68,7 @@ describe("person credits route", () => {
     expect(payload.credits).toHaveLength(1);
     expect(payload.credits_by_show).toHaveLength(1);
     expect(payload.show_scope).toBeUndefined();
+    expect(getCuratedCastShowIdsByPersonIdMock).toHaveBeenCalledWith("person-1");
     expect(getEpisodeCreditsByPersonShowIdMock).not.toHaveBeenCalled();
     expect(getEpisodeCreditsByPersonIdMock).toHaveBeenCalledWith("person-1", {
       includeArchiveFootage: false,
@@ -71,6 +77,7 @@ describe("person credits route", () => {
 
   it("returns show_scope with cast/crew grouping and role separation", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
+    getCuratedCastShowIdsByPersonIdMock.mockResolvedValue(new Set<string>([showId]));
     const scopedCredits = [
       {
         id: "credit-host",
@@ -209,6 +216,7 @@ describe("person credits route", () => {
 
   it("places credits with Self episode evidence into cast_groups even when base category differs", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
+    getCuratedCastShowIdsByPersonIdMock.mockResolvedValue(new Set<string>([showId]));
     const scopedCredits = [
       {
         id: "credit-host",
@@ -253,6 +261,7 @@ describe("person credits route", () => {
 
   it("suppresses null-role Self cast groups when explicit cast role exists", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
+    getCuratedCastShowIdsByPersonIdMock.mockResolvedValue(new Set<string>([showId]));
     const scopedCredits = [
       {
         id: "credit-host",
@@ -331,6 +340,7 @@ describe("person credits route", () => {
 
   it("keeps null-role Self cast groups when no explicit cast role exists", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
+    getCuratedCastShowIdsByPersonIdMock.mockResolvedValue(new Set<string>([showId]));
     const scopedCredits = [
       {
         id: "credit-self-null-role",
@@ -389,6 +399,7 @@ describe("person credits route", () => {
 
   it("builds show_scope from full-scope credits even when paged credits omit scoped rows", async () => {
     const showId = "11111111-2222-3333-4444-555555555555";
+    getCuratedCastShowIdsByPersonIdMock.mockResolvedValue(new Set<string>([showId]));
     getCreditsByPersonIdMock.mockResolvedValue([
       {
         id: "credit-other-show",

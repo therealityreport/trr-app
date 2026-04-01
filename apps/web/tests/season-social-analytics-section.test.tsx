@@ -2172,25 +2172,18 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
   });
 
-  it("stages initial social refresh under a concurrency cap of two before analytics begins", async () => {
+  it("stages initial primary social refresh under a concurrency cap of two before deferred reads begin", async () => {
     const phaseOneResolvers: Array<() => void> = [];
     let startedPhaseOne = 0;
     let settledPhaseOne = 0;
     let inFlightPhaseOne = 0;
     let maxInFlightPhaseOne = 0;
-    let analyticsRequestedBeforePhaseOneSettled = false;
+    let secondaryRequestedBeforePhaseOneSettled = false;
 
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
 
-      if (
-        url.includes("/social/targets?") ||
-        url.includes("/social/runs?") ||
-        url.includes("/social/runs/summary?") ||
-        url.includes("/social/ingest/worker-health") ||
-        url.includes("/social/ingest/health-dot") ||
-        url.includes("/social/shared-status?")
-      ) {
+      if (url.includes("/social/analytics?") || url.includes("/social/targets?") || url.includes("/social/runs?")) {
         startedPhaseOne += 1;
         inFlightPhaseOne += 1;
         maxInFlightPhaseOne = Math.max(maxInFlightPhaseOne, inFlightPhaseOne);
@@ -2199,21 +2192,26 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
             inFlightPhaseOne = Math.max(0, inFlightPhaseOne - 1);
             settledPhaseOne += 1;
             if (url.includes("/social/targets?")) resolve(jsonResponse({ targets: [] }));
-            else if (url.includes("/social/runs/summary?")) resolve(jsonResponse({ summaries: [] }));
             else if (url.includes("/social/runs?")) resolve(jsonResponse({ runs: [] }));
-            else if (url.includes("/social/shared-status?")) resolve(jsonResponse({}));
-            else resolve(jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null }));
+            else resolve(jsonResponse(analyticsBase));
           });
         });
       }
+      if (
+        url.includes("/social/runs/summary?") ||
+        url.includes("/social/ingest/worker-health") ||
+        url.includes("/social/ingest/health-dot") ||
+        url.includes("/social/shared-status?")
+      ) {
+        if (settledPhaseOne < 3) {
+          secondaryRequestedBeforePhaseOneSettled = true;
+        }
+        if (url.includes("/social/runs/summary?")) return Promise.resolve(jsonResponse({ summaries: [] }));
+        if (url.includes("/social/shared-status?")) return Promise.resolve(jsonResponse({}));
+        return Promise.resolve(jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null }));
+      }
       if (url.includes("/social/jobs?")) {
         return Promise.resolve(jsonResponse({ jobs: [] }));
-      }
-      if (url.includes("/social/analytics?")) {
-        if (settledPhaseOne < 5) {
-          analyticsRequestedBeforePhaseOneSettled = true;
-        }
-        return Promise.resolve(jsonResponse(analyticsBase));
       }
       if (url.includes("/social/analytics/week/")) {
         return Promise.resolve(jsonResponse(defaultWeekDetailResponse(1)));
@@ -2244,20 +2242,6 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
 
     act(() => {
-      phaseOneResolvers.shift()?.();
-    });
-    await waitFor(() => {
-      expect(startedPhaseOne).toBe(4);
-    });
-
-    act(() => {
-      phaseOneResolvers.shift()?.();
-    });
-    await waitFor(() => {
-      expect(startedPhaseOne).toBe(5);
-    });
-
-    act(() => {
       for (const resolve of phaseOneResolvers.splice(0)) {
         resolve();
       }
@@ -2265,7 +2249,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
 
     await screen.findByTestId("weekly-heatmap-row-1");
     expect(maxInFlightPhaseOne).toBeLessThanOrEqual(2);
-    expect(analyticsRequestedBeforePhaseOneSettled).toBe(false);
+    expect(secondaryRequestedBeforePhaseOneSettled).toBe(false);
   });
 
   it("fetches week detail payloads in hashtags view even when only posts/likes/comments metrics are selected", async () => {
@@ -3040,9 +3024,9 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     );
 
     await waitFor(() => {
+      expect(callCount.analytics).toBeGreaterThan(1);
       expect(callCount.targets).toBeGreaterThan(1);
-      expect(callCount.runs).toBeGreaterThan(1);
-      expect(callCount.summaries).toBeGreaterThan(0);
+      expect(callCount.runs).toBeGreaterThan(0);
     });
   });
 
@@ -3870,6 +3854,101 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
     });
     await Promise.resolve();
     expect(screen.getByText(/Social analytics request timed out/i)).toBeInTheDocument();
+  });
+
+  it("defers season secondary reads until primary bootstrap is usable and caps secondary concurrency", async () => {
+    let resolveAnalytics: ((value: Response) => void) | null = null;
+    let resolveRunSummaries: ((value: Response) => void) | null = null;
+    let resolveWorkerHealth: ((value: Response) => void) | null = null;
+    let resolveSharedStatus: ((value: Response) => void) | null = null;
+    const requestedUrls: string[] = [];
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      requestedUrls.push(url);
+
+      if (url.includes("/social/analytics?")) {
+        return new Promise<Response>((resolve) => {
+          resolveAnalytics = resolve;
+        });
+      }
+      if (url.includes("/social/targets?")) {
+        return Promise.resolve(jsonResponse({ targets: [] }));
+      }
+      if (url.includes("/social/runs?")) {
+        return Promise.resolve(jsonResponse({ runs: [] }));
+      }
+      if (url.includes("/social/runs/summary?")) {
+        return new Promise<Response>((resolve) => {
+          resolveRunSummaries = resolve;
+        });
+      }
+      if (url.includes("/social/ingest/health-dot")) {
+        return new Promise<Response>((resolve) => {
+          resolveWorkerHealth = resolve;
+        });
+      }
+      if (url.includes("/social/shared-status?")) {
+        return new Promise<Response>((resolve) => {
+          resolveSharedStatus = resolve;
+        });
+      }
+      if (url.includes("/social/jobs?")) {
+        return Promise.resolve(jsonResponse({ jobs: [] }));
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(
+      <SeasonSocialAnalyticsSection
+        showId="show-1"
+        seasonNumber={6}
+        seasonId="season-1"
+        showName="Test Show"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /Run/i })).toBeInTheDocument();
+    });
+
+    expect(requestedUrls.some((url) => url.includes("/social/runs/summary?"))).toBe(false);
+    expect(requestedUrls.some((url) => url.includes("/social/ingest/health-dot"))).toBe(false);
+    expect(requestedUrls.some((url) => url.includes("/social/shared-status?"))).toBe(false);
+
+    expect(resolveAnalytics).not.toBeNull();
+    await act(async () => {
+      resolveAnalytics?.(jsonResponse(analyticsBase));
+    });
+
+    await screen.findByText("Weekly Trend");
+
+    await waitFor(() => {
+      const secondaryCalls = requestedUrls.filter(
+        (url) =>
+          url.includes("/social/runs/summary?") ||
+          url.includes("/social/ingest/health-dot") ||
+          url.includes("/social/shared-status?"),
+      );
+      expect(secondaryCalls).toHaveLength(2);
+    });
+
+    expect(resolveRunSummaries).not.toBeNull();
+    await act(async () => {
+      resolveRunSummaries?.(jsonResponse({ summaries: [] }));
+    });
+
+    await waitFor(() => {
+      expect(requestedUrls.some((url) => url.includes("/social/shared-status?"))).toBe(true);
+    });
+
+    await act(async () => {
+      resolveWorkerHealth?.(
+        jsonResponse({ queue_enabled: false, healthy: true, healthy_workers: 1, reason: null }),
+      );
+      resolveSharedStatus?.(jsonResponse({}));
+    });
   });
 
   it("includes season_id hint in social landing requests", async () => {

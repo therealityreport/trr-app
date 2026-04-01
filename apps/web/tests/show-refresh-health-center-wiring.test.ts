@@ -31,6 +31,13 @@ describe("show refresh health center wiring", () => {
     expect(showPage).not.toMatch(/Show Gallery/);
   });
 
+  it("surfaces remote worker events and refetches credits payload after cast refresh", () => {
+    expect(showPage).toMatch(/event === "operation" \|\| event === "dispatched_to_modal"/);
+    expect(showPage).toMatch(/remote worker/);
+    expect(showPage).toMatch(/fetchShowCredits\(\)/);
+    expect(showPage).toMatch(/IMDb Full Credits synced for cast \+ crew/);
+  });
+
   it("runs gallery media after unified refresh with fast gallery-only settings", () => {
     expect(showPage).toMatch(/void refreshAllShowData\(\);/);
     expect(showPage).toMatch(/return refreshShow\("photos", \{/);

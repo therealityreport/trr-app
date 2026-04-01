@@ -36,6 +36,8 @@ import {
   MEDAL_TABLE_CHOOSE,
   ATHLETIC_NFL_FOURTH_DOWN_DATA,
 } from "./chart-data";
+import FilterCardTracker from "./FilterCardTracker";
+import { NFL_FREE_AGENTS_2026 } from "./free-agent-data";
 import type { BarChartData } from "./InteractiveBarChart";
 import type { LineChartData } from "./InteractiveLineChart";
 import type {
@@ -695,7 +697,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
   return (
     <div
       style={{
-        maxWidth: 600,
+        maxWidth: "100%",
+        width: "100%",
         padding: "0",
         background: "var(--dd-brand-bg)",
         color: "var(--dd-brand-text-primary)",
@@ -1288,6 +1291,70 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     [{block.position}] 300×250 / 300×600 / 728×90
                   </div>
                 </div>
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── video-embed: inline video player ── */
+          if (block.type === "video-embed") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="video-embed"
+                css={[
+                  `div[data-ath-video-stream="${block.streamId}"] — DASH/HLS dual-source video`,
+                  `Horizontal: 9 | Vertical: 16 (portrait aspect)`,
+                  `DASH: application/dash+xml (.mpd) | HLS: application/x-mpegURL (.m3u8)`,
+                ]}
+                show={showCss}
+              >
+                <div style={{
+                  background: "#121212", borderRadius: 8, overflow: "hidden",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  minHeight: 120, padding: "24px 16px",
+                }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 11, color: "#969693", marginBottom: 8 }}>
+                      ▶ Video Embed
+                    </div>
+                    <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#52524F" }}>
+                      Stream: {block.streamId}
+                    </div>
+                    <div style={{ fontFamily: "var(--dd-font-mono)", fontSize: 10, color: "#52524F", marginTop: 4 }}>
+                      {block.sources.map((s) => s.type.split("/").pop()).join(" + ")} dual-source
+                    </div>
+                  </div>
+                </div>
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── filter-card-tracker: interactive player card tracker ── */
+          if (block.type === "filter-card-tracker") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="filter-card-tracker"
+                css={[
+                  `div#filtered-cards.article-fullwidth.fc.fc-branded.fc-cs-${block.colorScheme}`,
+                  `WordPress filter-card system — jQuery + D3.js + filtercard.js + big-board-charts.js`,
+                  `${block.cardCount} accordion cards with search, 4 dropdown filters, expand/collapse all`,
+                  `Each card: rank + h3 player name + team logo + contract spotlight + expandable two-column body`,
+                  `Expanded: left (contract + age/height/weight + scouting + "How he fits") | right (headshot + stats table)`,
+                ]}
+                show={showCss}
+              >
+                <FilterCardTracker
+                  data={{
+                    title: "Top 150 NFL Free Agents",
+                    colorScheme: block.colorScheme,
+                    players: NFL_FREE_AGENTS_2026 as any,
+                    positionBreakdown: { Edge: 19, WR: 15, CB: 14, T: 13, S: 13, TE: 13, LB: 12, RB: 12, IDL: 12, G: 12, QB: 10, C: 5 },
+                    statusBreakdown: { Agreed: 117, "Still available": 33 },
+                  }}
+                  colorScheme={block.colorScheme}
+                  filters={block.filters}
+                />
               </BlockAnnotation>
             );
           }

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 interface RouteParams {
   params: Promise<{ runId: string; artifactName: string[] }>;
@@ -19,11 +19,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
   let serviceRoleKey: string;
   try {
-    serviceRoleKey = getTrrAdminServiceKey();
+    serviceRoleKey = getInternalAdminBearerToken();
   } catch {
     return Response.json(
       {
-        error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not configured",
+        error: "TRR internal admin auth is not configured",
       },
       { status: 500 },
     );

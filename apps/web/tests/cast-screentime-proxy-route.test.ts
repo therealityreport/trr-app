@@ -23,9 +23,9 @@ describe("cast screentime admin access", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     process.env.TRR_CAST_SCREENTIME_ADMIN_ENABLED = "true";
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret";
     requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/cast-screentime/runs/demo");
@@ -55,14 +55,15 @@ describe("cast screentime admin access", () => {
   });
 
   it("forwards requests to the backend when the feature is enabled", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ run_id: "demo", status: "success" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
+    );
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ run_id: "demo", status: "success" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        })
-      )
+      fetchMock
     );
 
     const response = await GET(new NextRequest("http://localhost/api/admin/trr-api/cast-screentime/runs/demo"), {
@@ -73,33 +74,15 @@ describe("cast screentime admin access", () => {
     expect(response.status).toBe(200);
     expect(payload.run_id).toBe("demo");
     expect(payload.status).toBe("success");
-  });
-
-  it("returns 500 when the TRR-prefixed key is absent", async () => {
-    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ run_id: "demo", status: "success" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        })
-      )
-    );
-
-    const response = await GET(new NextRequest("http://localhost/api/admin/trr-api/cast-screentime/runs/demo"), {
-      params: Promise.resolve({ path: ["runs", "demo"] }),
-    });
-    const payload = (await response.json()) as { run_id?: string; status?: string };
-
-    expect(response.status).toBe(500);
-    expect(payload).toEqual({ error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not configured" });
+    const firstCall = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const headers = new Headers(firstCall?.headers);
+    expect(headers.get("Authorization")).toMatch(/^Bearer /);
   });
 
   it("returns an actionable error when the internal admin secret is missing", async () => {
     delete process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
-    vi.stubGlobal("fetch", vi.fn());
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
     const response = await GET(new NextRequest("http://localhost/api/admin/trr-api/cast-screentime/runs/demo"), {
       params: Promise.resolve({ path: ["runs", "demo"] }),
@@ -107,6 +90,7 @@ describe("cast screentime admin access", () => {
     const payload = (await response.json()) as { error?: string };
 
     expect(response.status).toBe(500);
-    expect(payload.error).toBe("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured in the TRR-APP server environment");
+    expect(payload.error).toBe("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

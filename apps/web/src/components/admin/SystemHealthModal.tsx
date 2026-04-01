@@ -45,6 +45,25 @@ type WorkerHealth = {
     function_name?: string | null;
     modal_environment?: string | null;
   } | null;
+  remote_auth_capabilities?: {
+    instagram?: {
+      required?: boolean;
+      executor_backend?: string | null;
+      total_authenticated_workers?: number;
+      fresh_authenticated_workers?: number;
+      healthy_authenticated_workers?: number;
+      ready?: boolean;
+      reason?: string | null;
+      missing_hints?: string[];
+    } | null;
+  } | null;
+  shared_account_backfill_readiness?: {
+    ready?: boolean;
+    reason?: string | null;
+    dispatcher_ready?: boolean;
+    dispatcher_heartbeat_fresh?: boolean;
+    instagram_remote_auth_ready?: boolean;
+  } | null;
   workers: WorkerEntry[];
   reason: string | null;
 };
@@ -293,6 +312,7 @@ const PURGE_INACTIVE_WORKERS_URL = "/api/admin/trr-api/social/ingest/workers/pur
 const WORKER_DETAIL_URL_BASE = "/api/admin/trr-api/social/ingest/workers";
 const DEBUG_JOB_URL_BASE = "/api/admin/trr-api/social/ingest/jobs";
 const ADMIN_OPERATIONS_HEALTH_URL = "/api/admin/trr-api/operations/health";
+const CANCEL_ACTIVE_ADMIN_OPERATIONS_URL = "/api/admin/trr-api/operations/cancel";
 const CANCEL_STALE_ADMIN_OPERATIONS_URL = "/api/admin/trr-api/operations/stale/cancel";
 const ADMIN_OPERATIONS_HEALTH_LIMIT = 100;
 
@@ -442,6 +462,10 @@ type SystemHealthViewModel = {
   executionBackendLabel: string;
   executionModeLabel: string;
   executionPolicyLabel: string;
+  instagramRemoteAuthLabel: string;
+  instagramRemoteAuthDetail: string;
+  sharedAccountBackfillReadinessLabel: string;
+  sharedAccountBackfillReadinessDetail: string;
   workerStageCards: WorkerStageCardViewModel[];
   staleClaimsSummary: string;
   queueStatusCards: SummaryCardViewModel[];
@@ -778,6 +802,11 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
   const staleRunningCount = Number(queueStatus.workers.stale_running_count ?? 0);
   const staleClaims = queueStatus.queue.stale_claims;
   const dispatcherReadiness = queueStatus.workers.dispatcher_readiness;
+  const instagramRemoteAuth = queueStatus.workers.remote_auth_capabilities?.instagram;
+  const instagramRemoteAuthReady = instagramRemoteAuth?.ready === true;
+  const instagramRemoteHealthyWorkers = Number(instagramRemoteAuth?.healthy_authenticated_workers ?? 0);
+  const instagramRemoteFreshWorkers = Number(instagramRemoteAuth?.fresh_authenticated_workers ?? 0);
+  const sharedAccountBackfillReadiness = queueStatus.workers.shared_account_backfill_readiness;
   const oldestQueuedAgeSeconds =
     typeof queueStatus.workers.oldest_queued_age_seconds === "number"
       ? queueStatus.workers.oldest_queued_age_seconds
@@ -919,6 +948,22 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     };
   });
 
+  const instagramRemoteAuthLabel = instagramRemoteAuthReady
+    ? `${instagramRemoteHealthyWorkers.toLocaleString()} authenticated`
+    : "Not ready";
+  const instagramRemoteAuthDetail = instagramRemoteAuthReady
+    ? `${instagramRemoteFreshWorkers.toLocaleString()} recent Instagram-authenticated remote worker heartbeat${instagramRemoteFreshWorkers === 1 ? "" : "s"}`
+    : String(instagramRemoteAuth?.reason || "No Instagram-authenticated remote workers are reporting.").replaceAll("_", " ");
+  const sharedAccountBackfillReady = sharedAccountBackfillReadiness?.ready === true;
+  const sharedAccountBackfillReadinessLabel = sharedAccountBackfillReady ? "Ready" : "Blocked";
+  const sharedAccountBackfillReadinessDetail = sharedAccountBackfillReady
+    ? "Modal dispatch, dispatcher heartbeat, and Instagram remote auth are all green."
+    : String(
+        sharedAccountBackfillReadiness?.reason ||
+          dispatcherReadiness?.reason ||
+          "Remote shared-account backfill is not ready yet.",
+      ).replaceAll("_", " ");
+
   return {
     statusSummary,
     summaryCards,
@@ -930,6 +975,10 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     executionPolicyLabel: queueStatus.remote_plane?.remote_job_plane_enforced
       ? "Local execution is disabled"
       : "Local execution is allowed",
+    instagramRemoteAuthLabel,
+    instagramRemoteAuthDetail,
+    sharedAccountBackfillReadinessLabel,
+    sharedAccountBackfillReadinessDetail,
     workerStageCards,
     staleClaimsSummary: staleClaims
       ? `${staleClaims.total.toLocaleString()} stale claimed jobs`
@@ -1601,7 +1650,7 @@ function WorkerPlaneSummary({ viewModel }: { viewModel: SystemHealthViewModel })
       <p className="text-sm text-zinc-600">
         All long-running sync work is expected to run on the configured remote executor, not in your browser or local app session.
       </p>
-      <div className="grid gap-2 md:grid-cols-4">
+      <div className="grid gap-2 md:grid-cols-6">
         <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Execution owner</p>
           <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.executionOwnerLabel.replace("Execution owner: ", "")}</p>
@@ -1617,6 +1666,16 @@ function WorkerPlaneSummary({ viewModel }: { viewModel: SystemHealthViewModel })
         <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Execution policy</p>
           <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.executionPolicyLabel}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Instagram remote auth</p>
+          <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.instagramRemoteAuthLabel}</p>
+          <p className="mt-1 text-[11px] text-zinc-500">{viewModel.instagramRemoteAuthDetail}</p>
+        </div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Shared-account backfill</p>
+          <p className="mt-1 text-sm font-medium text-zinc-900">{viewModel.sharedAccountBackfillReadinessLabel}</p>
+          <p className="mt-1 text-[11px] text-zinc-500">{viewModel.sharedAccountBackfillReadinessDetail}</p>
         </div>
       </div>
       {viewModel.workerStageCards.length > 0 && (
@@ -1879,9 +1938,15 @@ function RunningJobs({ jobs }: { jobs: RunningJobEntry[] }) {
 function AdminOperationsTable({
   operations,
   emptyMessage,
+  cancelingOperationIds,
+  onCancelOperation,
+  cancelActionLabel = "Cancel",
 }: {
   operations: AdminOperationHealthEntry[];
   emptyMessage: string;
+  cancelingOperationIds?: Set<string>;
+  onCancelOperation?: (operationId: string) => Promise<void>;
+  cancelActionLabel?: string;
 }) {
   if (operations.length === 0) {
     return <p className="text-sm text-zinc-400">{emptyMessage}</p>;
@@ -1922,6 +1987,20 @@ function AdminOperationsTable({
               Worker: <span className="font-mono text-zinc-700">{truncate(operation.claimed_by_worker_id ?? "-", 24)}</span>
             </p>
           </div>
+          {onCancelOperation ? (
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  void onCancelOperation(operation.id);
+                }}
+                disabled={cancelingOperationIds?.has(operation.id) === true}
+                className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cancelingOperationIds?.has(operation.id) ? "Cancelling..." : cancelActionLabel}
+              </button>
+            </div>
+          ) : null}
           {typeof operation.cancel_requested_age_seconds === "number" ? (
             <p className="mt-2 text-[11px] text-zinc-400">
               Cancel requested {formatAgeSeconds(operation.cancel_requested_age_seconds)} ago
@@ -2243,7 +2322,10 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const [clearingAll, setClearingAll] = useState(false);
   const [clearingBlockedAll, setClearingBlockedAll] = useState(false);
   const [clearingStaleAdminOperations, setClearingStaleAdminOperations] = useState(false);
+  const [cancelingAdminOperationIds, setCancelingAdminOperationIds] = useState<Set<string>>(new Set());
+  const [cancelingAllActiveAdminOperations, setCancelingAllActiveAdminOperations] = useState(false);
   const [cancelingActiveJobs, setCancelingActiveJobs] = useState(false);
+  const [dismissingAllRecentFailures, setDismissingAllRecentFailures] = useState(false);
   const [resettingHealth, setResettingHealth] = useState(false);
   const [clearingOlderWorkerCheckins, setClearingOlderWorkerCheckins] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -2286,6 +2368,9 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     () => (queueStatus.data ? buildSystemHealthViewModel(queueStatus.data, modalState) : null),
     [modalState, queueStatus.data],
   );
+  const hasActiveAdminOperations = (adminOperations.data?.summary.active_total ?? 0) > 0;
+  const hasStaleAdminOperations = (adminOperations.data?.summary.stale_total ?? 0) > 0;
+  const hasRecentFailures = (queueStatus.data?.queue.recent_failures?.length ?? 0) > 0;
 
   const cancelStuckJobs = useCallback(
     async (jobIds: string[]) => {
@@ -2546,6 +2631,96 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     }
   }, [adminOperations, healthDot, queueStatus]);
 
+  const cancelSingleAdminOperation = useCallback(
+    async (operationId: string) => {
+      setActionNotice(null);
+      setActionError(null);
+      setCancelingAdminOperationIds((current) => new Set(current).add(operationId));
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/operations/${operationId}/cancel`,
+          {
+            method: "POST",
+            cache: "no-store",
+          },
+          { allowDevAdminBypass: true },
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          cancelled_operations?: number;
+          cancelled_operation_ids?: string[];
+          operation?: { status?: string | null };
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? `HTTP ${response.status}`);
+        }
+        await Promise.all([adminOperations.refetch(), queueStatus.refetch(), healthDot.refetch()]);
+        const cancelledOperations = Number(payload.cancelled_operations ?? 0);
+        const status = String(payload.operation?.status || "").trim().toLowerCase();
+        if (status === "cancelled") {
+          setActionNotice(
+            cancelledOperations > 1
+              ? `Cancelled ${cancelledOperations} related admin operations from ${operationId.slice(0, 8)}.`
+              : `Admin operation ${operationId.slice(0, 8)} cancelled.`,
+          );
+        } else {
+          setActionNotice(
+            cancelledOperations > 1
+              ? `Cancellation requested for ${cancelledOperations} related admin operations from ${operationId.slice(0, 8)}.`
+              : `Cancellation requested for admin operation ${operationId.slice(0, 8)}.`,
+          );
+        }
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "Failed to cancel admin operation");
+      } finally {
+        setCancelingAdminOperationIds((current) => {
+          const next = new Set(current);
+          next.delete(operationId);
+          return next;
+        });
+      }
+    },
+    [adminOperations, healthDot, queueStatus],
+  );
+
+  const cancelAllActiveAdminOperations = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setCancelingAllActiveAdminOperations(true);
+    try {
+      const response = await fetchAdminWithAuth(
+        CANCEL_ACTIVE_ADMIN_OPERATIONS_URL,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cancel_all_active: true }),
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        cancel_requested_operations?: number;
+        active_operations_remaining?: number;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      await Promise.all([adminOperations.refetch(), queueStatus.refetch(), healthDot.refetch()]);
+      const requested = Number(payload.cancel_requested_operations ?? 0);
+      const remaining = Number(payload.active_operations_remaining ?? 0);
+      setActionNotice(
+        requested > 0
+          ? `Requested cancellation for ${requested} active admin operation${requested === 1 ? "" : "s"}.${remaining > 0 ? ` ${remaining} still active.` : ""}`
+          : "No active admin operations needed cancellation.",
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to cancel active admin operations");
+    } finally {
+      setCancelingAllActiveAdminOperations(false);
+    }
+  }, [adminOperations, healthDot, queueStatus]);
+
   const dismissRecentFailure = useCallback(
     async (jobId: string) => {
       setActionNotice(null);
@@ -2594,6 +2769,44 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     },
     [healthDot, queueStatus],
   );
+
+  const dismissAllRecentFailures = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setDismissingAllRecentFailures(true);
+    try {
+      const response = await fetchAdminWithAuth(
+        DISMISS_RECENT_FAILURES_URL,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ dismiss_all_visible: true }),
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        dismissed_jobs?: number;
+        recent_failures_remaining?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      const dismissedJobs = Number(payload.dismissed_jobs ?? 0);
+      const remaining = Number(payload.recent_failures_remaining ?? 0);
+      setActionNotice(
+        dismissedJobs > 0
+          ? `Dismissed ${dismissedJobs} recent failure${dismissedJobs === 1 ? "" : "s"}.${remaining > 0 ? ` ${remaining} still visible.` : ""}`
+          : "No recent failures needed dismissal.",
+      );
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to dismiss recent failures");
+    } finally {
+      setDismissingAllRecentFailures(false);
+    }
+  }, [healthDot, queueStatus]);
 
   const cancelAllActiveJobs = useCallback(async () => {
     setActionNotice(null);
@@ -2770,6 +2983,46 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           </div>
         )}
 
+        {(queueStatus.data || adminOperations.data) && (
+          <div className="sticky top-0 z-10 mb-4 rounded-xl border border-zinc-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
+                Immediate Actions
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void cancelAllActiveAdminOperations();
+                }}
+                disabled={cancelingAllActiveAdminOperations || !hasActiveAdminOperations}
+                className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cancelingAllActiveAdminOperations ? "Cancelling active admin jobs..." : "Cancel all active admin operations"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void clearStaleAdminOperations();
+                }}
+                disabled={clearingStaleAdminOperations || !hasStaleAdminOperations}
+                className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {clearingStaleAdminOperations ? "Clearing stale..." : "Force cancel stale admin operations"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void dismissAllRecentFailures();
+                }}
+                disabled={dismissingAllRecentFailures || !hasRecentFailures}
+                className="rounded-md border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {dismissingAllRecentFailures ? "Dismissing..." : "Dismiss all error patterns"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {!queueStatus.data && !adminOperations.data && (
           <p className="text-sm text-zinc-500">Loading detailed queue and worker diagnostics...</p>
         )}
@@ -2782,26 +3035,12 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
 
             <hr className="border-zinc-100" />
 
-            <section>
-              <SectionHeader>How This Sync Runs</SectionHeader>
-              <WorkerPlaneSummary viewModel={viewModel} />
-            </section>
-
-            <hr className="border-zinc-100" />
-
-            <section>
-              <SectionHeader>Queue Health</SectionHeader>
-              <QueueHealthSection viewModel={viewModel} />
-            </section>
-
             {adminOperations.data && (
               <>
-                <hr className="border-zinc-100" />
-
                 <section>
                   <SectionHeader>Admin Operations</SectionHeader>
                   <p className="mb-3 text-sm text-zinc-600">
-                    Gallery, person, and show jobs running through the shared admin operation plane.
+                    Long-running show, person, and gallery workflows running through the shared remote execution plane.
                   </p>
                   <SummaryCards
                     columns={4}
@@ -2840,6 +3079,35 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <div>
+                          <p className="text-sm font-medium text-zinc-900">Active admin operations</p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            The newest non-terminal workflows, including runtime ownership and the last update age.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void cancelAllActiveAdminOperations();
+                          }}
+                          disabled={cancelingAllActiveAdminOperations || (adminOperations.data.summary.active_total ?? 0) <= 0}
+                          className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {cancelingAllActiveAdminOperations ? "Cancelling..." : "Cancel all active admin operations"}
+                        </button>
+                      </div>
+                      <div className="mt-3">
+                        <AdminOperationsTable
+                          operations={adminOperations.data.active_operations}
+                          emptyMessage="No active admin operations right now."
+                          cancelingOperationIds={cancelingAdminOperationIds}
+                          onCancelOperation={cancelSingleAdminOperation}
+                          cancelActionLabel="Cancel run"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div>
                           <p className="text-sm font-medium text-zinc-900">Stale admin operations</p>
                           <p className="mt-1 text-xs text-zinc-500">
                             These jobs have dead heartbeats or have been cancelling past the grace window.
@@ -2861,22 +3129,24 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                         emptyMessage="No stale admin operations detected."
                       />
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-zinc-900">Active admin operations</p>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        The newest non-terminal gallery and admin jobs, including runtime ownership and last update age.
-                      </p>
-                      <div className="mt-3">
-                        <AdminOperationsTable
-                          operations={adminOperations.data.active_operations}
-                          emptyMessage="No active admin operations right now."
-                        />
-                      </div>
-                    </div>
                   </div>
                 </section>
+
+                <hr className="border-zinc-100" />
               </>
             )}
+
+            <section>
+              <SectionHeader>How This Sync Runs</SectionHeader>
+              <WorkerPlaneSummary viewModel={viewModel} />
+            </section>
+
+            <hr className="border-zinc-100" />
+
+            <section>
+              <SectionHeader>Queue Health</SectionHeader>
+              <QueueHealthSection viewModel={viewModel} />
+            </section>
 
             <hr className="border-zinc-100" />
 
@@ -2969,10 +3239,24 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                   </div>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-zinc-900">Recent Error Patterns</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    These are the most recent job failures, grouped in the order they occurred.
-                  </p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-900">Recent Error Patterns</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        These are the most recent job failures, grouped in the order they occurred.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void dismissAllRecentFailures();
+                      }}
+                      disabled={dismissingAllRecentFailures || !hasRecentFailures}
+                      className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {dismissingAllRecentFailures ? "Dismissing..." : "Dismiss all"}
+                    </button>
+                  </div>
                   <div className="mt-3">
                     <RecentFailures
                       failures={queueStatus.data.queue.recent_failures}
@@ -2993,6 +3277,19 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
             <button
               type="button"
               onClick={() => {
+                void cancelAllActiveAdminOperations();
+              }}
+              disabled={cancelingAllActiveAdminOperations || (adminOperations.data?.summary.active_total ?? 0) <= 0}
+              className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {cancelingAllActiveAdminOperations ? "Cancelling active admin operations..." : "Cancel all active admin operations"}
+            </button>
+            <p className="text-xs text-zinc-500">
+              Stops all currently active admin-operation workflows, including show refresh runs that are still attached to workers.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
                 void clearStaleAdminOperations();
               }}
               disabled={clearingStaleAdminOperations || (adminOperations.data?.summary.stale_total ?? 0) <= 0}
@@ -3010,6 +3307,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               }}
               disabled={
                 resettingHealth ||
+                cancelingAllActiveAdminOperations ||
                 cancelingActiveJobs ||
                 clearingAll ||
                 cancelingJobIds.size > 0 ||
@@ -3030,6 +3328,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               }}
               disabled={
                 resettingHealth ||
+                cancelingAllActiveAdminOperations ||
                 cancelingActiveJobs ||
                 clearingAll ||
                 cancelingJobIds.size > 0 ||

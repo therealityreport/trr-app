@@ -1,0 +1,2730 @@
+{
+  "schemaVersion": "2026-03-31.nyt-games-media.v1",
+  "inputHash": "13df4f633fbd0d9720794bff7bcfe1be7f24c9bd3cd2cbac3bdeef15d6296391",
+  "generatedAt": "2026-03-31T20:16:10.793Z",
+  "scoringConfigVersion": "crosswords-home-saved-bundle.v1",
+  "data": {
+    "sourceBundle": {
+      "canonicalUrl": "https://www.nytimes.com/crosswords",
+      "htmlPath": "/Volumes/HardDrive/SAVED PAGES/NYT GAMES/HOME PAGE/The Crossword — The New York Times.html",
+      "stylesheets": [
+        "/Volumes/HardDrive/SAVED PAGES/NYT GAMES/HOME PAGE/The Crossword — The New York Times_files/hub.3cf5ee155725326e1184.css",
+        "/Volumes/HardDrive/SAVED PAGES/NYT GAMES/HOME PAGE/The Crossword — The New York Times_files/5761.7d1915be73cf8ef65093.css",
+        "/Volumes/HardDrive/SAVED PAGES/NYT GAMES/HOME PAGE/The Crossword — The New York Times_files/5282.6ea7e0f5f16a91f7809a.css"
+      ]
+    },
+    "extractedUrls": [
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/bento_image.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/bento_image.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/bento_image_se.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/bento_image_se.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-gold-star.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-gold-star.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-blue-star.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-blue-star.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-unavailable.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-unavailable.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-0.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-0.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-1.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-1.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-2.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-2.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-3.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-3.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-4.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-4.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-5.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-5.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-6.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-6.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-7.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-7.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-8.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-8.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-9.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-9.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-10.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-10.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-11.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-11.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-12.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-12.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-13.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-13.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-14.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-14.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-15.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-15.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-16.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-16.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-progress/mini-progress-blue-star.svg",
+        "resolved": "./assets/mini-progress/mini-progress-blue-star.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-progress/mini-progress-0.svg",
+        "resolved": "./assets/mini-progress/mini-progress-0.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-progress/mini-progress-1.svg",
+        "resolved": "./assets/mini-progress/mini-progress-1.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-progress/mini-progress-2.svg",
+        "resolved": "./assets/mini-progress/mini-progress-2.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-progress/mini-progress-3.svg",
+        "resolved": "./assets/mini-progress/mini-progress-3.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-progress/mini-progress-4.svg",
+        "resolved": "./assets/mini-progress/mini-progress-4.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-progress/mini-unavailable.svg",
+        "resolved": "./assets/mini-progress/mini-unavailable.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/puzzle-progress-newest.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-newest.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-blue-star.svg",
+        "resolved": "./assets/midi-progress/midi-progress-blue-star.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-0.svg",
+        "resolved": "./assets/midi-progress/midi-progress-0.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-unavailable.svg",
+        "resolved": "./assets/midi-progress/midi-unavailable.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-1.svg",
+        "resolved": "./assets/midi-progress/midi-progress-1.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-2.svg",
+        "resolved": "./assets/midi-progress/midi-progress-2.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-3.svg",
+        "resolved": "./assets/midi-progress/midi-progress-3.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-4.svg",
+        "resolved": "./assets/midi-progress/midi-progress-4.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-5.svg",
+        "resolved": "./assets/midi-progress/midi-progress-5.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-6.svg",
+        "resolved": "./assets/midi-progress/midi-progress-6.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-7.svg",
+        "resolved": "./assets/midi-progress/midi-progress-7.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-8.svg",
+        "resolved": "./assets/midi-progress/midi-progress-8.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/midi-progress/midi-progress-9.svg",
+        "resolved": "./assets/midi-progress/midi-progress-9.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/print.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/print.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/print-black.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/print-black.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/hover-ribbon-bright.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/hover-ribbon-bright.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/puzzle-progress/hover-ribbon-dark.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/hover-ribbon-dark.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/spelling-bee-card-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/spelling-bee-card-icon.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/download-app-store.svg",
+        "resolved": "./assets/download-app-store.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/download-google-play.png",
+        "resolved": "./assets/download-google-play.png"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/mini-star.svg",
+        "resolved": "./assets/mini-star.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/icons/lock-black.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/lock-black.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "https://www.nytimes.com/games-assets/guide-promo-005.jpg",
+        "resolved": "https://www.nytimes.com/games-assets/guide-promo-005.jpg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/letter-boxed-card-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/letter-boxed-card-icon.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/pips-card-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/pips-card-icon.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/icons/crossplay-card-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/crossplay-card-icon.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/sudoku-card-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/sudoku-card-icon.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/tiles-card-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/tiles-card-icon.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/wordle-card-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/wordle-card-icon.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/connections.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/connections.svg"
+      },
+      {
+        "discoveredIn": "hub.3cf5ee155725326e1184.css",
+        "raw": "./assets/expansion-games/strands.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/strands.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/connections/connections_CTA.gif",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/connections/connections_CTA.gif"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/connections/connections-archive-cta.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/connections/connections-archive-cta.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/icons/mini_archive.png",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/mini_archive.png"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/icons/mini_leaderboard.png",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/mini_leaderboard.png"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/icons/banner-cta/connections_leaderboard_friends.svg",
+        "resolved": "https://www.nytimes.com/games-assets/icons/banner-cta/connections_leaderboard_friends.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/icons/banner-cta/mini_leaderboard_friends.svg",
+        "resolved": "https://www.nytimes.com/games-assets/icons/banner-cta/mini_leaderboard_friends.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/icons/banner-cta/sb_leaderboard_friends.svg",
+        "resolved": "https://www.nytimes.com/games-assets/icons/banner-cta/sb_leaderboard_friends.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/icons/banner-cta/wordle_leaderboard_friends.svg",
+        "resolved": "https://www.nytimes.com/games-assets/icons/banner-cta/wordle_leaderboard_friends.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://storage.googleapis.com/games-assets/v2/assets/icons/crossplay_app_icon_rounded.svg",
+        "resolved": "https://storage.googleapis.com/games-assets/v2/assets/icons/crossplay_app_icon_rounded.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/icons/banner-cta/pips_appdownload_cta.svg",
+        "resolved": "https://www.nytimes.com/games-assets/icons/banner-cta/pips_appdownload_cta.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "./assets/icons/inline-games-all.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/inline-games-all.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "./assets/icons/strands-download.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/strands-download.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/icons/ad-message-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/ad-message-icon.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/icons/banner-cta/wordle_leaderboard_large.svg",
+        "resolved": "https://www.nytimes.com/games-assets/icons/banner-cta/wordle_leaderboard_large.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Wordle-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Wordle-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Connections-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Connections-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Crossword-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Crossword-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Spelling-Bee-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Spelling-Bee-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Mini-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Mini-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Midi-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Midi-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Strands-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Strands-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Sudoku-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Sudoku-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Tiles-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Tiles-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/LetterBoxed-Icon-np.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/LetterBoxed-Icon-np.svg"
+      },
+      {
+        "discoveredIn": "5761.7d1915be73cf8ef65093.css",
+        "raw": "./assets/crossplay/bannerV2.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/crossplay/bannerV2.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/cheltenham/cheltenham-normal-300.woff2",
+        "resolved": "./fonts/cheltenham/cheltenham-normal-300.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/cheltenham/cheltenham-normal-300.woff",
+        "resolved": "./fonts/cheltenham/cheltenham-normal-300.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/cheltenham/cheltenham-normal-500.woff2",
+        "resolved": "./fonts/cheltenham/cheltenham-normal-500.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/cheltenham/cheltenham-normal-500.woff",
+        "resolved": "./fonts/cheltenham/cheltenham-normal-500.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-300.woff2",
+        "resolved": "./fonts/franklin/franklin-normal-300.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-300.woff",
+        "resolved": "./fonts/franklin/franklin-normal-300.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-400.woff2",
+        "resolved": "./fonts/franklin/franklin-normal-400.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-400.woff",
+        "resolved": "./fonts/franklin/franklin-normal-400.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-500.woff2",
+        "resolved": "./fonts/franklin/franklin-normal-500.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-500.woff",
+        "resolved": "./fonts/franklin/franklin-normal-500.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-600.woff2",
+        "resolved": "./fonts/franklin/franklin-normal-600.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-600.woff",
+        "resolved": "./fonts/franklin/franklin-normal-600.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-700.woff2",
+        "resolved": "./fonts/franklin/franklin-normal-700.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-700.woff",
+        "resolved": "./fonts/franklin/franklin-normal-700.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-800.woff2",
+        "resolved": "./fonts/franklin/franklin-normal-800.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-normal-800.woff",
+        "resolved": "./fonts/franklin/franklin-normal-800.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-italic-500.woff2",
+        "resolved": "./fonts/franklin/franklin-italic-500.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin/franklin-italic-500.woff",
+        "resolved": "./fonts/franklin/franklin-italic-500.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin-cw/franklin-cw-normal-400.woff2",
+        "resolved": "./fonts/franklin-cw/franklin-cw-normal-400.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin-cw/franklin-cw-normal-400.woff",
+        "resolved": "./fonts/franklin-cw/franklin-cw-normal-400.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin-cw/franklin-cw-normal-500.woff2",
+        "resolved": "./fonts/franklin-cw/franklin-cw-normal-500.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/franklin-cw/franklin-cw-normal-500.woff",
+        "resolved": "./fonts/franklin-cw/franklin-cw-normal-500.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-400.woff2",
+        "resolved": "./fonts/karnak/karnak-normal-400.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-400.woff",
+        "resolved": "./fonts/karnak/karnak-normal-400.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-500.woff2",
+        "resolved": "./fonts/karnak/karnak-normal-500.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-500.woff",
+        "resolved": "./fonts/karnak/karnak-normal-500.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-600.woff2",
+        "resolved": "./fonts/karnak/karnak-normal-600.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-600.woff",
+        "resolved": "./fonts/karnak/karnak-normal-600.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-700.woff2",
+        "resolved": "./fonts/karnak/karnak-normal-700.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnak/karnak-normal-700.woff",
+        "resolved": "./fonts/karnak/karnak-normal-700.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnakcondensed/karnakcondensed-normal-700.woff2",
+        "resolved": "./fonts/karnakcondensed/karnakcondensed-normal-700.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/karnakcondensed/karnakcondensed-normal-700.woff",
+        "resolved": "./fonts/karnakcondensed/karnakcondensed-normal-700.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/stymie/stymie-normal-500.woff2",
+        "resolved": "./fonts/stymie/stymie-normal-500.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/stymie/stymie-normal-500.woff",
+        "resolved": "./fonts/stymie/stymie-normal-500.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/stymie/stymie-normal-700.woff2",
+        "resolved": "./fonts/stymie/stymie-normal-700.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/stymie/stymie-normal-700.woff",
+        "resolved": "./fonts/stymie/stymie-normal-700.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/stymie/stymie-normal-800.woff2",
+        "resolved": "./fonts/stymie/stymie-normal-800.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/stymie/stymie-normal-800.woff",
+        "resolved": "./fonts/stymie/stymie-normal-800.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/inter/inter-normal-600.woff2",
+        "resolved": "./fonts/inter/inter-normal-600.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/inter/inter-normal-600.woff",
+        "resolved": "./fonts/inter/inter-normal-600.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/imperial/imperial-normal-400.woff2",
+        "resolved": "./fonts/imperial/imperial-normal-400.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/imperial/imperial-normal-400.woff",
+        "resolved": "./fonts/imperial/imperial-normal-400.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/imperial/imperial-normal-600.woff2",
+        "resolved": "./fonts/imperial/imperial-normal-600.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/imperial/imperial-normal-600.woff",
+        "resolved": "./fonts/imperial/imperial-normal-600.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/imperial/imperial-normal-700.woff2",
+        "resolved": "./fonts/imperial/imperial-normal-700.woff2"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./fonts/imperial/imperial-normal-700.woff",
+        "resolved": "./fonts/imperial/imperial-normal-700.woff"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/back.svg",
+        "resolved": "./assets/back.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/light-mode-nyt-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/light-mode-nyt-icon.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/dark-mode-nyt-icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/dark-mode-nyt-icon.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/daily.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/daily.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/midi.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/midi.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/mini.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/mini.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/spelling-bee.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/spelling-bee.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/wordle.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/wordle.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/tiles.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/tiles.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/letter-boxed.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/letter-boxed.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/strands.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/strands.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/pips.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/pips.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/connections/connections-bot-mascot.svg",
+        "resolved": "./assets/connections/connections-bot-mascot.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/sudoku.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/sudoku.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/california-privacy-default.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/california-privacy-default.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/crossplay.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/crossplay.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/crossplay-liquid-glass.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/crossplay-liquid-glass.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/spelling-bee.svg",
+        "resolved": "./assets/spelling-bee.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/NYT-Icon-Normalized.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/NYT-Icon-Normalized.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/Cooking-Icon-Normalized.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/Cooking-Icon-Normalized.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/Wirecutter-Icon-Normalized.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/Wirecutter-Icon-Normalized.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/Athletic-Icon-Normalized.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/Athletic-Icon-Normalized.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/NYT-Connections-Sports-Icon.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/wordle/nav-icons/NYT-Connections-Sports-Icon.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/timer-pause.svg",
+        "resolved": "./assets/timer-pause.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icon-close.svg",
+        "resolved": "./assets/icon-close.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icon-close-dark.svg",
+        "resolved": "./assets/icon-close-dark.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icon-rotate.svg",
+        "resolved": "./assets/icon-rotate.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icon-caret-right.svg",
+        "resolved": "./assets/icon-caret-right.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/banner-right.svg",
+        "resolved": "./assets/banner-right.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/arrow-up.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/arrow-up.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/arrow-down.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/arrow-down.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/crossword-app-color.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/crossword-app-color.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/sparkle.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/sparkle.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/share-outline.svg",
+        "resolved": "./assets/share-outline.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/apps/appQR_2.png",
+        "resolved": "./assets/apps/appQR_2.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/group-three.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/group-three.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections-archive.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections-archive.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/year-in-games.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/year-in-games.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icon-alert.svg",
+        "resolved": "./assets/icon-alert.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ready-0.svg",
+        "resolved": "./assets/bee-ready-0.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/caret-thin-black.svg",
+        "resolved": "./assets/caret-thin-black.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/landscape-warning.svg",
+        "resolved": "./assets/landscape-warning.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/blue-star-0.svg",
+        "resolved": "./assets/blue-star-0.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/padlock-black.svg",
+        "resolved": "./assets/padlock-black.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/check-white.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/check-white.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/padlock.svg",
+        "resolved": "./assets/padlock.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-loved-1.svg",
+        "resolved": "./assets/bee-loved-1.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-smarty-1.svg",
+        "resolved": "./assets/bee-smarty-1.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-queen-1.svg",
+        "resolved": "./assets/bee-queen-1.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-spooky-1.svg",
+        "resolved": "./assets/bee-spooky-1.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-valentines.png",
+        "resolved": "./assets/bee-valentines.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-april-fool.png",
+        "resolved": "./assets/bee-april-fool.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/beeatrices-bee-day.svg",
+        "resolved": "./assets/beeatrices-bee-day.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ny-2024.png",
+        "resolved": "./assets/bee-ny-2024.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ny-2025.png",
+        "resolved": "./assets/bee-ny-2025.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ny-2026.png",
+        "resolved": "./assets/bee-ny-2026.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ny-2027.png",
+        "resolved": "./assets/bee-ny-2027.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ny-2028.png",
+        "resolved": "./assets/bee-ny-2028.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ny-2029.png",
+        "resolved": "./assets/bee-ny-2029.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/bee-ny-2030.png",
+        "resolved": "./assets/bee-ny-2030.png"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/spelling-bee-hub/gold-star-icon.svg",
+        "resolved": "./assets/spelling-bee-hub/gold-star-icon.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections-progress-0.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections-progress-0.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections-progress-1.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections-progress-1.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections-progress-2.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections-progress-2.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections-progress-3.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections-progress-3.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections-progress-won.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections-progress-won.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/icons/connections-progress-loss.svg",
+        "resolved": "https://www.nytimes.com/games-assets/v2/assets/icons/connections-progress-loss.svg"
+      },
+      {
+        "discoveredIn": "5282.6ea7e0f5f16a91f7809a.css",
+        "raw": "./assets/oxford.svg",
+        "resolved": "./assets/oxford.svg"
+      }
+    ],
+    "assets": [
+      {
+        "id": "docs-toc-icon",
+        "label": "Table of contents icon",
+        "kind": "icon",
+        "file": "icons/docs/toc-outline.png",
+        "source": "https://static.thenounproject.com/png/1010520-200.png",
+        "allowMissingFromBundle": true,
+        "display": {
+          "slot": "docs-toc-trigger",
+          "desktop": {
+            "width": 22,
+            "height": 22,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 22,
+            "height": 22,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "external-docs-provenance"
+        ]
+      },
+      {
+        "id": "nyt-games-logo",
+        "label": "NYT Games wordmark",
+        "kind": "logo",
+        "file": "logos/nyt-games-logo.svg",
+        "source": "https://www.nytimes.com/crosswords",
+        "sourceType": "inline-html",
+        "sourceSelector": "svg.pz-nav__logo",
+        "display": {
+          "slot": "brand-logo",
+          "desktop": {
+            "width": 138,
+            "height": 25,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "The Crossword — The New York Times.html"
+        ]
+      },
+      {
+        "id": "featured-article-illustration",
+        "label": "Featured article illustration",
+        "kind": "illustration",
+        "file": "illustrations/guide-promo-005.jpg",
+        "source": "https://www.nytimes.com/games-assets/guide-promo-005.jpg",
+        "display": {
+          "slot": "featured-article-illustration",
+          "desktop": {
+            "width": 290,
+            "height": 260,
+            "objectFit": "cover",
+            "backgroundSize": "cover",
+            "backgroundPosition": "left"
+          },
+          "mobile": {
+            "width": 320,
+            "height": 260,
+            "objectFit": "cover",
+            "backgroundSize": "cover",
+            "backgroundPosition": "left"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "crossplay-banner",
+        "label": "Crossplay banner",
+        "kind": "promo",
+        "file": "promo/crossplay-banner-v2.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/crossplay/bannerV2.svg",
+        "display": {
+          "slot": "crossplay-banner",
+          "desktop": {
+            "width": 320,
+            "height": 207,
+            "objectFit": "cover",
+            "backgroundSize": "cover"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "cta-crossplay-app-icon-rounded",
+        "label": "Crossplay CTA rounded app icon",
+        "kind": "icon",
+        "file": "icons/cta/crossplay-app-icon-rounded.svg",
+        "source": "https://storage.googleapis.com/games-assets/v2/assets/icons/crossplay_app_icon_rounded.svg",
+        "display": {
+          "slot": "drawer-cta-icon",
+          "desktop": {
+            "width": 56,
+            "height": 56,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 56,
+            "height": 56,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "cta-pips-appdownload-cta",
+        "label": "Pips CTA app-download icon",
+        "kind": "icon",
+        "file": "icons/cta/pips-appdownload-cta.svg",
+        "source": "https://www.nytimes.com/games-assets/icons/banner-cta/pips_appdownload_cta.svg",
+        "display": {
+          "slot": "drawer-cta-icon",
+          "desktop": {
+            "width": 85,
+            "height": 56,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 56,
+            "height": 56,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "cta-inline-games-all",
+        "label": "Inline games CTA strip",
+        "kind": "icon",
+        "file": "icons/cta/inline-games-all.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/inline-games-all.svg",
+        "display": {
+          "slot": "drawer-cta-inline-strip",
+          "desktop": {
+            "width": 148,
+            "height": 30,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 148,
+            "height": 30,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "print-default",
+        "label": "Print icon",
+        "kind": "icon",
+        "file": "icons/print.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/print.svg",
+        "display": {
+          "slot": "monthly-bonus-print",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "print-dark",
+        "label": "Print icon (black)",
+        "kind": "icon",
+        "file": "icons/print-black.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/print-black.svg",
+        "display": {
+          "slot": "monthly-bonus-print",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-0",
+        "label": "Puzzle progress 0",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-0.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-0.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-1",
+        "label": "Puzzle progress 1",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-1.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-1.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-2",
+        "label": "Puzzle progress 2",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-2.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-2.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-3",
+        "label": "Puzzle progress 3",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-3.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-3.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-4",
+        "label": "Puzzle progress 4",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-4.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-4.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-5",
+        "label": "Puzzle progress 5",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-5.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-5.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-6",
+        "label": "Puzzle progress 6",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-6.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-6.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-7",
+        "label": "Puzzle progress 7",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-7.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-7.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-8",
+        "label": "Puzzle progress 8",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-8.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-8.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-9",
+        "label": "Puzzle progress 9",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-9.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-9.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-10",
+        "label": "Puzzle progress 10",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-10.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-10.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-11",
+        "label": "Puzzle progress 11",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-11.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-11.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-12",
+        "label": "Puzzle progress 12",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-12.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-12.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-13",
+        "label": "Puzzle progress 13",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-13.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-13.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-14",
+        "label": "Puzzle progress 14",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-14.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-14.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-15",
+        "label": "Puzzle progress 15",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-15.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-15.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-state-16",
+        "label": "Puzzle progress 16",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-16.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-16.svg",
+        "display": {
+          "slot": "featured-puzzle-progress",
+          "desktop": {
+            "width": 100,
+            "height": 100,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 75,
+            "height": 75,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-gold-star",
+        "label": "Puzzle progress gold star",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-gold-star.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-gold-star.svg",
+        "display": {
+          "slot": "archive-thumb-progress",
+          "desktop": {
+            "width": 55,
+            "height": 55,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-blue-star",
+        "label": "Puzzle progress blue star",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-blue-star.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-blue-star.svg",
+        "display": {
+          "slot": "archive-thumb-progress",
+          "desktop": {
+            "width": 55,
+            "height": 55,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-newest",
+        "label": "Puzzle newest state",
+        "kind": "progress",
+        "file": "progress/puzzle-progress-newest.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-progress-newest.svg",
+        "display": {
+          "slot": "archive-thumb-progress",
+          "desktop": {
+            "width": 55,
+            "height": 55,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "progress-unavailable",
+        "label": "Puzzle unavailable state",
+        "kind": "progress",
+        "file": "progress/puzzle-unavailable.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/puzzle-progress/puzzle-unavailable.svg",
+        "display": {
+          "slot": "archive-thumb-progress",
+          "desktop": {
+            "width": 55,
+            "height": 55,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "page-icon-crossword",
+        "label": "Crossword page icon",
+        "kind": "icon",
+        "file": "icons/crossword-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Crossword-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-midi",
+        "label": "Midi page icon",
+        "kind": "icon",
+        "file": "icons/midi-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Midi-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-mini",
+        "label": "Mini page icon",
+        "kind": "icon",
+        "file": "icons/mini-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Mini-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-wordle",
+        "label": "Wordle page icon",
+        "kind": "icon",
+        "file": "icons/page/wordle-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Wordle-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-connections",
+        "label": "Connections page icon",
+        "kind": "icon",
+        "file": "icons/page/connections-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Connections-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-spelling-bee",
+        "label": "Spelling Bee page icon",
+        "kind": "icon",
+        "file": "icons/page/spelling-bee-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Spelling-Bee-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-strands",
+        "label": "Strands page icon",
+        "kind": "icon",
+        "file": "icons/page/strands-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Strands-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-sudoku",
+        "label": "Sudoku page icon",
+        "kind": "icon",
+        "file": "icons/page/sudoku-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Sudoku-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-tiles",
+        "label": "Tiles page icon",
+        "kind": "icon",
+        "file": "icons/page/tiles-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/Tiles-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "page-icon-letter-boxed",
+        "label": "Letter Boxed page icon",
+        "kind": "icon",
+        "file": "icons/page/letter-boxed-icon-np.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/wordle/page-icons/LetterBoxed-Icon-np.svg",
+        "display": {
+          "slot": "hamburger-cta-icon-strip",
+          "desktop": {
+            "width": 25,
+            "height": 25,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5761.7d1915be73cf8ef65093.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-crossplay",
+        "label": "Crossplay drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/crossplay.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/crossplay.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-crossword",
+        "label": "Crossword drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/daily.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/daily.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-midi",
+        "label": "Midi drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/midi.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/midi.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-mini",
+        "label": "Mini drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/mini.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/mini.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-connections",
+        "label": "Connections drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/connections.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/connections.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-spelling-bee",
+        "label": "Spelling Bee drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/spelling-bee.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/spelling-bee.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-wordle",
+        "label": "Wordle drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/wordle.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/wordle.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-pips",
+        "label": "Pips drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/pips.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/pips.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-strands",
+        "label": "Strands drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/strands.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/strands.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-letter-boxed",
+        "label": "Letter Boxed drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/letter-boxed.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/letter-boxed.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-tiles",
+        "label": "Tiles drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/tiles.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/tiles.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "5282.6ea7e0f5f16a91f7809a.css"
+        ]
+      },
+      {
+        "id": "drawer-icon-sudoku",
+        "label": "Sudoku drawer icon",
+        "kind": "icon",
+        "file": "icons/drawer/sudoku-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/sudoku-card-icon.svg",
+        "display": {
+          "slot": "drawer-footer-icon",
+          "desktop": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          },
+          "mobile": {
+            "width": 20,
+            "height": 20,
+            "objectFit": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-crossplay",
+        "label": "Crossplay card icon",
+        "kind": "icon",
+        "file": "icons/crossplay-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/icons/crossplay-card-icon.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-wordle",
+        "label": "Wordle card icon",
+        "kind": "icon",
+        "file": "icons/wordle-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/wordle-card-icon.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-connections",
+        "label": "Connections card icon",
+        "kind": "icon",
+        "file": "icons/connections.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/connections.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-spelling-bee",
+        "label": "Spelling Bee card icon",
+        "kind": "icon",
+        "file": "icons/spelling-bee-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/spelling-bee-card-icon.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-pips",
+        "label": "Pips card icon",
+        "kind": "icon",
+        "file": "icons/pips-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/pips-card-icon.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-strands",
+        "label": "Strands card icon",
+        "kind": "icon",
+        "file": "icons/strands.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/strands.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-letter-boxed",
+        "label": "Letter Boxed card icon",
+        "kind": "icon",
+        "file": "icons/letter-boxed-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/letter-boxed-card-icon.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-tiles",
+        "label": "Tiles card icon",
+        "kind": "icon",
+        "file": "icons/tiles-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/tiles-card-icon.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      },
+      {
+        "id": "card-icon-sudoku",
+        "label": "Sudoku card icon",
+        "kind": "icon",
+        "file": "icons/sudoku-card-icon.svg",
+        "source": "https://www.nytimes.com/games-assets/v2/assets/expansion-games/sudoku-card-icon.svg",
+        "display": {
+          "slot": "hub-game-card-illustration",
+          "desktop": {
+            "width": 92,
+            "height": 92,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          },
+          "mobile": {
+            "width": 62,
+            "height": 62,
+            "objectFit": "contain",
+            "backgroundSize": "contain"
+          }
+        },
+        "discoveredIn": [
+          "hub.3cf5ee155725326e1184.css"
+        ]
+      }
+    ],
+    "sourceComponents": [
+      {
+        "id": "playbook-palette-index",
+        "label": "Playbook Palette",
+        "group": "foundation",
+        "sourceComponentName": "@nyt/playbook/lib/assets/palette/index.css",
+        "sourcePath": "xwords/phoenix/node_modules/@nyt/playbook/lib/assets/palette/index.css",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "color-palette",
+        "cssModules": [
+          "index.css"
+        ]
+      },
+      {
+        "id": "playbook-spacing",
+        "label": "Playbook Spacing",
+        "group": "foundation",
+        "sourceComponentName": "@nyt/playbook/lib/assets/spacing",
+        "sourcePath": "xwords/phoenix/node_modules/@nyt/playbook/lib/assets/spacing",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "type-scale",
+        "cssModules": [
+          "spacing"
+        ]
+      },
+      {
+        "id": "foundation-moments-buttons",
+        "label": "Moments / buttons.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/moments/buttons.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/moments/buttons.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "buttons.scss"
+        ]
+      },
+      {
+        "id": "foundation-moments-close",
+        "label": "Moments / close.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/moments/close.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/moments/close.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "close.scss"
+        ]
+      },
+      {
+        "id": "foundation-moments-icon",
+        "label": "Moments / icon.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/moments/icon.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/moments/icon.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "icon.scss"
+        ]
+      },
+      {
+        "id": "foundation-moments-info",
+        "label": "Moments / info.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/moments/info.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/moments/info.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "info.scss"
+        ]
+      },
+      {
+        "id": "foundation-moments-title",
+        "label": "Moments / title.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/moments/title.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/moments/title.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "title.scss"
+        ]
+      },
+      {
+        "id": "foundation-game-index",
+        "label": "Foundation Game / index.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/index.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/index.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "index.scss"
+        ]
+      },
+      {
+        "id": "foundation-game-intercept",
+        "label": "Foundation Game / intercept.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/intercept.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/intercept.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "intercept.scss"
+        ]
+      },
+      {
+        "id": "foundation-game-modals",
+        "label": "Foundation Game / modals.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/modals.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/modals.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "modals.scss"
+        ]
+      },
+      {
+        "id": "foundation-game-moments",
+        "label": "Foundation Game / moments.scss",
+        "group": "foundation",
+        "sourceComponentName": "foundation-game/moments.scss",
+        "sourcePath": "xwords/phoenix/src/shared/foundation-game/moments.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "moments.scss"
+        ]
+      },
+      {
+        "id": "hub-games-section",
+        "label": "GamesSection",
+        "group": "hub",
+        "sourceComponentName": "GamesSection",
+        "sourcePath": "xwords/phoenix/src/shared/hub/GamesSection",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "game-portfolio",
+        "cssModules": [
+          "hub-game-card",
+          "hub-our-games"
+        ]
+      },
+      {
+        "id": "hub-guide-promo",
+        "label": "GuidePromo",
+        "group": "hub",
+        "sourceComponentName": "GuidePromo",
+        "sourcePath": "xwords/phoenix/src/shared/hub/GuidePromo",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "featured-article",
+        "cssModules": [
+          "hub-guide-promo-card",
+          "hub-guide-promo-card-illustration"
+        ]
+      },
+      {
+        "id": "hub-loading-card",
+        "label": "LoadingCard",
+        "group": "hub",
+        "sourceComponentName": "LoadingCard",
+        "sourcePath": "xwords/phoenix/src/shared/hub/LoadingCard",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "LoadingCard.css"
+        ]
+      },
+      {
+        "id": "hub-mobile-stats-card",
+        "label": "MobileStatsCard",
+        "group": "hub",
+        "sourceComponentName": "MobileStatsCard",
+        "sourcePath": "xwords/phoenix/src/shared/hub/MobileStatsCard",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "recently-tabbed",
+        "cssModules": [
+          "mobile stats card"
+        ]
+      },
+      {
+        "id": "hub-print-modal",
+        "label": "PrintModal",
+        "group": "hub",
+        "sourceComponentName": "PrintModal",
+        "sourcePath": "xwords/phoenix/src/shared/hub/PrintModal",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "hub-print-modal",
+          "hub-print-modal-content"
+        ]
+      },
+      {
+        "id": "hub-progress",
+        "label": "Progress",
+        "group": "hub",
+        "sourceComponentName": "Progress",
+        "sourcePath": "xwords/phoenix/src/shared/hub/Progress",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "recently-tabbed",
+        "cssModules": [
+          "puzzle-progress",
+          "progress-state"
+        ]
+      },
+      {
+        "id": "hub-promo-card",
+        "label": "PromoCard",
+        "group": "hub",
+        "sourceComponentName": "PromoCard",
+        "sourcePath": "xwords/phoenix/src/shared/hub/PromoCard",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "navigation-drawer-crossplay-cta",
+        "cssModules": [
+          "promo card",
+          "banner CTA"
+        ]
+      },
+      {
+        "id": "hub-puzzle-card",
+        "label": "PuzzleCard / scss",
+        "group": "hub",
+        "sourceComponentName": "PuzzleCard",
+        "sourcePath": "xwords/phoenix/src/shared/hub/PuzzleCard/scss",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "game-portfolio",
+        "cssModules": [
+          "hub-game-card",
+          "puzzle card"
+        ]
+      },
+      {
+        "id": "hub-puzzle-group",
+        "label": "PuzzleGroup",
+        "group": "hub",
+        "sourceComponentName": "PuzzleGroup",
+        "sourcePath": "xwords/phoenix/src/shared/hub/PuzzleGroup",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "recently-tabbed",
+        "cssModules": [
+          "hub-puzzle-group"
+        ]
+      },
+      {
+        "id": "hub-sponsored-card",
+        "label": "SponsoredCard",
+        "group": "hub",
+        "sourceComponentName": "SponsoredCard",
+        "sourcePath": "xwords/phoenix/src/shared/hub/SponsoredCard",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "source-tree-coverage",
+        "cssModules": [
+          "hub-sponsored-card"
+        ]
+      },
+      {
+        "id": "hub-stats-card",
+        "label": "StatsCard",
+        "group": "hub",
+        "sourceComponentName": "StatsCard",
+        "sourcePath": "xwords/phoenix/src/shared/hub/StatsCard",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "recently-tabbed",
+        "cssModules": [
+          "stats card"
+        ]
+      },
+      {
+        "id": "hub-streak-encouragement",
+        "label": "StreakEncouragement",
+        "group": "hub",
+        "sourceComponentName": "StreakEncouragement",
+        "sourcePath": "xwords/phoenix/src/shared/hub/StreakEncouragement",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "recently-tabbed",
+        "cssModules": [
+          "streak encouragement"
+        ]
+      },
+      {
+        "id": "hub-welcome",
+        "label": "Welcome",
+        "group": "hub",
+        "sourceComponentName": "Welcome",
+        "sourcePath": "xwords/phoenix/src/shared/hub/Welcome",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "header-shell-and-portal-targets",
+        "cssModules": [
+          "welcome"
+        ]
+      },
+      {
+        "id": "hub-wordplay-link",
+        "label": "WordplayLink",
+        "group": "hub",
+        "sourceComponentName": "WordplayLink",
+        "sourcePath": "xwords/phoenix/src/shared/hub/WordplayLink",
+        "provenance": "Provided screenshot of the webpack:// source tree.",
+        "docsAnchor": "production-footer",
+        "cssModules": [
+          "wordplay link"
+        ]
+      },
+      {
+        "id": "hub-shared-accordion",
+        "label": "shared / Accordion",
+        "group": "hub",
+        "sourceComponentName": "Accordion",
+        "sourcePath": "xwords/phoenix/src/shared/hub/shared/Accordion/Accordion.scss",
+        "provenance": "Provided screenshot of the webpack:// source tree plus saved hub CSS.",
+        "docsAnchor": "recently-tabbed",
+        "cssModules": [
+          "Accordion.scss"
+        ]
+      }
+    ]
+  }
+}

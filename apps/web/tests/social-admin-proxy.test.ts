@@ -26,7 +26,8 @@ describe("social-admin-proxy", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-token";
+    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret-for-tests";
+    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
     fetchAdminBackendJsonMock.mockReset();
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 200,
@@ -76,9 +77,10 @@ describe("social-admin-proxy", () => {
     );
     expect(backendCalls).toHaveLength(2);
     const firstInit = backendCalls[0]?.[1] as RequestInit | undefined;
-    const firstHeaders = (firstInit?.headers ?? {}) as Record<string, string>;
-    expect(typeof firstHeaders["x-trace-id"]).toBe("string");
-    expect(firstHeaders["x-trace-id"].length).toBeGreaterThan(0);
+    const firstHeaders = new Headers(firstInit?.headers);
+    expect(typeof firstHeaders.get("x-trace-id")).toBe("string");
+    expect((firstHeaders.get("x-trace-id") ?? "").length).toBeGreaterThan(0);
+    expect(firstHeaders.get("Authorization")).toMatch(/^Bearer /);
   });
 
   it("maps persistent upstream 502 to retryable standardized envelope", async () => {
@@ -170,6 +172,53 @@ describe("social-admin-proxy", () => {
     expect(payload.upstream_status).toBe(503);
     expect(payload.upstream_detail).toBe("connection pool exhausted");
     expect(response.headers.get("retry-after")).toBe("2");
+  });
+
+  it("classifies raw 500 session-pool saturation as BACKEND_SATURATED", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: { get: () => null },
+      json: async () => ({
+        detail: {
+          code: "DATABASE_SERVICE_UNAVAILABLE",
+          reason: "session_pool_capacity",
+          message:
+            "Database pool initialization failed: connection to server at aws-1-us-east-1.pooler.supabase.com failed: FATAL: MaxClientsInSessionMode: max clients reached",
+        },
+      }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    let thrown: unknown;
+    try {
+      await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+        fallbackError: "Failed to fetch social analytics",
+        retries: 0,
+        timeoutMs: 1000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const response = socialProxyErrorResponse(thrown, "[test] raw saturation");
+    const payload = (await response.json()) as {
+      code?: string;
+      retryable?: boolean;
+      upstream_status?: number;
+      upstream_detail?: unknown;
+    };
+
+    expect(response.status).toBe(503);
+    expect(payload.code).toBe("BACKEND_SATURATED");
+    expect(payload.retryable).toBe(true);
+    expect(payload.upstream_status).toBe(500);
+    expect(payload.upstream_detail).toEqual({
+      code: "DATABASE_SERVICE_UNAVAILABLE",
+      reason: "session_pool_capacity",
+      message:
+        "Database pool initialization failed: connection to server at aws-1-us-east-1.pooler.supabase.com failed: FATAL: MaxClientsInSessionMode: max clients reached",
+    });
   });
 
   it("uses seasonIdHint directly when it is a valid UUID (skips canonical lookup)", async () => {
@@ -291,9 +340,11 @@ describe("social-admin-proxy", () => {
     expect(payload.upstream_status).toBe(500);
   });
 
-  it("throws a generic backend-auth error when the TRR-specific service role key is absent", async () => {
-    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+  it("fails before fetch when the internal admin secret is absent", async () => {
+    delete process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
     getBackendApiUrlMock.mockImplementation((path: string) => `http://backend.local/api/v1${path}`);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
     await expect(
       fetchSocialBackendJson("/ingest/queue-status", {
@@ -301,7 +352,8 @@ describe("social-admin-proxy", () => {
         retries: 0,
         timeoutMs: 1000,
       }),
-    ).rejects.toThrow("Backend auth not configured");
+    ).rejects.toThrow("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("maps missing backend configuration to BACKEND_UNREACHABLE", async () => {

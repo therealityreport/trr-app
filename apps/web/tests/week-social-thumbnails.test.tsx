@@ -513,6 +513,214 @@ describe("WeekDetailPage thumbnails", () => {
       expect(screen.getByText("66")).toBeInTheDocument();
       expect(screen.getByText("12/12 Comments (Saved/Actual)")).toBeInTheDocument();
     });
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(true);
+  });
+
+  it("ignores stale backfill summary/detail responses after a remount", async () => {
+    const previewPayload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    previewPayload.platforms.instagram.posts = [previewPayload.platforms.instagram.posts[0]];
+    previewPayload.platforms.instagram.totals = {
+      posts: 1,
+      total_comments: 10,
+      total_engagement: 100,
+    };
+    previewPayload.platforms.tiktok.posts = [];
+    previewPayload.platforms.tiktok.totals = {
+      posts: 0,
+      total_comments: 0,
+      total_engagement: 0,
+    };
+    previewPayload.platforms.youtube.posts = [];
+    previewPayload.platforms.youtube.totals = {
+      posts: 0,
+      total_comments: 0,
+      total_engagement: 0,
+    };
+    previewPayload.totals = {
+      posts: 1,
+      total_comments: 10,
+      total_engagement: 100,
+    };
+    Object.assign(previewPayload, {
+      pagination: { limit: 100, offset: 0, returned: 1, total: 3, has_more: true },
+    });
+
+    const freshMetricsPayload = JSON.parse(JSON.stringify(previewPayload)) as typeof previewPayload;
+    freshMetricsPayload.platforms.instagram.posts = [
+      {
+        ...previewPayload.platforms.instagram.posts[0],
+        source_id: "ig-fresh-1",
+        collaborators: ["fresh_collab_one"],
+        profile_tags: ["fresh_tag_one"],
+        mentions: ["@fresh_one"],
+        hashtags: ["FreshOne"],
+      },
+      {
+        ...previewPayload.platforms.instagram.posts[0],
+        source_id: "ig-fresh-2",
+        collaborators: ["fresh_collab_two"],
+        profile_tags: ["fresh_tag_two"],
+        mentions: ["@fresh_two"],
+        hashtags: ["FreshTwo"],
+      },
+      {
+        ...previewPayload.platforms.instagram.posts[0],
+        source_id: "ig-fresh-3",
+        collaborators: ["fresh_collab_three"],
+        profile_tags: ["fresh_tag_three"],
+        mentions: ["@fresh_three"],
+        hashtags: ["FreshThree"],
+      },
+    ];
+    freshMetricsPayload.platforms.instagram.totals = {
+      posts: 3,
+      total_comments: 30,
+      total_engagement: 300,
+    };
+    freshMetricsPayload.totals = {
+      posts: 3,
+      total_comments: 30,
+      total_engagement: 300,
+    };
+    Object.assign(freshMetricsPayload, {
+      pagination: { limit: 100, offset: 0, returned: 3, total: 3, has_more: false },
+    });
+
+    const staleMetricsPayload = JSON.parse(JSON.stringify(previewPayload)) as typeof previewPayload;
+    staleMetricsPayload.platforms.instagram.posts = [
+      {
+        ...previewPayload.platforms.instagram.posts[0],
+        source_id: "ig-stale-1",
+        collaborators: ["stale_collab_only"],
+        profile_tags: ["stale_tag_only"],
+        mentions: ["@stale_only"],
+        hashtags: ["StaleOnly"],
+      },
+    ];
+    staleMetricsPayload.platforms.instagram.totals = {
+      posts: 99,
+      total_comments: 999,
+      total_engagement: 9999,
+    };
+    staleMetricsPayload.totals = {
+      posts: 99,
+      total_comments: 999,
+      total_engagement: 9999,
+    };
+    Object.assign(staleMetricsPayload, {
+      pagination: { limit: 100, offset: 0, returned: 1, total: 99, has_more: false },
+    });
+
+    const freshSummaryPayload = {
+      week: previewPayload.week,
+      season: previewPayload.season,
+      source_scope: previewPayload.source_scope,
+      platforms: {
+        instagram: { total_posts: 3, totals: { posts: 3, total_comments: 30, total_engagement: 300 } },
+        tiktok: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        youtube: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        twitter: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        facebook: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+        threads: { total_posts: 0, totals: { posts: 0, total_comments: 0, total_engagement: 0 } },
+      },
+      totals: { posts: 3, total_comments: 30, total_engagement: 300 },
+    };
+
+    const staleSummaryPayload = {
+      ...freshSummaryPayload,
+      platforms: {
+        ...freshSummaryPayload.platforms,
+        instagram: {
+          total_posts: 99,
+          totals: { posts: 99, total_comments: 999, total_engagement: 9999 },
+        },
+      },
+      totals: { posts: 99, total_comments: 999, total_engagement: 9999 },
+    };
+
+    let resolveStaleSummary!: (response: Response) => void;
+    const staleSummaryResponse = new Promise<Response>((resolve) => {
+      resolveStaleSummary = resolve;
+    });
+    let resolveStaleMetrics!: (response: Response) => void;
+    const staleMetricsResponse = new Promise<Response>((resolve) => {
+      resolveStaleMetrics = resolve;
+    });
+    let staleSummaryPending = true;
+    let staleMetricsPending = true;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1/summary")) {
+        if (staleSummaryPending) {
+          staleSummaryPending = false;
+          return staleSummaryResponse;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => freshSummaryPayload,
+        } as Response;
+      }
+      if (url.includes("/social/analytics/week/1")) {
+        const query = new URLSearchParams(url.split("?")[1] ?? "");
+        if (query.get("post_limit") === "100") {
+          if (staleMetricsPending) {
+            staleMetricsPending = false;
+            return staleMetricsResponse;
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => freshMetricsPayload,
+          } as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => previewPayload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const firstRender = render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(true);
+      expect(
+        fetchMock.mock.calls.some((call) => {
+          const url = String(call[0]);
+          return url.includes("/social/analytics/week/1") && url.includes("post_limit=100");
+        }),
+      ).toBe(true);
+    });
+    firstRender.unmount();
+
+    render(<WeekDetailPage />);
+    await waitFor(() => {
+      expect(within(screen.getByTestId("week-summary-posts")).getByText("3")).toBeInTheDocument();
+      expect(screen.getByTestId("summary-token-collaborators")).toHaveTextContent("3");
+    });
+
+    resolveStaleSummary(
+      new Response(JSON.stringify(staleSummaryPayload), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    resolveStaleMetrics(
+      new Response(JSON.stringify(staleMetricsPayload), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId("week-summary-posts")).getByText("3")).toBeInTheDocument();
+      expect(screen.getByTestId("summary-token-collaborators")).toHaveTextContent("3");
+    });
   });
 
   it("builds canonical instagram permalinks from source ids for reel posts", async () => {
@@ -4068,18 +4276,23 @@ describe("WeekDetailPage thumbnails", () => {
 
     fireEvent.click(await screen.findByTestId("week-sync-button"));
 
-    const ingestCall = fetchMock.mock.calls.find(
-      (call) => String(call[0]).includes("/social/ingest") && (call[1] as RequestInit | undefined)?.method === "POST",
-    );
-    if (ingestCall) {
-      const ingestInit = ingestCall[1] as RequestInit;
-      const body = JSON.parse(String(ingestInit.body ?? "{}")) as Record<string, unknown>;
-      expect(body.platforms).toEqual(["instagram"]);
-      expect(body.accounts_override).toBeUndefined();
-      expect(body.hashtags_override).toEqual(["RHOSLC"]);
-      expect(body.max_comments_per_post).toBe(3000);
-      expect(body.max_replies_per_post).toBe(500);
-    }
+    const ingestCall = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        (entry) =>
+          String(entry[0]).includes("/social/sync-sessions") &&
+          (entry[1] as RequestInit | undefined)?.method === "POST",
+      );
+      expect(call).toBeDefined();
+      return call;
+    });
+
+    const ingestInit = ingestCall?.[1] as RequestInit;
+    const body = JSON.parse(String(ingestInit.body ?? "{}")) as Record<string, unknown>;
+    expect(body.platforms).toEqual(["instagram"]);
+    expect(body.accounts_override).toBeUndefined();
+    expect(body.hashtags_override).toEqual(["RHOSLC"]);
+    expect(body.max_comments_per_post).toBe(0);
+    expect(body.max_replies_per_post).toBe(0);
   });
 
   it("aggregates paginated jobs and normalizes sync log account handles", async () => {

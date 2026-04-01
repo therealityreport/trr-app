@@ -569,6 +569,15 @@ export const HUB = {
     subscribeButtonClass: "pz-nav__button",
     subscribeText: "Subscribe",
     subscribeCampaignId: "4QHQ8",
+    hybridBackLabel: "Back",
+    portalMounts: [
+      "banner-portal",
+      "js-mobile-toolbar",
+      "bar1-portal",
+      "nav-variant-experiment",
+      "cywp-help-portal",
+      "js-nav-drawer",
+    ],
   },
 
   /** Navigation drawer — from live <div class="pz-nav-drawer"> */
@@ -609,7 +618,7 @@ export const HUB = {
           { name: "Letter Boxed", href: "/puzzles/letter-boxed", icon: "pz-icon-letter-boxed", collapsible: false },
           { name: "Tiles", href: "/puzzles/tiles", icon: "pz-icon-tiles", collapsible: false },
           { name: "Sudoku", href: "/puzzles/sudoku", icon: "pz-icon-sudoku", collapsible: false },
-          { name: "View all Games", href: "/puzzles", collapsible: false },
+          { name: "View all Games", href: "/crosswords", collapsible: false },
         ],
       },
       {
@@ -1095,7 +1104,7 @@ export const FOUNDATION = {
 export const TECH_STACK = {
   /** Build metadata from <meta> tags */
   build: {
-    commit: "f1a6f14",
+    commit: "3830bfc",
     pageName: "hub",
     CG: "Crosswords/Games",
     PT: "puzzle hub",
@@ -1107,6 +1116,12 @@ export const TECH_STACK = {
       "9236.9cff01cea7c2e4b748ea.css",
       "5282.135255377a0b31955461.css",
       "hub.15dced5b24f937724a34.css",
+    ],
+    jsChunkExamples: [
+      "webpack-2f0df11395c1a9ad.js",
+      "framework-8883d1e9be70c3da.js",
+      "hub-d8f9e71b6b28d22f.js",
+      "main-49f6f30c8b1b2e11.js",
     ],
     jsChunks: 24, /* Number of deferred JS bundles for hub page */
   },
@@ -1168,7 +1183,7 @@ export const TECH_STACK = {
       specsUrl: "https://static01.nyt.com/statsig/config/...",
     },
     abra: {
-      version: 29498,
+      version: 29529,
       description: "NYT internal A/B test framework — client-side partition on agent_id or regi_id",
     },
   },
@@ -1209,6 +1224,7 @@ export const AB_TESTS = {
       { key: "GAMES_connectionsSportsLinks_0924", scope: "Connections sports edition links" },
       { key: "GAMES_geoLockedCrossPlayCTA_0714", scope: "Crossplay CTA — geo-locked to NZ/AU" },
       { key: "GAMES_appConnectionsBot_0425_v2", scope: "Connections bot (app)" },
+      { key: "GAMES_GAMES_CROSS_BOT_PAYWALL", scope: "Daily crossword bot paywall wiring" },
     ],
   },
   archives: {
@@ -1237,10 +1253,36 @@ export const AB_TESTS = {
       { key: "GAMES_PurrTOSBlocker_1024", scope: "PURR TOS blocker" },
     ],
   },
+  welcomeCtas: {
+    description: "App and web welcome-screen CTA variants by game",
+    tests: [
+      { key: "AMS_WELCOME_SCREEN_CTA_WORDLE", scope: "Wordle" },
+      { key: "AMS_WELCOME_SCREEN_CTA_SPELLING_BEE", scope: "Spelling Bee" },
+      { key: "AMS_WELCOME_SCREEN_CTA_CONNECTIONS", scope: "Connections" },
+      { key: "AMS_WELCOME_SCREEN_CTA_STRANDS", scope: "Strands" },
+      { key: "AMS_WELCOME_SCREEN_CTA_MINI_CROSSWORD", scope: "Mini Crossword" },
+      { key: "AMS_WELCOME_SCREEN_CTA_TILES", scope: "Tiles" },
+      { key: "AMS_WELCOME_SCREEN_CTA_LETTER_BOXED", scope: "Letter Boxed" },
+      { key: "AMS_WELCOME_SCREEN_CTA_PIPS", scope: "Pips" },
+      { key: "AMS_WELCOME_SCREEN_CTA_MIDI_CROSSWORD", scope: "The Midi" },
+    ],
+  },
+  endscreenActions: {
+    description: "Puzzle completion and post-game endscreen treatments",
+    tests: [
+      { key: "OMA_ENDSCREENACTIONS_CONNECTIONS", scope: "Connections" },
+      { key: "OMA_ENDSCREENACTIONS_STRANDS", scope: "Strands" },
+      { key: "OMA_ENDSCREENACTIONS_MINI", scope: "Mini Crossword" },
+      { key: "OMA_ENDSCREENACTIONS_TILES", scope: "Tiles" },
+      { key: "OMA_ENDSCREENACTIONS_SUDOKU", scope: "Sudoku" },
+      { key: "OMA_ENDSCREENACTIONS_DAILY", scope: "Daily Crossword" },
+    ],
+  },
   adExperiments: {
     description: "DFP ad placement and refresh experiments",
     tests: [
       { key: "DFP_WordleSkipFade_0524", scope: "Wordle ad skip with fade" },
+      { key: "DFP_WordleSkip", scope: "Wordle ad skip" },
       { key: "DFP_WordleMobile_0423", scope: "Wordle mobile interstitial" },
       { key: "DFP_WordleAdRefresh", scope: "Wordle ad refresh (31s interval)" },
       { key: "DFP_StrandsMobileWeb", scope: "Strands mobile web ads" },
@@ -1248,6 +1290,7 @@ export const AB_TESTS = {
       { key: "DFP_SpellingBeeMobile", scope: "Spelling Bee mobile ads" },
       { key: "DFP_MiniSkip", scope: "Mini crossword ad skip" },
       { key: "DFP_GamesPrebid_1025", scope: "Prebid vs MediaNet (50/50)" },
+      { key: "dfp_wordle_ad", scope: "Legacy Wordle ad placement flag" },
     ],
   },
 } as const;

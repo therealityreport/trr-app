@@ -41,8 +41,8 @@ const STAGE_TOPIC_MAP: Record<string, RefreshLogTopicKey> = {
   details_tmdb_watch_providers: "show_core",
   seasons_episodes_seasons: "show_core",
   seasons_episodes_episodes: "show_core",
-  cast_credits_show_cast: "show_core",
-  cast_credits_episode_appearances: "show_core",
+  credits_fullcredits_sync: "show_core",
+  credits_episode_appearances_sync: "show_core",
   social_setup_seed: "show_core",
   links: "links",
   links_discover: "links",
@@ -77,6 +77,7 @@ const STAGE_TOPIC_MAP: Record<string, RefreshLogTopicKey> = {
 const CATEGORY_TOPIC_MAP: Record<string, RefreshLogTopicKey> = {
   "show info": "show_core",
   "seasons & episodes": "show_core",
+  credits: "show_core",
   "cast & credits": "show_core",
   "social setup": "show_core",
   "refresh links": "links",

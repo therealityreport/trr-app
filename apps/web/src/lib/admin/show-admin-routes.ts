@@ -83,6 +83,7 @@ const SHOW_TAB_BY_PATH_SEGMENT: Record<string, ShowAdminTab> = {
   media: "assets",
   news: "news",
   cast: "cast",
+  credits: "cast",
   surveys: "surveys",
   social: "social",
   "media-gallery": "assets",
@@ -107,6 +108,7 @@ const SHOW_TAB_BY_QUERY_ALIAS: Record<string, ShowAdminTab> = {
   assets: "assets",
   news: "news",
   cast: "cast",
+  credits: "cast",
   surveys: "surveys",
   social: "social",
   gallery: "assets",
@@ -122,6 +124,7 @@ const SEASON_TAB_BY_PATH_SEGMENT: Record<string, SeasonAdminTab> = {
   news: "news",
   fandom: "fandom",
   cast: "cast",
+  credits: "cast",
   surveys: "surveys",
   social: "social",
 };
@@ -144,6 +147,7 @@ const SEASON_TAB_BY_QUERY_ALIAS: Record<string, SeasonAdminTab> = {
   news: "news",
   fandom: "fandom",
   cast: "cast",
+  credits: "cast",
   surveys: "surveys",
   social: "social",
   media: "assets",
@@ -904,6 +908,10 @@ export function buildShowAdminUrl(input: {
     return appendQuery(segments.join("/"), nextQuery);
   }
 
+  if (tab === "cast") {
+    return appendQuery(`${base}/credits`, buildCanonicalQuery(input.query));
+  }
+
   return appendQuery(`${base}/${tab}`, buildCanonicalQuery(input.query));
 }
 
@@ -988,6 +996,10 @@ export function buildSeasonAdminUrl(input: {
     if (weekToken) segments.push(weekToken);
     if (platform) segments.push(platform);
     return appendQuery(segments.join("/"), nextQuery);
+  }
+
+  if (tab === "cast") {
+    return appendQuery(`${base}/credits`, buildCanonicalQuery(input.query));
   }
 
   return appendQuery(`${base}/${tab}`, buildCanonicalQuery(input.query));

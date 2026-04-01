@@ -1,7 +1,11 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
+import {
+  cleanupStaleGettyPrefetchFiles,
+  hydrateGettyPrefetchPayload,
+} from "@/lib/server/admin/getty-local-scrape";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 800;
@@ -19,18 +23,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
   let serviceRoleKey: string;
   try {
-    serviceRoleKey = getTrrAdminServiceKey();
+    serviceRoleKey = getInternalAdminBearerToken();
   } catch {
     return Response.json(
       {
-        error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not configured",
+        error: "TRR internal admin auth is not configured",
       },
       { status: 500 },
     );
   }
-  const body = request.headers.get("content-type")?.includes("application/json")
+  let body = request.headers.get("content-type")?.includes("application/json")
     ? await request.text().catch(() => "")
     : "";
+  if (body.trim()) {
+    body = await hydrateGettyPrefetchPayload(body);
+    cleanupStaleGettyPrefetchFiles().catch(() => {});
+  }
   const backendResponse = await fetch(backendUrl, {
     method: "POST",
     headers: {

@@ -6,7 +6,7 @@ import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
-import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
+import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
 import { getSeasonByShowAndNumber } from "@/lib/server/trr-api/trr-shows-repository";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
@@ -100,14 +100,6 @@ const SHOW_SEASON_RESOLUTION_MAX_PAGES = 20;
 const seasonIdResolutionCache = new Map<string, { seasonId: string; expiresAt: number }>();
 const seasonIdResolutionInFlight = new Map<string, Promise<string>>();
 
-const getServiceRoleKey = (): string => {
-  try {
-    return getTrrAdminServiceKey().trim();
-  } catch {
-    throw new Error("Backend auth not configured");
-  }
-};
-
 const normalizeBackendErrorMessage = (data: Record<string, unknown>, fallback: string): string => {
   if (typeof data.error === "string" && data.error.trim()) {
     return data.error;
@@ -143,7 +135,13 @@ const readUpstreamDetailCode = (data: Record<string, unknown>): string | undefin
 
 const hasBackendSaturationText = (value: string): boolean => {
   const message = value.toLowerCase();
-  return message.includes("connection pool exhausted") || message.includes("database pool initialization failed");
+  return (
+    message.includes("connection pool exhausted") ||
+    message.includes("database pool initialization failed") ||
+    message.includes("maxclientsinsessionmode") ||
+    message.includes("session-pool capacity") ||
+    message.includes("session pool capacity")
+  );
 };
 
 const hasBackendSaturationDetail = (detail: unknown): boolean => {
@@ -166,11 +164,19 @@ const isBackendSaturatedResponse = (options: {
   detail: unknown;
   detailCode?: string;
 }): boolean => {
+  const detailRecord =
+    options.detail && typeof options.detail === "object" ? (options.detail as Record<string, unknown>) : null;
+  const detailReason =
+    typeof detailRecord?.reason === "string" && detailRecord.reason.trim()
+      ? detailRecord.reason.trim().toLowerCase()
+      : "";
   return (
-    options.status === 503 &&
+    options.status >= 500 &&
     (hasBackendSaturationText(options.message) ||
       hasBackendSaturationDetail(options.detail) ||
-      options.detailCode === "BACKEND_SATURATED")
+      options.detailCode === "BACKEND_SATURATED" ||
+      detailReason === "session_pool_capacity" ||
+      (options.detailCode === "DATABASE_SERVICE_UNAVAILABLE" && detailReason === "session_pool_capacity"))
   );
 };
 
@@ -308,11 +314,6 @@ type SeasonListItem = {
   season_number?: unknown;
 };
 
-type SeasonListPayload = {
-  seasons?: unknown;
-  pagination?: unknown;
-};
-
 type SeasonListPagination = {
   count?: unknown;
   total?: unknown;
@@ -435,7 +436,7 @@ const resolveSeasonIdFromBackend = async (showId: string, seasonNumber: number):
 
 type FetchWithRetryOptions = {
   method?: string;
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
   body?: string;
   timeoutMs?: number;
   retries?: number;
@@ -475,13 +476,11 @@ async function fetchBackend(
 ): Promise<Response> {
   const retries = Math.max(0, options.retries ?? 0);
   const maxAttempts = retries + 1;
-  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
-  const requestHeaders: Record<string, string> = {
-    ...(options.headers ?? {}),
-    "x-trace-id": traceId,
-  };
-  if (!requestHeaders["x-request-id"]) {
-    requestHeaders["x-request-id"] = traceId;
+  const requestHeaders = new Headers(options.headers);
+  const traceId = String(options.traceId || requestHeaders.get("x-trace-id") || "").trim() || buildTraceId();
+  requestHeaders.set("x-trace-id", traceId);
+  if (!requestHeaders.has("x-request-id")) {
+    requestHeaders.set("x-request-id", traceId);
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -649,15 +648,16 @@ export const fetchSeasonBackendJson = async (
 ): Promise<Record<string, unknown>> => {
   const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath, options.seasonIdHint);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
-  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
+  const traceId =
+    String(options.traceId || new Headers(options.headers).get("x-trace-id") || "").trim() ||
+    buildTraceId();
   const response = await fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: {
-      Authorization: `Bearer ${getServiceRoleKey()}`,
+    headers: buildInternalAdminHeaders({
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
-    },
+    }),
   });
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 };
@@ -668,15 +668,16 @@ export const fetchSocialBackendJson = async (
 ): Promise<Record<string, unknown>> => {
   const backendBase = buildSocialBackendUrl(socialPath);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
-  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
+  const traceId =
+    String(options.traceId || new Headers(options.headers).get("x-trace-id") || "").trim() ||
+    buildTraceId();
   const response = await fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: {
-      Authorization: `Bearer ${getServiceRoleKey()}`,
+    headers: buildInternalAdminHeaders({
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
-    },
+    }),
   });
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 };
@@ -689,15 +690,16 @@ export const fetchSeasonBackendResponse = async (
 ): Promise<Response> => {
   const backendBase = await buildSeasonBackendUrl(showId, seasonNumberRaw, seasonPath, options.seasonIdHint);
   const backendUrl = appendQuery(backendBase, options.queryString ?? "");
-  const traceId = String(options.traceId || options.headers?.["x-trace-id"] || "").trim() || buildTraceId();
+  const traceId =
+    String(options.traceId || new Headers(options.headers).get("x-trace-id") || "").trim() ||
+    buildTraceId();
   return fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: {
-      Authorization: `Bearer ${getServiceRoleKey()}`,
+    headers: buildInternalAdminHeaders({
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
-    },
+    }),
   });
 };
 

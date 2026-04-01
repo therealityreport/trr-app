@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+import { BRANDS_PROFILE_CACHE_NAMESPACE } from "@/lib/server/trr-api/brands-route-cache";
 
 const {
   requireAdminMock,
@@ -99,7 +101,8 @@ describe("brand profile route", () => {
     requireAdminMock.mockReset();
     getBrandProfileBySlugMock.mockReset();
     getBrandProfileSuggestionsMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-1" });
+    invalidateRouteResponseCache(BRANDS_PROFILE_CACHE_NAMESPACE);
   });
 
   it("returns an exact network-only profile payload", async () => {
@@ -136,6 +139,8 @@ describe("brand profile route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-upstream-ms")).toBeTruthy();
     expect(payload.display_name).toBe("Bravo");
     expect(payload.categories).toEqual(["network"]);
   });
@@ -149,8 +154,23 @@ describe("brand profile route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-upstream-ms")).toBeTruthy();
     expect(payload.targets[0].target_type).toBe("social");
     expect(payload.targets[0].target_key).toBe("instagram.com");
+  });
+
+  it("returns a cache hit for repeated exact profile lookups", async () => {
+    getBrandProfileBySlugMock.mockResolvedValue(makePayload());
+
+    const request = new NextRequest("http://localhost/api/admin/brands/profile?slug=instagram");
+    const first = await GET(request);
+    const second = await GET(request);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-trr-cache")).toBe("hit");
+    expect(getBrandProfileBySlugMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns a merged multi-target profile payload", async () => {

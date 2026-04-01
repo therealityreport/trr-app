@@ -2597,6 +2597,7 @@ export interface TrrPersonCredit {
   source_type?: string | null;
   external_imdb_id?: string | null;
   external_url?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface PersonShowEpisodeCredit {
@@ -3743,30 +3744,32 @@ export async function getCreditsByPersonId(
     credit_category: string;
     source_type: string | null;
     show_imdb_id: string | null;
+    metadata: Record<string, unknown> | null;
   }>(
     `SELECT
-       vsc.id,
-       vsc.show_id,
-       vsc.person_id,
-       vsc.show_name,
-       vsc.role,
-       vsc.billing_order,
-       vsc.credit_category,
-       vsc.source_type,
+       c.id,
+       c.show_id,
+       c.person_id,
+       s.name AS show_name,
+       c.role,
+       c.billing_order,
+       c.credit_category,
+       c.source_type,
+       c.metadata,
        COALESCE(s.imdb_id, sei.external_id) AS show_imdb_id
-     FROM core.v_show_cast AS vsc
+     FROM core.credits AS c
      LEFT JOIN core.shows AS s
-       ON s.id = vsc.show_id
+       ON s.id = c.show_id
      LEFT JOIN LATERAL (
        SELECT external_id
        FROM core.show_external_ids
-       WHERE show_id = vsc.show_id
+       WHERE show_id = c.show_id
          AND source_id = 'imdb'
        ORDER BY is_primary DESC, observed_at DESC NULLS LAST, id DESC
        LIMIT 1
      ) AS sei ON TRUE
-     WHERE vsc.person_id = $1::uuid
-     ORDER BY vsc.billing_order ASC NULLS LAST, vsc.show_name ASC NULLS LAST, vsc.id ASC`,
+     WHERE c.person_id = $1::uuid
+     ORDER BY c.billing_order ASC NULLS LAST, s.name ASC NULLS LAST, c.id ASC`,
     [personId]
   );
 
@@ -3781,6 +3784,7 @@ export async function getCreditsByPersonId(
     source_type: row.source_type,
     external_imdb_id: row.show_imdb_id,
     external_url: row.show_imdb_id ? `${IMDB_TITLE_BASE_URL}/${row.show_imdb_id}/` : null,
+    metadata: row.metadata,
   }));
 
   const personResult = await pgQuery<{ imdb_person_id: string | null }>(
@@ -3861,12 +3865,27 @@ export async function getCreditsByPersonId(
       source_type: "imdb_name_fullcredits",
       external_imdb_id: imdbTitleId,
       external_url: credit.external_url,
+      metadata: null,
     });
   }
 
   imdbOnlyCredits.sort((a, b) => (a.show_name ?? "").localeCompare(b.show_name ?? ""));
   const combined = [...localCredits, ...imdbOnlyCredits];
   return combined.slice(offset, offset + limit);
+}
+
+export async function getCuratedCastShowIdsByPersonId(personId: string): Promise<Set<string>> {
+  const result = await pgQuery<{ show_id: string }>(
+    `SELECT DISTINCT sra.show_id::text AS show_id
+     FROM core.show_cast_role_assignments AS sra
+     JOIN core.show_role_catalog AS src
+       ON src.id = sra.role_id
+     WHERE sra.person_id = $1::uuid
+       AND src.is_active = true`,
+    [personId]
+  );
+
+  return new Set(result.rows.map((row) => row.show_id));
 }
 
 /**

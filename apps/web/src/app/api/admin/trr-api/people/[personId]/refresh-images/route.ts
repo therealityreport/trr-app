@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 import {
   hydrateGettyPrefetchPayload,
   cleanupStaleGettyPrefetchFiles,
@@ -94,10 +95,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
       console.error(
-        "[person/refresh-images] TRR_CORE_SUPABASE_SERVICE_ROLE_KEY not configured"
+        "[person/refresh-images] TRR internal admin auth not configured"
       );
       return NextResponse.json(
         { error: "Backend auth not configured" },

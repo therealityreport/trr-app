@@ -387,33 +387,38 @@
 }
 
 .brand-scope-nyt-games,
+/*
+ * NYT Games — WHITE background in default (light) mode.
+ * Dark mode is user-preference only, not the default.
+ * Game tiles, keyboard, and modals sit on white/light gray.
+ */
 .design-docs .nytg-scope {
-  --dd-brand-bg: #121213;
-  --dd-brand-surface: #1a1a1b;
-  --dd-brand-surface-alt: #272729;
-  --dd-brand-border: #3a3a3c;
-  --dd-brand-border-subtle: #565758;
+  --dd-brand-bg: #FFFFFF;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F6F7F8;
+  --dd-brand-border: #D3D6DA;
+  --dd-brand-border-subtle: #E5E7EB;
   --dd-brand-accent: #6AAA64;
-  --dd-brand-accent-bg: rgba(106, 170, 100, 0.16);
-  --dd-brand-text-primary: #FFFFFF;
-  --dd-brand-text-secondary: #D3D6DA;
-  --dd-brand-text-muted: #A7ADB2;
+  --dd-brand-accent-bg: rgba(106, 170, 100, 0.12);
+  --dd-brand-text-primary: #1A1A1B;
+  --dd-brand-text-secondary: #565758;
+  --dd-brand-text-muted: #818384;
   --dd-brand-section-label: #6AAA64;
   --dd-brand-stat-number: #6AAA64;
-  --dd-brand-link: #9dd89a;
-  --dd-brand-card-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
-  --dd-brand-card-shadow-hover: 0 16px 36px rgba(0, 0, 0, 0.34);
-  --dd-ink-black: #FFFFFF;
-  --dd-ink-dark: #F6F7F8;
-  --dd-ink-medium: #E5E7EB;
-  --dd-ink-soft: #D3D6DA;
-  --dd-ink-light: #A7ADB2;
-  --dd-ink-faint: #818384;
-  --dd-paper-white: #1a1a1b;
-  --dd-paper-warm: #272729;
-  --dd-paper-cool: #3a3a3c;
-  --dd-paper-grey: #3a3a3c;
-  --dd-paper-mid: #565758;
+  --dd-brand-link: #3A7D44;
+  --dd-brand-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --dd-brand-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --dd-ink-black: #1A1A1B;
+  --dd-ink-dark: #272729;
+  --dd-ink-medium: #3A3A3C;
+  --dd-ink-soft: #565758;
+  --dd-ink-light: #818384;
+  --dd-ink-faint: #A7ADB2;
+  --dd-paper-white: #FFFFFF;
+  --dd-paper-warm: #F6F7F8;
+  --dd-paper-cool: #E5E7EB;
+  --dd-paper-grey: #D3D6DA;
+  --dd-paper-mid: #A7ADB2;
 }
 
 .brand-scope-nyt-magazine {
@@ -444,33 +449,38 @@
   --dd-brand-link: #3069B3;
 }
 
+/*
+ * The Athletic — WHITE content area with dark chrome (header/footer only).
+ * Page bg is #FFFFFF (--Gray10), text is #121212 (--Gray70).
+ * Dark background only applies to nav header and footer, NOT the page body.
+ */
 .brand-scope-athletic {
-  --dd-brand-bg: #121212;
-  --dd-brand-surface: #191919;
-  --dd-brand-surface-alt: #222222;
-  --dd-brand-border: #2E2E2E;
-  --dd-brand-border-subtle: #3A3A3A;
-  --dd-brand-accent: #1DB954;
-  --dd-brand-accent-bg: rgba(29, 185, 84, 0.14);
-  --dd-brand-text-primary: #F9FAFB;
-  --dd-brand-text-secondary: #D1D5DB;
-  --dd-brand-text-muted: #9CA3AF;
-  --dd-brand-section-label: #1DB954;
-  --dd-brand-stat-number: #1DB954;
-  --dd-brand-link: #7EE0A3;
-  --dd-brand-card-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
-  --dd-brand-card-shadow-hover: 0 18px 40px rgba(0, 0, 0, 0.36);
-  --dd-ink-black: #F9FAFB;
-  --dd-ink-dark: #F3F4F6;
-  --dd-ink-medium: #E5E7EB;
-  --dd-ink-soft: #D1D5DB;
-  --dd-ink-light: #9CA3AF;
-  --dd-ink-faint: #6B7280;
-  --dd-paper-white: #191919;
-  --dd-paper-warm: #222222;
-  --dd-paper-cool: #2E2E2E;
-  --dd-paper-grey: #2E2E2E;
-  --dd-paper-mid: #3A3A3A;
+  --dd-brand-bg: #FFFFFF;
+  --dd-brand-surface: #FFFFFF;
+  --dd-brand-surface-alt: #F7F7F4;
+  --dd-brand-border: #F0F0EE;
+  --dd-brand-border-subtle: #E2E2E2;
+  --dd-brand-accent: #386C92;
+  --dd-brand-accent-bg: rgba(56, 108, 146, 0.1);
+  --dd-brand-text-primary: #121212;
+  --dd-brand-text-secondary: #52524F;
+  --dd-brand-text-muted: #969693;
+  --dd-brand-section-label: #52524F;
+  --dd-brand-stat-number: #121212;
+  --dd-brand-link: #386C92;
+  --dd-brand-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --dd-brand-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --dd-ink-black: #121212;
+  --dd-ink-dark: #1A1A1A;
+  --dd-ink-medium: #323232;
+  --dd-ink-soft: #52524F;
+  --dd-ink-light: #969693;
+  --dd-ink-faint: #C4C4C0;
+  --dd-paper-white: #FFFFFF;
+  --dd-paper-warm: #F7F7F4;
+  --dd-paper-cool: #F0F0EE;
+  --dd-paper-grey: #DBDBD9;
+  --dd-paper-mid: #C4C4C0;
 }
 
 .brand-scope-nyt-opinion {

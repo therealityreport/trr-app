@@ -67,6 +67,7 @@ describe("person gallery route cache dedupe", () => {
           limit: 3,
           offset: 0,
           count: 3,
+          total_count: 9,
           next_offset: 3,
           has_more: true,
         },
@@ -84,8 +85,8 @@ describe("person gallery route cache dedupe", () => {
     expect(secondResponse.status).toBe(200);
     expect(firstPayload.photos).toHaveLength(3);
     expect(secondPayload.photos).toHaveLength(3);
-    expect(firstPayload.pagination).toMatchObject({ has_more: true, next_offset: 3 });
-    expect(secondPayload.pagination).toMatchObject({ has_more: true, next_offset: 3 });
+    expect(firstPayload.pagination).toMatchObject({ has_more: true, next_offset: 3, total_count: 9 });
+    expect(secondPayload.pagination).toMatchObject({ has_more: true, next_offset: 3, total_count: 9 });
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(1);
   });
 });

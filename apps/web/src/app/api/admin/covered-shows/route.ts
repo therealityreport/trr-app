@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import type { AuthContext } from "@/lib/server/postgres";
+import {
+  addCoveredShow as addCoveredShowLocal,
+  type CoveredShow,
+  getCoveredShows as getCoveredShowsLocal,
+} from "@/lib/server/admin/covered-shows-repository";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -22,6 +28,27 @@ const COVERED_SHOWS_CACHE_TTL_MS = parseCacheTtlMs(
   30_000,
 );
 
+const extractBackendMessage = (
+  data: Record<string, unknown>,
+  fallback: string,
+): string => {
+  if (typeof data.error === "string" && data.error.trim()) return data.error;
+  if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
+  return fallback;
+};
+
+const shouldFallbackToLocalCoveredShowsRepo = (error: unknown): boolean => {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("backend internal auth is not configured") ||
+    message.includes("backend auth not configured") ||
+    message.includes("backend api not configured") ||
+    message.includes("could not reach trr-backend") ||
+    message.includes("timed out")
+  );
+};
+
 /**
  * GET /api/admin/covered-shows
  *
@@ -35,7 +62,7 @@ export async function GET(request: NextRequest) {
       "list",
       request.nextUrl.searchParams,
     );
-    const cachedShows = getRouteResponseCache<Array<Record<string, unknown>>>(
+    const cachedShows = getRouteResponseCache<CoveredShow[]>(
       COVERED_SHOWS_CACHE_NAMESPACE,
       cacheKey,
     );
@@ -44,30 +71,53 @@ export async function GET(request: NextRequest) {
     }
 
     const shows = await getOrCreateRouteResponsePromise(
-      COVERED_SHOWS_CACHE_NAMESPACE,
-      cacheKey,
-      async () => {
-        const upstream = await fetchAdminBackendJson("/admin/covered-shows", {
-          timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-          routeName: "covered-shows:list",
-        });
-        if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : "Failed to fetch covered shows",
+        COVERED_SHOWS_CACHE_NAMESPACE,
+        cacheKey,
+        async () => {
+        const loadLocalShows = async () => {
+          const loadedShows = await getCoveredShowsLocal();
+          setRouteResponseCache(
+            COVERED_SHOWS_CACHE_NAMESPACE,
+            cacheKey,
+            loadedShows,
+            COVERED_SHOWS_CACHE_TTL_MS,
           );
+          return loadedShows;
+        };
+
+        try {
+          const upstream = await fetchAdminBackendJson("/admin/covered-shows", {
+            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+            routeName: "covered-shows:list",
+          });
+          if (upstream.status !== 200) {
+            const message = extractBackendMessage(upstream.data, "Failed to fetch covered shows");
+            if (upstream.status >= 500 || upstream.status === 403 || upstream.status === 401) {
+              console.warn("[api] Falling back to local covered shows repository", {
+                status: upstream.status,
+                message,
+              });
+              return loadLocalShows();
+            }
+            throw new Error(message);
+          }
+          const loadedShows = Array.isArray(upstream.data.shows)
+            ? (upstream.data.shows as CoveredShow[])
+            : [];
+          setRouteResponseCache(
+            COVERED_SHOWS_CACHE_NAMESPACE,
+            cacheKey,
+            loadedShows,
+            COVERED_SHOWS_CACHE_TTL_MS,
+          );
+          return loadedShows;
+        } catch (error) {
+          if (shouldFallbackToLocalCoveredShowsRepo(error)) {
+            console.warn("[api] Covered shows backend proxy unavailable; using local repository", error);
+            return loadLocalShows();
+          }
+          throw error;
         }
-        const loadedShows = Array.isArray(upstream.data.shows)
-          ? (upstream.data.shows as Array<Record<string, unknown>>)
-          : [];
-        setRouteResponseCache(
-          COVERED_SHOWS_CACHE_NAMESPACE,
-          cacheKey,
-          loadedShows,
-          COVERED_SHOWS_CACHE_TTL_MS,
-        );
-        return loadedShows;
       },
     );
 
@@ -90,6 +140,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await requireAdmin(request);
+    const authContext: AuthContext = { firebaseUid: user.uid, isAdmin: true };
 
     const body = await request.json();
     const { trr_show_id, show_name } = body;
@@ -108,47 +159,58 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const upstream = await fetchAdminBackendJson("/admin/covered-shows", {
-      method: "POST",
-      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-      routeName: "covered-shows:create",
-      headers: {
-        "Content-Type": "application/json",
-        "X-TRR-Admin-User-Uid": user.uid,
-      },
-      body: JSON.stringify({
-        trr_show_id,
-        show_name,
-      }),
-    });
-    if (upstream.status === 400 || upstream.status === 404) {
-      return NextResponse.json(
-        {
-          error:
-            typeof upstream.data.detail === "string"
-              ? upstream.data.detail
-              : typeof upstream.data.error === "string"
-                ? upstream.data.error
-                : "Failed to add covered show",
+    try {
+      const upstream = await fetchAdminBackendJson("/admin/covered-shows", {
+        method: "POST",
+        timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+        routeName: "covered-shows:create",
+        headers: {
+          "Content-Type": "application/json",
+          "X-TRR-Admin-User-Uid": user.uid,
         },
-        { status: upstream.status },
-      );
+        body: JSON.stringify({
+          trr_show_id,
+          show_name,
+        }),
+      });
+      if (upstream.status === 400 || upstream.status === 404) {
+        return NextResponse.json(
+          {
+            error: extractBackendMessage(upstream.data, "Failed to add covered show"),
+          },
+          { status: upstream.status },
+        );
+      }
+      if (upstream.status !== 200) {
+        const message = extractBackendMessage(upstream.data, "Failed to add covered show");
+        if (upstream.status >= 500 || upstream.status === 403 || upstream.status === 401) {
+          console.warn("[api] Falling back to local covered shows create", {
+            status: upstream.status,
+            message,
+          });
+        } else {
+          throw new Error(message);
+        }
+      } else {
+        invalidateRouteResponseCache(COVERED_SHOWS_CACHE_NAMESPACE, `${user.uid}:`);
+        await invalidateAdminBackendCache("/admin/covered-shows/cache/invalidate", {
+          routeName: "covered-shows",
+        });
+        return NextResponse.json(upstream.data, { status: 201 });
+      }
+    } catch (error) {
+      if (!shouldFallbackToLocalCoveredShowsRepo(error)) {
+        throw error;
+      }
+      console.warn("[api] Covered shows create proxy unavailable; using local repository", error);
     }
-    if (upstream.status !== 200) {
-      throw new Error(
-        typeof upstream.data.error === "string"
-          ? upstream.data.error
-          : typeof upstream.data.detail === "string"
-            ? upstream.data.detail
-            : "Failed to add covered show",
-      );
-    }
+
+    const show = await addCoveredShowLocal(authContext, { trr_show_id, show_name });
     invalidateRouteResponseCache(COVERED_SHOWS_CACHE_NAMESPACE, `${user.uid}:`);
     await invalidateAdminBackendCache("/admin/covered-shows/cache/invalidate", {
       routeName: "covered-shows",
     });
-
-    return NextResponse.json(upstream.data, { status: 201 });
+    return NextResponse.json({ show }, { status: 201 });
   } catch (error) {
     console.error("[api] Failed to add covered show", error);
     return buildAdminProxyErrorResponse(error);

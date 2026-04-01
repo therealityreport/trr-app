@@ -1746,7 +1746,7 @@ export default function BrandAthleticComponents() {
             marginBottom: 16,
           }}
         >
-          Brand Specimen &mdash; Athletic Dark Theme Preview
+          Brand Specimen &mdash; Navigation Header
         </div>
         <div
           style={{

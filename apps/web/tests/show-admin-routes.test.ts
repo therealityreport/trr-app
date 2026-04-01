@@ -55,6 +55,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams()
       )
     ).toMatchObject({ tab: "cast", assetsSubTab: "images", source: "path" });
+
+    expect(
+      parseShowRouteState(
+        "/rhoslc/credits",
+        new URLSearchParams()
+      )
+    ).toMatchObject({ tab: "cast", assetsSubTab: "images", source: "path" });
   });
 
   it("falls back to legacy show query params", () => {
@@ -153,7 +160,7 @@ describe("show-admin-routes", () => {
         showSlug: "rhoslc",
         tab: "cast",
       })
-    ).toBe("/rhoslc/cast");
+    ).toBe("/rhoslc/credits");
   });
 
   it("builds and parses canonical social account profile URLs", () => {
@@ -258,6 +265,13 @@ describe("show-admin-routes", () => {
         new URLSearchParams("tab=details")
       )
     ).toMatchObject({ tab: "overview", assetsSubTab: "images", source: "query" });
+
+    expect(
+      parseSeasonRouteState(
+        "/rhoslc/s4/credits",
+        new URLSearchParams()
+      )
+    ).toMatchObject({ tab: "cast", assetsSubTab: "images", source: "path" });
   });
 
   it("builds canonical season URLs", () => {
@@ -290,7 +304,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 4,
         tab: "cast",
       })
-    ).toBe("/the-real-housewives-of-salt-lake-city/s4/cast");
+    ).toBe("/the-real-housewives-of-salt-lake-city/s4/credits");
 
     expect(
       buildSeasonAdminUrl({
@@ -323,7 +337,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 6,
         tab: "cast",
       })
-    ).toBe("/rhoslc/s6/cast");
+    ).toBe("/rhoslc/s6/credits");
 
     expect(
       buildSeasonAdminUrl({

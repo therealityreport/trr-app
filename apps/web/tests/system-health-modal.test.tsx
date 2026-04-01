@@ -52,6 +52,18 @@ describe("SystemHealthModal polling", () => {
         resolved?: boolean;
         reason?: string | null;
       };
+      remote_auth_capabilities?: {
+        instagram?: {
+          ready?: boolean;
+          reason?: string | null;
+          healthy_authenticated_workers?: number;
+          fresh_authenticated_workers?: number;
+        };
+      };
+      shared_account_backfill_readiness?: {
+        ready?: boolean;
+        reason?: string | null;
+      };
       workers: unknown[];
       reason: string | null;
     };
@@ -120,6 +132,18 @@ describe("SystemHealthModal polling", () => {
         last_dispatch_success_at: "2026-03-02T12:05:00.000Z",
         last_dispatch_error: null,
         dispatcher_readiness: { resolved: true, reason: null },
+        remote_auth_capabilities: {
+          instagram: {
+            ready: true,
+            reason: null,
+            healthy_authenticated_workers: 1,
+            fresh_authenticated_workers: 1,
+          },
+        },
+        shared_account_backfill_readiness: {
+          ready: true,
+          reason: null,
+        },
         by_stage: { posts: { total: 1, healthy: 1, fresh: 1 } },
         by_platform: { instagram: { total: 1, healthy: 1, fresh: 1 } },
         workers: [],
@@ -518,6 +542,10 @@ describe("SystemHealthModal polling", () => {
     });
 
     expect(screen.getByText("How This Sync Runs")).toBeInTheDocument();
+    expect(screen.getByText("Instagram remote auth")).toBeInTheDocument();
+    expect(screen.getByText("1 authenticated")).toBeInTheDocument();
+    expect(screen.getByText("Shared-account backfill")).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.getByText("Remote executor")).toBeInTheDocument();
     expect(screen.getByText("Modal")).toBeInTheDocument();
     expect(screen.getByText("Remote")).toBeInTheDocument();

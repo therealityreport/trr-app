@@ -14,6 +14,7 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/admin/covered-shows-repository", () => ({
   addCoveredShow: vi.fn(),
+  getCoveredShows: vi.fn(),
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({

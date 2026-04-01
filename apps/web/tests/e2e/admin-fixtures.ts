@@ -217,14 +217,37 @@ export async function mockAdminApi(page: Page, options: MockAdminApiOptions = {}
         route,
         [
           buildSseEvent("progress", {
-            stage: "cast_credits_show_cast",
-            message: "Syncing cast credits...",
+            stage: "credits_fullcredits_sync",
+            message: "Syncing IMDb Full Credits (cast + crew)...",
             current: 1,
             total: 4,
           }),
           buildSseEvent("complete", {
             counts: {
-              cast_credits_show_cast: 1,
+              credits_fullcredits_sync: 1,
+            },
+          }),
+        ].join("")
+      );
+    }
+
+    if (/^\/api\/admin\/trr-api\/people\/[^/]+\/refresh-profile\/stream$/.test(path)) {
+      await sleep(options.personRefreshStreamDelayMs ?? 0);
+      return fulfillSse(
+        route,
+        [
+          buildSseEvent("progress", {
+            stage: "profile_imdb",
+            message: "Refreshing IMDb profile...",
+            current: 1,
+            total: 1,
+          }),
+          buildSseEvent("complete", {
+            summary: {
+              skips: [],
+              failures: [],
+              profile_fields_changed: 1,
+              aliases_added: 0,
             },
           }),
         ].join("")
