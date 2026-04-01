@@ -368,7 +368,7 @@ function NYTOverlayMenu({
     padding: "7px 0",
     fontSize: 14,
     fontWeight: 500,
-    color: "#e2e2e2",
+    color: "#363636",
     textDecoration: "none",
     cursor: "pointer",
     fontFamily: T.franklin,
@@ -379,7 +379,7 @@ function NYTOverlayMenu({
     fontSize: 13,
     fontWeight: 400,
     paddingLeft: 16,
-    color: "#aaa",
+    color: "#727272",
   };
 
   const sectionHeaderStyle: React.CSSProperties = {
@@ -402,7 +402,7 @@ function NYTOverlayMenu({
           position: "fixed",
           inset: 0,
           zIndex: 9998,
-          background: "rgba(0,0,0,0.5)",
+          background: "rgba(0,0,0,0.3)",
           opacity: open ? 1 : 0,
           pointerEvents: open ? "auto" : "none",
           transition: "opacity 0.3s ease",
@@ -417,11 +417,12 @@ function NYTOverlayMenu({
           bottom: 0,
           width: 320,
           zIndex: 9999,
-          background: "#121212",
+          background: "#fff",
+          borderRight: "1px solid #e2e2e2",
           transform: open ? "translateX(0)" : "translateX(-100%)",
           transition: "transform 0.3s ease",
           overflowY: "auto",
-          boxShadow: open ? "4px 0 24px rgba(0,0,0,0.3)" : "none",
+          boxShadow: open ? "4px 0 16px rgba(0,0,0,0.08)" : "none",
           fontFamily: T.franklin,
         }}
       >
@@ -437,7 +438,7 @@ function NYTOverlayMenu({
               padding: 8,
               fontSize: 24,
               lineHeight: 1,
-              color: "#e2e2e2",
+              color: "#727272",
             }}
           >
             &times;
@@ -450,7 +451,7 @@ function NYTOverlayMenu({
             <div
               key={group.label}
               style={{
-                borderBottom: "1px solid #333",
+                borderBottom: "1px solid #e2e2e2",
                 paddingBottom: 14,
                 marginBottom: 14,
               }}
@@ -481,7 +482,7 @@ function NYTOverlayMenu({
                         </span>
                       </div>
                       {isExpanded && (
-                        <div style={{ marginLeft: 8, borderLeft: "1px solid #333", paddingLeft: 8 }}>
+                        <div style={{ marginLeft: 8, borderLeft: "1px solid #e2e2e2", paddingLeft: 8 }}>
                           <Link href={buildDesignDocsPath(sectionId)} style={subLinkStyle} onClick={onClose}>
                             Overview
                           </Link>
@@ -509,7 +510,7 @@ function NYTOverlayMenu({
                                     ...subLinkStyle,
                                     paddingLeft: 24,
                                     fontSize: 12,
-                                    color: link.slug === "voting-deadlines-state" ? "#fff" : "#888",
+                                    color: link.slug === "voting-deadlines-state" ? "#121212" : "#727272",
                                     fontWeight: link.slug === "voting-deadlines-state" ? 600 : 400,
                                   }}
                                   onClick={onClose}
@@ -1115,8 +1116,8 @@ export default function VotingDeadlinesArticle() {
               display: "block",
             }}
           >
-            <span>When to</span>{" "}
-            <span>
+            <span style={{ display: "block" }}>When to</span>
+            <span style={{ display: "block" }}>
               <span
                 className="headline-animated"
                 key={animatedPhrase}
@@ -1134,8 +1135,8 @@ export default function VotingDeadlinesArticle() {
               >
                 <i style={{ fontStyle: "italic" }}>{animatedPhrase}</i>
               </span>
-            </span>{" "}
-            <span>in Your State</span>
+            </span>
+            <span style={{ display: "block" }}>in Your State</span>
           </span>
         </h1>
       </div>

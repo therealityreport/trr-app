@@ -36,8 +36,10 @@ export const SEASON_REFRESH_STAGE_LABELS: Record<string, string> = {
   prune: "Cleanup",
   mirroring: "S3 Mirroring",
   mirror: "S3 Mirroring",
-  cast_credits_show_cast: "Cast Credits",
-  cast_credits_episode_appearances: "Episode Credits",
+  cast_credits_show_cast: "IMDb Full Credits",
+  cast_credits_episode_appearances: "Episode Appearances",
+  credits_fullcredits_sync: "IMDb Full Credits",
+  credits_episode_appearances_sync: "Episode Appearances",
 };
 
 export const SEASON_STREAM_IDLE_TIMEOUT_MS = 600_000;

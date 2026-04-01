@@ -5,6 +5,13 @@ const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
 }));
+const { getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
+  getInternalAdminBearerTokenMock: vi.fn(),
+}));
+const { hydrateGettyPrefetchPayloadMock, cleanupStaleGettyPrefetchFilesMock } = vi.hoisted(() => ({
+  hydrateGettyPrefetchPayloadMock: vi.fn(),
+  cleanupStaleGettyPrefetchFilesMock: vi.fn(),
+}));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
@@ -14,9 +21,19 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
+vi.mock("@/lib/server/admin/getty-local-scrape", () => ({
+  hydrateGettyPrefetchPayload: hydrateGettyPrefetchPayloadMock,
+  cleanupStaleGettyPrefetchFiles: cleanupStaleGettyPrefetchFilesMock,
+}));
+
 import { GET as getArtifactPreview } from "@/app/api/admin/trr-api/bravotv/images/runs/[runId]/artifacts/[...artifactName]/route";
 import { GET as getLatestShowRun } from "@/app/api/admin/trr-api/bravotv/images/shows/[showId]/latest/route";
 import { POST as startPersonStream } from "@/app/api/admin/trr-api/bravotv/images/people/[personId]/stream/route";
+import { POST as startShowStream } from "@/app/api/admin/trr-api/bravotv/images/shows/[showId]/stream/route";
 
 describe("bravotv image admin proxy routes", () => {
   beforeEach(() => {
@@ -24,7 +41,12 @@ describe("bravotv image admin proxy routes", () => {
     vi.unstubAllGlobals();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockImplementation((path: string) => `https://backend.example.com/api/v1${path}`);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("service-role-secret");
+    hydrateGettyPrefetchPayloadMock.mockReset();
+    hydrateGettyPrefetchPayloadMock.mockImplementation(async (raw: string) => raw);
+    cleanupStaleGettyPrefetchFilesMock.mockReset();
+    cleanupStaleGettyPrefetchFilesMock.mockResolvedValue(0);
   });
 
   it("forwards latest show run requests to the backend", async () => {
@@ -52,7 +74,9 @@ describe("bravotv image admin proxy routes", () => {
   });
 
   it("returns 500 when the TRR-specific service role key is missing", async () => {
-    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    getInternalAdminBearerTokenMock.mockImplementation(() => {
+      throw new Error("missing");
+    });
 
     vi.stubGlobal(
       "fetch",
@@ -68,7 +92,7 @@ describe("bravotv image admin proxy routes", () => {
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not configured",
+      error: "TRR internal admin auth is not configured",
     });
   });
 
@@ -110,6 +134,96 @@ describe("bravotv image admin proxy routes", () => {
           "x-trr-request-id": "req-1",
         }),
         body: JSON.stringify({ mode: "person", sources: ["tmdb"] }),
+      }),
+    );
+  });
+
+  it("hydrates Getty prefetch payload before forwarding person stream requests", async () => {
+    hydrateGettyPrefetchPayloadMock.mockResolvedValue(
+      JSON.stringify({
+        mode: "person",
+        sources: ["getty"],
+        getty_prefetched_assets: [{ editorial_id: "928663262" }],
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("event: progress\ndata: {\"stage\":\"starting\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ),
+    );
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/bravotv/images/people/person-1/stream",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "person", sources: ["getty"], getty_prefetch_token: "tok-1" }),
+      },
+    );
+
+    await startPersonStream(request, {
+      params: Promise.resolve({ personId: "person-1" }),
+    });
+
+    expect(hydrateGettyPrefetchPayloadMock).toHaveBeenCalled();
+    expect(cleanupStaleGettyPrefetchFilesMock).toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      "https://backend.example.com/api/v1/admin/bravotv/images/people/person-1/stream",
+      expect.objectContaining({
+        body: JSON.stringify({
+          mode: "person",
+          sources: ["getty"],
+          getty_prefetched_assets: [{ editorial_id: "928663262" }],
+        }),
+      }),
+    );
+  });
+
+  it("hydrates Getty prefetch payload before forwarding show stream requests", async () => {
+    hydrateGettyPrefetchPayloadMock.mockResolvedValue(
+      JSON.stringify({
+        mode: "show",
+        sources: ["getty"],
+        getty_prefetched_assets: [{ editorial_id: "928663262" }],
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("event: progress\ndata: {\"stage\":\"starting\"}\n\n", {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ),
+    );
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/bravotv/images/shows/show-1/stream",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "show", sources: ["getty"], getty_prefetch_token: "tok-2" }),
+      },
+    );
+
+    await startShowStream(request, {
+      params: Promise.resolve({ showId: "show-1" }),
+    });
+
+    expect(hydrateGettyPrefetchPayloadMock).toHaveBeenCalled();
+    expect(cleanupStaleGettyPrefetchFilesMock).toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      "https://backend.example.com/api/v1/admin/bravotv/images/shows/show-1/stream",
+      expect.objectContaining({
+        body: JSON.stringify({
+          mode: "show",
+          sources: ["getty"],
+          getty_prefetched_assets: [{ editorial_id: "928663262" }],
+        }),
       }),
     );
   });

@@ -26,3 +26,6 @@ docs/Repository/generated/
 tmp/
 apps/web/.cache/
 .next-social-debug/
+
+# Build artifacts
+.artifacts/

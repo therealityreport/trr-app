@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 import { isValidUuid } from "@/lib/server/validation/identifiers";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ const VALID_PLATFORMS = [
 ] as const;
 
 const getWriteHeaders = (uid: string, includeJson = false): Record<string, string> => {
-  const serviceRoleKey = getTrrAdminServiceKey();
+  const serviceRoleKey = getInternalAdminBearerToken();
   if (!serviceRoleKey) {
     throw new Error("Backend auth not configured");
   }
@@ -34,10 +34,6 @@ const getWriteHeaders = (uid: string, includeJson = false): Record<string, strin
     Authorization: `Bearer ${serviceRoleKey.trim()}`,
     "X-TRR-Admin-User-Uid": uid,
   };
-  const internalSecret = process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET?.trim();
-  if (internalSecret) {
-    headers["X-TRR-Internal-Admin-Secret"] = internalSecret;
-  }
   if (includeJson) {
     headers["Content-Type"] = "application/json";
   }

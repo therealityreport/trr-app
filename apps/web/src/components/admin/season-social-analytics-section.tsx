@@ -31,6 +31,7 @@ import {
   type SocialSyncSessionProgressSnapshot,
   type SocialSyncSessionStreamPayload,
 } from "@/lib/admin/social-sync-session";
+import { logAdminPageReadDiagnostic, measurePayloadBytes } from "@/lib/admin/page-read-diagnostics";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type PlatformTab = "overview" | Platform;
@@ -1234,6 +1235,7 @@ const ANALYTICS_POLL_REFRESH_MS = 60_000;
 const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 4_000;
 const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 const INITIAL_SOCIAL_REFRESH_CONCURRENCY = 2;
+const DEFERRED_SOCIAL_REFRESH_CONCURRENCY = 2;
 const WEEK_DETAIL_FETCH_CONCURRENCY = 2;
 const WEEK_DETAIL_TARGETS_PAGE_LIMIT = 100;
 const WEEK_DETAIL_TARGETS_MAX_PAGES = 20;
@@ -2255,6 +2257,7 @@ export default function SeasonSocialAnalyticsSection({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<SocialJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [primaryBootstrapReady, setPrimaryBootstrapReady] = useState(analyticsView === "reddit");
   const [error, setError] = useState<string | null>(null);
   const [sectionErrors, setSectionErrors] = useState<{
     analytics: string | null;
@@ -2447,6 +2450,7 @@ export default function SeasonSocialAnalyticsSection({
     if (analyticsView !== "reddit") {
       return;
     }
+    setPrimaryBootstrapReady(true);
     setLoading(false);
     setError(null);
     setSectionErrors({
@@ -3523,6 +3527,7 @@ export default function SeasonSocialAnalyticsSection({
       }
 
       if (requestView === "reddit") {
+        setPrimaryBootstrapReady(true);
         setLoading(false);
         setSectionErrors({
           analytics: null,
@@ -3539,7 +3544,15 @@ export default function SeasonSocialAnalyticsSection({
       }
 
       setLoading(true);
+      setPrimaryBootstrapReady(false);
       setError(null);
+      const primaryStartedAt = Date.now();
+      logAdminPageReadDiagnostic({
+        pageFamily: "season-social-analytics",
+        resource: "primary-bootstrap",
+        requestRole: "primary",
+        phase: "start",
+      });
       const nextSectionErrors = {
         analytics: null as string | null,
         targets: null as string | null,
@@ -3547,14 +3560,12 @@ export default function SeasonSocialAnalyticsSection({
         jobs: null as string | null,
       };
 
-      const [targetsResult, runsResult, runSummariesResult, workerHealthResult, sharedStatusResult] =
+      const [analyticsResult, targetsResult, runsResult] =
         await settleWithConcurrencyLimit(
           [
+            () => fetchAnalytics() as Promise<unknown>,
             () => fetchTargets() as Promise<unknown>,
             () => fetchRuns() as Promise<unknown>,
-            () => fetchRunSummaries() as Promise<unknown>,
-            () => fetchWorkerHealth() as Promise<unknown>,
-            () => fetchSharedStatus() as Promise<unknown>,
           ],
           INITIAL_SOCIAL_REFRESH_CONCURRENCY,
         );
@@ -3568,7 +3579,13 @@ export default function SeasonSocialAnalyticsSection({
           targetsResult.reason instanceof Error ? targetsResult.reason.message : "Failed to load social targets";
       }
 
-      let runIdToLoad = selectedRunId;
+      if (analyticsResult.status === "rejected") {
+        nextSectionErrors.analytics =
+          analyticsResult.reason instanceof Error
+            ? analyticsResult.reason.message
+            : "Failed to load social analytics";
+      }
+
       if (runsResult.status === "fulfilled") {
         const loadedRuns = runsResult.value as SocialRun[];
         const activeRun = loadedRuns.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
@@ -3578,50 +3595,12 @@ export default function SeasonSocialAnalyticsSection({
           setActiveRunId(null);
         }
 
-        if (runIdToLoad && !loadedRuns.some((run) => run.id === runIdToLoad)) {
-          runIdToLoad = null;
-        }
-        if (!runIdToLoad && selectedRunId) {
+        if (selectedRunId && !loadedRuns.some((run) => run.id === selectedRunId)) {
           setSelectedRunId(null);
         }
       } else {
         nextSectionErrors.runs =
           runsResult.reason instanceof Error ? runsResult.reason.message : "Failed to load social runs";
-      }
-
-      if (runSummariesResult.status === "rejected") {
-        setRunSummaryError(
-          runSummariesResult.reason instanceof Error
-            ? runSummariesResult.reason.message
-            : "Failed to load social run summary",
-        );
-      } else {
-        setRunSummaryError(null);
-      }
-
-      if (workerHealthResult.status === "rejected") {
-        setWorkerHealthError(
-          workerHealthResult.reason instanceof Error
-            ? workerHealthResult.reason.message
-            : "Failed to load social worker health",
-        );
-      } else {
-        setWorkerHealthError(null);
-      }
-      if (sharedStatusResult.status === "rejected") {
-        setSharedStatusError(
-          sharedStatusResult.reason instanceof Error
-            ? sharedStatusResult.reason.message
-            : "Failed to load shared social pipeline status",
-        );
-      } else {
-        setSharedStatusError(null);
-      }
-
-      try {
-        await fetchJobs(runIdToLoad);
-      } catch (jobsError) {
-        nextSectionErrors.jobs = jobsError instanceof Error ? jobsError.message : "Failed to load social jobs";
       }
 
       if (!isCurrentRequest()) {
@@ -3630,22 +3609,103 @@ export default function SeasonSocialAnalyticsSection({
 
       setSectionErrors(nextSectionErrors);
       setLoading(false);
+      setPrimaryBootstrapReady(true);
+      logAdminPageReadDiagnostic({
+        pageFamily: "season-social-analytics",
+        resource: "primary-bootstrap",
+        requestRole: "primary",
+        phase: nextSectionErrors.analytics || nextSectionErrors.targets || nextSectionErrors.runs ? "error" : "success",
+        durationMs: Date.now() - primaryStartedAt,
+        payloadBytes:
+          (analyticsResult.status === "fulfilled" ? measurePayloadBytes(analyticsResult.value) ?? 0 : 0) +
+          (targetsResult.status === "fulfilled" ? measurePayloadBytes(targetsResult.value) ?? 0 : 0) +
+          (runsResult.status === "fulfilled" ? measurePayloadBytes(runsResult.value) ?? 0 : 0),
+        message: [nextSectionErrors.analytics, nextSectionErrors.targets, nextSectionErrors.runs]
+          .filter((value): value is string => Boolean(value))
+          .join(" | "),
+      });
 
-      void fetchAnalytics()
-        .then(() => {
-          if (isCurrentRequest()) {
-            setSectionErrors((current) => ({ ...current, analytics: null }));
-          }
-        })
-        .catch((analyticsError) => {
-          if (isCurrentRequest()) {
-            setSectionErrors((current) => ({
-              ...current,
-              analytics:
-                analyticsError instanceof Error ? analyticsError.message : "Failed to load social analytics",
-            }));
-          }
+      void (async () => {
+        const secondaryStartedAt = Date.now();
+        const [runSummariesResult, workerHealthResult, sharedStatusResult] = await settleWithConcurrencyLimit(
+          [
+            () => fetchRunSummaries() as Promise<unknown>,
+            () => fetchWorkerHealth() as Promise<unknown>,
+            () => fetchSharedStatus() as Promise<unknown>,
+          ],
+          DEFERRED_SOCIAL_REFRESH_CONCURRENCY,
+        );
+
+        if (!isCurrentRequest()) {
+          return;
+        }
+
+        if (runSummariesResult.status === "rejected") {
+          setRunSummaryError(
+            runSummariesResult.reason instanceof Error
+              ? runSummariesResult.reason.message
+              : "Failed to load social run summary",
+          );
+        } else {
+          setRunSummaryError(null);
+        }
+
+        if (workerHealthResult.status === "rejected") {
+          setWorkerHealthError(
+            workerHealthResult.reason instanceof Error
+              ? workerHealthResult.reason.message
+              : "Failed to load social worker health",
+          );
+        } else {
+          setWorkerHealthError(null);
+        }
+
+        if (sharedStatusResult.status === "rejected") {
+          setSharedStatusError(
+            sharedStatusResult.reason instanceof Error
+              ? sharedStatusResult.reason.message
+              : "Failed to load shared social pipeline status",
+          );
+        } else {
+          setSharedStatusError(null);
+        }
+
+        logAdminPageReadDiagnostic({
+          pageFamily: "season-social-analytics",
+          resource: "secondary-bootstrap",
+          requestRole: "secondary",
+          phase:
+            runSummariesResult.status === "rejected" ||
+            workerHealthResult.status === "rejected" ||
+            sharedStatusResult.status === "rejected"
+              ? "error"
+              : "success",
+          durationMs: Date.now() - secondaryStartedAt,
+          payloadBytes:
+            (runSummariesResult.status === "fulfilled" ? measurePayloadBytes(runSummariesResult.value) ?? 0 : 0) +
+            (workerHealthResult.status === "fulfilled" ? measurePayloadBytes(workerHealthResult.value) ?? 0 : 0) +
+            (sharedStatusResult.status === "fulfilled" ? measurePayloadBytes(sharedStatusResult.value) ?? 0 : 0),
+          message: [
+            runSummariesResult.status === "rejected"
+              ? runSummariesResult.reason instanceof Error
+                ? runSummariesResult.reason.message
+                : "Failed to load social run summary"
+              : null,
+            workerHealthResult.status === "rejected"
+              ? workerHealthResult.reason instanceof Error
+                ? workerHealthResult.reason.message
+                : "Failed to load social worker health"
+              : null,
+            sharedStatusResult.status === "rejected"
+              ? sharedStatusResult.reason instanceof Error
+                ? sharedStatusResult.reason.message
+                : "Failed to load shared social pipeline status"
+              : null,
+          ]
+            .filter((value): value is string => Boolean(value))
+            .join(" | "),
         });
+      })();
     })();
 
     inFlightRef.current.refreshAllByView.set(requestView, request);
@@ -3659,7 +3719,6 @@ export default function SeasonSocialAnalyticsSection({
     }
   }, [
     fetchAnalytics,
-    fetchJobs,
     fetchRunSummaries,
     fetchRuns,
     fetchSharedStatus,
@@ -3676,6 +3735,9 @@ export default function SeasonSocialAnalyticsSection({
   }, [refreshAll]);
 
   useEffect(() => {
+    if (!primaryBootstrapReady) {
+      return;
+    }
     if (!selectedRunId) {
       setJobs([]);
       return;
@@ -3690,7 +3752,7 @@ export default function SeasonSocialAnalyticsSection({
           jobs: jobsError instanceof Error ? jobsError.message : "Failed to load social jobs",
         }));
       });
-  }, [fetchJobs, selectedRunId]);
+  }, [fetchJobs, primaryBootstrapReady, selectedRunId]);
 
   const refreshSelectedRunJobs = useCallback(async () => {
     const runId = selectedRunId;
@@ -4351,8 +4413,10 @@ export default function SeasonSocialAnalyticsSection({
   ]);
 
   useEffect(() => {
+    if (!primaryBootstrapReady) return;
     if (!activeSyncSessionId || !runningIngest) return;
     if (activeSyncSessionStreamConnected) return;
+    if (DEV_LOW_HEAT_MODE && !isDocumentVisible) return;
     let cancelled = false;
     let timer: number | null = null;
 
@@ -4441,6 +4505,8 @@ export default function SeasonSocialAnalyticsSection({
     fetchRuns,
     getAuthHeaders,
     runningIngest,
+    primaryBootstrapReady,
+    isDocumentVisible,
     seasonId,
     seasonNumber,
     showId,
@@ -4506,6 +4572,7 @@ export default function SeasonSocialAnalyticsSection({
 
   // Poll for job + run updates using a single-flight loop (no overlapping requests).
   useEffect(() => {
+    if (!primaryBootstrapReady) return;
     if (!activeRunId) return;
     if (!hasRunningJobs && !runningIngest) return;
     if (DEV_LOW_HEAT_MODE && !isDocumentVisible) return;
@@ -4624,7 +4691,7 @@ export default function SeasonSocialAnalyticsSection({
         window.clearTimeout(timer);
       }
     };
-  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, fetchWorkerHealth, hasRunningJobs, isDocumentVisible, runningIngest]);
+  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, fetchWorkerHealth, hasRunningJobs, isDocumentVisible, primaryBootstrapReady, runningIngest]);
 
   useEffect(() => {
     if (pollingStatus !== "recovered") return;

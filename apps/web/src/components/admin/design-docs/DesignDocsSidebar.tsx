@@ -222,7 +222,13 @@ function AccordionNav({
                       {showSubLinks && (
                         <ul style={{ listStyle: "none", margin: 0, padding: "2px 0 2px 36px" }}>
                           {getBrandSubSections(sectionId).map((sub) => {
-                            const isSubActive = sub.href ? pathname.startsWith(sub.href) : false;
+                            const brandSectionPath = buildDesignDocsPath(sectionId);
+                            const subPath = sub.href?.split("#")[0];
+                            const isSubActive = subPath ? pathname.startsWith(subPath) : false;
+                            const anchorHref =
+                              pathname === brandSectionPath
+                                ? `#${sub.anchor}`
+                                : `${brandSectionPath}#${sub.anchor}`;
                             return (
                               <li key={sub.anchor}>
                                 {sub.href ? (
@@ -244,7 +250,7 @@ function AccordionNav({
                                   </Link>
                                 ) : (
                                   <a
-                                    href={`#${sub.anchor}`}
+                                    href={anchorHref}
                                     onClick={onNavigate}
                                     style={{
                                       display: "block",
@@ -311,6 +317,35 @@ function AccordionNav({
                                             }}
                                           >
                                             {article.label.length > 42 ? `${article.label.slice(0, 42)}…` : article.label}
+                                          </Link>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+
+                                {/* NYT Games article sub-links under Games */}
+                                {sub.href === buildDesignDocsPath("nyt-games-articles") && isSubActive && (
+                                  <ul style={{ listStyle: "none", margin: 0, padding: "2px 0 2px 12px", borderLeft: `1px solid ${F.border}` }}>
+                                    {getGameArticleSubLinks().map((game) => {
+                                      const gamePath = buildDesignDocsPath(`nyt-games-articles/${game.slug}`);
+                                      const isGameActive = pathname === gamePath;
+                                      return (
+                                        <li key={game.slug}>
+                                          <Link
+                                            href={gamePath}
+                                            onClick={onNavigate}
+                                            style={{
+                                              display: "block",
+                                              padding: "3px 6px",
+                                              fontFamily: F.franklin,
+                                              fontSize: 11,
+                                              fontWeight: isGameActive ? 600 : 400,
+                                              color: isGameActive ? F.copy : F.faint,
+                                              textDecoration: "none",
+                                            }}
+                                          >
+                                            {game.label}
                                           </Link>
                                         </li>
                                       );

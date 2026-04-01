@@ -365,7 +365,7 @@ const formatCatalogDiagnosticErrorMessage = (
       ? "Gap analysis timed out before completion. Retry when you need repair guidance."
       : "Freshness check timed out before completion. Retry in a moment.";
   }
-  return `${label} failed. ${error.message}`;
+  return `${label} failed. ${(error as Error).message}`;
 };
 
 const toCatalogGapAnalysisStatusError = (
@@ -404,7 +404,6 @@ const cloneHashtagItems = (items: SocialAccountProfileHashtag[]): SocialAccountP
     ...item,
     assignments: item.assignments?.map((assignment) => ({ ...assignment })) ?? [],
     assigned_shows: item.assigned_shows?.map((show) => ({ ...show })) ?? [],
-    assigned_seasons: item.assigned_seasons?.map((season) => ({ ...season })) ?? [],
     observed_shows: item.observed_shows?.map((show) => ({ ...show })) ?? [],
     observed_seasons: item.observed_seasons?.map((season) => ({ ...season })) ?? [],
   }));
@@ -418,7 +417,7 @@ const formatHashtagRequestErrorMessage = (error: SocialAccountRequestError | nul
   if (isTimeoutRequestError(error)) {
     return "Hashtag load timed out before completion. Retry when needed.";
   }
-  return error.message || "Failed to load social account profile hashtags";
+  return (error as Error).message || "Failed to load social account profile hashtags";
 };
 
 const resolveCatalogProgressBackoffMs = (error: SocialAccountRequestError, saturationAttempt: number): number => {

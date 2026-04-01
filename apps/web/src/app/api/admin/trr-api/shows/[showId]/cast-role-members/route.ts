@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 import { resolveAdminShowId } from "@/lib/server/admin/resolve-show-id";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 import {
   buildUserScopedRouteCacheKey,
   getRouteResponseCache,
@@ -109,7 +110,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const url = new URL(backendUrl);
     searchParams.forEach((value, key) => url.searchParams.set(key, value));
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
       return NextResponse.json(
         {

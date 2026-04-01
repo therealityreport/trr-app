@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { isCastScreentimeAdminEnabled } from "@/lib/server/admin/cast-screentime-access";
-import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -27,27 +27,7 @@ async function forward(request: NextRequest, method: string, { params }: RoutePa
       return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
     }
 
-    let serviceRoleKey: string;
-    try {
-      serviceRoleKey = getTrrAdminServiceKey();
-    } catch {
-      return NextResponse.json(
-        { error: "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY is not configured" },
-        { status: 500 },
-      );
-    }
-
-    const internalSecret = process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
-    if (!internalSecret) {
-      return NextResponse.json(
-        { error: "TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured in the TRR-APP server environment" },
-        { status: 500 },
-      );
-    }
-
-    const headers = new Headers({
-      Authorization: `Bearer ${serviceRoleKey}`,
-      "X-TRR-Internal-Admin-Secret": internalSecret,
+    const headers = buildInternalAdminHeaders({
       Accept: "application/json",
     });
     const incomingContentType = request.headers.get("content-type");

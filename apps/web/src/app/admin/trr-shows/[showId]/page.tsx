@@ -146,11 +146,11 @@ import {
   type JobLiveCounts,
 } from "@/lib/admin/job-live-counts";
 import {
-  type CastRefreshPhaseDefinition,
   type CastRefreshPhaseId,
+  type CastRefreshPhaseProgress,
   type CastRefreshPhaseState,
+  createInitialCastRefreshPhaseStates,
   runCastEnrichMediaWorkflow,
-  runPhasedCastRefresh,
 } from "@/lib/admin/cast-refresh-orchestration";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
@@ -167,7 +167,12 @@ import {
   normalizeKickoffHandle,
   type CanonicalOperationStatus,
 } from "@/lib/admin/async-handles";
-import { getOrCreateAdminFlowKey } from "@/lib/admin/operation-session";
+import {
+  clearAdminOperationSession,
+  getAutoResumableAdminOperationSession,
+  getOrCreateAdminFlowKey,
+  markAdminOperationSessionStatus,
+} from "@/lib/admin/operation-session";
 import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
@@ -367,6 +372,35 @@ interface CastRoleMember {
   photo_url: string | null;
 }
 
+interface ShowCrewCreditRow {
+  credit_id: string;
+  person_id: string;
+  person_name: string | null;
+  role: string | null;
+  billing_order: number | null;
+  source_type: string | null;
+  episode_count: number | null;
+  episodes_label: string | null;
+  years_label: string | null;
+  imdb_name_id: string | null;
+  display_order: number | null;
+}
+
+interface ShowCrewSection {
+  title: string;
+  rows: ShowCrewCreditRow[];
+}
+
+interface ShowCreditsPayload {
+  cast_roster: Array<Record<string, unknown>>;
+  crew_sections: ShowCrewSection[];
+  source_metadata?: {
+    source_page_url?: string | null;
+    show_imdb_id?: string | null;
+    last_synced_at?: string | null;
+  } | null;
+}
+
 interface BravoPersonTag {
   person_id?: string | null;
   person_name?: string | null;
@@ -548,11 +582,20 @@ type CastRunFailedMember = {
   reason: string;
 };
 
+type CastBatchRunSummary = {
+  attempted: number;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  failedMembers: CastRunFailedMember[];
+};
+
 type ShowRefreshRunOptions = {
   photoMode?: "fast" | "full";
   skipCastPhotos?: boolean;
   includeCastProfiles?: boolean;
   suppressSuccessNotice?: boolean;
+  onProgress?: (progress: Partial<CastRefreshPhaseProgress>) => void;
 };
 type PersonRefreshMode = "full" | "ingest_only" | "profile_only";
 
@@ -649,7 +692,7 @@ const ShowNewsTab = dynamic(() => import("@/components/admin/show-tabs/ShowNewsT
   loading: () => <TabLoadingFallback label="News" />,
 });
 const ShowCastTab = dynamic(() => import("@/components/admin/show-tabs/ShowCastTab"), {
-  loading: () => <TabLoadingFallback label="Cast" />,
+  loading: () => <TabLoadingFallback label="Credits" />,
 });
 const ShowSocialTab = dynamic(() => import("@/components/admin/show-tabs/ShowSocialTab"), {
   loading: () => <TabLoadingFallback label="Social" />,
@@ -684,7 +727,7 @@ const SHOW_PAGE_TABS: ShowTab[] = [
   { id: "seasons", label: "Seasons" },
   { id: "assets", label: "Assets" },
   { id: "news", label: "News" },
-  { id: "cast", label: "Cast" },
+  { id: "cast", label: "Credits" },
   { id: "surveys", label: "Surveys" },
   { id: "social", label: "Social" },
   { id: "settings", label: "Settings" },
@@ -834,7 +877,7 @@ const SHOW_REFRESH_TARGET_LABELS: Record<ShowRefreshTarget, string> = {
   details: "Show Info",
   seasons_episodes: "Seasons & Episodes",
   photos: "Gallery Media",
-  cast_credits: "Cast & Credits",
+  cast_credits: "Credits",
   videos: "Bravo Videos",
   news: "Google News",
   social_setup: "Social Setup",
@@ -860,8 +903,10 @@ const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
   seasons_episodes_episodes: "Episodes",
   photos_show_images: "Show Media",
   photos_season_episode_images: "Season/Episode Media",
-  cast_credits_show_cast: "Cast Credits",
-  cast_credits_episode_appearances: "Episode Credits",
+  cast_credits_show_cast: "IMDb Full Credits",
+  cast_credits_episode_appearances: "Episode Appearances",
+  credits_fullcredits_sync: "IMDb Full Credits",
+  credits_episode_appearances_sync: "Episode Appearances",
   videos_bravo_import: "Bravo Videos",
   news_google_sync: "Google News",
   social_setup_seed: "Social Setup",
@@ -891,7 +936,12 @@ const SHOW_REFRESH_STAGE_LABELS: Record<string, string> = {
 const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
   starting: "Initializing",
   tmdb_profile: "TMDb Profile",
+  profile_tmdb: "TMDb Profile",
+  profile_imdb: "IMDb Profile",
   fandom_profile: "Fandom Profile",
+  profile_fandom: "Fandom Profile",
+  profile_wikipedia: "Wikipedia Profile",
+  profile_bravo: "Bravo Profile",
   sync_imdb: "Cast Media (IMDb)",
   sync_tmdb: "Cast Media (TMDb)",
   sync_fandom: "Cast Media (Fandom)",
@@ -979,13 +1029,44 @@ const CAST_REFRESH_PHASE_ORDER: CastRefreshPhaseId[] = [
   "media_ingest",
 ];
 
+const CREDITS_PIPELINE_BACKEND_TARGET = "credits_pipeline";
+
+const createCastRefreshPhaseStates = (): CastRefreshPhaseState[] =>
+  createInitialCastRefreshPhaseStates(
+    CAST_REFRESH_PHASE_ORDER.map((phaseId) => ({
+      id: phaseId,
+      label: CAST_REFRESH_PHASE_STAGES[phaseId],
+      timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS[phaseId],
+      run: async () => undefined,
+    }))
+  );
+
+const buildCreditsPipelineRequestBody = (): string =>
+  JSON.stringify({ targets: [CREDITS_PIPELINE_BACKEND_TARGET] });
+
+const buildCreditsPipelineFlowScope = (showId: string): string => {
+  const body = buildCreditsPipelineRequestBody();
+  return `POST:/api/admin/trr-api/shows/${showId}/refresh/stream:${String(body.length)}`;
+};
+
+const isCastRefreshPhaseId = (value: unknown): value is CastRefreshPhaseId =>
+  typeof value === "string" && CAST_REFRESH_PHASE_ORDER.includes(value as CastRefreshPhaseId);
+
+const toIsoNow = (): string => new Date().toISOString();
+
+const updateCastRefreshPhaseStates = (
+  states: CastRefreshPhaseState[],
+  phaseId: CastRefreshPhaseId,
+  updater: (state: CastRefreshPhaseState) => CastRefreshPhaseState
+): CastRefreshPhaseState[] => states.map((state) => (state.id === phaseId ? updater(state) : state));
+
 const SEASON_PAGE_TABS = [
   { tab: "overview", label: "Home" },
   { tab: "episodes", label: "Episodes" },
   { tab: "assets", label: "Assets" },
   { tab: "news", label: "News" },
   { tab: "fandom", label: "Fandom" },
-  { tab: "cast", label: "Cast" },
+  { tab: "cast", label: "Credits" },
   { tab: "surveys", label: "Surveys" },
   { tab: "social", label: "Social Media" },
 ] as const;
@@ -2008,17 +2089,6 @@ const buildAssetAutoCropPayloadWithFallback = (
     strategy: "resize_center_fallback_v1",
   };
 
-const isCrewCreditCategory = (value: string | null | undefined): boolean => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) return false;
-  return (
-    normalized === "crew" ||
-    normalized.includes("crew") ||
-    normalized.includes("producer") ||
-    normalized.includes("production")
-  );
-};
-
 const areStringArraysEqual = (a: string[], b: string[]): boolean => {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -2222,6 +2292,11 @@ export default function TrrShowDetailPage() {
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
   const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
+  const [showCrewSections, setShowCrewSections] = useState<ShowCrewSection[]>([]);
+  const [showCreditsLoadedOnce, setShowCreditsLoadedOnce] = useState(false);
+  const [showCreditsLoading, setShowCreditsLoading] = useState(false);
+  const [showCreditsError, setShowCreditsError] = useState<string | null>(null);
+  const [showCreditsSourceUrl, setShowCreditsSourceUrl] = useState<string | null>(null);
   const [castMatrixSyncLoading, setCastMatrixSyncLoading] = useState(false);
   const [castMatrixSyncError, setCastMatrixSyncError] = useState<string | null>(null);
   const [castMatrixSyncResult, setCastMatrixSyncResult] = useState<CastMatrixSyncResult | null>(
@@ -2600,6 +2675,7 @@ export default function TrrShowDetailPage() {
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [castRefreshPipelineRunning, setCastRefreshPipelineRunning] = useState(false);
+  const [castRefreshCanceling, setCastRefreshCanceling] = useState(false);
   const [castRefreshPhaseStates, setCastRefreshPhaseStates] = useState<CastRefreshPhaseState[]>(
     []
   );
@@ -2619,6 +2695,7 @@ export default function TrrShowDetailPage() {
   const castAutoLoadAttemptedRef = useRef<string | null>(null);
   const castAutoRecoveryAttemptedRef = useRef<string | null>(null);
   const castAutoPhotoRecoveryAttemptedRef = useRef<string | null>(null);
+  const castRefreshResumeOperationRef = useRef<string | null>(null);
   const castSnapshotRef = useRef<{ cast: TrrCastMember[]; archive: TrrCastMember[] }>({
     cast: [],
     archive: [],
@@ -3033,8 +3110,17 @@ export default function TrrShowDetailPage() {
       return;
     }
 
+    // If the UI is already rendering Credits while the root path still parses as the
+    // default details tab, promote the canonical route to /credits instead of /:show.
+    const canonicalShowTab =
+      showRouteState.tab === "details" &&
+      showRouteState.source === "default" &&
+      activeTab === "cast"
+        ? activeTab
+        : showRouteState.tab;
+
     const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
-    if (showRouteState.tab === "social") {
+    if (canonicalShowTab === "social") {
       preservedQuery.delete("social_platform");
       if (socialAnalyticsView === "bravo") {
         preservedQuery.delete("social_view");
@@ -3045,12 +3131,12 @@ export default function TrrShowDetailPage() {
     const socialSeasonNumber = getSocialSeasonNumberForRouting();
     const canonicalRouteUrl = buildShowAdminUrl({
       showSlug: showSlugForRouting,
-      tab: showRouteState.tab,
+      tab: canonicalShowTab,
       assetsSubTab: showRouteState.assetsSubTab,
       query: preservedQuery,
-      socialView: showRouteState.tab === "social" ? socialAnalyticsView : undefined,
+      socialView: canonicalShowTab === "social" ? socialAnalyticsView : undefined,
       socialRoute:
-        showRouteState.tab === "social"
+        canonicalShowTab === "social"
           ? {
               seasonNumber: socialSeasonNumber,
               weekIndex: socialPathFilters?.weekIndex,
@@ -3082,8 +3168,10 @@ export default function TrrShowDetailPage() {
     getSocialSeasonNumberForRouting,
     socialPathFilters,
     socialPlatformTab,
+    activeTab,
     showSlugForRouting,
     showRouteState.assetsSubTab,
+    showRouteState.source,
     showRouteState.tab,
   ]);
 
@@ -3182,6 +3270,133 @@ export default function TrrShowDetailPage() {
       };
     });
   }, [refreshLogEntries]);
+
+  const refreshPersonProfile = useCallback(
+    async (
+      personId: string,
+      onProgress?: (progress: RefreshProgressState) => void,
+      options?: { signal?: AbortSignal }
+    ) => {
+      const headers = await getAuthHeaders();
+      const externalSignal = options?.signal;
+      if (externalSignal?.aborted) {
+        throw new Error("Cast refresh canceled.");
+      }
+
+      const streamController = new AbortController();
+      const forwardExternalAbort = () => streamController.abort();
+      if (externalSignal) {
+        externalSignal.addEventListener("abort", forwardExternalAbort, { once: true });
+      }
+      const streamTimeout = setTimeout(
+        () => streamController.abort(),
+        PERSON_REFRESH_STREAM_TIMEOUT_MS
+      );
+      let streamIdleTimeout: ReturnType<typeof setTimeout> | null = null;
+      const bumpStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = setTimeout(
+          () => streamController.abort(),
+          PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS
+        );
+      };
+      const clearStreamIdleTimeout = () => {
+        if (streamIdleTimeout) clearTimeout(streamIdleTimeout);
+        streamIdleTimeout = null;
+      };
+
+      let completePayload: Record<string, unknown> | null = null;
+      bumpStreamIdleTimeout();
+      try {
+        await adminStream(
+          `/api/admin/trr-api/people/${personId}/refresh-profile/stream`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_links: false, refresh_credits: false }),
+            timeoutMs: PERSON_REFRESH_STREAM_TIMEOUT_MS,
+            externalSignal: streamController.signal,
+            onEvent: async ({ event, payload }) => {
+              bumpStreamIdleTimeout();
+              if (event === "progress" && payload && typeof payload === "object") {
+                const stageLabel = resolveStageLabel(
+                  (payload as { stage?: unknown }).stage,
+                  PERSON_REFRESH_STAGE_LABELS
+                );
+                const current = parseProgressNumber((payload as { current?: unknown }).current);
+                const total = parseProgressNumber((payload as { total?: unknown }).total);
+                onProgress?.({
+                  stage: stageLabel,
+                  message: buildProgressMessage(
+                    stageLabel,
+                    (payload as { message?: unknown }).message,
+                    "Syncing cast bios and profile intelligence..."
+                  ),
+                  current,
+                  total,
+                });
+                return;
+              }
+
+              if (event === "error") {
+                const message =
+                  payload && typeof payload === "object"
+                    ? (payload as { error?: unknown; detail?: unknown })
+                    : null;
+                const errorText =
+                  typeof message?.error === "string" && message.error
+                    ? message.error
+                    : "Failed to refresh person profile";
+                const detailText =
+                  typeof message?.detail === "string" && message.detail ? message.detail : null;
+                throw new Error(detailText ? `${errorText}: ${detailText}` : errorText);
+              }
+
+              if (event === "complete") {
+                completePayload =
+                  payload && typeof payload === "object"
+                    ? (payload as Record<string, unknown>)
+                    : {};
+              }
+            },
+          }
+        );
+        const cp = completePayload as Record<string, unknown> | null;
+        const summary =
+          cp &&
+          typeof cp.summary === "object" &&
+          cp.summary !== null
+            ? (cp.summary as Record<string, unknown>)
+            : cp ?? {};
+        onProgress?.({
+          stage: "Complete",
+          message: "Cast bios/profile sync complete.",
+          current: 1,
+          total: 1,
+        });
+        return summary;
+      } catch (streamErr) {
+        if (isAbortError(streamErr) && externalSignal?.aborted) {
+          throw new Error("Cast refresh canceled.");
+        }
+        if (isAbortError(streamErr)) {
+          throw new Error(
+            `Timed out syncing cast bios/profiles after ${Math.round(
+              PERSON_REFRESH_STREAM_TIMEOUT_MS / 1000
+            )}s.`
+          );
+        }
+        throw streamErr;
+      } finally {
+        if (externalSignal) {
+          externalSignal.removeEventListener("abort", forwardExternalAbort);
+        }
+        clearStreamIdleTimeout();
+        clearTimeout(streamTimeout);
+      }
+    },
+    [getAuthHeaders]
+  );
 
   // Refresh images for a person with streaming progress when available.
   const refreshPersonImages = useCallback(
@@ -3542,6 +3757,8 @@ export default function TrrShowDetailPage() {
     [getAuthHeaders]
   );
 
+  // Retained for targeted cast-member reruns outside the durable credits pipeline.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const refreshCastProfilesAndMedia = useCallback(
     async (
       members: TrrCastMember[],
@@ -3550,6 +3767,7 @@ export default function TrrShowDetailPage() {
         stageLabel?: string;
         category?: string;
         signal?: AbortSignal;
+        onProgress?: (progress: Partial<CastRefreshPhaseProgress>) => void;
       }
     ) => {
       const mode = options?.mode ?? "full";
@@ -3589,7 +3807,13 @@ export default function TrrShowDetailPage() {
 
       const total = uniqueMembers.length;
       if (total === 0) {
-        return { attempted: 0, succeeded: 0, failed: 0, failedMembers: [] as CastRunFailedMember[] };
+        return {
+          attempted: 0,
+          succeeded: 0,
+          skipped: 0,
+          failed: 0,
+          failedMembers: [] as CastRunFailedMember[],
+        } satisfies CastBatchRunSummary;
       }
       const throwIfAborted = () => {
         if (options?.signal?.aborted) {
@@ -3599,6 +3823,7 @@ export default function TrrShowDetailPage() {
       throwIfAborted();
 
       let succeeded = 0;
+      let skipped = 0;
       let failed = 0;
       let completed = 0;
       let dispatched = 0;
@@ -3614,14 +3839,21 @@ export default function TrrShowDetailPage() {
       }: {
         completed: number;
         inFlight: number;
-      }) =>
-        isIngestOnly
-          ? `Ingesting media: ${completedCount}/${total} complete (${inFlightCount} in flight)`
-          : formatCastBatchRunningMessage({ completed: completedCount, total, inFlight: inFlightCount });
+      }) => {
+        if (isIngestOnly) {
+          return `Ingesting media: ${completedCount}/${total} complete (${inFlightCount} in flight)`;
+        }
+        if (isProfileOnly) {
+          return `Bios: ${completedCount} complete, ${skipped} skipped, ${inFlightCount} in flight`;
+        }
+        return formatCastBatchRunningMessage({ completed: completedCount, total, inFlight: inFlightCount });
+      };
 
       const memberBatchMessage = (label: string, completedCount: number, inFlightCount: number) =>
         isIngestOnly
           ? `${batchCountsMessage({ completed: completedCount, inFlight: inFlightCount })} — ${label}`
+          : isProfileOnly
+            ? `${batchCountsMessage({ completed: completedCount, inFlight: inFlightCount })} — ${label}`
           : formatCastBatchMemberMessage(label, { completed: completedCount, total, inFlight: inFlightCount });
 
       const setCastBatchProgress = (message: string, stage = stageLabel) => {
@@ -3634,6 +3866,12 @@ export default function TrrShowDetailPage() {
             total,
           },
         }));
+        options?.onProgress?.({
+          stage,
+          current: completed,
+          total,
+          message,
+        });
       };
 
       setRefreshTargetProgress((prev) => ({
@@ -3668,32 +3906,71 @@ export default function TrrShowDetailPage() {
         });
 
         try {
-          await refreshPersonImages(
-            member.person_id,
-            (progress) => {
-              throwIfAborted();
-              setRefreshTargetProgress((prev) => ({
-                ...prev,
-                cast_credits: {
-                  stage: progress.stage ?? stageLabel,
-                  message:
-                    progress.message
-                      ? isIngestOnly
-                        ? `${batchCountsMessage({ completed, inFlight })} — ${label}: ${progress.message}`
-                        : `${label}: ${progress.message} (${formatCastBatchCounts({
-                            completed,
-                            total,
-                            inFlight,
-                          })})`
-                      : memberBatchMessage(label, completed, inFlight),
-                  current: completed,
-                  total,
-                },
-              }));
-            },
-            { mode, signal: options?.signal, personName: label }
-          );
-          succeeded += 1;
+          const handleMemberProgress = (progress: RefreshProgressState) => {
+            throwIfAborted();
+            const nextMessage =
+              progress.message
+                ? isIngestOnly
+                  ? `${batchCountsMessage({ completed, inFlight })} — ${label}: ${progress.message}`
+                  : isProfileOnly
+                    ? `${label}: ${progress.message} (${batchCountsMessage({ completed, inFlight })})`
+                    : `${label}: ${progress.message} (${formatCastBatchCounts({
+                        completed,
+                        total,
+                        inFlight,
+                      })})`
+                : memberBatchMessage(label, completed, inFlight);
+            setRefreshTargetProgress((prev) => ({
+              ...prev,
+              cast_credits: {
+                stage: progress.stage ?? stageLabel,
+                message: nextMessage,
+                current: completed,
+                total,
+              },
+            }));
+            options?.onProgress?.({
+              stage: progress.stage ?? stageLabel,
+              current: completed,
+              total,
+              message: nextMessage,
+            });
+          };
+          const result = isProfileOnly
+            ? await refreshPersonProfile(member.person_id, handleMemberProgress, {
+                signal: options?.signal,
+              })
+            : await refreshPersonImages(member.person_id, handleMemberProgress, {
+                mode,
+                signal: options?.signal,
+                personName: label,
+              });
+          const resultSummary = result && typeof result === "object"
+            ? (result as Record<string, unknown>)
+            : null;
+          const skipEntries = Array.isArray(resultSummary?.skips)
+            ? resultSummary.skips.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            : [];
+          const profileFieldsChanged = parseProgressNumber(resultSummary?.profile_fields_changed) ?? 0;
+          const aliasesAdded = parseProgressNumber(resultSummary?.aliases_added) ?? 0;
+          const linksRefreshed = parseProgressNumber(resultSummary?.links_refreshed) ?? 0;
+          const creditsUpdated = parseProgressNumber(resultSummary?.credits_updated) ?? 0;
+          const failureEntries = Array.isArray(resultSummary?.failures)
+            ? resultSummary.failures.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            : [];
+          const memberSkipped =
+            isProfileOnly &&
+            failureEntries.length === 0 &&
+            skipEntries.length > 0 &&
+            profileFieldsChanged === 0 &&
+            aliasesAdded === 0 &&
+            linksRefreshed === 0 &&
+            creditsUpdated === 0;
+          if (memberSkipped) {
+            skipped += 1;
+          } else {
+            succeeded += 1;
+          }
         } catch (err) {
           console.warn(`Failed to ${failureVerb} cast media for ${label}:`, err);
           const errorText = err instanceof Error ? err.message : "unknown error";
@@ -3734,17 +4011,17 @@ export default function TrrShowDetailPage() {
       await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
 
       setCastBatchProgress(
-        `${completionPrefix} (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}).`
+        `${completionPrefix} (${succeeded}/${total} succeeded${skipped > 0 ? `, ${skipped} skipped` : ""}${failed > 0 ? `, ${failed} failed` : ""}).`
       );
       appendRefreshLog({
         category,
-        message: `${completionPrefix} (${succeeded}/${total} succeeded${failed > 0 ? `, ${failed} failed` : ""}, dispatched ${dispatched}/${total}).`,
+        message: `${completionPrefix} (${succeeded}/${total} succeeded${skipped > 0 ? `, ${skipped} skipped` : ""}${failed > 0 ? `, ${failed} failed` : ""}, dispatched ${dispatched}/${total}).`,
         current: total,
         total,
       });
-      return { attempted: total, succeeded, failed, failedMembers };
+      return { attempted: total, succeeded, skipped, failed, failedMembers } satisfies CastBatchRunSummary;
     },
-    [appendRefreshLog, refreshPersonImages]
+    [appendRefreshLog, refreshPersonImages, refreshPersonProfile]
   );
 
   const reprocessCastMedia = useCallback(
@@ -4417,6 +4694,40 @@ export default function TrrShowDetailPage() {
     },
     [getAuthHeaders, isCurrentShowId, showId]
   );
+
+  const fetchShowCredits = useCallback(async () => {
+    if (!showId) return;
+    setShowCreditsLoading(true);
+    setShowCreditsError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/credits`,
+        { headers, cache: "no-store" },
+        SHOW_CAST_LOAD_TIMEOUT_MS
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & Partial<ShowCreditsPayload>;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load crew credits");
+      }
+      setShowCrewSections(Array.isArray(data.crew_sections) ? data.crew_sections : []);
+      setShowCreditsSourceUrl(
+        typeof data.source_metadata?.source_page_url === "string" ? data.source_metadata.source_page_url : null
+      );
+      setShowCreditsLoadedOnce(true);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load crew credits";
+      setShowCreditsError(message);
+      if (!showCreditsLoadedOnce) {
+        setShowCrewSections([]);
+      }
+    } finally {
+      setShowCreditsLoading(false);
+    }
+  }, [getAuthHeaders, showCreditsLoadedOnce, showId]);
 
   const fetchShowLinks = useCallback(async () => {
     if (!showId) return;
@@ -6921,6 +7232,17 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (!hasAccess || !showId || activeTab !== "cast") return;
+    void fetchShowCredits();
+  }, [activeTab, fetchShowCredits, hasAccess, showId]);
+
+  useEffect(() => {
+    if (activeTab !== "cast") return;
+    if (!refreshTargetNotice.cast_credits) return;
+    void fetchShowCredits();
+  }, [activeTab, fetchShowCredits, refreshTargetNotice.cast_credits]);
+
+  useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "cast") return;
     const seasonsKey = [...castSeasonFilters].sort((a, b) => a - b).join(",");
     const autoLoadKey = `${showId}|${seasonsKey}`;
     if (castRoleMembersAutoLoadAttemptedRef.current === autoLoadKey) return;
@@ -7104,6 +7426,11 @@ export default function TrrShowDetailPage() {
     setCastRoleMembersError(null);
     setCastRoleMembersWarning(null);
     setLastSuccessfulCastRoleMembersAt(null);
+    setShowCrewSections([]);
+    setShowCreditsLoadedOnce(false);
+    setShowCreditsLoading(false);
+    setShowCreditsError(null);
+    setShowCreditsSourceUrl(null);
     setCastRoleEditorDeepLinkWarning(null);
     setCastMatrixSyncError(null);
     setCastMatrixSyncResult(null);
@@ -7347,6 +7674,9 @@ export default function TrrShowDetailPage() {
         }
       }
       const hasScopedRoleOrSeasonMatch = castRoleMemberByPersonId.has(member.person_id);
+      if (castRoleMembersLoadedOnce && castRoleMembers.length > 0 && !hasScopedRoleOrSeasonMatch) {
+        return false;
+      }
       if (
         !shouldIncludeCastMemberForSeasonFilter({
           castSeasonFilters,
@@ -7397,6 +7727,7 @@ export default function TrrShowDetailPage() {
     castDisplayBaseMembers,
     castHasImageFilter,
     castRoleAndCreditFilters,
+    castRoleMembers.length,
     castRoleMemberByPersonId,
     castRoleMembersLoadedOnce,
     castSearchQueryDeferred,
@@ -7406,54 +7737,67 @@ export default function TrrShowDetailPage() {
   ]);
 
   const castGalleryMembers = useMemo(
-    () => castDisplayMembers.filter((member) => !isCrewCreditCategory(member.credit_category)),
+    () => castDisplayMembers,
     [castDisplayMembers]
   );
-  const crewGalleryMembers = useMemo(
-    () => castDisplayMembers.filter((member) => isCrewCreditCategory(member.credit_category)),
-    [castDisplayMembers]
-  );
+  const crewDisplaySections = useMemo(() => {
+    const query = castSearchQueryDeferred.trim();
+    if (!query) return showCrewSections;
+    return showCrewSections
+      .map((section) => ({
+        ...section,
+        rows: section.rows.filter((row) => {
+          const haystack = [
+            row.person_name,
+            row.role,
+            row.episodes_label,
+            row.years_label,
+            section.title,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          return haystack.includes(query);
+        }),
+      }))
+      .filter((section) => section.rows.length > 0);
+  }, [castSearchQueryDeferred, showCrewSections]);
   const castDisplayTotals = useMemo(() => {
-    let castTotal = 0;
-    let crewTotal = 0;
-    for (const member of castDisplayBaseMembers) {
-      if (isCrewCreditCategory(member.credit_category)) {
-        crewTotal += 1;
-      } else {
-        castTotal += 1;
-      }
-    }
+    const castTotal =
+      castRoleMembersLoadedOnce && castRoleMembers.length > 0
+        ? castDisplayBaseMembers.filter((member) => castRoleMemberByPersonId.has(member.person_id)).length
+        : castDisplayBaseMembers.length;
+    const crewTotal = showCrewSections.reduce((sum, section) => sum + section.rows.length, 0);
     return {
       cast: castTotal,
       crew: crewTotal,
-      total: castDisplayBaseMembers.length,
+      total: castTotal + crewTotal,
     };
-  }, [castDisplayBaseMembers]);
+  }, [castDisplayBaseMembers, castRoleMemberByPersonId, castRoleMembers.length, castRoleMembersLoadedOnce, showCrewSections]);
   const visibleCastGalleryMembers = useMemo(
     () => castGalleryMembers.slice(0, castRenderLimit),
     [castGalleryMembers, castRenderLimit]
   );
-  const visibleCrewGalleryMembers = useMemo(
-    () => crewGalleryMembers.slice(0, crewRenderLimit),
-    [crewGalleryMembers, crewRenderLimit]
-  );
   const renderedCastCount = visibleCastGalleryMembers.length;
   const matchedCastCount = castGalleryMembers.length;
   const totalCastCount = castDisplayTotals.cast;
-  const renderedCrewCount = visibleCrewGalleryMembers.length;
-  const matchedCrewCount = crewGalleryMembers.length;
+  const renderedCrewCount = crewDisplaySections.reduce(
+    (sum, section) => sum + Math.min(section.rows.length, crewRenderLimit),
+    0
+  );
+  const matchedCrewCount = crewDisplaySections.reduce((sum, section) => sum + section.rows.length, 0);
   const totalCrewCount = castDisplayTotals.crew;
   const renderedVisibleCount = renderedCastCount + renderedCrewCount;
-  const matchedVisibleCount = castDisplayMembers.length;
+  const matchedVisibleCount = matchedCastCount + matchedCrewCount;
   const totalVisibleCount = castDisplayTotals.total;
   const castRenderProgressLabel = useMemo(() => {
     const rendered =
       Math.min(castRenderLimit, castGalleryMembers.length) +
-      Math.min(crewRenderLimit, crewGalleryMembers.length);
-    const total = castGalleryMembers.length + crewGalleryMembers.length;
+      crewDisplaySections.reduce((sum, section) => sum + Math.min(section.rows.length, crewRenderLimit), 0);
+    const total = castGalleryMembers.length + matchedCrewCount;
     if (total === 0 || rendered >= total) return null;
     return `Rendering ${rendered.toLocaleString()}/${total.toLocaleString()}`;
-  }, [castGalleryMembers.length, castRenderLimit, crewGalleryMembers.length, crewRenderLimit]);
+  }, [castGalleryMembers.length, castRenderLimit, crewDisplaySections, crewRenderLimit, matchedCrewCount]);
 
   useEffect(() => {
     setCastRenderLimit(CAST_INCREMENTAL_INITIAL_LIMIT);
@@ -7470,7 +7814,10 @@ export default function TrrShowDetailPage() {
 
   useEffect(() => {
     if (activeTab !== "cast") return;
-    if (castRenderLimit >= castGalleryMembers.length && crewRenderLimit >= crewGalleryMembers.length) {
+    if (
+      castRenderLimit >= castGalleryMembers.length &&
+      crewDisplaySections.every((section) => crewRenderLimit >= section.rows.length)
+    ) {
       return;
     }
 
@@ -7482,9 +7829,9 @@ export default function TrrShowDetailPage() {
             : Math.min(prev + CAST_INCREMENTAL_BATCH_SIZE, castGalleryMembers.length)
         );
         setCrewRenderLimit((prev) =>
-          prev >= crewGalleryMembers.length
+          crewDisplaySections.every((section) => prev >= section.rows.length)
             ? prev
-            : Math.min(prev + CAST_INCREMENTAL_BATCH_SIZE, crewGalleryMembers.length)
+            : prev + CAST_INCREMENTAL_BATCH_SIZE
         );
       }, 0);
     };
@@ -7511,7 +7858,7 @@ export default function TrrShowDetailPage() {
     activeTab,
     castGalleryMembers.length,
     castRenderLimit,
-    crewGalleryMembers.length,
+    crewDisplaySections,
     crewRenderLimit,
   ]);
 
@@ -8986,9 +9333,9 @@ export default function TrrShowDetailPage() {
       options?: ShowRefreshRunOptions
     ): Promise<boolean> => {
       const label = getShowRefreshTargetLabel(target);
-      const includeCastProfiles = options?.includeCastProfiles ?? true;
       const fastPhotoMode = options?.photoMode === "fast";
       const skipCastPhotos = options?.skipCastPhotos === true;
+      const onProgress = options?.onProgress;
       const seasonScopedPhotoRefresh =
         target === "photos" &&
         activeTab === "assets" &&
@@ -8997,10 +9344,10 @@ export default function TrrShowDetailPage() {
           ? selectedGallerySeason
           : null;
       const suppressSuccessNotice = options?.suppressSuccessNotice === true;
+      const backendTarget = target === "cast_credits" ? CREDITS_PIPELINE_BACKEND_TARGET : target;
 
       let success = false;
-      let castProfilesSummary: { attempted: number; succeeded: number; failed: number } | null =
-        null;
+      let latestLiveCounts: JobLiveCounts | null = refreshTargetLiveCounts[target] ?? null;
 
       setRefreshingTargets((prev) => ({ ...prev, [target]: true }));
       setRefreshTargetLiveCounts((prev) => ({ ...prev, [target]: null }));
@@ -9076,7 +9423,9 @@ export default function TrrShowDetailPage() {
                 }
               : target === "get_images"
                 ? {}
-                : { targets: [target] };
+                : target === "cast_credits"
+                  ? { targets: [CREDITS_PIPELINE_BACKEND_TARGET] }
+                  : { targets: [target] };
           const streamController = new AbortController();
           let streamIdleTimer: ReturnType<typeof setTimeout> | null = null;
           const bumpStreamIdleTimeout = () => {
@@ -9145,14 +9494,54 @@ export default function TrrShowDetailPage() {
                     progressMessage = `${progressMessage}${counts}`;
                   }
                   const nextLiveCounts = resolveJobLiveCounts(
-                    refreshTargetLiveCounts[target] ?? null,
+                    latestLiveCounts,
                     payload
                   );
+                  latestLiveCounts = nextLiveCounts;
                   setRefreshTargetLiveCounts((prev) => ({ ...prev, [target]: nextLiveCounts }));
                   const enrichedProgressMessage = appendLiveCountsToMessage(
                     progressMessage,
                     nextLiveCounts
                   );
+                  if (target === "cast_credits") {
+                    const phaseRaw =
+                      (payload as { pipeline_stage?: unknown }).pipeline_stage ?? stageRaw ?? stageKeyRaw;
+                    const phaseId = isCastRefreshPhaseId(phaseRaw) ? phaseRaw : null;
+                    const pipelineStatusRaw = (payload as { pipeline_status?: unknown }).pipeline_status;
+                    const pipelineStatus =
+                      typeof pipelineStatusRaw === "string" ? pipelineStatusRaw.trim().toLowerCase() : "running";
+                    if (phaseId) {
+                      setCastRefreshPhaseStates((prev) => {
+                        const existing = prev.length > 0 ? prev : createCastRefreshPhaseStates();
+                        return updateCastRefreshPhaseStates(existing, phaseId, (state) => ({
+                          ...state,
+                          status:
+                            pipelineStatus === "completed"
+                              ? "completed"
+                              : pipelineStatus === "skipped"
+                                ? "skipped"
+                                : pipelineStatus === "failed"
+                                  ? "failed"
+                                  : "running",
+                          startedAt: state.startedAt ?? toIsoNow(),
+                          finishedAt:
+                            pipelineStatus === "completed" || pipelineStatus === "skipped" || pipelineStatus === "failed"
+                              ? toIsoNow()
+                              : null,
+                          error:
+                            pipelineStatus === "failed" && typeof (payload as { error?: unknown }).error === "string"
+                              ? String((payload as { error?: unknown }).error)
+                              : null,
+                          progress: {
+                            current: typeof current === "number" && Number.isFinite(current) ? current : state.progress.current,
+                            total: typeof total === "number" && Number.isFinite(total) ? total : state.progress.total,
+                            message: enrichedProgressMessage || state.progress.message || null,
+                            liveCounts: nextLiveCounts,
+                          },
+                        }));
+                      });
+                    }
+                  }
 
                   setRefreshTargetProgress((prev) => ({
                     ...prev,
@@ -9177,6 +9566,69 @@ export default function TrrShowDetailPage() {
                           ? sourceRaw
                           : null,
                   });
+                  onProgress?.({
+                    stage: stageLabel ?? undefined,
+                    current: typeof current === "number" && Number.isFinite(current) ? current : null,
+                    total: typeof total === "number" && Number.isFinite(total) ? total : null,
+                    message: enrichedProgressMessage,
+                    liveCounts: nextLiveCounts,
+                  });
+                  return;
+                }
+
+                if ((event === "operation" || event === "dispatched_to_modal") && payload && typeof payload === "object") {
+                  const kickoffHandle = normalizeKickoffHandle(payload as Record<string, unknown>);
+                  const metaParts: string[] = [];
+                  if (kickoffHandle.executionOwner) {
+                    metaParts.push(
+                      kickoffHandle.executionOwner === "remote_worker"
+                        ? "remote worker"
+                        : kickoffHandle.executionOwner
+                    );
+                  }
+                  if (kickoffHandle.executionBackendCanonical) {
+                    metaParts.push(kickoffHandle.executionBackendCanonical);
+                  }
+                  if (kickoffHandle.executionModeCanonical) {
+                    metaParts.push(`mode ${kickoffHandle.executionModeCanonical}`);
+                  }
+                  if (kickoffHandle.operationId) {
+                    metaParts.push(`op ${kickoffHandle.operationId.slice(0, 8)}`);
+                  }
+                  const metaSuffix = metaParts.length > 0 ? ` (${metaParts.join(" · ")})` : "";
+                  const operationStatus =
+                    canonicalizeOperationStatus(
+                      kickoffHandle.rawStatus,
+                      event === "dispatched_to_modal" ? "running" : "queued"
+                    ) || (event === "dispatched_to_modal" ? "running" : "queued");
+                  const operationMessage =
+                    kickoffHandle.rawStatus === "attached"
+                      ? `Attached to ${label} refresh${metaSuffix}.`
+                      : operationStatus === "running"
+                        ? `${label} refresh running${metaSuffix}.`
+                        : `${label} refresh ${operationStatus}${metaSuffix}.`;
+                  setRefreshTargetProgress((prev) => ({
+                    ...prev,
+                    [target]: {
+                      stage: "Remote Worker",
+                      message: operationMessage,
+                      current: prev[target]?.current ?? 0,
+                      total: prev[target]?.total ?? null,
+                    },
+                  }));
+                  appendRefreshLog({
+                    category: label,
+                    message: operationMessage,
+                    current: null,
+                    total: null,
+                  });
+                  onProgress?.({
+                    stage: "Remote Worker",
+                    current: null,
+                    total: null,
+                    message: operationMessage,
+                    liveCounts: latestLiveCounts,
+                  });
                   return;
                 }
 
@@ -9186,9 +9638,10 @@ export default function TrrShowDetailPage() {
                     : {};
                   sawComplete = true;
                   const completeLiveCounts = resolveJobLiveCounts(
-                    refreshTargetLiveCounts[target] ?? null,
+                    latestLiveCounts,
                     payloadObject
                   );
+                  latestLiveCounts = completeLiveCounts;
                   setRefreshTargetLiveCounts((prev) => ({
                     ...prev,
                     [target]: completeLiveCounts,
@@ -9330,7 +9783,7 @@ export default function TrrShowDetailPage() {
                     resultsRaw && typeof resultsRaw === "object"
                       ? (resultsRaw as Record<string, unknown>)
                       : null;
-                  const stepRaw = results ? results[target] : null;
+                  const stepRaw = results ? results[backendTarget] : null;
                   const step =
                     stepRaw && typeof stepRaw === "object"
                       ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
@@ -9352,39 +9805,47 @@ export default function TrrShowDetailPage() {
                       await loadGalleryAssets(selectedGallerySeason);
                     }
                   } else if (target === "cast_credits") {
-                    if (includeCastProfiles) {
-                      const castMembers = await fetchCast({
-                        rosterMode: "imdb_show_membership",
-                        minEpisodes: 1,
-                      });
-                      castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
-                    }
-                    await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 });
+                    await Promise.all([
+                      fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
+                      fetchShowCredits(),
+                    ]);
                   }
 
                   const durationMs =
                     typeof step?.duration_ms === "number" ? step.duration_ms : null;
-                  const castSuffix =
-                    target === "cast_credits" && castProfilesSummary
-                      ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
-                          castProfilesSummary.failed > 0
-                            ? ` (${castProfilesSummary.failed} failed)`
-                            : ""
+                  const castSuffix = "";
+                  const creditsSuccessNotice =
+                    target === "cast_credits"
+                      ? `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}: IMDb Full Credits, profile links, bios, network augmentation, and media ingest refreshed${
+                          liveCountSuffix ? `. ${liveCountSuffix}` : "."
                         }`
-                      : "";
+                      : `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}${
+                          liveCountSuffix ? `. ${liveCountSuffix}` : "."
+                        }`;
                   if (!suppressSuccessNotice) {
                     setRefreshTargetNotice((prev) => ({
                       ...prev,
-                      [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}${
-                        liveCountSuffix ? `. ${liveCountSuffix}` : "."
-                      }`,
+                      [target]: creditsSuccessNotice,
                     }));
                   }
                   appendRefreshLog({
                     category: label,
-                    message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
+                    message:
+                      target === "cast_credits"
+                        ? `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}: IMDb Full Credits synced for cast + crew, episode appearances refreshed${castSuffix}.`
+                        : `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
                     current: null,
                     total: null,
+                  });
+                  onProgress?.({
+                    stage: "Complete",
+                    current: 1,
+                    total: 1,
+                    message:
+                      target === "cast_credits"
+                        ? "Credits refresh pipeline completed."
+                        : `Refreshed ${label}.`,
+                    liveCounts: completeLiveCounts,
                   });
                   return;
                 }
@@ -9438,7 +9899,10 @@ export default function TrrShowDetailPage() {
               {
                 method: "POST",
                 headers: { ...headers, "Content-Type": "application/json" },
-                body: JSON.stringify({ targets: [target] }),
+                body:
+                  target === "cast_credits"
+                    ? buildCreditsPipelineRequestBody()
+                    : JSON.stringify({ targets: [target] }),
               },
               SHOW_REFRESH_FALLBACK_TIMEOUT_MS
             );
@@ -9469,7 +9933,7 @@ export default function TrrShowDetailPage() {
             resultsRaw && typeof resultsRaw === "object"
               ? (resultsRaw as Record<string, unknown>)
               : null;
-          const stepRaw = results ? results[target] : null;
+          const stepRaw = results ? results[backendTarget] : null;
           const step =
             stepRaw && typeof stepRaw === "object"
               ? (stepRaw as { status?: unknown; duration_ms?: unknown; error?: unknown })
@@ -9485,34 +9949,41 @@ export default function TrrShowDetailPage() {
           } else if (target === "seasons_episodes") {
             await Promise.all([fetchShow(), fetchSeasons()]);
           } else if (target === "cast_credits") {
-            if (includeCastProfiles) {
-              const castMembers = await fetchCast({
-                rosterMode: "imdb_show_membership",
-                minEpisodes: 1,
-              });
-              castProfilesSummary = await refreshCastProfilesAndMedia(castMembers);
-            }
-            await fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 });
+            await Promise.all([
+              fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
+              fetchShowCredits(),
+            ]);
           }
 
           const durationMs = typeof step?.duration_ms === "number" ? step.duration_ms : null;
-          const castSuffix =
-            target === "cast_credits" && castProfilesSummary
-              ? `, cast profiles/media: ${castProfilesSummary.succeeded}/${castProfilesSummary.attempted}${
-                  castProfilesSummary.failed > 0 ? ` (${castProfilesSummary.failed} failed)` : ""
-                }`
-              : "";
+          const castSuffix = "";
           if (!suppressSuccessNotice) {
             setRefreshTargetNotice((prev) => ({
               ...prev,
-              [target]: `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
+              [target]:
+                target === "cast_credits"
+                  ? `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}: IMDb Full Credits, profile links, bios, network augmentation, and media ingest refreshed.`
+                  : `Refreshed ${label}${durationMs !== null ? ` (${durationMs}ms)` : ""}${castSuffix}.`,
             }));
           }
           appendRefreshLog({
             category: label,
-            message: `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
+            message:
+              target === "cast_credits"
+                ? `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}: IMDb Full Credits, profile links, bios, network augmentation, and media ingest refreshed.`
+                : `Completed ${label}${durationMs !== null ? ` in ${durationMs}ms` : ""}${castSuffix}.`,
             current: null,
             total: null,
+          });
+          onProgress?.({
+            stage: "Complete",
+            current: 1,
+            total: 1,
+            message:
+              target === "cast_credits"
+                ? "Credits refresh pipeline completed."
+                : `Refreshed ${label}.`,
+            liveCounts: latestLiveCounts,
           });
         } else if (!sawComplete) {
           if (!suppressSuccessNotice) {
@@ -9557,7 +10028,7 @@ export default function TrrShowDetailPage() {
       appendRefreshLog,
       assetsView,
       fetchCast,
-      refreshCastProfilesAndMedia,
+      fetchShowCredits,
       fetchSeasons,
       fetchShow,
       getAuthHeaders,
@@ -9861,301 +10332,107 @@ export default function TrrShowDetailPage() {
     panel.scrollTop = healthCenterScrollTopRef.current;
   }, [refreshAllProgress, refreshLogEntries, refreshLogOpen, refreshingShowAll]);
 
-  const refreshShowCast = useCallback(async () => {
-    if (
-      refreshingShowAll ||
-      Object.values(refreshingTargets).some(Boolean) ||
-      castMatrixSyncLoading ||
-      castMediaEnriching ||
-      castRefreshPipelineRunning
-    ) {
-      return;
-    }
-    const runController = new AbortController();
-    castRefreshAbortControllerRef.current = runController;
-    setCastMediaEnrichNotice(null);
-    setCastMediaEnrichError(null);
-    setCastRunFailedMembers([]);
-    setCastFailedMembersOpen(false);
-    setCastRefreshPipelineRunning(true);
-    setCastRefreshPhaseStates([]);
-    setRefreshTargetNotice((prev) => {
-      const next = { ...prev };
-      delete next.cast_credits;
-      return next;
-    });
-    setRefreshTargetError((prev) => {
-      const next = { ...prev };
-      delete next.cast_credits;
-      return next;
-    });
-    setRefreshTargetProgress((prev) => {
-      const next = { ...prev };
-      delete next.cast_credits;
-      return next;
-    });
-
-    const isBravoShow = (show?.networks ?? []).some((network) => isBravoNetworkName(network));
-    let rosterMembers: TrrCastMember[] = [];
-    let latestPhaseStates: CastRefreshPhaseState[] = [];
-    let completedSuccessfully = false;
-    const runFailedMembers: CastRunFailedMember[] = [];
-
-    try {
-      const phases: CastRefreshPhaseDefinition[] = [
-        {
-          id: "credits_sync",
-          label: "Credits Sync",
-          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.credits_sync,
-          run: async ({ updateProgress }) => {
-            updateProgress({
-              current: 0,
-              total: 1,
-              message: "Syncing cast credits from IMDb...",
-            });
-            const refreshed = await refreshShow("cast_credits", {
-              includeCastProfiles: false,
-              suppressSuccessNotice: true,
-            });
-            if (!refreshed) {
-              throw new Error("Cast credits sync failed.");
-            }
-            updateProgress({
-              current: 1,
-              total: 1,
-              message: "Cast credits synced.",
-            });
-          },
-        },
-        {
-          id: "profile_links_sync",
-          label: "Profile Links Sync",
-          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.profile_links_sync,
-          run: async ({ signal, updateProgress }) => {
-            updateProgress({
-              current: 0,
-              total: 1,
-              message: "Syncing relationship roles and profile links...",
-            });
-            await syncCastMatrixRoles({
-              includeRelationshipRoles: true,
-              includeBravoLinks: false,
-              includeBravoImages: false,
-              throwOnError: true,
-              signal,
-            });
-            updateProgress({
-              current: 1,
-              total: 1,
-              message: "Profile link sync complete.",
-            });
-          },
-        },
-        {
-          id: "bio_sync",
-          label: "Bio Sync",
-          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.bio_sync,
-          run: async ({ signal, updateProgress }) => {
-            updateProgress({
-              current: 0,
-              total: null,
-              message: "Loading IMDb cast roster for bio sync...",
-            });
-            rosterMembers = await fetchCast({
-              rosterMode: "imdb_show_membership",
-              minEpisodes: 1,
-              throwOnError: true,
-              signal,
-            });
-            const bioSummary = await refreshCastProfilesAndMedia(rosterMembers, {
-              mode: "profile_only",
-              stageLabel: "Cast Bios",
-              category: "Cast Bios",
-              signal,
-            });
-            if (bioSummary.failedMembers.length > 0) {
-              runFailedMembers.push(...bioSummary.failedMembers);
-            }
-            updateProgress({
-              current: rosterMembers.length,
-              total: rosterMembers.length,
-              message: `Bio sync complete for ${rosterMembers.length.toLocaleString()} members.`,
-            });
-          },
-        },
-        {
-          id: "network_augmentation",
-          label: "Network Augmentation",
-          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.network_augmentation,
-          run: async ({ signal, updateProgress }) => {
-            if (!isBravoShow) {
-              return { skipped: true, message: "Skipped: no Bravo network augmentation required." };
-            }
-            updateProgress({
-              current: 0,
-              total: 1,
-              message: "Running Bravo-specific cast augmentation...",
-            });
-            await syncCastMatrixRoles({
-              includeRelationshipRoles: false,
-              includeBravoLinks: true,
-              includeBravoImages: true,
-              throwOnError: true,
-              signal,
-            });
-            updateProgress({
-              current: 1,
-              total: 1,
-              message: "Network augmentation complete.",
-            });
-          },
-        },
-        {
-          id: "media_ingest",
-          label: "Media Ingest",
-          timeoutMs: CAST_REFRESH_PHASE_TIMEOUTS.media_ingest,
-          run: async ({ signal, updateProgress }) => {
-            if (rosterMembers.length === 0) {
-              rosterMembers = await fetchCast({
-                rosterMode: "imdb_show_membership",
-                minEpisodes: 1,
-                throwOnError: true,
-                signal,
-              });
-            }
-            const longHint =
-              rosterMembers.length > 30 ? " This may take several minutes." : "";
-            updateProgress({
-              current: 0,
-              total: rosterMembers.length,
-              message: `Ingesting cast media from IMDb/TMDb...${longHint}`,
-            });
-            const ingestSummary = await refreshCastProfilesAndMedia(rosterMembers, {
-              mode: "ingest_only",
-              stageLabel: "Cast Media Ingest",
-              category: "Cast Media Ingest",
-              signal,
-            });
-            if (ingestSummary.failedMembers.length > 0) {
-              runFailedMembers.push(...ingestSummary.failedMembers);
-            }
-            updateProgress({
-              current: rosterMembers.length,
-              total: rosterMembers.length,
-              message: "Cast media ingest complete.",
-            });
-          },
-        },
-      ];
-
-      await runPhasedCastRefresh({
-        phases,
-        signal: runController.signal,
-        onPhaseStatesChange: (states) => {
-          latestPhaseStates = states;
-          setCastRefreshPhaseStates(states);
-          const activePhase =
-            states.find((phase) => phase.status === "running") ??
-            states.find((phase) => phase.status === "failed" || phase.status === "timed_out") ??
-            [...states].reverse().find((phase) => phase.status === "completed") ??
-            null;
-          if (!activePhase) return;
-
-          const phaseIndex = states.findIndex((phase) => phase.id === activePhase.id);
-          const phaseStage = CAST_REFRESH_PHASE_STAGES[activePhase.id] ?? activePhase.label;
-          setRefreshTargetProgress((prev) => ({
-            ...prev,
-            cast_credits: {
-              stage: `Phase ${phaseIndex + 1}/${states.length}: ${phaseStage}`,
-              message:
-                activePhase.progress.message ||
-                `${phaseStage} ${
-                  activePhase.status === "running" ? "in progress" : activePhase.status
-                }.`,
-              current: activePhase.progress.current,
-              total: activePhase.progress.total,
-            },
-          }));
-        },
-      });
-      await fetchCast({
-        rosterMode: "imdb_show_membership",
-        minEpisodes: 1,
-        signal: runController.signal,
-      });
-      await fetchCastRoleMembers({ force: true });
-      setCastRoleMembersWarning(null);
-      setCastRunFailedMembers(runFailedMembers);
-      setCastFailedMembersOpen(runFailedMembers.length > 0);
-      setRefreshTargetNotice((prev) => ({
-        ...prev,
-        cast_credits:
-          "Cast refresh complete: credits synced, profile links synced, bios refreshed, network augmentation applied, media ingest complete.",
-      }));
-      completedSuccessfully = true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Cast refresh failed";
-      if (runController.signal.aborted || /canceled/i.test(message)) {
-        setRefreshTargetError((prev) => {
-          const next = { ...prev };
-          delete next.cast_credits;
-          return next;
-        });
-        setRefreshTargetNotice((prev) => ({
-          ...prev,
-          cast_credits: "Cast refresh canceled.",
-        }));
-        appendRefreshLog({
-          category: "Cast & Credits",
-          message: "Cast refresh canceled.",
-          current: null,
-          total: null,
-        });
+  const refreshShowCast = useCallback(
+    async ({ resumeOnly = false }: { resumeOnly?: boolean } = {}) => {
+      if (!showId) return;
+      const flowScope = buildCreditsPipelineFlowScope(showId);
+      const resumableSession = getAutoResumableAdminOperationSession(flowScope);
+      const hasResumableOperation =
+        resumableSession?.status === "active" &&
+        typeof resumableSession.operationId === "string" &&
+        resumableSession.operationId.trim().length > 0;
+      if (resumeOnly && !hasResumableOperation) {
         return;
       }
-      const failedPhase =
-        latestPhaseStates.find((phase) => phase.status === "failed" || phase.status === "timed_out")
-        ?? null;
-      const phasePrefix = failedPhase
-        ? `${CAST_REFRESH_PHASE_STAGES[failedPhase.id] ?? failedPhase.label} failed`
-        : "Cast refresh failed";
-      setCastRunFailedMembers(runFailedMembers);
-      setCastFailedMembersOpen(runFailedMembers.length > 0);
+      if (
+        !resumeOnly &&
+        (
+          refreshingShowAll ||
+          Object.values(refreshingTargets).some(Boolean) ||
+          castMatrixSyncLoading ||
+          castMediaEnriching ||
+          castRefreshPipelineRunning
+        )
+      ) {
+        return;
+      }
+
+      const runController = new AbortController();
+      castRefreshAbortControllerRef.current = runController;
+      setCastMediaEnrichNotice(null);
+      setCastMediaEnrichError(null);
+      setCastRunFailedMembers([]);
+      setCastFailedMembersOpen(false);
+      setCastRefreshCanceling(false);
+      setCastRefreshPipelineRunning(true);
+      setCastRefreshPhaseStates((prev) => (prev.length > 0 ? prev : createCastRefreshPhaseStates()));
       setRefreshTargetNotice((prev) => {
         const next = { ...prev };
         delete next.cast_credits;
         return next;
       });
-      setRefreshTargetError((prev) => ({ ...prev, cast_credits: `${phasePrefix}: ${message}` }));
-      appendRefreshLog({
-        category: "Cast & Credits",
-        message: `${phasePrefix}: ${message}`,
-        current: null,
-        total: null,
+      setRefreshTargetError((prev) => {
+        const next = { ...prev };
+        delete next.cast_credits;
+        return next;
       });
-    } finally {
-      if (castRefreshAbortControllerRef.current === runController) {
-        castRefreshAbortControllerRef.current = null;
+      setRefreshTargetProgress((prev) => ({
+        ...prev,
+        cast_credits: {
+          stage: resumeOnly ? "Reconnect" : "Initializing",
+          message:
+            resumeOnly && resumableSession?.operationId
+              ? `Reconnected to Credits refresh from this tab (op ${resumableSession.operationId.slice(0, 8)}).`
+              : "Starting Credits refresh...",
+          current: 0,
+          total: CAST_REFRESH_PHASE_ORDER.length,
+        },
+      }));
+
+      if (resumeOnly && resumableSession?.operationId) {
+        const reconnectMessage = `Reconnected to Credits refresh from this tab (op ${resumableSession.operationId.slice(0, 8)}).`;
+        setRefreshTargetNotice((prev) => ({
+          ...prev,
+          cast_credits: reconnectMessage,
+        }));
+        appendRefreshLog({
+          category: "Credits",
+          message: reconnectMessage,
+          current: null,
+          total: null,
+        });
       }
-      setCastRefreshPipelineRunning(false);
-      if (completedSuccessfully) {
-        setCastRefreshPhaseStates([]);
+
+      try {
+        const refreshed = await refreshShow("cast_credits", {
+          includeCastProfiles: false,
+          suppressSuccessNotice: true,
+        });
+        if (refreshed) {
+          setCastRoleMembersWarning(null);
+        }
+      } finally {
+        if (castRefreshAbortControllerRef.current === runController) {
+          castRefreshAbortControllerRef.current = null;
+        }
+        clearAdminOperationSession(flowScope);
+        castRefreshResumeOperationRef.current = null;
+        setCastRefreshCanceling(false);
+        setCastRefreshPipelineRunning(false);
       }
-    }
-  }, [
-    appendRefreshLog,
-    castMatrixSyncLoading,
-    castMediaEnriching,
-    castRefreshPipelineRunning,
-    fetchCast,
-    fetchCastRoleMembers,
-    refreshCastProfilesAndMedia,
-    refreshShow,
-    refreshingShowAll,
-    refreshingTargets,
-    show?.networks,
-    syncCastMatrixRoles,
-  ]);
+    },
+    [
+      appendRefreshLog,
+      castMatrixSyncLoading,
+      castMediaEnriching,
+      castRefreshPipelineRunning,
+      refreshShow,
+      refreshingShowAll,
+      refreshingTargets,
+      setCastRoleMembersWarning,
+      showId,
+    ],
+  );
 
   const enrichCastMedia = useCallback(async () => {
     if (
@@ -10242,11 +10519,136 @@ export default function TrrShowDetailPage() {
     reprocessCastMedia,
   ]);
 
-  const cancelShowCastWorkflow = useCallback(() => {
+  const cancelShowCastWorkflow = useCallback(async () => {
     castRefreshAbortControllerRef.current?.abort();
     castMediaEnrichAbortControllerRef.current?.abort();
     abortInFlightPersonRefreshRuns();
-  }, [abortInFlightPersonRefreshRuns]);
+
+    if (!showId) return;
+    const flowScope = buildCreditsPipelineFlowScope(showId);
+    const activeSession = getAutoResumableAdminOperationSession(flowScope);
+    const operationId = activeSession?.operationId?.trim() ?? "";
+    if (!operationId) {
+      setCastRefreshCanceling(false);
+      return;
+    }
+
+    setCastRefreshCanceling(true);
+    setRefreshTargetError((prev) => {
+      const next = { ...prev };
+      delete next.cast_credits;
+      return next;
+    });
+    setRefreshTargetNotice((prev) => ({
+      ...prev,
+      cast_credits: `Requesting cancellation for Credits run ${operationId.slice(0, 8)}...`,
+    }));
+    setRefreshTargetProgress((prev) => ({
+      ...prev,
+      cast_credits: {
+        stage: prev.cast_credits?.stage ?? "Cancellation",
+        message: `Requesting cancellation for Credits run ${operationId.slice(0, 8)}...`,
+        current: prev.cast_credits?.current ?? null,
+        total: prev.cast_credits?.total ?? null,
+      },
+    }));
+    appendRefreshLog({
+      category: "Credits",
+      message: `Cancellation requested for operation ${operationId.slice(0, 8)}.`,
+      current: null,
+      total: null,
+    });
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/operations/${operationId}/cancel`,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers,
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        operation?: { status?: string | null };
+        cancelled_operation_ids?: string[];
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      const cancelledOperationIds = Array.isArray(payload.cancelled_operation_ids)
+        ? payload.cancelled_operation_ids.filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0,
+          )
+        : [];
+      const resultingStatus = String(payload.operation?.status || "").trim().toLowerCase();
+      if (resultingStatus === "cancelled") {
+        markAdminOperationSessionStatus(flowScope, "cancelled");
+      }
+      const notice =
+        resultingStatus === "cancelled"
+          ? cancelledOperationIds.length > 1
+            ? `Cancelled ${cancelledOperationIds.length} related Credits jobs.`
+            : `Credits run ${operationId.slice(0, 8)} cancelled.`
+          : cancelledOperationIds.length > 1
+            ? `Cancellation requested for ${cancelledOperationIds.length} related Credits jobs.`
+            : `Cancellation requested for Credits run ${operationId.slice(0, 8)}.`;
+      setRefreshTargetNotice((prev) => ({ ...prev, cast_credits: notice }));
+      setRefreshTargetProgress((prev) => ({
+        ...prev,
+        cast_credits: {
+          stage: prev.cast_credits?.stage ?? "Cancellation",
+          message:
+            resultingStatus === "cancelled"
+              ? notice
+              : `${notice} Waiting for the worker to stop...`,
+          current: prev.cast_credits?.current ?? null,
+          total: prev.cast_credits?.total ?? null,
+        },
+      }));
+      appendRefreshLog({
+        category: "Credits",
+        message: notice,
+        current: null,
+        total: null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to cancel Credits run";
+      setRefreshTargetError((prev) => ({ ...prev, cast_credits: message }));
+      appendRefreshLog({
+        category: "Credits",
+        message: `Cancellation failed: ${message}`,
+        current: null,
+        total: null,
+      });
+      setCastRefreshCanceling(false);
+    }
+  }, [abortInFlightPersonRefreshRuns, appendRefreshLog, getAuthHeaders, showId]);
+
+  useEffect(() => {
+    if (!showId || activeTab !== "cast") {
+      castRefreshResumeOperationRef.current = null;
+      return;
+    }
+    const flowScope = buildCreditsPipelineFlowScope(showId);
+    const activeSession = getAutoResumableAdminOperationSession(flowScope);
+    const activeOperationId = activeSession?.operationId?.trim() ?? "";
+    if (!activeOperationId) {
+      castRefreshResumeOperationRef.current = null;
+      return;
+    }
+    if (refreshingTargets.cast_credits || castRefreshPipelineRunning) {
+      castRefreshResumeOperationRef.current = activeOperationId;
+      return;
+    }
+    if (castRefreshResumeOperationRef.current === activeOperationId) {
+      return;
+    }
+    castRefreshResumeOperationRef.current = activeOperationId;
+    void refreshShowCast({ resumeOnly: true });
+  }, [activeTab, castRefreshPipelineRunning, refreshShowCast, refreshingTargets.cast_credits, showId]);
 
   const retryFailedCastMediaEnrich = useCallback(async () => {
     if (castRunFailedMembers.length === 0) return;
@@ -11045,6 +11447,14 @@ export default function TrrShowDetailPage() {
   const imdbRatingText = formatFixed1(show.imdb_rating_value);
   const primaryNetwork = show.networks?.[0] ?? null;
   const networkLabel = show.networks?.slice(0, 2).join(" · ") || "TRR Core";
+  const creditsPipelineFlowScope = showId ? buildCreditsPipelineFlowScope(showId) : null;
+  const activeCreditsOperationSession = creditsPipelineFlowScope
+    ? getAutoResumableAdminOperationSession(creditsPipelineFlowScope)
+    : null;
+  const hasReconnectableCreditsRun =
+    activeCreditsOperationSession?.status === "active" &&
+    typeof activeCreditsOperationSession.operationId === "string" &&
+    activeCreditsOperationSession.operationId.trim().length > 0;
   const hasPersonRefreshInFlight = Object.keys(refreshingPersonIds).length > 0;
   const isShowRefreshBusy =
     refreshingShowAll || Object.values(refreshingTargets).some((value) => value);
@@ -11053,12 +11463,14 @@ export default function TrrShowDetailPage() {
     castMediaEnriching ||
     castMatrixSyncLoading ||
     Boolean(refreshingTargets.cast_credits) ||
+    hasReconnectableCreditsRun ||
     hasPersonRefreshInFlight;
   const isCastRefreshBusy =
     isShowRefreshBusy ||
     castMatrixSyncLoading ||
     castRefreshPipelineRunning ||
     castMediaEnriching ||
+    hasReconnectableCreditsRun ||
     hasPersonRefreshInFlight;
   const rolesWarningWithSnapshotAge = withSnapshotAgeSuffix(rolesWarning, lastSuccessfulRolesAt);
   const castRoleMembersWarningWithSnapshotAge = withSnapshotAgeSuffix(
@@ -11099,7 +11511,8 @@ export default function TrrShowDetailPage() {
     ? castRefreshActivePhase
       ? CAST_REFRESH_PHASE_BUTTON_LABELS[castRefreshActivePhase.id]
       : "Refreshing..."
-    : "Refresh";
+    : "Refresh Credits";
+  const castRefreshCancelButtonLabel = castRefreshCanceling ? "Cancelling..." : "Cancel Run";
   const autoGeneratedBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim() || "";
 
   const pipelineSteps = buildPipelineRows(REFRESH_LOG_TOPIC_DEFINITIONS, refreshLogTopicGroups);
@@ -11192,7 +11605,7 @@ export default function TrrShowDetailPage() {
     },
     {
       key: "cast",
-      label: "Cast",
+      label: "Credits",
       countLabel: `${cast.length}`,
       status: castHealthStatus,
       onClick: () => setTab("cast"),
@@ -12034,7 +12447,7 @@ export default function TrrShowDetailPage() {
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Cast Members
+                    Credits
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
                     {show.name}
@@ -12068,25 +12481,29 @@ export default function TrrShowDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={refreshShowCast}
+                    onClick={() => refreshShowCast()}
                     disabled={isCastRefreshBusy}
                     title={isCastRefreshBusy ? "Cast sync in progress" : undefined}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
                     {castRefreshButtonLabel}
                   </button>
-                  {(castRefreshPipelineRunning || castMediaEnriching || hasPersonRefreshInFlight) && (
+                  {(castRefreshPipelineRunning ||
+                    castMediaEnriching ||
+                    hasPersonRefreshInFlight ||
+                    hasReconnectableCreditsRun) && (
                     <button
                       type="button"
-                      onClick={cancelShowCastWorkflow}
-                      className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                      onClick={() => void cancelShowCastWorkflow()}
+                      disabled={castRefreshCanceling}
+                      className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Cancel
+                      {castRefreshCancelButtonLabel}
                     </button>
                   )}
                 </div>
               </div>
-              {(refreshTargetNotice.cast_credits ||
+                  {(refreshTargetNotice.cast_credits ||
                 refreshTargetError.cast_credits) && (
                 <p
                   className={`mb-4 text-sm ${
@@ -12101,7 +12518,7 @@ export default function TrrShowDetailPage() {
                 <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Cast Refresh Pipeline
+                      Credits Refresh Pipeline
                     </p>
                     {castRefreshPipelineRunning && (
                       <p className="text-[11px] text-zinc-500">Fail-fast timeout policy enabled</p>
@@ -12117,10 +12534,7 @@ export default function TrrShowDetailPage() {
                           <p className="text-sm font-semibold text-zinc-800">
                             {index + 1}. {CAST_REFRESH_PHASE_STAGES[phase.id] ?? phase.label}
                           </p>
-                          {(phase.status === "running" ||
-                            phase.status === "failed" ||
-                            phase.status === "timed_out") &&
-                            phase.progress.message && (
+                          {phase.status !== "pending" && phase.progress.message && (
                               <p className="truncate text-xs text-zinc-500">{phase.progress.message}</p>
                             )}
                         </div>
@@ -12174,6 +12588,34 @@ export default function TrrShowDetailPage() {
                     Retry Cast
                   </button>
                 </div>
+              )}
+              {showCreditsError && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <span>{showCreditsError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchShowCredits()}
+                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    Retry Crew
+                  </button>
+                </div>
+              )}
+              {showCreditsLoading && !showCreditsLoadedOnce && (
+                <p className="mb-4 text-sm text-zinc-500">Loading crew credits...</p>
+              )}
+              {showCreditsSourceUrl && (
+                <p className="mb-4 text-xs text-zinc-500">
+                  Crew source:{" "}
+                  <a
+                    href={showCreditsSourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-zinc-700 underline decoration-zinc-300 underline-offset-2"
+                  >
+                    IMDb Full Credits
+                  </a>
+                </p>
               )}
               {castRoleMembersWarningWithSnapshotAge && (
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -12563,111 +13005,47 @@ export default function TrrShowDetailPage() {
                   )}
                 </section>
 
-                {crewGalleryMembers.length > 0 && (
+                {crewDisplaySections.length > 0 && (
                   <section>
                     <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
                       Crew
                     </p>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {visibleCrewGalleryMembers.map((member) => {
-                        const thumbnailUrl = member.merged_photo_url;
-                        const episodeLabel =
-                          typeof member.total_episodes === "number"
-                            ? `${member.total_episodes} episodes`
-                            : null;
-                        return (
-                          <div
-                            key={`crew-${member.id}`}
-                            className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
-                          >
-                            <Link
-                              href={buildPersonAdminUrl({
-                                showSlug: showSlugForRouting,
-                                personSlug: buildPersonRouteSlug({
-                                  personName: member.full_name || member.cast_member_name || null,
-                                  personId: member.person_id,
-                                }),
-                                tab: "overview",
-                              }) as Route}
-                              className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                            >
-                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                              {thumbnailUrl ? (
-                                <CastPhoto
-                                  src={thumbnailUrl}
-                                  alt={member.full_name || member.cast_member_name || "Crew member"}
-                                  thumbnail_focus_x={member.thumbnail_focus_x}
-                                  thumbnail_focus_y={member.thumbnail_focus_y}
-                                  thumbnail_zoom={member.thumbnail_zoom}
-                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
-                                />
-                              ) : (
-                                <div className="flex h-full items-center justify-center text-zinc-400">
-                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                  </svg>
-                                </div>
-                              )}
-                            </div>
-                            <p className="font-semibold text-zinc-900">
-                              {member.full_name || member.cast_member_name || "Unknown"}
-                            </p>
-                            {member.credit_category && (
-                              <p className="text-sm text-blue-700">{member.credit_category}</p>
-                            )}
-                            {episodeLabel && <p className="text-xs text-zinc-600">{episodeLabel}</p>}
-                            {member.roles.length > 0 && (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {member.roles.map((role) => (
-                                  <span
-                                    key={`crew-${member.person_id}-${role}`}
-                                    className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700"
-                                  >
-                                    {role}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleRefreshCastMember(
-                                  member.person_id,
-                                  member.full_name || member.cast_member_name || "Crew member"
-                                );
-                              }}
-                              disabled={castAnyJobRunning || Boolean(refreshingPersonIds[member.person_id])}
-                              title={castAnyJobRunning ? "Cast sync in progress" : undefined}
-                              className="mt-3 w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50"
-                            >
-                              {refreshingPersonIds[member.person_id] ? "Refreshing..." : "Refresh Person"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                openCastRoleEditor(
-                                  member.person_id,
-                                  member.full_name || member.cast_member_name || "Crew member"
-                                );
-                              }}
-                              disabled={castAnyJobRunning}
-                              title={castAnyJobRunning ? "Cast sync in progress" : undefined}
-                              className="mt-2 w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50"
-                            >
-                              Edit Roles
-                            </button>
-                            <RefreshProgressBar
-                              show={Boolean(refreshingPersonIds[member.person_id])}
-                              stage={refreshingPersonProgress[member.person_id]?.stage}
-                              message={refreshingPersonProgress[member.person_id]?.message}
-                              current={refreshingPersonProgress[member.person_id]?.current}
-                              total={refreshingPersonProgress[member.person_id]?.total}
-                            />
+                    <div className="space-y-4">
+                      {crewDisplaySections.map((section) => (
+                        <div key={section.title} className="rounded-xl border border-zinc-200 bg-zinc-50/80">
+                          <div className="border-b border-zinc-200 px-4 py-3">
+                            <p className="text-sm font-semibold text-zinc-900">{section.title}</p>
                           </div>
-                        );
-                      })}
+                          <div className="divide-y divide-zinc-200">
+                            {section.rows.slice(0, crewRenderLimit).map((row) => (
+                              <div
+                                key={row.credit_id}
+                                className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]"
+                              >
+                                <div className="min-w-0">
+                                  <Link
+                                    href={buildPersonAdminUrl({
+                                      showSlug: showSlugForRouting,
+                                      personSlug: buildPersonRouteSlug({
+                                        personName: row.person_name,
+                                        personId: row.person_id,
+                                      }),
+                                      tab: "overview",
+                                    }) as Route}
+                                    className="font-semibold text-zinc-900 hover:underline"
+                                  >
+                                    {row.person_name || "Unknown"}
+                                  </Link>
+                                </div>
+                                <div className="min-w-0 text-sm text-zinc-600">{row.role || "Unspecified"}</div>
+                                <div className="text-right text-xs text-zinc-500">
+                                  {[row.episodes_label, row.years_label].filter(Boolean).join(" • ") || "IMDb"}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </section>
                 )}
@@ -12730,7 +13108,7 @@ export default function TrrShowDetailPage() {
 
                 {castUiTerminalReady &&
                   castGalleryMembers.length === 0 &&
-                  crewGalleryMembers.length === 0 &&
+                  crewDisplaySections.length === 0 &&
                   cast.length > 0 && (
                   <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                 )}

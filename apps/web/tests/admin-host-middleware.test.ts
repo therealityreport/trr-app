@@ -246,6 +246,7 @@ describe("admin host proxy", () => {
     ["/api-references", "http://admin.localhost:3000/admin/api-references"],
     ["/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/admin/dev-dashboard/skills-and-agents"],
     ["/rhoslc", "http://admin.localhost:3000/admin/trr-shows/rhoslc"],
+    ["/rhoslc/credits", "http://admin.localhost:3000/admin/trr-shows/rhoslc/credits"],
     ["/rhoslc/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social"],
     ["/rhoslc/social/reddit", "http://admin.localhost:3000/admin/trr-shows/rhoslc/social?social_view=reddit"],
     ["/rhoslc/assets/videos", "http://admin.localhost:3000/admin/trr-shows/rhoslc/assets/videos"],
@@ -259,6 +260,7 @@ describe("admin host proxy", () => {
       "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0/instagram",
     ],
     ["/rhoslc/s6", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6"],
+    ["/rhoslc/s6/credits", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=credits"],
     ["/rhoslc/s6/social", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social"],
     ["/rhoslc/s6/social/reddit", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=social&social_view=reddit"],
     ["/rhoslc/s6/assets/videos", "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6?tab=assets&assets=videos"],
@@ -280,6 +282,21 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-rewrite")).toBe(expectedRewrite);
+  });
+
+  it.each([
+    ["/rhoslc/cast", "http://admin.localhost:3000/rhoslc/credits"],
+    ["/rhoslc/s6/cast", "http://admin.localhost:3000/rhoslc/s6/credits"],
+  ])("redirects legacy short admin-host cast aliases to credits: %s", (pathname, expectedLocation) => {
+    process.env.ADMIN_APP_ORIGIN = "http://admin.localhost:3000";
+    process.env.ADMIN_ENFORCE_HOST = "true";
+    process.env.ADMIN_STRICT_HOST_ROUTING = "false";
+
+    const request = new NextRequest(`http://admin.localhost:3000${pathname}`);
+    const response = proxy(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(expectedLocation);
   });
 
   it("preserves the incoming search string once when rewriting canonical social profile routes", () => {
@@ -512,8 +529,24 @@ describe("admin host proxy", () => {
       "http://admin.localhost:3000/rhoslc",
     ],
     [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/credits",
+      "http://admin.localhost:3000/rhoslc/credits",
+    ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/cast",
+      "http://admin.localhost:3000/rhoslc/credits",
+    ],
+    [
       "http://admin.localhost:3000/admin/trr-shows/rhoslc/season-6/social",
       "http://admin.localhost:3000/rhoslc/s6/social",
+    ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/season-6/credits",
+      "http://admin.localhost:3000/rhoslc/s6/credits",
+    ],
+    [
+      "http://admin.localhost:3000/admin/trr-shows/rhoslc/season-6/cast",
+      "http://admin.localhost:3000/rhoslc/s6/credits",
     ],
     [
       "http://admin.localhost:3000/admin/trr-shows/rhoslc/seasons/6/social/week/0",

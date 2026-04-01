@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
+import {
   ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  TRR_SHOW_ASSETS_CACHE_NAMESPACE,
+  TRR_SHOW_ASSETS_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/trr-show-read-route-cache";
 
 export const dynamic = "force-dynamic";
 const FULL_FETCH_LIMIT = 5000;
@@ -20,7 +30,7 @@ interface RouteParams {
  */
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(_request);
+    const user = await requireAdmin(_request);
 
     const { showId } = await params;
     if (!showId) {
@@ -47,23 +57,38 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     if (full) upstreamParams.set("full", "true");
     if (sources.length > 0) upstreamParams.set("sources", sources.join(","));
 
-    const upstream = await fetchAdminBackendJson(
-      `/admin/trr-api/shows/${showId}/assets?${upstreamParams.toString()}`,
-      {
-        timeoutMs: ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
-        routeName: "show-assets",
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, `show-assets:${showId}`, upstreamParams);
+    const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SHOW_ASSETS_CACHE_NAMESPACE, cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+    }
+
+    const payload = await getOrCreateRouteResponsePromise(
+      TRR_SHOW_ASSETS_CACHE_NAMESPACE,
+      cacheKey,
+      async () => {
+        const upstream = await fetchAdminBackendJson(
+          `/admin/trr-api/shows/${showId}/assets?${upstreamParams.toString()}`,
+          {
+            timeoutMs: ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
+            routeName: "show-assets",
+          },
+        );
+        if (upstream.status !== 200) {
+          throw new Error(
+            typeof upstream.data.error === "string"
+              ? upstream.data.error
+              : typeof upstream.data.detail === "string"
+                ? upstream.data.detail
+                : "Failed to fetch show assets",
+          );
+        }
+        setRouteResponseCache(TRR_SHOW_ASSETS_CACHE_NAMESPACE, cacheKey, upstream.data, TRR_SHOW_ASSETS_CACHE_TTL_MS);
+        return upstream.data;
       },
     );
-    if (upstream.status !== 200) {
-      throw new Error(
-        typeof upstream.data.error === "string"
-          ? upstream.data.error
-          : typeof upstream.data.detail === "string"
-            ? upstream.data.detail
-            : "Failed to fetch show assets",
-      );
-    }
-    return NextResponse.json(upstream.data);
+
+    return NextResponse.json(payload);
   } catch (error) {
     console.error("[api] Failed to fetch show assets", error);
     return buildAdminProxyErrorResponse(error);

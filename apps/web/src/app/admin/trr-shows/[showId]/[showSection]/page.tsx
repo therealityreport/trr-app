@@ -10,6 +10,7 @@ const KNOWN_SHOW_SECTIONS = new Set([
   "overview",
   "seasons",
   "cast",
+  "credits",
   "social",
   "surveys",
   "details",
@@ -24,6 +25,10 @@ const KNOWN_SHOW_SECTIONS = new Set([
 export default async function ShowSectionRedirectPage({ params }: ShowSectionPageProps) {
   const { showId, showSection } = await params;
   const normalizedSection = showSection.trim().toLowerCase();
+
+  if (normalizedSection === "cast") {
+    redirect(`/admin/trr-shows/${encodeURIComponent(showId)}/credits` as Route);
+  }
 
   // Handle season slug redirects (e.g. /admin/trr-shows/{id}/season-1)
   const seasonMatch = normalizedSection.match(/^season-([0-9]{1,3})$/);

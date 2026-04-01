@@ -48,6 +48,7 @@ const ROOT_SHOW_ROUTE_SECOND_SEGMENTS = new Set([
   "assets",
   "news",
   "cast",
+  "credits",
   "surveys",
   "social",
   "videos",
@@ -57,6 +58,7 @@ const ROOT_SHOW_ROUTE_SECOND_SEGMENTS = new Set([
 const ROOT_SHOW_ROUTE_ADMIN_SECTION_SEGMENTS = new Set([
   "assets",
   "cast",
+  "credits",
   "details",
   "fandom",
   "media",
@@ -71,6 +73,7 @@ const ROOT_SHOW_ROUTE_ADMIN_SECTION_SEGMENTS = new Set([
 const ROOT_SHOW_ROUTE_ADMIN_SEASON_TABS = new Set([
   "assets",
   "cast",
+  "credits",
   "details",
   "fandom",
   "news",
@@ -510,6 +513,14 @@ function buildCanonicalSeasonSocialWeekPath(input: {
   return input.subTab && input.subTab !== "details" ? `${base}/${input.subTab}` : `${base}/details`;
 }
 
+function normalizeCanonicalCreditsSegment(value: string | undefined): "credits" | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (normalized === "cast" || normalized === "credits") {
+    return "credits";
+  }
+  return null;
+}
+
 function isCanonicalShortAdminPath(pathname: string): boolean {
   return (
     pathname === "/" ||
@@ -558,6 +569,23 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   const [firstSegment, secondSegment] = segments;
   const normalizedFirst = firstSegment?.toLowerCase() ?? "";
   const normalizedSecond = secondSegment?.toLowerCase() ?? "";
+  const canonicalCreditsSegment = normalizeCanonicalCreditsSegment(secondSegment);
+
+  if (firstSegment && !ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS.has(normalizedFirst)) {
+    const encodedFirstSegment = encodeURIComponent(firstSegment);
+    if (segments.length === 2 && canonicalCreditsSegment) {
+      return appendSearch(`/${encodedFirstSegment}/${canonicalCreditsSegment}`, searchParams);
+    }
+    if (segments.length === 3 && isSeasonToken(secondSegment ?? "")) {
+      const seasonCreditsSegment = normalizeCanonicalCreditsSegment(segments[2]);
+      if (seasonCreditsSegment) {
+        return appendSearch(
+          `/${encodedFirstSegment}/${encodeURIComponent(secondSegment ?? "")}/${seasonCreditsSegment}`,
+          searchParams,
+        );
+      }
+    }
+  }
 
   if (normalizedFirst === "admin" && secondSegment) {
     const rootCanonicalPath = ROOT_ONLY_ADMIN_SECTION_CANONICAL_PATHS.get(normalizedSecond);
@@ -667,6 +695,9 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
   if (normalizedFirstTail === "overview" || normalizedFirstTail === "details") {
     return appendSearch(`/${encodedShowSegment}`, searchParams);
   }
+  if (normalizeCanonicalCreditsSegment(firstTail)) {
+    return appendSearch(`/${encodedShowSegment}/credits`, searchParams);
+  }
   if (normalizedFirstTail.startsWith("season-")) {
     const validSeasonAlias = /^season-([0-9]{1,3})$/i.test(normalizedFirstTail);
     if (!validSeasonAlias) {
@@ -688,6 +719,9 @@ function mapCanonicalAdminUiRedirect(pathname: string, searchParams?: URLSearchP
     const normalizedSeasonTail = seasonTail[0]?.trim().toLowerCase() ?? "";
     if (seasonTail.length === 0 || normalizedSeasonTail === "overview" || normalizedSeasonTail === "details") {
       return appendSearch(seasonBase, searchParams);
+    }
+    if (normalizeCanonicalCreditsSegment(seasonTail[0])) {
+      return appendSearch(`${seasonBase}/credits`, searchParams);
     }
     return appendSearch(
       `${seasonBase}/${seasonTail.map((segment) => encodeURIComponent(segment)).join("/")}`,
@@ -845,7 +879,8 @@ function mapCanonicalAdminUiRewrite(pathname: string): string | null {
   }
 
   if (segments.length === 2 && ROOT_SHOW_ROUTE_ADMIN_SECTION_SEGMENTS.has(normalizedSecond)) {
-    return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/${normalizedSecond}`;
+    const canonicalSection = normalizeCanonicalCreditsSegment(secondSegment) ?? normalizedSecond;
+    return `/admin/trr-shows/${encodeURIComponent(firstSegment)}/${canonicalSection}`;
   }
   if (segments.length === 3 && (normalizedSecond === "assets" || normalizedSecond === "media")) {
     const assetSubTab = ROOT_SHOW_ROUTE_ADMIN_SHOW_ASSET_SEGMENTS.get(normalizedThird);

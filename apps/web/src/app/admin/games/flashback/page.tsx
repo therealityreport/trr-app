@@ -8,18 +8,27 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { ADMIN_GAMES_PATH, ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { ADMIN_GAME_MAP } from "@/lib/admin/games";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
-import { createClient } from "@/lib/supabase/client";
 import type { FlashbackQuiz, FlashbackEvent } from "@/lib/flashback/types";
 
-// Flashback tables are not yet in the generated Supabase types.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function db(): any {
-  const client = createClient();
-  if (!client) throw new Error("Supabase is not configured.");
-  return client;
-}
-
 const GAME = ADMIN_GAME_MAP.flashback;
+
+async function readApiJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(
+      typeof payload.error === "string" ? payload.error : "Request failed",
+    );
+  }
+  return payload as T;
+}
 
 export default function AdminFlashbackPage() {
   const { user, checking, hasAccess } = useAdminGuard();
@@ -33,18 +42,17 @@ export default function AdminFlashbackPage() {
   /* ─── Fetch quizzes ─── */
   const fetchQuizzes = useCallback(async () => {
     setLoadingQuizzes(true);
-    const supabase = db();
-    const { data, error } = await supabase
-      .from("flashback_quizzes")
-      .select("*")
-      .order("publish_date", { ascending: false });
-
-    if (error) {
+    try {
+      const payload = await readApiJson<{ quizzes: FlashbackQuiz[] }>(
+        "/api/admin/flashback/quizzes",
+      );
+      setQuizzes(payload.quizzes ?? []);
+    } catch (error) {
       console.error("Failed to load quizzes", error);
-    } else {
-      setQuizzes((data ?? []) as FlashbackQuiz[]);
+      setQuizzes([]);
+    } finally {
+      setLoadingQuizzes(false);
     }
-    setLoadingQuizzes(false);
   }, []);
 
   useEffect(() => {
@@ -54,19 +62,17 @@ export default function AdminFlashbackPage() {
   /* ─── Fetch events for selected quiz ─── */
   const fetchEvents = useCallback(async (quizId: string) => {
     setLoadingEvents(true);
-    const supabase = db();
-    const { data, error } = await supabase
-      .from("flashback_events")
-      .select("*")
-      .eq("quiz_id", quizId)
-      .order("sort_order", { ascending: true });
-
-    if (error) {
+    try {
+      const payload = await readApiJson<{ events: FlashbackEvent[] }>(
+        `/api/admin/flashback/quizzes/${encodeURIComponent(quizId)}/events`,
+      );
+      setEvents(payload.events ?? []);
+    } catch (error) {
       console.error("Failed to load events", error);
-    } else {
-      setEvents((data ?? []) as FlashbackEvent[]);
+      setEvents([]);
+    } finally {
+      setLoadingEvents(false);
     }
-    setLoadingEvents(false);
   }, []);
 
   useEffect(() => {
@@ -81,32 +87,37 @@ export default function AdminFlashbackPage() {
     const publishDate = window.prompt("Publish date (YYYY-MM-DD):");
     if (!publishDate) return;
 
-    const supabase = db();
-    const { error } = await supabase.from("flashback_quizzes").insert({
-      title,
-      publish_date: publishDate,
-      is_published: false,
-    });
-
-    if (error) {
-      window.alert(`Error creating quiz: ${error.message}`);
-    } else {
+    try {
+      await readApiJson<{ quiz: FlashbackQuiz }>("/api/admin/flashback/quizzes", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          publish_date: publishDate,
+        }),
+      });
       await fetchQuizzes();
+    } catch (error) {
+      window.alert(
+        `Error creating quiz: ${error instanceof Error ? error.message : "Failed"}`,
+      );
     }
   };
 
   /* ─── Toggle publish ─── */
   const handleTogglePublish = async (quiz: FlashbackQuiz) => {
-    const supabase = db();
-    const { error } = await supabase
-      .from("flashback_quizzes")
-      .update({ is_published: !quiz.is_published })
-      .eq("id", quiz.id);
-
-    if (error) {
-      window.alert(`Error toggling publish: ${error.message}`);
-    } else {
+    try {
+      await readApiJson<{ quiz: FlashbackQuiz }>(
+        `/api/admin/flashback/quizzes/${encodeURIComponent(quiz.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ is_published: !quiz.is_published }),
+        },
+      );
       await fetchQuizzes();
+    } catch (error) {
+      window.alert(
+        `Error toggling publish: ${error instanceof Error ? error.message : "Failed"}`,
+      );
     }
   };
 
@@ -132,38 +143,48 @@ export default function AdminFlashbackPage() {
       return;
     }
 
-    const nextSortOrder = events.length + 1;
-
-    const supabase = db();
-    const { error } = await supabase.from("flashback_events").insert({
-      quiz_id: selectedQuizId,
-      description,
-      year,
-      image_url: imageUrl,
-      point_value: pointValue,
-      sort_order: nextSortOrder,
-    });
-
-    if (error) {
-      window.alert(`Error adding event: ${error.message}`);
-    } else {
+    try {
+      await readApiJson<{ event: FlashbackEvent }>(
+        `/api/admin/flashback/quizzes/${encodeURIComponent(selectedQuizId)}/events`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            description,
+            year,
+            image_url: imageUrl,
+            point_value: pointValue,
+          }),
+        },
+      );
       await fetchEvents(selectedQuizId);
+    } catch (error) {
+      window.alert(
+        `Error adding event: ${error instanceof Error ? error.message : "Failed"}`,
+      );
     }
   };
 
   /* ─── Delete event ─── */
   const handleDeleteEvent = async (eventId: string) => {
     if (!window.confirm("Delete this event?")) return;
-    const supabase = db();
-    const { error } = await supabase
-      .from("flashback_events")
-      .delete()
-      .eq("id", eventId);
-
-    if (error) {
-      window.alert(`Error deleting event: ${error.message}`);
-    } else if (selectedQuizId) {
-      await fetchEvents(selectedQuizId);
+    try {
+      const response = await fetch(
+        `/api/admin/flashback/events/${encodeURIComponent(eventId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        throw new Error(
+          typeof payload.error === "string" ? payload.error : "Failed to delete event",
+        );
+      }
+      if (selectedQuizId) {
+        await fetchEvents(selectedQuizId);
+      }
+    } catch (error) {
+      window.alert(
+        `Error deleting event: ${error instanceof Error ? error.message : "Failed"}`,
+      );
     }
   };
 

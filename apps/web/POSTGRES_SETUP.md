@@ -21,8 +21,11 @@ Add these to `apps/web/.env.local`:
 ### 1. PostgreSQL Database Connection
 
 ```bash
-DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
+TRR_DB_URL=postgresql://user:password@host:port/database?sslmode=require
+TRR_DB_FALLBACK_URL=
 ```
+
+`TRR_DB_URL` is the app runtime contract. `DATABASE_URL` is still used by the migration scripts only, so invoke those commands as `DATABASE_URL="$TRR_DB_URL" pnpm run db:migrate` instead of storing `DATABASE_URL` as the app runtime source of truth.
 
 **Where to get this:**
 - **Neon:** https://neon.tech (Free tier available)
@@ -86,7 +89,7 @@ The server proxy sends `X-TRR-Internal-Admin-Secret` to TRR-Backend for the face
 
 ### Step 1: Configure Environment Variables
 
-Edit `apps/web/.env.local` and add the three required variables above.
+Edit `apps/web/.env.local` and add the required runtime variables above.
 
 ### Step 2: Run Database Migrations
 
@@ -94,7 +97,7 @@ This creates the PostgreSQL tables for survey responses:
 
 ```bash
 cd apps/web
-DATABASE_URL='your-connection-string' pnpm run db:migrate
+DATABASE_URL="${TRR_DB_URL}" pnpm run db:migrate
 ```
 
 **Expected output:**
@@ -304,7 +307,7 @@ export async function POST(request: NextRequest) {
 ### 4. Run Migration
 
 ```bash
-DATABASE_URL='your-connection-string' pnpm run db:migrate
+DATABASE_URL="${TRR_DB_URL}" pnpm run db:migrate
 ```
 
 The new survey will automatically appear in the admin UI dropdown!
@@ -326,12 +329,12 @@ The new survey will automatically appear in the admin UI dropdown!
 
 ### Database Connection Error
 
-**Symptom:** `DATABASE_URL is not configured`
+**Symptom:** `No database connection string is set`
 
-**Cause:** `DATABASE_URL` is missing from `.env.local`
+**Cause:** `TRR_DB_URL` is missing from `.env.local`
 
 **Fix:**
-1. Add `DATABASE_URL` to `.env.local`
+1. Add `TRR_DB_URL` to `.env.local`
 2. Restart the dev server
 
 ### Admin UI Shows "Forbidden"
@@ -365,7 +368,8 @@ The new survey will automatically appear in the admin UI dropdown!
 Set these in your hosting provider (Vercel, Railway, etc.):
 
 ```bash
-DATABASE_URL=postgresql://...
+TRR_DB_URL=postgresql://...
+TRR_DB_FALLBACK_URL=
 FIREBASE_SERVICE_ACCOUNT={"type":"service_account",...}
 ADMIN_EMAIL_ALLOWLIST=admin@example.com
 ```
@@ -374,7 +378,7 @@ ADMIN_EMAIL_ALLOWLIST=admin@example.com
 
 **Option 1: Manual (one-time)**
 ```bash
-DATABASE_URL='production-url' pnpm run db:migrate
+DATABASE_URL="${TRR_DB_URL}" pnpm run db:migrate
 ```
 
 **Option 2: Automatic (on deploy)**

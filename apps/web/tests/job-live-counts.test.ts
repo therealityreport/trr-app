@@ -88,8 +88,8 @@ describe("job-live-counts", () => {
 
   it("returns null when payload has no count signals", () => {
     const counts = resolveJobLiveCounts(null, {
-      stage: "cast_credits_show_cast",
-      message: "Syncing cast credits...",
+      stage: "credits_fullcredits_sync",
+      message: "Syncing IMDb Full Credits...",
       current: 1,
       total: 2,
     });

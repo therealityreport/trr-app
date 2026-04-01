@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
+import { NETWORKS_STREAMING_DETAIL_CACHE_NAMESPACE } from "@/lib/server/trr-api/networks-streaming-route-cache";
 
 const { requireAdminMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
@@ -13,6 +15,19 @@ vi.mock("@/lib/server/auth", () => ({
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  buildAdminReadResponseHeaders: ({
+    cacheStatus,
+    upstreamMs,
+  }: {
+    cacheStatus: string;
+    upstreamMs?: number | null;
+  }) => {
+    const headers: Record<string, string> = { "x-trr-cache": cacheStatus };
+    if (typeof upstreamMs === "number") {
+      headers["x-trr-upstream-ms"] = String(Math.round(upstreamMs));
+    }
+    return headers;
+  },
   buildAdminProxyErrorResponse: (error: unknown) =>
     NextResponse.json(
       { error: error instanceof Error ? error.message : "failed" },
@@ -33,7 +48,8 @@ describe("networks-streaming detail route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    invalidateRouteResponseCache(NETWORKS_STREAMING_DETAIL_CACHE_NAMESPACE);
   });
 
   it("returns backend detail payload for a valid entity", async () => {
@@ -60,6 +76,8 @@ describe("networks-streaming detail route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-upstream-ms")).toBe("8");
     expect(payload.display_name).toBe("Bravo");
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
       "/admin/shows/networks-streaming/detail?entity_type=network&entity_slug=bravo",
@@ -67,6 +85,31 @@ describe("networks-streaming detail route", () => {
         routeName: "networks-streaming-detail",
       }),
     );
+  });
+
+  it("returns a cache hit for repeated requests by the same admin user", async () => {
+    requireAdminMock.mockResolvedValue({ uid: "admin-1" });
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        entity_type: "network",
+        entity_key: "bravo",
+        entity_slug: "bravo",
+        display_name: "Bravo",
+      },
+      durationMs: 5,
+    });
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/networks-streaming/detail?entity_type=network&entity_slug=bravo",
+    );
+    const first = await GET(request);
+    const second = await GET(request);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.headers.get("x-trr-cache")).toBe("hit");
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns 400 when entity_type is invalid", async () => {
@@ -117,6 +160,8 @@ describe("networks-streaming detail route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("x-trr-cache")).toBe("miss");
+    expect(response.headers.get("x-trr-upstream-ms")).toBe("4");
     expect(payload.error).toBe("not_found");
     expect(payload.suggestions).toHaveLength(1);
   });

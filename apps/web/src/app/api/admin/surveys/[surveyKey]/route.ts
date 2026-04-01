@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  invalidateRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
+import {
+  SURVEY_DETAIL_CACHE_NAMESPACE,
+  SURVEY_DETAIL_CACHE_TTL_MS,
+  SURVEY_SEASON_CAST_CACHE_NAMESPACE,
+} from "@/lib/server/admin/survey-route-cache";
+import {
   getSurveyBySlug,
   updateSurvey,
 } from "@/lib/server/surveys/normalized-survey-admin-repository";
@@ -12,6 +24,7 @@ import {
   listSeasonCastSurveyRoles,
   replaceSeasonCastSurveyRoles,
 } from "@/lib/server/admin/season-cast-survey-roles-repository";
+import { buildAdminReadResponseHeaders } from "@/lib/server/trr-api/admin-read-proxy";
 
 export const dynamic = "force-dynamic";
 interface RouteParams {
@@ -79,113 +92,159 @@ function parseCastTitlesByPersonId(
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    await requireAdmin(request);
+    const startedAt = performance.now();
+    const user = await requireAdmin(request);
     const { surveyKey } = await params;
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+    const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    searchParams.delete("refresh");
 
-    const survey = await getSurveyBySlug(surveyKey);
-    if (!survey) {
-      return NextResponse.json({ error: "Survey not found" }, { status: 404 });
-    }
-
-    // Check if we should include related data
-    const url = new URL(request.url);
-    const includeCast = url.searchParams.get("includeCast") === "true";
-    const includeEpisodes = url.searchParams.get("includeEpisodes") === "true";
-    const includeAssets = url.searchParams.get("includeAssets") === "true";
-
-    const response: Record<string, unknown> = { survey: transformSurveyForAdmin(survey) };
-
-    const trrLink = await getLinkBySurveyId(survey.id);
-    response.trrLink = trrLink;
-
-    const castTitlesByPersonId = parseCastTitlesByPersonId(survey.metadata);
-
-    // Fetch cast from TRR core for this show/season
-    if (includeCast) {
-      if (trrLink && trrLink.season_number) {
-        const [seasonCast, seasonRoles] = await Promise.all([
-          getCastByShowSeason(
-            trrLink.trr_show_id,
-            trrLink.season_number,
-            { limit: 50 },
-          ),
-          listSeasonCastSurveyRoles(trrLink.trr_show_id, trrLink.season_number),
-        ]);
-
-        const roleMap = new Map<string, "main" | "friend_of">(
-          seasonRoles.map((row) => [row.person_id, row.role]),
-        );
-        // Transform to the format expected by the admin UI
-        response.cast = seasonCast.map((member, index) => {
-          const name = member.person_name ?? "Unknown";
-          const role = roleMap.get(member.person_id) ?? null;
-          // Prefer admin-maintained season roles. Fall back to legacy per-survey metadata if present.
-          const status: CastTitle | null =
-            role === "main"
-              ? "main"
-              : role === "friend_of"
-                ? "friend"
-                : (castTitlesByPersonId[member.person_id] ?? null);
-          return {
-            id: member.person_id,
-            name,
-            slug: name.toLowerCase().replace(/\s+/g, "-"),
-            image_url: member.photo_url,
-            role: "Self",
-            status,
-            instagram: null,
-            display_order: index,
-            is_alumni: false,
-            alumni_verdict_enabled: false,
-          };
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, surveyKey, searchParams);
+    const promiseKey = forceRefresh ? `${cacheKey}:refresh` : cacheKey;
+    if (!forceRefresh) {
+      const cached = getRouteResponseCache<Record<string, unknown>>(
+        SURVEY_DETAIL_CACHE_NAMESPACE,
+        cacheKey,
+      );
+      if (cached) {
+        return NextResponse.json(cached, {
+          headers: buildAdminReadResponseHeaders({ cacheStatus: "hit" }),
         });
-      } else {
-        response.cast = [];
       }
     }
 
-    // Fetch episodes from TRR core for this show/season
-    if (includeEpisodes) {
-      if (trrLink && trrLink.season_number) {
-        const episodes = await getEpisodesByShowAndSeason(
-          trrLink.trr_show_id,
-          trrLink.season_number,
-          { limit: 50 }
-        );
-        // Transform to the format expected by the admin UI
-        // Determine current episode based on metadata
+    const payload = await getOrCreateRouteResponsePromise(
+      SURVEY_DETAIL_CACHE_NAMESPACE,
+      promiseKey,
+      async () => {
+        const survey = await getSurveyBySlug(surveyKey);
+        if (!survey) {
+          return null;
+        }
+
+        const includeCast = searchParams.get("includeCast") === "true";
+        const includeEpisodes = searchParams.get("includeEpisodes") === "true";
+        const includeAssets = searchParams.get("includeAssets") === "true";
+
+        const response: Record<string, unknown> = { survey: transformSurveyForAdmin(survey) };
+        const trrLink = await getLinkBySurveyId(survey.id);
+        response.trrLink = trrLink;
+
+        const castTitlesByPersonId = parseCastTitlesByPersonId(survey.metadata);
         const currentEpisodeId = survey.metadata?.currentEpisodeId as string | undefined;
-        response.episodes = episodes.map((ep) => ({
-          id: ep.id,
-          episode_number: ep.episode_number,
-          episode_id: `E${ep.episode_number.toString().padStart(2, "0")}`,
-          episode_label: ep.title,
-          air_date: ep.air_date,
-          opens_at: null,
-          closes_at: null,
-          is_active: true,
-          is_current: currentEpisodeId === ep.id,
-        }));
-      } else {
-        response.episodes = [];
-      }
-    }
 
-    // Fetch assets from TRR core for this show/season
-    if (includeAssets) {
-      if (trrLink && trrLink.season_number) {
-        const assets = await getAssetsByShowSeason(
-          trrLink.trr_show_id,
-          trrLink.season_number,
-          { limit: 200 }
+        if (trrLink && trrLink.season_number) {
+          const castPromise = includeCast
+            ? Promise.all([
+                getCastByShowSeason(trrLink.trr_show_id, trrLink.season_number, { limit: 50 }),
+                listSeasonCastSurveyRoles(trrLink.trr_show_id, trrLink.season_number),
+              ]).then(([seasonCast, seasonRoles]) => {
+                const roleMap = new Map<string, "main" | "friend_of">(
+                  seasonRoles.map((row) => [row.person_id, row.role]),
+                );
+                return seasonCast.map((member, index) => {
+                  const name = member.person_name ?? "Unknown";
+                  const role = roleMap.get(member.person_id) ?? null;
+                  const status: CastTitle | null =
+                    role === "main"
+                      ? "main"
+                      : role === "friend_of"
+                        ? "friend"
+                        : (castTitlesByPersonId[member.person_id] ?? null);
+                  return {
+                    id: member.person_id,
+                    name,
+                    slug: name.toLowerCase().replace(/\s+/g, "-"),
+                    image_url: member.photo_url,
+                    role: "Self",
+                    status,
+                    instagram: null,
+                    display_order: index,
+                    is_alumni: false,
+                    alumni_verdict_enabled: false,
+                  };
+                });
+              })
+            : Promise.resolve(null);
+          const episodesPromise = includeEpisodes
+            ? getEpisodesByShowAndSeason(trrLink.trr_show_id, trrLink.season_number, { limit: 50 }).then((episodes) =>
+                episodes.map((ep) => ({
+                  id: ep.id,
+                  episode_number: ep.episode_number,
+                  episode_id: `E${ep.episode_number.toString().padStart(2, "0")}`,
+                  episode_label: ep.title,
+                  air_date: ep.air_date,
+                  opens_at: null,
+                  closes_at: null,
+                  is_active: true,
+                  is_current: currentEpisodeId === ep.id,
+                })),
+              )
+            : Promise.resolve(null);
+          const assetsPromise = includeAssets
+            ? getAssetsByShowSeason(trrLink.trr_show_id, trrLink.season_number, { limit: 200 })
+            : Promise.resolve(null);
+
+          const [cast, episodes, assets] = await Promise.all([
+            castPromise,
+            episodesPromise,
+            assetsPromise,
+          ]);
+
+          if (includeCast) {
+            response.cast = cast ?? [];
+          }
+          if (includeEpisodes) {
+            response.episodes = episodes ?? [];
+          }
+          if (includeAssets) {
+            response.assets = assets ?? [];
+          }
+        } else {
+          if (includeCast) {
+            response.cast = [];
+          }
+          if (includeEpisodes) {
+            response.episodes = [];
+          }
+          if (includeAssets) {
+            response.assets = [];
+          }
+        }
+
+        setRouteResponseCache(
+          SURVEY_DETAIL_CACHE_NAMESPACE,
+          cacheKey,
+          response,
+          SURVEY_DETAIL_CACHE_TTL_MS,
         );
-        response.assets = assets;
-      } else {
-        response.assets = [];
-      }
+        return response;
+      },
+    );
+
+    if (!payload) {
+      const totalMs = performance.now() - startedAt;
+      return NextResponse.json(
+        { error: "Survey not found" },
+        {
+          status: 404,
+          headers: buildAdminReadResponseHeaders({
+            cacheStatus: forceRefresh ? "refresh" : "miss",
+            upstreamMs: totalMs,
+            totalMs,
+          }),
+        },
+      );
     }
 
-    return NextResponse.json(response);
+    const totalMs = performance.now() - startedAt;
+    return NextResponse.json(payload, {
+      headers: buildAdminReadResponseHeaders({
+        cacheStatus: forceRefresh ? "refresh" : "miss",
+        upstreamMs: totalMs,
+        totalMs,
+      }),
+    });
   } catch (error) {
     console.error("[api] Failed to get survey", error);
     const message = error instanceof Error ? error.message : "failed";
@@ -292,6 +351,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Survey not found" }, { status: 404 });
     }
 
+    invalidateRouteResponseCache(SURVEY_DETAIL_CACHE_NAMESPACE, `${user.uid}:${surveyKey}:`);
+    if (showId && Number.isFinite(Number(seasonNumber))) {
+      invalidateRouteResponseCache(
+        SURVEY_SEASON_CAST_CACHE_NAMESPACE,
+        `${user.uid}:${showId}:${Number(seasonNumber)}:`,
+      );
+    }
     return NextResponse.json({ survey: transformSurveyForAdmin(updated) });
   } catch (error) {
     console.error("[api] Failed to update survey", error);
@@ -326,6 +392,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Survey not found" }, { status: 404 });
     }
 
+    invalidateRouteResponseCache(SURVEY_DETAIL_CACHE_NAMESPACE, `${user.uid}:${surveyKey}:`);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[api] Failed to delete survey", error);

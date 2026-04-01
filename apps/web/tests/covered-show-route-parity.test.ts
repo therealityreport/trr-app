@@ -6,11 +6,21 @@ const {
   fetchAdminBackendJsonMock,
   invalidateAdminBackendCacheMock,
   getBackendApiUrlMock,
+  getCoveredShowsLocalMock,
+  getCoveredShowByTrrShowIdMock,
+  addCoveredShowLocalMock,
+  removeCoveredShowLocalMock,
+  getInternalAdminBearerTokenMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
   invalidateAdminBackendCacheMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getCoveredShowsLocalMock: vi.fn(),
+  getCoveredShowByTrrShowIdMock: vi.fn(),
+  addCoveredShowLocalMock: vi.fn(),
+  removeCoveredShowLocalMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -19,6 +29,17 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/admin/covered-shows-repository", () => ({
+  getCoveredShows: getCoveredShowsLocalMock,
+  getCoveredShowByTrrShowId: getCoveredShowByTrrShowIdMock,
+  addCoveredShow: addCoveredShowLocalMock,
+  removeCoveredShow: removeCoveredShowLocalMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
@@ -32,7 +53,7 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
     ),
 }));
 
-import { POST } from "@/app/api/admin/covered-shows/route";
+import { GET as LIST_GET, POST } from "@/app/api/admin/covered-shows/route";
 import { DELETE, GET } from "@/app/api/admin/covered-shows/[showId]/route";
 
 describe("covered show route parity", () => {
@@ -41,13 +62,17 @@ describe("covered show route parity", () => {
     fetchAdminBackendJsonMock.mockReset();
     invalidateAdminBackendCacheMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    getCoveredShowsLocalMock.mockReset();
+    getCoveredShowByTrrShowIdMock.mockReset();
+    addCoveredShowLocalMock.mockReset();
+    removeCoveredShowLocalMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
     invalidateAdminBackendCacheMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockImplementation((path: string) => `https://backend.example.com/api/v1${path}`);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
-    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret";
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-jwt");
   });
 
   it("returns the backend-owned covered-show contract", async () => {
@@ -116,6 +141,40 @@ describe("covered show route parity", () => {
     );
   });
 
+  it("falls back to the local repository for covered-shows list when backend auth is unavailable", async () => {
+    fetchAdminBackendJsonMock.mockRejectedValue(new Error("Backend internal auth is not configured"));
+    getCoveredShowsLocalMock.mockResolvedValue([
+      {
+        id: "covered-2",
+        trr_show_id: "show-2",
+        show_name: "Local Show",
+        canonical_slug: "local-show",
+        alternative_names: [],
+        show_total_episodes: 8,
+        poster_url: null,
+      },
+    ]);
+
+    const request = new NextRequest("http://localhost/api/admin/covered-shows");
+    const response = await LIST_GET(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      shows: [
+        {
+          id: "covered-2",
+          trr_show_id: "show-2",
+          show_name: "Local Show",
+          canonical_slug: "local-show",
+          alternative_names: [],
+          show_total_episodes: 8,
+          poster_url: null,
+        },
+      ],
+    });
+    expect(getCoveredShowsLocalMock).toHaveBeenCalledTimes(1);
+  });
+
   it("deletes covered shows through the backend proxy with admin uid", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), {
@@ -136,8 +195,7 @@ describe("covered show route parity", () => {
       expect.objectContaining({ method: "DELETE" }),
     );
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
-    expect(headers.get("Authorization")).toBe("Bearer service-role-secret");
-    expect(headers.get("X-TRR-Internal-Admin-Secret")).toBe("internal-secret");
+    expect(headers.get("Authorization")).toBe("Bearer internal-admin-jwt");
     expect(headers.get("X-TRR-Admin-User-Uid")).toBe("admin-test-user");
     expect(invalidateAdminBackendCacheMock).toHaveBeenCalledWith(
       "/admin/covered-shows/cache/invalidate",

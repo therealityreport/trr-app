@@ -22,6 +22,8 @@
     "brand-fonts:glyph-comparison": "node scripts/brand-font-glyph-comparison.mjs",
     "design-docs:classify": "node scripts/design-docs/classify-publisher-patterns.mjs",
     "design-docs:extract-navigation": "node scripts/design-docs/extract-navigation.mjs",
+    "design-docs:nyt-games:media": "node scripts/design-docs/generate-nyt-games-media-artifacts.mjs",
+    "design-docs:nyt-games:media:validate": "node scripts/design-docs/validate-nyt-games-media.mjs",
     "design-docs:validate-config": "node scripts/design-docs/validate-config-integrity.mjs",
     "design-docs:a11y-audit": "node scripts/design-docs/run-accessibility-audit.mjs",
     "design-docs:integration-checks": "node scripts/design-docs/run-integration-checks.mjs",

@@ -273,6 +273,30 @@ interface CastRoleMember {
   photo_url: string | null;
 }
 
+interface ShowCrewCreditRow {
+  credit_id: string;
+  person_id: string;
+  person_name: string | null;
+  role: string | null;
+  billing_order: number | null;
+  source_type: string | null;
+  episode_count: number | null;
+  episodes_label: string | null;
+  years_label: string | null;
+  imdb_name_id: string | null;
+  display_order: number | null;
+}
+
+interface ShowCrewSection {
+  title: string;
+  rows: ShowCrewCreditRow[];
+}
+
+interface ShowCreditsPayload {
+  cast_roster: Array<Record<string, unknown>>;
+  crew_sections: ShowCrewSection[];
+}
+
 type CastRunFailedMember = {
   personId: string;
   name: string;
@@ -349,7 +373,7 @@ const SEASON_PAGE_TABS: ReadonlyArray<{ id: TabId; label: string; icon?: "home" 
   { id: "assets", label: "Assets" },
   { id: "news", label: "News" },
   { id: "fandom", label: "Fandom" },
-  { id: "cast", label: "Cast" },
+  { id: "cast", label: "Credits" },
   { id: "surveys", label: "Surveys" },
   { id: "social", label: "Social Media" },
 ];
@@ -373,8 +397,10 @@ const SEASON_REFRESH_STAGE_LABELS: Record<string, string> = {
   prune: "Cleanup",
   mirroring: "S3 Mirroring",
   mirror: "S3 Mirroring",
-  cast_credits_show_cast: "Cast Credits",
-  cast_credits_episode_appearances: "Episode Credits",
+  cast_credits_show_cast: "IMDb Full Credits",
+  cast_credits_episode_appearances: "Episode Appearances",
+  credits_fullcredits_sync: "IMDb Full Credits",
+  credits_episode_appearances_sync: "Episode Appearances",
 };
 const SEASON_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SEASON_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
@@ -788,17 +814,6 @@ const buildAssetAutoCropPayloadWithFallback = (
     strategy: "resize_center_fallback_v1",
   };
 
-const isCrewCreditCategory = (value: string | null | undefined): boolean => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) return false;
-  return (
-    normalized === "crew" ||
-    normalized.includes("crew") ||
-    normalized.includes("producer") ||
-    normalized.includes("production")
-  );
-};
-
 const areStringArraysEqual = (a: string[], b: string[]): boolean => {
   if (a === b) return true;
   if (a.length !== b.length) return false;
@@ -1081,6 +1096,10 @@ export default function SeasonDetailPage() {
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
   const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
+  const [showCrewSections, setShowCrewSections] = useState<ShowCrewSection[]>([]);
+  const [showCreditsLoadedOnce, setShowCreditsLoadedOnce] = useState(false);
+  const [showCreditsLoading, setShowCreditsLoading] = useState(false);
+  const [showCreditsError, setShowCreditsError] = useState<string | null>(null);
   const [lastSuccessfulCastRoleMembersAt, setLastSuccessfulCastRoleMembersAt] = useState<number | null>(
     null
   );
@@ -1690,6 +1709,34 @@ export default function SeasonDetailPage() {
     }
   }, [getAuthHeaders, showId]);
 
+  const fetchShowCredits = useCallback(async () => {
+    if (!showId) return;
+    setShowCreditsLoading(true);
+    setShowCreditsError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/admin/trr-api/shows/${showId}/credits`, {
+        headers,
+        cache: "no-store",
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & Partial<ShowCreditsPayload>;
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch show credits");
+      }
+      setShowCrewSections(Array.isArray(data.crew_sections) ? data.crew_sections : []);
+      setShowCreditsLoadedOnce(true);
+    } catch (err) {
+      setShowCreditsError(err instanceof Error ? err.message : "Failed to fetch show credits");
+      if (!showCreditsLoadedOnce) {
+        setShowCrewSections([]);
+      }
+    } finally {
+      setShowCreditsLoading(false);
+    }
+  }, [getAuthHeaders, showCreditsLoadedOnce, showId]);
+
   const fetchCastRoleMembers = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       if (!showId) return;
@@ -2172,6 +2219,10 @@ export default function SeasonDetailPage() {
     setCastRoleMembersLoadedOnce(false);
     setCastRoleMembersError(null);
     setCastRoleMembersWarning(null);
+    setShowCrewSections([]);
+    setShowCreditsLoadedOnce(false);
+    setShowCreditsLoading(false);
+    setShowCreditsError(null);
     setLastSuccessfulCastRoleMembersAt(null);
     setRefreshingPersonIds({});
     setRefreshingPersonProgress({});
@@ -2208,10 +2259,17 @@ export default function SeasonDetailPage() {
     if (!hasAccess || !showId) return;
     if (activeTab !== "cast") return;
     void fetchCastRoleMembers();
+    void fetchShowCredits();
     if (!showCastFetchAttemptedRef.current) {
       void fetchShowCastForBrand();
     }
-  }, [activeTab, fetchCastRoleMembers, fetchShowCastForBrand, hasAccess, showId]);
+  }, [activeTab, fetchCastRoleMembers, fetchShowCastForBrand, fetchShowCredits, hasAccess, showId]);
+
+  useEffect(() => {
+    if (activeTab !== "cast") return;
+    if (!castRefreshNotice) return;
+    void fetchShowCredits();
+  }, [activeTab, castRefreshNotice, fetchShowCredits]);
 
   useEffect(() => {
     if (!hasAccess || !showId) return;
@@ -4378,21 +4436,17 @@ export default function SeasonDetailPage() {
   ]);
 
   const castDisplayTotals = useMemo(() => {
-    let castTotal = 0;
-    let crewTotal = 0;
-    for (const member of castMergedMembers) {
-      if (isCrewCreditCategory(member.credit_category)) {
-        crewTotal += 1;
-      } else {
-        castTotal += 1;
-      }
-    }
+    const castTotal =
+      castRoleMembersLoadedOnce
+        ? castMergedMembers.filter((member) => castRoleMemberByPersonId.has(member.person_id)).length
+        : castMergedMembers.length;
+    const crewTotal = showCrewSections.reduce((sum, section) => sum + section.rows.length, 0);
     return {
       cast: castTotal,
       crew: crewTotal,
-      total: castMergedMembers.length,
+      total: castTotal + crewTotal,
     };
-  }, [castMergedMembers]);
+  }, [castMergedMembers, castRoleMemberByPersonId, castRoleMembersLoadedOnce, showCrewSections]);
 
   const showFallbackCastWarning =
     seasonCastSource === "show_fallback" &&
@@ -4400,38 +4454,50 @@ export default function SeasonDetailPage() {
     castUniqueMembers.every((member) => (member.episodes_in_season ?? 0) <= 0);
 
   const castSeasonMembers = useMemo(
-    () => castDisplayMembers.filter((member) => !isCrewCreditCategory(member.credit_category)),
-    [castDisplayMembers]
+    () => castDisplayMembers.filter((member) => !castRoleMembersLoadedOnce || castRoleMemberByPersonId.has(member.person_id)),
+    [castDisplayMembers, castRoleMemberByPersonId, castRoleMembersLoadedOnce]
   );
-  const crewSeasonMembers = useMemo(
-    () => castDisplayMembers.filter((member) => isCrewCreditCategory(member.credit_category)),
-    [castDisplayMembers]
+  const crewDisplaySections = useMemo(
+    () =>
+      showCrewSections
+        .map((section) => ({
+          ...section,
+          rows: section.rows.filter((row) => {
+            if (!castSearchQueryDeferred.trim()) return true;
+            const haystack = [row.person_name, row.role, row.episodes_label, row.years_label, section.title]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase();
+            return haystack.includes(castSearchQueryDeferred);
+          }),
+        }))
+        .filter((section) => section.rows.length > 0),
+    [castSearchQueryDeferred, showCrewSections]
   );
   const visibleCastSeasonMembers = useMemo(
     () => castSeasonMembers.slice(0, castRenderLimit),
     [castRenderLimit, castSeasonMembers]
   );
-  const visibleCrewSeasonMembers = useMemo(
-    () => crewSeasonMembers.slice(0, crewRenderLimit),
-    [crewRenderLimit, crewSeasonMembers]
-  );
   const renderedCastCount = visibleCastSeasonMembers.length;
   const matchedCastCount = castSeasonMembers.length;
   const totalCastCount = castDisplayTotals.cast;
-  const renderedCrewCount = visibleCrewSeasonMembers.length;
-  const matchedCrewCount = crewSeasonMembers.length;
+  const renderedCrewCount = crewDisplaySections.reduce(
+    (sum, section) => sum + Math.min(section.rows.length, crewRenderLimit),
+    0
+  );
+  const matchedCrewCount = crewDisplaySections.reduce((sum, section) => sum + section.rows.length, 0);
   const totalCrewCount = castDisplayTotals.crew;
   const renderedVisibleCount = renderedCastCount + renderedCrewCount;
-  const matchedVisibleCount = castDisplayMembers.length;
+  const matchedVisibleCount = matchedCastCount + matchedCrewCount;
   const totalVisibleCount = castDisplayTotals.total;
   const castRenderProgressLabel = useMemo(() => {
     const rendered =
       Math.min(castRenderLimit, castSeasonMembers.length) +
-      Math.min(crewRenderLimit, crewSeasonMembers.length);
-    const total = castSeasonMembers.length + crewSeasonMembers.length;
+      crewDisplaySections.reduce((sum, section) => sum + Math.min(section.rows.length, crewRenderLimit), 0);
+    const total = castSeasonMembers.length + matchedCrewCount;
     if (total === 0 || rendered >= total) return null;
     return `Rendering ${rendered.toLocaleString()}/${total.toLocaleString()}`;
-  }, [castRenderLimit, castSeasonMembers.length, crewRenderLimit, crewSeasonMembers.length]);
+  }, [castRenderLimit, castSeasonMembers.length, crewDisplaySections, crewRenderLimit, matchedCrewCount]);
   const castRoleMembersWarningWithSnapshotAge = withSnapshotAgeSuffix(
     castRoleMembersWarning,
     lastSuccessfulCastRoleMembersAt
@@ -4474,7 +4540,10 @@ export default function SeasonDetailPage() {
 
   useEffect(() => {
     if (activeTab !== "cast") return;
-    if (castRenderLimit >= castSeasonMembers.length && crewRenderLimit >= crewSeasonMembers.length) {
+    if (
+      castRenderLimit >= castSeasonMembers.length &&
+      crewDisplaySections.every((section) => crewRenderLimit >= section.rows.length)
+    ) {
       return;
     }
     const schedule = () => {
@@ -4485,9 +4554,9 @@ export default function SeasonDetailPage() {
             : Math.min(prev + SEASON_CAST_INCREMENTAL_BATCH_SIZE, castSeasonMembers.length)
         );
         setCrewRenderLimit((prev) =>
-          prev >= crewSeasonMembers.length
+          crewDisplaySections.every((section) => prev >= section.rows.length)
             ? prev
-            : Math.min(prev + SEASON_CAST_INCREMENTAL_BATCH_SIZE, crewSeasonMembers.length)
+            : prev + SEASON_CAST_INCREMENTAL_BATCH_SIZE
         );
       }, 0);
     };
@@ -4512,8 +4581,8 @@ export default function SeasonDetailPage() {
     activeTab,
     castRenderLimit,
     castSeasonMembers.length,
+    crewDisplaySections,
     crewRenderLimit,
-    crewSeasonMembers.length,
   ]);
 
   const formatEpisodesLabel = (count: number) => {
@@ -5780,7 +5849,7 @@ export default function SeasonDetailPage() {
               <div className="mb-6 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Cast
+                    Credits
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">
                     Season {season.season_number}
@@ -5800,7 +5869,7 @@ export default function SeasonDetailPage() {
                     title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
                     className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                   >
-                    {refreshingCast ? "Syncing..." : "Sync Cast"}
+                    {refreshingCast ? "Syncing..." : "Refresh Credits"}
                   </button>
                   <button
                     type="button"
@@ -5831,6 +5900,21 @@ export default function SeasonDetailPage() {
                 <p className={`mb-4 text-sm ${castEnrichError ? "text-red-600" : "text-zinc-500"}`}>
                   {castEnrichError || castEnrichNotice}
                 </p>
+              )}
+              {showCreditsError && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  <span>{showCreditsError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchShowCredits()}
+                    className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    Retry Crew
+                  </button>
+                </div>
+              )}
+              {showCreditsLoading && !showCreditsLoadedOnce && (
+                <p className="mb-4 text-sm text-zinc-500">Loading crew credits...</p>
               )}
               {showFallbackCastWarning && (
                 <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -6211,109 +6295,48 @@ export default function SeasonDetailPage() {
                   )}
                 </section>
 
-                {crewSeasonMembers.length > 0 && (
+                {crewDisplaySections.length > 0 && (
                   <section>
                     <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
                       Crew
                     </p>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {visibleCrewSeasonMembers.map((member) => (
-                        <div
-                          key={`crew-${member.person_id}`}
-                          className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 transition hover:border-blue-300 hover:bg-blue-100/40"
-                        >
-                          <Link
-                            href={buildPersonAdminUrl({
-                              showSlug: showSlugForRouting,
-                              personSlug: buildPersonRouteSlug({
-                                personName: member.person_name,
-                                personId: member.person_id,
-                              }),
-                              tab: "overview",
-                              query: new URLSearchParams({
-                                seasonNumber: String(seasonNumber),
-                              }),
-                            }) as Route}
-                            className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                          >
-                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                              {member.merged_photo_url ? (
-                                <CastPhoto
-                                  src={member.merged_photo_url}
-                                  alt={member.person_name || "Crew"}
-                                  thumbnail_focus_x={member.thumbnail_focus_x}
-                                  thumbnail_focus_y={member.thumbnail_focus_y}
-                                  thumbnail_zoom={member.thumbnail_zoom}
-                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
-                                />
-                              ) : (
-                                <div className="flex h-full items-center justify-center text-zinc-400">
-                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                  </svg>
-                                </div>
-                              )}
-                            </div>
-                            <p className="font-semibold text-zinc-900">{member.person_name || "Unknown"}</p>
-                            {member.credit_category && (
-                              <p className="text-sm text-blue-700">{member.credit_category}</p>
-                            )}
-                            <p className="text-xs text-zinc-600">
-                              {formatEpisodesLabel(member.episodes_in_season)}
-                            </p>
-                            <p className="text-xs text-zinc-500">
-                              Role: {member.roles.length > 0 ? member.roles.join(", ") : "Unspecified for season"}
-                            </p>
-                            {member.roles.length > 0 && (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {member.roles.map((role) => (
-                                  <span
-                                    key={`${member.person_id}-season-crew-role-${role}`}
-                                    className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700"
+                    <div className="space-y-4">
+                      {crewDisplaySections.map((section) => (
+                        <div key={section.title} className="rounded-xl border border-zinc-200 bg-zinc-50/80">
+                          <div className="border-b border-zinc-200 px-4 py-3">
+                            <p className="text-sm font-semibold text-zinc-900">{section.title}</p>
+                          </div>
+                          <div className="divide-y divide-zinc-200">
+                            {section.rows.slice(0, crewRenderLimit).map((row) => (
+                              <div
+                                key={row.credit_id}
+                                className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]"
+                              >
+                                <div className="min-w-0">
+                                  <Link
+                                    href={buildPersonAdminUrl({
+                                      showSlug: showSlugForRouting,
+                                      personSlug: buildPersonRouteSlug({
+                                        personName: row.person_name,
+                                        personId: row.person_id,
+                                      }),
+                                      tab: "overview",
+                                      query: new URLSearchParams({
+                                        seasonNumber: String(seasonNumber),
+                                      }),
+                                    }) as Route}
+                                    className="font-semibold text-zinc-900 hover:underline"
                                   >
-                                    {role}
-                                  </span>
-                                ))}
+                                    {row.person_name || "Unknown"}
+                                  </Link>
+                                </div>
+                                <div className="min-w-0 text-sm text-zinc-600">{row.role || "Unspecified"}</div>
+                                <div className="text-right text-xs text-zinc-500">
+                                  {[row.episodes_label, row.years_label].filter(Boolean).join(" • ") || "IMDb"}
+                                </div>
                               </div>
-                            )}
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void handleRefreshSeasonCastMember(
-                                member.person_id,
-                                member.person_name || "Crew member"
-                              )
-                            }
-                            disabled={seasonCastAnyJobRunning || Boolean(refreshingPersonIds[member.person_id])}
-                            title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
-                            className="mt-3 w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50"
-                          >
-                            {refreshingPersonIds[member.person_id] ? "Refreshing..." : "Refresh Person"}
-                          </button>
-                          <Link
-                            href={
-                              buildShowAdminUrl({
-                                showSlug: showSlugForRouting,
-                                tab: "cast",
-                                query: buildShowCastRoleEditorQuery(member.person_id),
-                              }) as Route
-                            }
-                            className={`mt-2 block w-full rounded-md border border-blue-200 bg-white px-2 py-1 text-center text-xs font-semibold text-blue-700 transition hover:bg-blue-50 ${
-                              seasonCastAnyJobRunning ? "pointer-events-none opacity-50" : ""
-                            }`}
-                            title={seasonCastAnyJobRunning ? "Cast sync in progress" : undefined}
-                          >
-                            Edit Roles
-                          </Link>
-                          <RefreshProgressBar
-                            show={Boolean(refreshingPersonIds[member.person_id])}
-                            stage={refreshingPersonProgress[member.person_id]?.stage}
-                            message={refreshingPersonProgress[member.person_id]?.message}
-                            current={refreshingPersonProgress[member.person_id]?.current}
-                            total={refreshingPersonProgress[member.person_id]?.total}
-                          />
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -6405,7 +6428,7 @@ export default function SeasonDetailPage() {
                   </section>
                 )}
 
-                {castSeasonMembers.length === 0 && crewSeasonMembers.length === 0 && cast.length > 0 && (
+                {castSeasonMembers.length === 0 && crewDisplaySections.length === 0 && cast.length > 0 && (
                   <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                 )}
 

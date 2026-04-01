@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getTrrAdminServiceKey } from "@/lib/server/supabase-trr-admin";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const serviceRoleKey = getTrrAdminServiceKey();
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
       return NextResponse.json({ error: "Backend auth not configured" }, { status: 502 });
     }

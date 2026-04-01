@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const dedicatedToken = process.env.TRR_BACKEND_SERVICE_TOKEN?.trim() || null;
     const serviceRoleToken =
-      process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY?.trim() || null;
+      getInternalAdminBearerToken();
     const backendToken =
       dedicatedToken ??
       (process.env.NODE_ENV === "production" ? null : serviceRoleToken);

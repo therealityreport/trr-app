@@ -174,14 +174,14 @@ const normalizeErrorPayload = async (response: Response): Promise<AdminNormalize
     payload = null;
   }
 
-  const message =
+  const message: string =
     (typeof payload?.error === "string" && payload.error.trim()) ||
     (typeof payload?.detail === "string" && payload.detail.trim()) ||
-    ((payload?.detail &&
+    (payload?.detail &&
       typeof payload.detail === "object" &&
-      typeof (payload.detail as Record<string, unknown>).message === "string" &&
-      ((payload.detail as Record<string, unknown>).message as string).trim()) ||
-      "") ||
+      typeof (payload.detail as Record<string, unknown>).message === "string"
+        ? ((payload.detail as Record<string, unknown>).message as string).trim()
+        : "") ||
     `${response.status} ${response.statusText || "Request failed"}`;
   const detail =
     payload?.detail && typeof payload.detail === "object" ? (payload.detail as Record<string, unknown>) : null;

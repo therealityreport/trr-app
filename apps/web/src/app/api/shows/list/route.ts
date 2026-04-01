@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseTrrCore } from "@/lib/server/supabase-trr-core";
+import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
 export const dynamic = "force-dynamic";
 
@@ -29,22 +29,33 @@ function isEnglishName(name: string): boolean {
  */
 export async function GET() {
   try {
-    const supabase = getSupabaseTrrCore();
-
-    const { data, error } = await supabase
-      .from("shows")
-      .select("id, name, alternative_names")
-      .order("name");
-
-    if (error) {
-      console.error("[api/shows/list] Supabase error:", error);
+    const backendUrl = getBackendApiUrl("/shows/list");
+    if (!backendUrl) {
+      console.error("[api/shows/list] TRR_API_URL not configured");
       return NextResponse.json(
         { error: "Failed to fetch shows" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    const shows: ShowWithAlternativeNames[] = ((data ?? []) as ShowRow[]).map((row) => ({
+    const response = await fetch(backendUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      console.error("[api/shows/list] Backend error:", response.status, await response.text());
+      return NextResponse.json(
+        { error: "Failed to fetch shows" },
+        { status: 500 },
+      );
+    }
+
+    const data = (await response.json().catch(() => [])) as ShowRow[];
+    const shows: ShowWithAlternativeNames[] = (data ?? []).map((row) => ({
       id: row.id,
       name: row.name,
       alternativeNames: (row.alternative_names ?? []).filter(isEnglishName),
@@ -55,7 +66,7 @@ export async function GET() {
     console.error("[api/shows/list] Error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

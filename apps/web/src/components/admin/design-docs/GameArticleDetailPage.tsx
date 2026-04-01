@@ -17,6 +17,12 @@ import {
   GamePips,
   GameTheMidi,
 } from "./sections/games";
+import {
+  NYTGamesDocsAnchorSection,
+  NYTGamesDocsPageShell,
+  extractTextFromReactNode,
+  slugifyNYTGamesSectionLabel,
+} from "./sections/games/NYTGamesPreviewShell";
 
 /* ── Wordle-Specific Data ─────────────────────────────────────────── */
 
@@ -120,21 +126,37 @@ const monoSmall: React.CSSProperties = {
 /* ── Shared SectionLabel for game components ─────────────────── */
 
 function SectionLabelStyled({ children }: { children: React.ReactNode }) {
+  const label = extractTextFromReactNode(children).replace(/\s+/g, " ").trim();
+  const id = slugifyNYTGamesSectionLabel(label);
+
   return (
-    <div
-      style={{
-        fontFamily: "var(--dd-font-sans)",
-        fontSize: 11,
-        fontWeight: 600,
-        textTransform: "uppercase" as const,
-        letterSpacing: "0.12em",
-        color: "var(--dd-brand-accent)",
-        marginBottom: 8,
-        marginTop: 32,
-      }}
-    >
-      {children}
-    </div>
+    <NYTGamesDocsAnchorSection id={id} label={label}>
+      <div
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 11,
+          fontWeight: 600,
+          textTransform: "uppercase" as const,
+          letterSpacing: "0.12em",
+          color: "var(--dd-brand-accent)",
+          marginBottom: 8,
+          marginTop: 32,
+        }}
+      >
+        {children}
+      </div>
+    </NYTGamesDocsAnchorSection>
+  );
+}
+
+function WordleSectionLabel({ children }: { children: React.ReactNode }) {
+  const label = extractTextFromReactNode(children).replace(/\s+/g, " ").trim();
+  const id = slugifyNYTGamesSectionLabel(label);
+
+  return (
+    <NYTGamesDocsAnchorSection id={id} label={label}>
+      <div style={sectionLabel}>{children}</div>
+    </NYTGamesDocsAnchorSection>
   );
 }
 
@@ -169,18 +191,26 @@ export default function GameArticleDetailPage({ gameId }: Props) {
 
   // Wordle has the full detailed article page with OG meta, board specimen, keyboard, etc.
   if (gameId === "wordle") {
-    return <WordleDetailPage game={game} />;
+    return (
+      <NYTGamesDocsPageShell
+        eyebrow="NYT Games • Design Breakdown"
+        title="Wordle"
+        description="Five-letter word puzzle — 5×6 grid, keyboard state management, flip animations, dark mode, colorblind mode, and share grid. The most viral word game since Scrabble, now a core NYT Games product."
+      >
+        <WordleDetailPage game={game} />
+      </NYTGamesDocsPageShell>
+    );
   }
 
   // All other games render their Game*.tsx component (same content that was in the anchor sections)
   const GameComponent = GAME_COMPONENTS[gameId];
 
   return (
-    <div className="nytg-scope">
-      <div className="dd-section-label">NYT Games &bull; Design Breakdown</div>
-      <h2 className="dd-section-title">{game.name}</h2>
-      <p className="dd-section-desc">{game.description}</p>
-
+    <NYTGamesDocsPageShell
+      eyebrow="NYT Games • Design Breakdown"
+      title={game.name}
+      description={game.description}
+    >
       {GameComponent ? (
         <GameComponent SectionLabel={SectionLabelStyled} />
       ) : (
@@ -188,7 +218,7 @@ export default function GameArticleDetailPage({ gameId }: Props) {
           Design system component not yet available for {game.name}.
         </p>
       )}
-    </div>
+    </NYTGamesDocsPageShell>
   );
 }
 
@@ -196,18 +226,9 @@ export default function GameArticleDetailPage({ gameId }: Props) {
 
 function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
   return (
-    <div className="nytg-scope">
-      {/* ── Header ──────────────────────────────────────── */}
-      <div className="dd-section-label">NYT Games &bull; Design Breakdown</div>
-      <h2 className="dd-section-title">Wordle</h2>
-      <p className="dd-section-desc">
-        Five-letter word puzzle &mdash; 5&times;6 grid, keyboard state management,
-        flip animations, dark mode, colorblind mode, and share grid. The most viral
-        word game since Scrabble, now a core NYT Games product.
-      </p>
-
+    <>
       {/* ── OG / Meta ──────────────────────────────────── */}
-      <div style={sectionLabel}>Open Graph &amp; Meta</div>
+      <WordleSectionLabel>Open Graph &amp; Meta</WordleSectionLabel>
       <div
         style={{
           background: "var(--dd-paper-white)",
@@ -257,7 +278,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Color Palette ──────────────────────────────── */}
-      <div style={sectionLabel}>Color Palette</div>
+      <WordleSectionLabel>Color Palette</WordleSectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 32 }}>
         {/* Light mode */}
         <div>
@@ -319,7 +340,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Game Board Specimen ─────────────────────────── */}
-      <div style={sectionLabel}>Game Board</div>
+      <WordleSectionLabel>Game Board</WordleSectionLabel>
       <div
         style={{
           background: "var(--dd-brand-surface)",
@@ -369,7 +390,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Keyboard Specimen ──────────────────────────── */}
-      <div style={sectionLabel}>Keyboard</div>
+      <WordleSectionLabel>Keyboard</WordleSectionLabel>
       <div
         style={{
           background: "var(--dd-brand-surface)",
@@ -414,7 +435,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Dark Mode Implementation ──────────────────── */}
-      <div style={sectionLabel}>Dark Mode</div>
+      <WordleSectionLabel>Dark Mode</WordleSectionLabel>
       <div
         style={{
           background: WORDLE.dark.tone7,
@@ -448,7 +469,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Layout Dimensions ─────────────────────────── */}
-      <div style={sectionLabel}>Layout Dimensions</div>
+      <WordleSectionLabel>Layout Dimensions</WordleSectionLabel>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginBottom: 32 }}>
         {[
           { label: "Header Height", value: `${WORDLE.layout.headerHeight}px` },
@@ -466,7 +487,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Build Info ─────────────────────────────────── */}
-      <div style={sectionLabel}>Build &amp; Assets</div>
+      <WordleSectionLabel>Build &amp; Assets</WordleSectionLabel>
       <div style={{ background: "var(--dd-paper-white)", border: "1px solid var(--dd-paper-grey)", borderRadius: 8, padding: 16, marginBottom: 32 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
@@ -504,7 +525,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── A/B Tests ─────────────────────────────────── */}
-      <div style={sectionLabel}>Wordle A/B Tests</div>
+      <WordleSectionLabel>Wordle A/B Tests</WordleSectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 32 }}>
         {game.abTestKeys.map((key) => (
           <div
@@ -536,7 +557,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Fonts ─────────────────────────────────────── */}
-      <div style={sectionLabel}>Typography</div>
+      <WordleSectionLabel>Typography</WordleSectionLabel>
       <div style={{ marginBottom: 32 }}>
         <div style={{ background: "var(--dd-paper-white)", border: "1px solid var(--dd-paper-grey)", borderRadius: 8, padding: 16 }}>
           {Object.entries(WORDLE.fonts).map(([role, family]) => (
@@ -549,7 +570,7 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
       </div>
 
       {/* ── Radius Tokens ─────────────────────────────── */}
-      <div style={sectionLabel}>Border Radius</div>
+      <WordleSectionLabel>Border Radius</WordleSectionLabel>
       <div style={{ display: "flex", gap: 16, marginBottom: 32, flexWrap: "wrap" }}>
         {Object.entries(WORDLE.radius).map(([label, value]) => (
           <div key={label} style={{ textAlign: "center" }}>
@@ -559,6 +580,6 @@ function WordleDetailPage({ game }: { game: (typeof GAME_ARTICLES)[number] }) {
           </div>
         ))}
       </div>
-    </div>
+    </>
   );
 }

@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
-import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  buildAdminProxyErrorResponse,
+  buildAdminReadResponseHeaders,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  BRANDS_LOGOS_CACHE_NAMESPACE,
+  BRANDS_LOGOS_CACHE_TTL_MS,
+} from "@/lib/server/trr-api/brands-route-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -10,48 +25,59 @@ const brandLogoRoutingEnabled = (): boolean =>
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const startedAt = performance.now();
+    const user = await requireAdmin(request);
     if (!brandLogoRoutingEnabled()) {
       return NextResponse.json({ error: "Brand logo routing is disabled" }, { status: 404 });
     }
 
-    const backendUrl = getBackendApiUrl("/admin/brands/logos");
-    if (!backendUrl) {
-      return NextResponse.json({ error: "Backend API not configured" }, { status: 500 });
+    const searchParams = new URLSearchParams(request.nextUrl.searchParams);
+    const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    searchParams.delete("refresh");
+    const cacheKey = buildUserScopedRouteCacheKey(user.uid, "logos", searchParams);
+    const promiseKey = forceRefresh ? `${cacheKey}:refresh` : cacheKey;
+
+    if (!forceRefresh) {
+      const cached = getRouteResponseCache<Record<string, unknown>>(BRANDS_LOGOS_CACHE_NAMESPACE, cacheKey);
+      if (cached) {
+        return NextResponse.json(cached, {
+          headers: buildAdminReadResponseHeaders({ cacheStatus: "hit" }),
+        });
+      }
     }
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
-    if (!serviceRoleKey) {
-      return NextResponse.json({ error: "Backend auth not configured" }, { status: 500 });
-    }
-
-    const upstream = new URL(backendUrl);
-    request.nextUrl.searchParams.forEach((value, key) => {
-      upstream.searchParams.set(key, value);
+    let responseHeaders: Record<string, string> | undefined;
+    const payload = await getOrCreateRouteResponsePromise(BRANDS_LOGOS_CACHE_NAMESPACE, promiseKey, async () => {
+      const upstream = await fetchAdminBackendJson("/admin/brands/logos", {
+        timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+        queryString: searchParams.toString() || undefined,
+        routeName: "brands-logos",
+      });
+      if (upstream.status !== 200) {
+        throw new Error(
+          typeof upstream.data.error === "string"
+            ? upstream.data.error
+            : typeof upstream.data.detail === "string"
+              ? upstream.data.detail
+            : "Failed to fetch brand logos",
+        );
+      }
+      responseHeaders = buildAdminReadResponseHeaders({
+        cacheStatus: forceRefresh ? "refresh" : "miss",
+        upstreamMs: upstream.durationMs,
+        totalMs: performance.now() - startedAt,
+      });
+      setRouteResponseCache(BRANDS_LOGOS_CACHE_NAMESPACE, cacheKey, upstream.data, BRANDS_LOGOS_CACHE_TTL_MS);
+      return upstream.data;
     });
 
-    const response = await fetch(upstream.toString(), {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
-      cache: "no-store",
+    return NextResponse.json(payload, {
+      headers:
+        responseHeaders ??
+        buildAdminReadResponseHeaders({ cacheStatus: forceRefresh ? "refresh" : "miss" }),
     });
-
-    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!response.ok) {
-      const error =
-        typeof payload.error === "string"
-          ? payload.error
-          : typeof payload.detail === "string"
-            ? payload.detail
-            : "Failed to fetch brand logos";
-      return NextResponse.json({ error }, { status: response.status });
-    }
-    return NextResponse.json(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : message === "forbidden" ? 403 : 500;
-    return NextResponse.json({ error: message }, { status });
+    console.error("[api] Failed to load brand logos", error);
+    return buildAdminProxyErrorResponse(error);
   }
 }

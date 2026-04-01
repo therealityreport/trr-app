@@ -35,7 +35,7 @@ describe("person refresh request-id diagnostics wiring", () => {
     expect(pageContents).toContain("show_id: effectiveGalleryImportContext.showId ?? undefined");
     expect(pageContents).toContain("show_name: effectiveGalleryImportContext.showName ?? undefined");
     expect(pageContents).toContain("show_name: effectiveGalleryImportContext.showName || undefined");
-    expect(pageContents).toContain("Import target:");
+    expect(pageContents).not.toContain("Import target:");
   });
 
   it("defaults person gallery scope to all instead of route-show-only imports", () => {

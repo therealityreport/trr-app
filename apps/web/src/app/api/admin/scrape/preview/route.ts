@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -47,9 +48,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Use Supabase service role key for backend auth (already verified admin via Firebase)
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
-      console.error("[scrape/preview] TRR_CORE_SUPABASE_SERVICE_ROLE_KEY not configured");
+      console.error("[scrape/preview] TRR internal admin auth not configured");
       return NextResponse.json(
         { error: "Backend auth not configured" },
         { status: 500 }

@@ -57,24 +57,26 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/suppressSuccessNotice\?: boolean/);
     expect(contents).toMatch(/suppressSuccessNotice: true/);
     expect(contents).toMatch(/if \(!suppressSuccessNotice\)/);
-    expect(contents).toMatch(
-      /Cast refresh complete: credits synced, profile links synced, bios refreshed, network augmentation applied, media ingest complete\./
-    );
+    expect(contents).toMatch(/Credits refresh pipeline completed\./);
+    expect(contents).toMatch(/IMDb Full Credits, profile links, bios, network augmentation, and media ingest refreshed/);
   });
 
-  it("threads abort signals through cast refresh/person media paths", () => {
-    expect(contents).toMatch(/options\?: \{ mode\?: PersonRefreshMode; signal\?: AbortSignal(?:; personName\?: string)? \}/);
-    expect(contents).toMatch(/\{ mode, signal: options\?\.signal, personName: label \}/);
-    expect(contents).toMatch(/runPhasedCastRefresh\(\{\s*phases,\s*signal: runController\.signal,/s);
+  it("threads abort signals through cast person media paths and switches the credits refresh to admin operations", () => {
+    expect(contents).toMatch(/options\?: \{ mode\?: PersonRefreshMode; signal\?: AbortSignal; personName\?: string \}/);
+    expect(contents).toMatch(/refresh-profile\/stream/);
+    expect(contents).toMatch(/mode,\s*signal: options\?\.signal,\s*personName: label/);
     expect(contents).toMatch(/if \(options\?\.signal\?\.aborted \|\| \/canceled\/i\.test\(errorText\)\)/);
+    expect(contents).toMatch(/buildCreditsPipelineFlowScope/);
+    expect(contents).toMatch(/getAutoResumableAdminOperationSession/);
+    expect(contents).toMatch(/clearAdminOperationSession\(flowScope\)/);
   });
 
   it("keeps cast tab progress scoped to cast workflows only", () => {
     expect(contents).toMatch(
-      /const castAnyJobRunning =\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*castMatrixSyncLoading \|\|\s*Boolean\(refreshingTargets\.cast_credits\) \|\|\s*hasPersonRefreshInFlight/s
+      /const castAnyJobRunning =\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*castMatrixSyncLoading \|\|\s*Boolean\(refreshingTargets\.cast_credits\) \|\|\s*hasReconnectableCreditsRun \|\|\s*hasPersonRefreshInFlight/s
     );
     expect(contents).toMatch(
-      /const isCastRefreshBusy =\s*isShowRefreshBusy \|\|\s*castMatrixSyncLoading \|\|\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*hasPersonRefreshInFlight;/s
+      /const isCastRefreshBusy =\s*isShowRefreshBusy \|\|\s*castMatrixSyncLoading \|\|\s*castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*hasReconnectableCreditsRun \|\|\s*hasPersonRefreshInFlight;/s
     );
     expect(contents).not.toMatch(/globalRefreshProgress/);
   });
@@ -111,30 +113,29 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/const cancelShowCastWorkflow = useCallback/);
     expect(contents).toMatch(/castRefreshAbortControllerRef\.current\?\.abort\(\)/);
     expect(contents).toMatch(/castMediaEnrichAbortControllerRef\.current\?\.abort\(\)/);
-    expect(contents).toMatch(/\(castRefreshPipelineRunning \|\| castMediaEnriching \|\| hasPersonRefreshInFlight\) &&/);
-    expect(contents).toMatch(/if \(completedSuccessfully\) \{\s*setCastRefreshPhaseStates\(\[\]\);/s);
+    expect(contents).toMatch(/\(castRefreshPipelineRunning \|\|\s*castMediaEnriching \|\|\s*hasPersonRefreshInFlight \|\|\s*hasReconnectableCreditsRun\) &&/s);
     expect(contents).toMatch(
       /castRefreshAbortControllerRef\.current\?\.abort\(\);\s*castMediaEnrichAbortControllerRef\.current\?\.abort\(\);/s
     );
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/operations\/\$\{operationId\}\/cancel/);
+    expect(contents).toMatch(/Cancel Run/);
     expect(contents).toMatch(/personRefreshAbortControllersRef/);
   });
 
   it("uses valid interactive structure for cast cards by separating link and action buttons", () => {
     expect(contents).toMatch(/<div\s+key=\{member\.id\}/);
     expect(contents).toMatch(/className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"/);
-    expect(contents).toMatch(/className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"/);
     expect(contents).not.toMatch(/event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*handleRefreshCastMember/s);
   });
 
-  it("uses canonical 5-phase cast refresh orchestration with phase-aware button labels", () => {
-    expect(contents).toMatch(/runPhasedCastRefresh\(\{/);
-    expect(contents).toMatch(/id:\s*"credits_sync"/);
-    expect(contents).toMatch(/id:\s*"profile_links_sync"/);
-    expect(contents).toMatch(/id:\s*"bio_sync"/);
-    expect(contents).toMatch(/id:\s*"network_augmentation"/);
-    expect(contents).toMatch(/id:\s*"media_ingest"/);
+  it("uses canonical 5-phase cast refresh state with durable credits-pipeline resume wiring", () => {
+    expect(contents).toMatch(/const CREDITS_PIPELINE_BACKEND_TARGET = "credits_pipeline"/);
     expect(contents).toMatch(/CAST_REFRESH_PHASE_TIMEOUTS:\s*Record<CastRefreshPhaseId,\s*number>/);
-    expect(contents).toMatch(/Ingesting media: \$\{completedCount\}\/\$\{total\} complete \(\$\{inFlightCount\} in flight\)/);
+    expect(contents).toMatch(/const buildCreditsPipelineRequestBody =/);
+    expect(contents).toMatch(/const buildCreditsPipelineFlowScope =/);
+    expect(contents).toMatch(/createCastRefreshPhaseStates\(\)/);
+    expect(contents).toMatch(/updateCastRefreshPhaseStates\(/);
+    expect(contents).toMatch(/void refreshShowCast\(\{ resumeOnly: true \}\);/);
     expect(contents).toMatch(/Syncing Credits\.\.\./);
     expect(contents).toMatch(/Syncing Links\.\.\./);
     expect(contents).toMatch(/Syncing Bios\.\.\./);

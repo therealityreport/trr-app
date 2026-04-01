@@ -34,11 +34,28 @@ function getToday(): string {
 // Quiz
 // ---------------------------------------------------------------------------
 
+const FLASHBACK_QUIZ_SELECT =
+  "id,title,publish_date,description,is_published,created_at,updated_at";
+const FLASHBACK_EVENT_SELECT =
+  "id,quiz_id,description,image_url,year,sort_order,point_value";
+const FLASHBACK_USER_STATS_SELECT =
+  "user_id,games_played,total_points,perfect_scores,current_streak,max_streak";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function unwrapRpcSingleRow<T extends Record<string, unknown>>(raw: any): T | null {
+  if (Array.isArray(raw)) {
+    return raw.length > 0 && raw[0] && typeof raw[0] === "object"
+      ? (raw[0] as T)
+      : null;
+  }
+  return raw && typeof raw === "object" ? (raw as T) : null;
+}
+
 /** Fetch today's published quiz (or the most recent published quiz <= today). */
 export async function getTodaysQuiz(): Promise<FlashbackQuiz | null> {
   const { data, error } = await db()
     .from("flashback_quizzes")
-    .select("*")
+    .select(FLASHBACK_QUIZ_SELECT)
     .eq("is_published", true)
     .lte("publish_date", getToday())
     .order("publish_date", { ascending: false })
@@ -65,7 +82,7 @@ export async function getQuizEvents(
 ): Promise<FlashbackEvent[]> {
   const { data, error } = await db()
     .from("flashback_events")
-    .select("*")
+    .select(FLASHBACK_EVENT_SELECT)
     .eq("quiz_id", quizId)
     .order("sort_order", { ascending: true });
 
@@ -86,41 +103,18 @@ export async function getOrCreateSession(
   userId: string,
   quizId: string,
 ): Promise<FlashbackSession> {
-  // Try to find an existing session for this user + quiz
-  const { data: existing, error: selectError } = await db()
-    .from("flashback_sessions")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("quiz_id", quizId)
-    .limit(1)
-    .single();
+  const { data, error } = await db().rpc("flashback_get_or_create_session", {
+    p_user_id: userId,
+    p_quiz_id: quizId,
+  });
+  const session = unwrapRpcSingleRow<Record<string, unknown>>(data);
 
-  if (existing && !selectError) {
-    return normalizeSession(existing);
-  }
-
-  // Create a fresh session
-  const newSession = {
-    user_id: userId,
-    quiz_id: quizId,
-    current_round: 0,
-    score: 0,
-    placements: [] as FlashbackPlacement[],
-    completed: false,
-  };
-
-  const { data: created, error: insertError } = await db()
-    .from("flashback_sessions")
-    .insert(newSession)
-    .select("*")
-    .single();
-
-  if (insertError || !created) {
-    console.error("[flashback] getOrCreateSession insert error", insertError);
+  if (error || !session) {
+    console.error("[flashback] getOrCreateSession rpc error", error);
     throw new Error("Failed to create Flashback session");
   }
 
-  return normalizeSession(created);
+  return normalizeSession(session);
 }
 
 /** Persist a placement and advance the session. */
@@ -131,42 +125,17 @@ export async function savePlacement(
   newRound: number,
   completed: boolean,
 ): Promise<void> {
-  // Fetch current placements so we can append
-  const { data: session, error: fetchError } = await db()
-    .from("flashback_sessions")
-    .select("placements")
-    .eq("id", sessionId)
-    .single();
+  const { data, error } = await db().rpc("flashback_save_placement", {
+    p_session_id: sessionId,
+    p_placement: placement,
+    p_new_score: newScore,
+    p_new_round: newRound,
+    p_completed: completed,
+  });
+  const session = unwrapRpcSingleRow<Record<string, unknown>>(data);
 
-  if (fetchError || !session) {
-    console.error("[flashback] savePlacement fetch error", fetchError);
-    throw new Error("Failed to fetch session for placement save");
-  }
-
-  const existingPlacements = Array.isArray(session.placements)
-    ? session.placements
-    : [];
-
-  const updatedPlacements = [...existingPlacements, placement];
-
-  const updatePayload: Record<string, unknown> = {
-    placements: updatedPlacements,
-    score: newScore,
-    current_round: newRound,
-    completed,
-  };
-
-  if (completed) {
-    updatePayload.completed_at = new Date().toISOString();
-  }
-
-  const { error: updateError } = await db()
-    .from("flashback_sessions")
-    .update(updatePayload)
-    .eq("id", sessionId);
-
-  if (updateError) {
-    console.error("[flashback] savePlacement update error", updateError);
+  if (error || !session) {
+    console.error("[flashback] savePlacement rpc error", error);
     throw new Error("Failed to save placement");
   }
 }
@@ -181,50 +150,15 @@ export async function updateUserStats(
   pointsEarned: number,
   isPerfect: boolean,
 ): Promise<void> {
-  // Fetch existing stats
-  const { data: existing } = await db()
-    .from("flashback_user_stats")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
+  const { data, error } = await db().rpc("flashback_update_user_stats", {
+    p_user_id: userId,
+    p_points_earned: pointsEarned,
+    p_is_perfect: isPerfect,
+  });
+  const stats = unwrapRpcSingleRow<Record<string, unknown>>(data);
 
-  if (existing) {
-    const updates: Record<string, unknown> = {
-      games_played: (existing.games_played ?? 0) + 1,
-      total_points: (existing.total_points ?? 0) + pointsEarned,
-      current_streak: (existing.current_streak ?? 0) + 1,
-      max_streak: Math.max(
-        (existing.max_streak ?? 0),
-        (existing.current_streak ?? 0) + 1,
-      ),
-    };
-
-    if (isPerfect) {
-      updates.perfect_scores = (existing.perfect_scores ?? 0) + 1;
-    }
-
-    const { error } = await db()
-      .from("flashback_user_stats")
-      .update(updates)
-      .eq("user_id", userId);
-
-    if (error) {
-      console.error("[flashback] updateUserStats update error", error);
-    }
-  } else {
-    // Insert new stats row
-    const { error } = await db().from("flashback_user_stats").insert({
-      user_id: userId,
-      games_played: 1,
-      total_points: pointsEarned,
-      perfect_scores: isPerfect ? 1 : 0,
-      current_streak: 1,
-      max_streak: 1,
-    });
-
-    if (error) {
-      console.error("[flashback] updateUserStats insert error", error);
-    }
+  if (error || !stats) {
+    console.error("[flashback] updateUserStats rpc error", error);
   }
 }
 
@@ -234,7 +168,7 @@ export async function getUserStats(
 ): Promise<FlashbackUserStats | null> {
   const { data, error } = await db()
     .from("flashback_user_stats")
-    .select("*")
+    .select(FLASHBACK_USER_STATS_SELECT)
     .eq("user_id", userId)
     .single();
 

@@ -5,6 +5,7 @@ import {
   type PersonShowEpisodeCredit,
   type TrrPersonCredit,
   getCreditsByPersonId,
+  getCuratedCastShowIdsByPersonId,
   getCreditsForPersonShowScope,
   getEpisodeCreditsByPersonShowId,
 } from "@/lib/server/trr-api/trr-shows-repository";
@@ -56,9 +57,6 @@ type CreditsByShowPayload = Omit<ShowScopePayload, "other_show_credits">;
 const isCastCategory = (value: string | null | undefined): boolean =>
   (value ?? "").trim().toLowerCase() === "self";
 
-const isBlankRole = (value: string | null | undefined): boolean =>
-  (value ?? "").trim().length === 0;
-
 const compareNullableAscNullLast = (a: number | null, b: number | null): number => {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
@@ -82,19 +80,39 @@ const sortCreditGroups = (groups: ShowScopeCreditGroup[]): ShowScopeCreditGroup[
     return a.credit_id.localeCompare(b.credit_id);
   });
 
+const normalizeRole = (value: string | null | undefined): string | null => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+};
+
+const readCreditMetadataEpisodeCount = (
+  credit: TrrPersonCredit
+): number | null => {
+  const metadata = credit.metadata;
+  if (!metadata || typeof metadata !== "object") return null;
+  const rawValue = metadata.episode_count;
+  if (typeof rawValue === "number" && Number.isFinite(rawValue) && rawValue > 0) {
+    return Math.trunc(rawValue);
+  }
+  if (typeof rawValue === "string") {
+    const parsed = Number.parseInt(rawValue, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
 const buildShowScopePayload = (
   showId: string,
   credits: TrrPersonCredit[],
-  episodeCredits: PersonShowEpisodeCredit[]
+  episodeCredits: PersonShowEpisodeCredit[],
+  curatedCastShowIds: Set<string>
 ): ShowScopePayload => {
   const showCredits = credits.filter((credit) => credit.show_id === showId);
   const otherShowCredits = credits.filter((credit) => credit.show_id !== showId);
   const showName = showCredits.find((credit) => credit.show_name)?.show_name ?? null;
-  const hasExplicitCastRole = showCredits.some(
-    (credit) =>
-      isCastCategory(credit.credit_category) &&
-      !isBlankRole(credit.role)
-  );
+  const isCuratedCastShow = curatedCastShowIds.has(showId);
 
   const episodeRowsByCreditId = new Map<string, PersonShowEpisodeCredit[]>();
   for (const row of episodeCredits) {
@@ -110,6 +128,24 @@ const buildShowScopePayload = (
   const crewGroups: ShowScopeCreditGroup[] = [];
   const castNonEpisodic: TrrPersonCredit[] = [];
   const crewNonEpisodic: TrrPersonCredit[] = [];
+  const hasExplicitCastRole = isCuratedCastShow
+    ? showCredits.some((credit) => {
+        const evidenceRows = episodeRowsByCreditId.get(credit.id) ?? [];
+        const isCastFromCredit = isCastCategory(credit.credit_category);
+        const isCastFromEvidence = evidenceRows.some((row) =>
+          isCastCategory(row.credit_category)
+        );
+        if (!(isCastFromCredit || isCastFromEvidence)) {
+          return false;
+        }
+
+        if (normalizeRole(credit.role)) {
+          return true;
+        }
+
+        return evidenceRows.some((row) => normalizeRole(row.role));
+      })
+    : false;
 
   for (const credit of showCredits) {
     const evidenceRows = episodeRowsByCreditId.get(credit.id) ?? [];
@@ -117,16 +153,42 @@ const buildShowScopePayload = (
     const isCastFromEvidence = evidenceRows.some((row) =>
       isCastCategory(row.credit_category)
     );
-    const isCast = isCastFromCredit || isCastFromEvidence;
+    const isCast = isCuratedCastShow && (isCastFromCredit || isCastFromEvidence);
     const normalizedCategory = isCastFromEvidence
       ? "Self"
       : credit.credit_category;
+    const role = normalizeRole(credit.role);
+    const shouldSuppressGenericCastDuplicate =
+      isCast &&
+      normalizedCategory === "Self" &&
+      role === null &&
+      hasExplicitCastRole;
 
-    if (hasExplicitCastRole && isCast && isBlankRole(credit.role)) {
+    if (shouldSuppressGenericCastDuplicate) {
       continue;
     }
 
     if (evidenceRows.length === 0) {
+      const metadataEpisodeCount = readCreditMetadataEpisodeCount(credit);
+      if (metadataEpisodeCount) {
+        const metadataOnlyGroup: ShowScopeCreditGroup = {
+          credit_id: credit.id,
+          role,
+          credit_category: normalizedCategory,
+          billing_order: credit.billing_order,
+          source_type: credit.source_type ?? null,
+          total_episodes: metadataEpisodeCount,
+          seasons: [],
+        };
+
+        if (isCast) {
+          castGroups.push(metadataOnlyGroup);
+        } else {
+          crewGroups.push(metadataOnlyGroup);
+        }
+        continue;
+      }
+
       if (isCast) {
         castNonEpisodic.push(credit);
       } else {
@@ -168,7 +230,7 @@ const buildShowScopePayload = (
 
     const group: ShowScopeCreditGroup = {
       credit_id: credit.id,
-      role: credit.role,
+      role,
       credit_category: normalizedCategory,
       billing_order: credit.billing_order,
       source_type: credit.source_type ?? null,
@@ -208,6 +270,7 @@ const toCreditsByShowPayload = (
 const buildCreditsByShowPayload = (
   credits: TrrPersonCredit[],
   episodeCredits: Array<PersonShowEpisodeCredit & { show_id: string }>,
+  curatedCastShowIds: Set<string>,
   options?: { prioritizedShowId?: string | null }
 ): CreditsByShowPayload[] => {
   const groupedCredits = new Map<string, TrrPersonCredit[]>();
@@ -233,7 +296,7 @@ const buildCreditsByShowPayload = (
 
   const creditsByShow = Array.from(groupedCredits.entries()).map(([showId, showCredits]) =>
     toCreditsByShowPayload(
-      buildShowScopePayload(showId, showCredits, episodeCreditsByShow.get(showId) ?? [])
+      buildShowScopePayload(showId, showCredits, episodeCreditsByShow.get(showId) ?? [], curatedCastShowIds)
     )
   );
 
@@ -298,18 +361,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const episodeCredits = await getEpisodeCreditsByPersonId(personId, {
       includeArchiveFootage: false,
     });
+    const curatedCastShowIds = await getCuratedCastShowIdsByPersonId(personId);
     const showScope = showId
       ? buildShowScopePayload(
           showId,
           await getCreditsForPersonShowScope(personId, showId),
           await getEpisodeCreditsByPersonShowId(personId, showId, {
             includeArchiveFootage: false,
-          })
+          }),
+          curatedCastShowIds,
         )
       : null;
     const creditsByShow = buildCreditsByShowPayload(
       credits,
       episodeCredits,
+      curatedCastShowIds,
       { prioritizedShowId: showId }
     );
 

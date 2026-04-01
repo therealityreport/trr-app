@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -46,18 +47,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
       return NextResponse.json(
         { error: "Backend auth not configured" },
-        { status: 500 },
-      );
-    }
-
-    const internalSecret = process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
-    if (!internalSecret) {
-      return NextResponse.json(
-        { error: "Internal backend auth secret not configured" },
         { status: 500 },
       );
     }
@@ -70,7 +63,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${serviceRoleKey}`,
-          "X-TRR-Internal-Admin-Secret": internalSecret,
         },
         body: JSON.stringify({ facebank_seed: facebankSeed }),
       });

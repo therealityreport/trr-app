@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
+import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 import {
   isRetryableSseNetworkError,
   normalizeSseProxyError,
@@ -246,7 +247,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const serviceRoleKey = process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    const serviceRoleKey = getInternalAdminBearerToken();
     if (!serviceRoleKey) {
       return buildErrorResponse(
         {
