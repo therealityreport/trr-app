@@ -111,19 +111,14 @@ export const isDeployedRuntime = (env: EnvLike = process.env): boolean => {
   return true;
 };
 
-export function validateRuntimeLane(connectionClass: ConnectionClass, isDeployed: boolean): void {
+export function validateRuntimeLane(connectionClass: ConnectionClass, _isDeployed: boolean): void {
+  void _isDeployed;
   if (connectionClass === "session" || connectionClass === "local") {
     return;
   }
-  if (isDeployed) {
-    throw new Error(
-      `[postgres] connection class "${connectionClass}" is not allowed in deployed runtime. ` +
-        `Only "session" (Supavisor pooler :5432) and "local" lanes are permitted.`,
-    );
-  }
-  console.warn(
-    `[postgres] connection class "${connectionClass}" is not recommended for runtime use; ` +
-      `default lane is Supavisor session mode on pooler.supabase.com:5432.`,
+  throw new Error(
+    `[postgres] connection class "${connectionClass}" is not allowed in runtime. ` +
+      `Only "session" (Supavisor pooler :5432) and "local" lanes are permitted.`,
   );
 }
 

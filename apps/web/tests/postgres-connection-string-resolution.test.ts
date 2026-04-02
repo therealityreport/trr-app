@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   classifyConnectionClass,
   isDeployedRuntime,
@@ -158,31 +158,31 @@ describe("validateRuntimeLane", () => {
 
   it("rejects transaction in deployed runtime", () => {
     expect(() => validateRuntimeLane("transaction", true)).toThrow(
-      /connection class "transaction" is not allowed in deployed runtime/,
+      /connection class "transaction" is not allowed in runtime/,
     );
   });
 
   it("rejects direct in deployed runtime", () => {
     expect(() => validateRuntimeLane("direct", true)).toThrow(
-      /connection class "direct" is not allowed in deployed runtime/,
+      /connection class "direct" is not allowed in runtime/,
     );
   });
 
-  it("warns but allows transaction in local dev", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    expect(() => validateRuntimeLane("transaction", false)).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('connection class "transaction" is not recommended'),
+  it("rejects transaction in local dev", () => {
+    expect(() => validateRuntimeLane("transaction", false)).toThrow(
+      /connection class "transaction" is not allowed in runtime/,
     );
-    warnSpy.mockRestore();
   });
 
-  it("warns but allows direct in local dev", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    expect(() => validateRuntimeLane("direct", false)).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('connection class "direct" is not recommended'),
+  it("rejects direct in local dev", () => {
+    expect(() => validateRuntimeLane("direct", false)).toThrow(
+      /connection class "direct" is not allowed in runtime/,
     );
-    warnSpy.mockRestore();
+  });
+
+  it("rejects unknown lanes in local dev", () => {
+    expect(() => validateRuntimeLane("other", false)).toThrow(
+      /connection class "other" is not allowed in runtime/,
+    );
   });
 });
