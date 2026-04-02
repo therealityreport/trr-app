@@ -13943,20 +13943,20 @@ export default function TrrShowDetailPage() {
                                     </div>
                                   </div>
                                   <div className="mt-3 grid gap-2">
-                                    {row.links.map((link) => (
+                                    {row.links.filter((link) => link.link).map((link) => (
                                       <InlineEditableLinkUrl
                                         key={`settings-season-link-editor-${row.seasonNumber}-${link.id}`}
-                                        linkId={link.link.id}
+                                        linkId={link.link!.id}
                                         url={link.url}
                                         openUrl={link.url}
                                         label={`${link.sourceLabel} season page`}
-                                        saving={Boolean(savingLinkIds[link.link.id])}
+                                        saving={Boolean(savingLinkIds[link.link!.id])}
                                         onSubmit={updateShowLinkUrl}
                                         containerClassName="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2"
                                         actions={
                                           <button
                                             type="button"
-                                            onClick={() => void deleteShowLink(link.link.id)}
+                                            onClick={() => void deleteShowLink(link.link!.id)}
                                             className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"
                                           >
                                             Delete
