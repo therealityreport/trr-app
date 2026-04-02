@@ -74,7 +74,6 @@ type PostgresPoolSizing = {
 };
 
 const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app-server";
-const warnedNonDefaultConnectionClasses = new Set<string>();
 
 const classifyHostClass = (connectionString: string): CandidateDetail["hostClass"] => {
   const host = parseConnectionHostname(connectionString);
@@ -323,16 +322,6 @@ const getPool = (): Pool => {
     pool,
   };
   if (selectedCandidate) {
-    if (
-      selectedCandidate.connectionClass !== "session" &&
-      selectedCandidate.connectionClass !== "local" &&
-      !warnedNonDefaultConnectionClasses.has(selectedCandidate.connectionClass)
-    ) {
-      warnedNonDefaultConnectionClasses.add(selectedCandidate.connectionClass);
-      console.warn(
-        `[postgres] non-default connection class ${selectedCandidate.connectionClass} selected; default runtime lane is Supavisor session mode on pooler.supabase.com:5432.`,
-      );
-    }
     console.info(
       `[postgres] winner_source=${selectedCandidate.source} host_class=${selectedCandidate.hostClass} connection_class=${selectedCandidate.connectionClass} pool_max=${max} pool_max_source=${process.env.POSTGRES_POOL_MAX ? "env:POSTGRES_POOL_MAX" : "default"} max_concurrent_operations=${getMaxConcurrentOperations()} max_concurrent_operations_source=${process.env.POSTGRES_MAX_CONCURRENT_OPERATIONS ? "env:POSTGRES_MAX_CONCURRENT_OPERATIONS" : "default"} application_name=${applicationName} application_name_source=${process.env.POSTGRES_APPLICATION_NAME ? "env:POSTGRES_APPLICATION_NAME" : "default"}`,
     );
