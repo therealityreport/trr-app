@@ -105,6 +105,10 @@ const REQUEST_PATH_ALIASES: Array<{ pattern: RegExp; replacement: string }> = [
     pattern: /^\/api\/admin\/images\/cast\/\[imageId\]\/reassign$/i,
     replacement: "/api/admin/images/[imageType]/[imageId]/reassign",
   },
+  {
+    pattern: /^\/api\/admin\/flashback\/events$/i,
+    replacement: "/api/admin/flashback/events/[eventId]",
+  },
 ];
 
 function posixify(value: string): string {

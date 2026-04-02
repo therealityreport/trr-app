@@ -31,8 +31,8 @@ describe("admin-breadcrumb helpers", () => {
         weekHref: "/shows/rhoslc/s5/social/week/2",
       }),
     ).toEqual([
-      { label: "Admin", href: "/" },
-      { label: "Shows", href: "/shows" },
+      { label: "Admin", href: "/admin" },
+      { label: "Shows", href: "/admin/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
       { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Week 2", href: "/shows/rhoslc/s5/social/week/2" },
@@ -48,8 +48,8 @@ describe("admin-breadcrumb helpers", () => {
         weekHref: "/shows/rhoslc/s5/social/week/2?social_platform=reddit",
       }),
     ).toEqual([
-      { label: "Admin", href: "/" },
-      { label: "Shows", href: "/shows" },
+      { label: "Admin", href: "/admin" },
+      { label: "Shows", href: "/admin/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
       { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
@@ -68,8 +68,8 @@ describe("admin-breadcrumb helpers", () => {
         subTabHref: "/shows/rhoslc/s5/social/reddit",
       }),
     ).toEqual([
-      { label: "Admin", href: "/" },
-      { label: "Shows", href: "/shows" },
+      { label: "Admin", href: "/admin" },
+      { label: "Shows", href: "/admin/shows" },
       { label: "RHOSLC", href: "/shows/rhoslc" },
       { label: "Season 5", href: "/shows/rhoslc/s5" },
       { label: "Social Media", href: "/shows/rhoslc/s5/social/reddit" },
@@ -85,8 +85,8 @@ describe("admin-breadcrumb helpers", () => {
         showHref: "/shows/the-real-housewives-of-salt-lake-city",
       }),
     ).toEqual([
-      { label: "Admin", href: "/" },
-      { label: "Shows", href: "/shows" },
+      { label: "Admin", href: "/admin" },
+      { label: "Shows", href: "/admin/shows" },
       {
         label: "The Real Housewives of Salt Lake City",
         href: "/shows/the-real-housewives-of-salt-lake-city",
@@ -99,21 +99,21 @@ describe("admin-breadcrumb helpers", () => {
         personHref: "/people/meredith-marks",
       }),
     ).toEqual([
-      { label: "Admin", href: "/" },
-      { label: "People", href: "/people" },
+      { label: "Admin", href: "/admin" },
+      { label: "People", href: "/admin/people" },
       { label: "Meredith Marks", href: "/people/meredith-marks" },
     ]);
   });
 
   it("builds survey detail breadcrumbs", () => {
     expect(buildSurveyDetailBreadcrumb("Rhoslc S5 E1", "/admin/surveys/rhoslc-s5-e1")).toEqual([
-      { label: "Admin", href: "/" },
+      { label: "Admin", href: "/admin" },
       { label: "Surveys", href: "/surveys" },
       { label: "Rhoslc S5 E1", href: "/admin/surveys/rhoslc-s5-e1" },
     ]);
 
     expect(buildNormalizedSurveyDetailBreadcrumb("Weekly Pulse", "/admin/surveys/normalized/weekly-pulse")).toEqual([
-      { label: "Admin", href: "/" },
+      { label: "Admin", href: "/admin" },
       { label: "Normalized Surveys", href: "/admin/surveys/normalized" },
       { label: "Weekly Pulse", href: "/admin/surveys/normalized/weekly-pulse" },
     ]);
@@ -121,16 +121,16 @@ describe("admin-breadcrumb helpers", () => {
 
   it("builds brands page breadcrumbs with current page included", () => {
     expect(buildBrandsPageBreadcrumb("Networks & Streaming Services", "/brands/networks-and-streaming")).toEqual([
-      { label: "Admin", href: "/" },
-      { label: "Brands", href: "/brands" },
+      { label: "Admin", href: "/admin" },
+      { label: "Brands", href: "/admin/brands" },
       { label: "Networks & Streaming Services", href: "/brands/networks-and-streaming" },
     ]);
 
     expect(
       buildNetworkDetailBreadcrumb("Bravo", "/brands/networks-and-streaming/network/bravo"),
     ).toEqual([
-      { label: "Admin", href: "/" },
-      { label: "Brands", href: "/brands" },
+      { label: "Admin", href: "/admin" },
+      { label: "Brands", href: "/admin/brands" },
       { label: "Networks & Streaming Services", href: "/brands?category=all" },
       { label: "Bravo", href: "/brands/networks-and-streaming/network/bravo" },
     ]);

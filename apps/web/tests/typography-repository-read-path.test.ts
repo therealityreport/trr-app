@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const EMPTY_SEEDED_STATE = { sets: [], assignments: [] };
+
 const { queryMock, buildTypographyStateSnapshotMock, buildSeededTypographyStateMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
-  buildTypographyStateSnapshotMock: vi.fn(),
+  buildTypographyStateSnapshotMock: vi.fn().mockReturnValue({ sets: [], assignments: [] }),
   buildSeededTypographyStateMock: vi.fn(),
 }));
 
@@ -15,12 +17,20 @@ vi.mock("@/lib/server/admin/typography-seed", () => ({
   buildSeededTypographyState: buildSeededTypographyStateMock,
 }));
 
+vi.mock("@/lib/server/admin/route-response-cache", () => ({
+  getRouteResponseCache: vi.fn().mockReturnValue(null),
+  setRouteResponseCache: vi.fn(),
+  getOrCreateRouteResponsePromise: vi.fn(
+    (_ns: string, _key: string, factory: () => Promise<unknown>) => factory(),
+  ),
+  invalidateRouteResponseCache: vi.fn(),
+}));
+
 import { getTypographyState } from "@/lib/server/admin/typography-repository";
 
 describe("typography repository read path", () => {
   beforeEach(() => {
     queryMock.mockReset();
-    buildTypographyStateSnapshotMock.mockReset();
     buildSeededTypographyStateMock.mockReset();
     buildSeededTypographyStateMock.mockReturnValue({ sets: [], assignments: [] });
   });
@@ -69,11 +79,7 @@ describe("typography repository read path", () => {
     }
   });
 
-  it("falls back to the snapshot when typography tables are absent", async () => {
-    buildTypographyStateSnapshotMock.mockReturnValue({
-      sets: [{ id: "fallback-set" }],
-      assignments: [{ id: "fallback-assignment" }],
-    });
+  it("falls back to the seeded snapshot when typography tables are absent", async () => {
     queryMock.mockRejectedValue({
       code: "42P01",
       message: 'relation "site_typography_sets" does not exist',
@@ -81,10 +87,9 @@ describe("typography repository read path", () => {
 
     const state = await getTypographyState();
 
-    expect(state).toEqual({
-      sets: [{ id: "fallback-set" }],
-      assignments: [{ id: "fallback-assignment" }],
-    });
-    expect(buildTypographyStateSnapshotMock).toHaveBeenCalledTimes(1);
+    // When tables are missing, readPersistedTypographyState returns null and
+    // getTypographyState falls back to the module-level SEEDED_SNAPSHOT which
+    // was captured once at import time from the mocked buildTypographyStateSnapshot.
+    expect(state).toEqual(EMPTY_SEEDED_STATE);
   });
 });

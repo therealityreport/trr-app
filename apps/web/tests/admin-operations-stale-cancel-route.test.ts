@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -14,20 +15,25 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 import { POST } from "@/app/api/admin/trr-api/operations/stale/cancel/route";
 
 describe("admin operations stale cancel route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
 
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/operations/stale/cancel");
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
   });
 
-  it("forwards POST body with service-role auth", async () => {
+  it("forwards POST body with internal admin auth", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ cancelled_operations: 1, cancelled_operation_ids: ["op-1"] }), {
         status: 200,
@@ -51,7 +57,7 @@ describe("admin operations stale cancel route", () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "POST",
       headers: {
-        Authorization: "Bearer service-role-secret",
+        Authorization: "Bearer internal-admin-token",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ operation_ids: ["op-1"] }),
