@@ -24,4 +24,20 @@ describe("person credits show-scope wiring", () => {
     expect(contents).toMatch(/buildPersonBreadcrumb\(person\.full_name, \{/);
     expect(contents).toMatch(/showHref: breadcrumbShowHref/);
   });
+
+  it("loads credits through adminGetJson with abort-safe secondary-read handling", () => {
+    const filePath = path.resolve(
+      __dirname,
+      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx"
+    );
+    const contents = fs.readFileSync(filePath, "utf8");
+
+    expect(contents).toMatch(/const fetchCredits = useCallback\(async \(options\?: \{ signal\?: AbortSignal \}\) =>/);
+    expect(contents).toMatch(/adminGetJson<\{/);
+    expect(contents).toMatch(/`\/api\/admin\/trr-api\/people\/\$\{personId\}\/credits\?\$\{params\.toString\(\)\}`/);
+    expect(contents).toMatch(/externalSignal: signal/);
+    expect(contents).toMatch(/requestRole: "secondary"/);
+    expect(contents).toMatch(/dedupeKey: `person:\$\{personId\}:credits:\$\{params\.toString\(\)\}`/);
+    expect(contents).toMatch(/if \(signal\?\.aborted \|\| isAbortError\(err\) \|\| isSignalAbortedWithoutReasonError\(err\)\) return;/);
+  });
 });

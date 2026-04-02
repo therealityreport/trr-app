@@ -36,6 +36,9 @@ interface ExternalLinksProps {
   externalIds: ExternalIds | null | undefined;
   tmdbId?: number | null;
   imdbId?: string | null;
+  derivedLinks?: {
+    justwatch_url?: string | null;
+  } | null;
   type?: "show" | "person";
   className?: string;
 }
@@ -47,6 +50,7 @@ export function ExternalLinks({
   externalIds,
   tmdbId,
   imdbId,
+  derivedLinks,
   type = "show",
   className = "",
 }: ExternalLinksProps) {
@@ -76,8 +80,12 @@ export function ExternalLinks({
     if (value === null || value === undefined || value === "") return false;
     return true;
   });
+  const justwatchUrl =
+    typeof derivedLinks?.justwatch_url === "string" && derivedLinks.justwatch_url.trim()
+      ? derivedLinks.justwatch_url.trim()
+      : null;
 
-  if (!hasIds) {
+  if (!hasIds && !justwatchUrl) {
     return null;
   }
 
@@ -116,6 +124,14 @@ export function ExternalLinks({
       label: "Wikidata",
       url: `https://www.wikidata.org/wiki/${ids.wikidata_id}`,
       value: ids.wikidata_id,
+    });
+  }
+
+  if (justwatchUrl) {
+    linkEntries.push({
+      label: "JustWatch",
+      url: justwatchUrl,
+      value: "Watch page",
     });
   }
 

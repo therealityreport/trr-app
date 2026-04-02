@@ -3,6 +3,10 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import { HubComponents } from "./games";
+import {
+  NYT_GAMES_RUNTIME_FONT_STACKS,
+  resolveNYTGamesRuntimeFontFamily,
+} from "./games/font-stacks";
 import BrandNYTGamesResources from "./games/BrandNYTGamesResources";
 import { FOUNDATION, TECH_STACK, AB_TESTS } from "./games/game-palettes";
 import {
@@ -44,12 +48,6 @@ const sectionCardStyle: CSSProperties = {
   border: "1px solid var(--dd-paper-grey)",
   borderRadius: 12,
 };
-
-const NYT_GAMES_FONT_STACKS = {
-  ui: '"NYTFranklin","nyt-franklin","Helvetica Neue",Arial,sans-serif',
-  body: '"NYTFranklin","nyt-franklin","Helvetica Neue",Arial,sans-serif',
-  headline: '"NYTKarnak_Condensed","nyt-karnakcondensed",Georgia,serif',
-} as const;
 
 const PORTFOLIO_GAMES = [
   {
@@ -419,7 +417,7 @@ function TypographySection() {
             </div>
             <div
               style={{
-                fontFamily: role.family,
+                fontFamily: resolveNYTGamesRuntimeFontFamily(role.family),
                 color: "var(--dd-ink-black)",
                 marginBottom: 10,
                 ...role.style,
@@ -654,7 +652,7 @@ function PortfolioCard({
             borderBottomLeftRadius: 8,
             background: badgeColor,
             color: "#ffffff",
-            fontFamily: NYT_GAMES_FONT_STACKS.ui,
+            fontFamily: NYT_GAMES_RUNTIME_FONT_STACKS.ui,
             fontSize: 10,
             fontWeight: 700,
             textTransform: "uppercase",
@@ -687,7 +685,7 @@ function PortfolioCard({
         )}
         <div
           style={{
-            fontFamily: NYT_GAMES_FONT_STACKS.headline,
+            fontFamily: NYT_GAMES_RUNTIME_FONT_STACKS.headline,
             fontSize: 28,
             lineHeight: 1.1,
             color: "#000000",
@@ -705,7 +703,7 @@ function PortfolioCard({
           justifyContent: "space-between",
           flexBasis: "100%",
           padding: 20,
-          fontFamily: NYT_GAMES_FONT_STACKS.ui,
+          fontFamily: NYT_GAMES_RUNTIME_FONT_STACKS.ui,
           fontSize: 16,
           lineHeight: "20.8px",
           minHeight: isMobile ? 132 : 140,
@@ -713,7 +711,7 @@ function PortfolioCard({
       >
         <div
           style={{
-            fontFamily: NYT_GAMES_FONT_STACKS.body,
+            fontFamily: NYT_GAMES_RUNTIME_FONT_STACKS.body,
             fontSize: isMobile ? 14 : 16,
             lineHeight: "20px",
             color: "#959595",
@@ -729,7 +727,7 @@ function PortfolioCard({
             border: "1px solid #cccccc",
             display: "grid",
             placeItems: "center",
-            fontFamily: NYT_GAMES_FONT_STACKS.ui,
+            fontFamily: NYT_GAMES_RUNTIME_FONT_STACKS.ui,
             fontSize: 16,
             fontWeight: 700,
             color: "#333333",

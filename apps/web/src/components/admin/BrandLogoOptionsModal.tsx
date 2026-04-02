@@ -3,17 +3,6 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "firebase/auth";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
 import AdminModal from "@/components/admin/AdminModal";
 import { Button } from "@/components/ui/button";
 import {
@@ -125,24 +114,13 @@ type LogoCardProps = {
   selected: boolean;
   targetLabel: string;
   onClick?: () => void;
-  onDelete?: () => void;
-  onCancelDelete?: () => void;
-  onSetAsIcon?: () => void;
-  onSetAsWordmark?: () => void;
-  confirmingDelete?: boolean;
   disabled?: boolean;
-};
-
-type FeatureSlotProps = {
-  role: BrandLogoRole;
-  option: SavedLogoAsset | DiscoverCandidate | null;
-  targetLabel: string;
 };
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
 const MANUAL_SOURCE_PROVIDER = "manual_import_url";
 const SAVED_SOURCE_PROVIDER = "saved";
-const SOURCE_PREFETCH_SIZE = 10;
+const SOURCE_PREFETCH_SIZE = 20;
 const SOURCE_PREFETCH_CONCURRENCY = 3;
 const SHARED_SOURCE_QUERY_ROLES: BrandLogoRole[] = ["wordmark", "icon"];
 const SHARED_SLUG_SOURCE_KINDS: SourceQueryKind[] = ["slug", "search_term"];
@@ -258,96 +236,6 @@ const getOptionPreferredRole = (option: SavedLogoAsset | DiscoverCandidate): Bra
   }
   return "wordmark";
 };
-
-const OTHER_BRAND_LOGO_ROLE: Record<BrandLogoRole, BrandLogoRole> = {
-  wordmark: "icon",
-  icon: "wordmark",
-};
-
-const dedupeBrandLogoRoles = (roles: Array<BrandLogoRole | null | undefined>): BrandLogoRole[] => {
-  const out: BrandLogoRole[] = [];
-  for (const role of roles) {
-    if (!role || out.includes(role)) continue;
-    out.push(role);
-  }
-  return out;
-};
-
-const toSavedLogoAsset = (value: unknown): SavedLogoAsset | null => {
-  if (!value || typeof value !== "object") return null;
-  const row = value as Record<string, unknown>;
-  const id = typeof row.id === "string" ? row.id : "";
-  if (!id) return null;
-  return {
-    id,
-    source_url: typeof row.source_url === "string" ? row.source_url : null,
-    source_provider: typeof row.source_provider === "string" ? row.source_provider : null,
-    discovered_from: typeof row.discovered_from === "string" ? row.discovered_from : null,
-    hosted_logo_url: typeof row.hosted_logo_url === "string" ? row.hosted_logo_url : null,
-    hosted_logo_black_url: typeof row.hosted_logo_black_url === "string" ? row.hosted_logo_black_url : null,
-    hosted_logo_white_url: typeof row.hosted_logo_white_url === "string" ? row.hosted_logo_white_url : null,
-    option_kind: typeof row.option_kind === "string" ? row.option_kind : "stored",
-    file_type: typeof row.file_type === "string" ? row.file_type : null,
-    content_type: typeof row.content_type === "string" ? row.content_type : null,
-    width: typeof row.width === "number" ? row.width : null,
-    height: typeof row.height === "number" ? row.height : null,
-    aspect_ratio: typeof row.aspect_ratio === "number" ? row.aspect_ratio : null,
-    logo_role: row.logo_role === "icon" ? "icon" : row.logo_role === "wordmark" ? "wordmark" : null,
-    detected_logo_role:
-      row.detected_logo_role === "icon" ? "icon" : row.detected_logo_role === "wordmark" ? "wordmark" : null,
-    selected_roles: Array.isArray(row.selected_roles)
-      ? dedupeBrandLogoRoles(
-          row.selected_roles.map((role) => (role === "icon" || role === "wordmark" ? role : null)),
-        )
-      : [],
-  };
-};
-
-function applyFeaturedSelectionState(
-  assets: SavedLogoAsset[],
-  featured: Record<BrandLogoRole, SavedLogoAsset | null>,
-  selectedAsset: SavedLogoAsset,
-  role: BrandLogoRole,
-): {
-  assets: SavedLogoAsset[];
-  featured: Record<BrandLogoRole, SavedLogoAsset | null>;
-} {
-  const nextFeatured = {
-    ...featured,
-    [role]: selectedAsset,
-  };
-  const otherRole = OTHER_BRAND_LOGO_ROLE[role];
-  const selectedRoles = dedupeBrandLogoRoles([
-    role,
-    nextFeatured[otherRole]?.id === selectedAsset.id ? otherRole : null,
-    ...(selectedAsset.selected_roles ?? []),
-  ]);
-
-  let foundSelectedAsset = false;
-  const nextAssets = assets.map((asset) => {
-    const retainedRoles = dedupeBrandLogoRoles((asset.selected_roles ?? []).filter((selectedRole) => selectedRole !== role));
-    if (asset.id !== selectedAsset.id) {
-      return retainedRoles.length === (asset.selected_roles ?? []).length
-        ? asset
-        : { ...asset, selected_roles: retainedRoles };
-    }
-    foundSelectedAsset = true;
-    return {
-      ...asset,
-      ...selectedAsset,
-      selected_roles: selectedRoles,
-    };
-  });
-
-  if (!foundSelectedAsset) {
-    nextAssets.push({
-      ...selectedAsset,
-      selected_roles: selectedRoles,
-    });
-  }
-
-  return { assets: nextAssets, featured: nextFeatured };
-}
 
 async function parseErrorPayload(response: Response): Promise<string> {
   const fallback = `Request failed (${response.status})`;
@@ -529,66 +417,14 @@ function getEmptyStateMessage({
   return "No candidates found for this source.";
 }
 
-function FeatureSlot({ role, option, targetLabel }: FeatureSlotProps) {
-  const { isOver, setNodeRef } = useDroppable({
-    id: `feature:${role}`,
-  });
-  const isWordmark = role === "wordmark";
-  return (
-    <div
-      ref={setNodeRef}
-      className={joinClassNames(
-        "rounded-2xl border bg-zinc-50 p-3 transition",
-        isOver ? "border-cyan-600 ring-2 ring-cyan-200" : "border-zinc-200",
-      )}
-    >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-        {isWordmark ? "Featured Wordmark" : "Featured Icon"}
-      </p>
-      <div
-        className={joinClassNames(
-          "mt-3 overflow-hidden rounded-xl border border-zinc-200 bg-white",
-          isWordmark ? "relative h-24 w-full" : "relative h-24 w-24",
-        )}
-      >
-        <Image
-          src={(option ? pickDisplayUrl(option) : null) || PLACEHOLDER_ICON_PATH}
-          alt={`${targetLabel} featured ${role}`}
-          fill
-          className="object-contain p-3"
-          unoptimized
-        />
-      </div>
-      <p className="mt-3 truncate text-sm font-semibold text-zinc-900">
-        {option ? formatProviderLabel(option.source_provider) : "Drop an asset here"}
-      </p>
-      <p className="truncate text-xs text-zinc-500">{option?.discovered_from || option?.source_url || "Drag from Saved or a source tab."}</p>
-    </div>
-  );
-}
-
 function LogoCard({
   option,
   isSaved,
   selected,
   targetLabel,
   onClick,
-  onDelete,
-  onCancelDelete,
-  onSetAsIcon,
-  onSetAsWordmark,
-  confirmingDelete = false,
   disabled = false,
 }: LogoCardProps) {
-  const { listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `drag:${option.id}`,
-    data: {
-      optionId: option.id,
-    },
-  });
-  const style = transform
-    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
-    : undefined;
   const metadataBits = [
     option.file_type ? option.file_type.toUpperCase() : null,
     formatDimensions(option.width, option.height),
@@ -599,12 +435,9 @@ function LogoCard({
 
   return (
     <div
-      ref={setNodeRef}
-      style={style}
       className={joinClassNames(
         "rounded-2xl border p-3 transition",
         selected ? "border-zinc-900 bg-zinc-100" : "border-zinc-200 bg-white hover:bg-zinc-50",
-        isDragging ? "opacity-60" : "",
       )}
     >
       <div
@@ -625,7 +458,6 @@ function LogoCard({
           onClick ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" : "",
           disabled ? "cursor-not-allowed opacity-70" : "",
         )}
-        {...listeners}
       >
         <div className="relative h-20 w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
           <Image
@@ -660,73 +492,7 @@ function LogoCard({
         ) : null}
       </div>
       {isSaved ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-[11px] font-semibold text-zinc-500">Drag into the wordmark or icon frame, or use explicit feature actions.</p>
-          {confirmingDelete ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2">
-              <p className="text-xs font-semibold text-red-800">Delete this saved asset permanently?</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCancelDelete?.();
-                  }}
-                  disabled={disabled}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDelete?.();
-                  }}
-                  disabled={disabled}
-                >
-                  Delete Permanently
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onSetAsWordmark?.();
-                }}
-                disabled={disabled}
-              >
-                Set as Wordmark
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onSetAsIcon?.();
-                }}
-                disabled={disabled}
-              >
-                Set as Icon
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDelete?.();
-                }}
-                disabled={disabled}
-              >
-                Delete
-              </Button>
-            </div>
-          )}
-        </div>
+        <p className="mt-3 text-[11px] text-zinc-500">Saved library asset</p>
       ) : null}
     </div>
   );
@@ -750,10 +516,6 @@ export default function BrandLogoOptionsModal({
   const [sources, setSources] = useState<SourceSummary[]>([]);
   const [activeSource, setActiveSource] = useState<string | null>(null);
   const [savedAssets, setSavedAssets] = useState<SavedLogoAsset[]>([]);
-  const [featuredByRole, setFeaturedByRole] = useState<Record<BrandLogoRole, SavedLogoAsset | null>>({
-    wordmark: null,
-    icon: null,
-  });
   const [discoveredOptionsBySource, setDiscoveredOptionsBySource] = useState<Record<string, DiscoverCandidate[]>>({});
   const [selectedOptionIdsBySource, setSelectedOptionIdsBySource] = useState<Record<string, string[]>>({});
   const [discoverOffsetBySource, setDiscoverOffsetBySource] = useState<Record<string, number>>({});
@@ -774,15 +536,7 @@ export default function BrandLogoOptionsModal({
   const [sourceSuggestionsBySource, setSourceSuggestionsBySource] = useState<Record<string, SourceSuggestion[]>>({});
   const [sourceSuggestionsLoadingBySource, setSourceSuggestionsLoadingBySource] = useState<Record<string, boolean>>({});
   const [sourceSuggestionsErrorBySource, setSourceSuggestionsErrorBySource] = useState<Record<string, string | null>>({});
-  const [activeDragOptionId, setActiveDragOptionId] = useState<string | null>(null);
-  const [deleteConfirmAssetId, setDeleteConfirmAssetId] = useState<string | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const sourcesRef = useRef<SourceSummary[]>([]);
-  const savedAssetsRef = useRef<SavedLogoAsset[]>([]);
-  const featuredByRoleRef = useRef<Record<BrandLogoRole, SavedLogoAsset | null>>({
-    wordmark: null,
-    icon: null,
-  });
   const discoverOffsetBySourceRef = useRef<Record<string, number>>({});
   const discoveredOptionsBySourceRef = useRef<Record<string, DiscoverCandidate[]>>({});
   const resultsScrollRef = useRef<HTMLDivElement | null>(null);
@@ -804,14 +558,6 @@ export default function BrandLogoOptionsModal({
   useEffect(() => {
     sourcesRef.current = sources;
   }, [sources]);
-
-  useEffect(() => {
-    savedAssetsRef.current = savedAssets;
-  }, [savedAssets]);
-
-  useEffect(() => {
-    featuredByRoleRef.current = featuredByRole;
-  }, [featuredByRole]);
 
   useEffect(() => {
     discoverOffsetBySourceRef.current = discoverOffsetBySource;
@@ -838,10 +584,6 @@ export default function BrandLogoOptionsModal({
     const nextSources = Array.isArray(payload.sources) ? payload.sources : [];
     setSavedAssets(nextSavedAssets);
     setSources(nextSources);
-    setFeaturedByRole({
-      wordmark: (payload.featured_assets?.wordmark as SavedLogoAsset | null | undefined) ?? null,
-      icon: (payload.featured_assets?.icon as SavedLogoAsset | null | undefined) ?? null,
-    });
     setSharedSlugs(deriveSharedSlugsFromSources(nextSources));
     setDiscoverHasMoreBySource(
       Object.fromEntries(nextSources.map((source) => [source.source_provider, Boolean(source.has_more)])),
@@ -1034,7 +776,6 @@ export default function BrandLogoOptionsModal({
     setNewSharedSlugDraft("");
     setAddingQueryBySource({});
     setNewQueryDraftBySource({});
-    setActiveDragOptionId(null);
     setDiscoveredOptionsBySource({});
     setSelectedOptionIdsBySource({});
     setDiscoveredCountBySource({});
@@ -1044,7 +785,6 @@ export default function BrandLogoOptionsModal({
     setSourceSuggestionsBySource({});
     setSourceSuggestionsLoadingBySource({});
     setSourceSuggestionsErrorBySource({});
-    setDeleteConfirmAssetId(null);
     setHasPersistedChanges(false);
     try {
       const {
@@ -1174,8 +914,6 @@ export default function BrandLogoOptionsModal({
     if (activeSource === MANUAL_SOURCE_PROVIDER) return manualOptions;
     return discoveredOptionsBySource[activeSource] ?? [];
   }, [activeSource, discoveredOptionsBySource, manualOptions, savedAssets]);
-  const activeDragOption = activeDragOptionId ? optionsById.get(activeDragOptionId) ?? null : null;
-
   const updateSourceSummary = useCallback((sourceProvider: string, updater: (source: SourceSummary) => SourceSummary) => {
     setSources((previous) => previous.map((source) => (source.source_provider === sourceProvider ? updater(source) : source)));
   }, []);
@@ -1425,115 +1163,6 @@ export default function BrandLogoOptionsModal({
     return true;
   }, [fetchModalPayloadWithFallback, hydrateFromModalPayload, prefetchSourceCandidates]);
 
-  const assignOptionToRole = useCallback(async (option: SavedLogoAsset | DiscoverCandidate, role: BrandLogoRole) => {
-    if (saving) return;
-    const previousSavedAssets = savedAssetsRef.current;
-    const previousFeaturedByRole = featuredByRoleRef.current;
-    const existingSavedAsset = (option.option_kind || "stored") === "candidate" ? null : toSavedLogoAsset(option);
-    if (existingSavedAsset) {
-      const optimisticState = applyFeaturedSelectionState(
-        previousSavedAssets,
-        previousFeaturedByRole,
-        existingSavedAsset,
-        role,
-      );
-      setSavedAssets(optimisticState.assets);
-      setFeaturedByRole(optimisticState.featured);
-    }
-    setSaving(true);
-    setError(null);
-    setDeleteConfirmAssetId(null);
-    try {
-      const body: Record<string, unknown> = {
-        target_type: targetType,
-        target_key: targetKey,
-        target_label: targetLabel,
-        logo_role: role,
-      };
-      if ((option.option_kind || "stored") === "candidate") {
-        body.candidate = {
-          source_url: option.source_url,
-          source_provider: option.source_provider || null,
-          discovered_from: option.discovered_from || null,
-        };
-      } else {
-        body.asset_id = option.id;
-      }
-      const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/assign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
-      }
-      const payload = (await response.json().catch(() => ({}))) as { selected?: unknown };
-      const selectedAsset = toSavedLogoAsset(payload.selected) ?? existingSavedAsset;
-      if (!selectedAsset) {
-        throw new Error("Assigned logo response did not include a selected asset");
-      }
-      const latestSavedAssets = savedAssetsRef.current;
-      const latestFeaturedByRole = featuredByRoleRef.current;
-      const nextState = applyFeaturedSelectionState(
-        latestSavedAssets,
-        latestFeaturedByRole,
-        selectedAsset,
-        role,
-      );
-      setSavedAssets(nextState.assets);
-      setFeaturedByRole(nextState.featured);
-      setHasPersistedChanges(true);
-      notifySaved();
-    } catch (assignError) {
-      setSavedAssets(previousSavedAssets);
-      setFeaturedByRole(previousFeaturedByRole);
-      setError(
-        normalizeLogoOptionsErrorMessage(
-          assignError instanceof Error ? assignError.message : "Failed to assign featured logo",
-        ),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [fetchWithAuth, notifySaved, saving, targetKey, targetLabel, targetType]);
-
-  const deleteSavedAsset = useCallback(async (assetId: string) => {
-    if (saving) return;
-    const requestId = mutationRefreshRequestIdRef.current + 1;
-    mutationRefreshRequestIdRef.current = requestId;
-    setSaving(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({
-        target_type: targetType,
-        target_key: targetKey,
-        target_label: targetLabel,
-      });
-      const response = await fetchWithAuth(`/api/admin/trr-api/brands/logos/options/saved/${assetId}?${params.toString()}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
-      }
-      const payload = (await response.json()) as ModalStateResponse;
-      if (mutationRefreshRequestIdRef.current !== requestId) return;
-      setDeleteConfirmAssetId(null);
-      hydrateFromModalPayload(payload, { preferredActiveSource: SAVED_SOURCE_PROVIDER });
-      const sourceRows = Array.isArray(payload.sources) ? payload.sources : [];
-      void prefetchSourceCandidates(sourceRows, modalSessionRef.current);
-      setHasPersistedChanges(true);
-      notifySaved();
-    } catch (deleteError) {
-      setError(
-        normalizeLogoOptionsErrorMessage(
-          deleteError instanceof Error ? deleteError.message : "Failed to delete saved logo option",
-        ),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [fetchWithAuth, hydrateFromModalPayload, notifySaved, prefetchSourceCandidates, saving, targetKey, targetLabel, targetType]);
-
   const onSaveSelected = useCallback(async () => {
     if (saving) return;
     if (!activeSource || activeSource === SAVED_SOURCE_PROVIDER || activeSelectionIds.length === 0) {
@@ -1589,23 +1218,6 @@ export default function BrandLogoOptionsModal({
     }
   }, [activeSelectionIds, activeSource, fetchWithAuth, notifySaved, optionsById, refreshModalAfterMutation, saving, targetKey, targetLabel, targetType]);
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    if (saving) return;
-    const optionId = String(event.active.data.current?.optionId || "");
-    setActiveDragOptionId(optionId || null);
-  }, [saving]);
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const optionId = String(event.active.data.current?.optionId || "");
-    const overId = String(event.over?.id || "");
-    setActiveDragOptionId(null);
-    if (!optionId || !overId.startsWith("feature:")) return;
-    const role = overId.replace("feature:", "") as BrandLogoRole;
-    const option = optionsById.get(optionId);
-    if (!option) return;
-    void assignOptionToRole(option, role);
-  }, [assignOptionToRole, optionsById]);
-
   const activeSourceDisplayCount = activeSource && Object.prototype.hasOwnProperty.call(discoveredCountBySource, activeSource)
     ? discoveredCountBySource[activeSource]
     : activeSourceRow?.total_count ?? 0;
@@ -1621,15 +1233,14 @@ export default function BrandLogoOptionsModal({
       isOpen={isOpen}
       onClose={onClose}
       title={`Brand Logos • ${targetLabel}`}
-      panelClassName="max-h-[90vh] max-w-6xl overflow-y-auto p-0"
+      panelClassName="max-h-[90vh] max-w-5xl overflow-y-auto p-0"
     >
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div ref={resultsScrollRef} data-testid="brand-logo-modal-scroll-root" className="flex min-h-0 flex-col">
+      <div ref={resultsScrollRef} data-testid="brand-logo-modal-scroll-root" className="flex min-h-0 flex-col">
           <div className="border-b border-zinc-200 bg-white px-4 py-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Combined Picker</p>
-                <p className="text-sm text-zinc-600">One shared saved library, drag-to-feature frames, and source discovery in a single modal.</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Logo Library</p>
+                <p className="text-sm text-zinc-600">Discover candidates by source, review the saved library, and persist only the options you select.</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {hasSharedSlugSources ? (
@@ -1641,11 +1252,6 @@ export default function BrandLogoOptionsModal({
                   {manualImportOpen ? "Hide Manual Import" : "Add Manual Import"}
                 </Button>
               </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
-              <FeatureSlot role="wordmark" option={featuredByRole.wordmark} targetLabel={targetLabel} />
-              <FeatureSlot role="icon" option={featuredByRole.icon} targetLabel={targetLabel} />
             </div>
 
             {slugPanelOpen && hasSharedSlugSources ? (
@@ -2013,17 +1619,12 @@ export default function BrandLogoOptionsModal({
                       isSaved={isSaved}
                       selected={isSelected}
                       targetLabel={targetLabel}
-                      confirmingDelete={deleteConfirmAssetId === option.id}
                       disabled={saving || loading || activeSourceBusy}
                       onClick={
                         isSaved || !activeSource
                           ? undefined
                           : () => toggleNonSavedSelection(activeSource, option.id)
                       }
-                      onDelete={isSaved ? (deleteConfirmAssetId === option.id ? () => void deleteSavedAsset(option.id) : () => setDeleteConfirmAssetId(option.id)) : undefined}
-                      onCancelDelete={isSaved ? () => setDeleteConfirmAssetId(null) : undefined}
-                      onSetAsWordmark={isSaved ? () => void assignOptionToRole(option, "wordmark") : undefined}
-                      onSetAsIcon={isSaved ? () => void assignOptionToRole(option, "icon") : undefined}
                     />
                   );
                 })}
@@ -2033,7 +1634,9 @@ export default function BrandLogoOptionsModal({
 
           <div className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 bg-white px-4 py-3">
             <p className="text-xs text-zinc-500">
-              {activeSource === SAVED_SOURCE_PROVIDER ? "Drag any saved asset into the top frames to make it featured." : "Batch save selected assets into the shared Saved library."}
+              {activeSource === SAVED_SOURCE_PROVIDER
+                ? "Saved assets stay in the library until you explicitly choose new candidates and save them."
+                : "Batch save selected assets into the shared saved library."}
             </p>
             <div className="flex items-center gap-2">
               <Button variant="outline" onClick={onClose} disabled={saving}>{hasPersistedChanges ? "Save" : "Close"}</Button>
@@ -2044,26 +1647,7 @@ export default function BrandLogoOptionsModal({
               ) : null}
             </div>
           </div>
-        </div>
-        <DragOverlay>
-          {activeDragOption ? (
-            <div className="w-56 rounded-2xl border border-zinc-300 bg-white p-3 shadow-lg">
-              <div className="relative h-20 w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
-                <Image
-                  src={pickDisplayUrl(activeDragOption) || PLACEHOLDER_ICON_PATH}
-                  alt={`${targetLabel} drag preview`}
-                  fill
-                  className="object-contain p-2"
-                  unoptimized
-                />
-              </div>
-              <p className="mt-3 truncate text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
-                {formatProviderLabel(activeDragOption.source_provider)}
-              </p>
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+      </div>
     </AdminModal>
   );
 }

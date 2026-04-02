@@ -36,7 +36,7 @@ describe("show cast route proxy parity", () => {
     resolveAdminShowIdMock.mockResolvedValue("00000000-0000-0000-0000-000000000001");
   });
 
-  it("forwards default minEpisodes and preserves the backend cast payload", async () => {
+  it("does not inject a default minEpisodes filter when the caller did not request one", async () => {
     fetchAdminBackendJsonMock.mockResolvedValue({
       status: 200,
       data: {
@@ -61,7 +61,7 @@ describe("show cast route proxy parity", () => {
 
     expect(response.status).toBe(200);
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
-      "/admin/trr-api/shows/00000000-0000-0000-0000-000000000001/cast?limit=20&offset=0&roster_mode=episode_evidence&photo_fallback=none&minEpisodes=1",
+      "/admin/trr-api/shows/00000000-0000-0000-0000-000000000001/cast?limit=20&offset=0&roster_mode=episode_evidence&photo_fallback=none",
       expect.objectContaining({ routeName: "show-cast" }),
     );
     expect(payload.cast_source).toBe("episode_evidence");
@@ -113,7 +113,7 @@ describe("show cast route proxy parity", () => {
 
     expect(response.status).toBe(200);
     expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
-      "/admin/trr-api/shows/00000000-0000-0000-0000-000000000001/cast?limit=500&offset=0&roster_mode=imdb_show_membership&photo_fallback=none&minEpisodes=1&include_photos=false",
+      "/admin/trr-api/shows/00000000-0000-0000-0000-000000000001/cast?limit=500&offset=0&roster_mode=imdb_show_membership&photo_fallback=none&include_photos=false",
       expect.objectContaining({ routeName: "show-cast" }),
     );
   });

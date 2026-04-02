@@ -353,7 +353,7 @@ describe("admin host proxy", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "http://admin.localhost:3000/brands/networks-and-streaming/network/bravo",
+      "http://admin.localhost:3000/brands/bravo",
     );
   });
 

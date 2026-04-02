@@ -93,6 +93,7 @@ const makePayload = (overrides?: Record<string, unknown>) => ({
       updated_at: "2026-03-16T12:00:00Z",
     },
   ],
+  social_profiles: [],
   ...overrides,
 });
 
@@ -122,7 +123,7 @@ describe("brand profile route", () => {
             target_label: "Bravo",
             friendly_slug: "bravotv",
             section_href: "/brands?category=network",
-            detail_href: "/brands/networks-and-streaming/network/bravo",
+            detail_href: "/brands/bravo",
             homepage_url: "https://bravotv.com",
             instagram_id: null,
             discovered_from: "https://bravotv.com",

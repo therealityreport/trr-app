@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 import BrandNYTGamesSection from "@/components/admin/design-docs/sections/BrandNYTGamesSection";
 import GameArticleDetailPage from "@/components/admin/design-docs/GameArticleDetailPage";
@@ -61,6 +61,38 @@ describe("NYT Games preview shell", () => {
     });
     expect(featuredLink).toHaveStyle({
       width: "calc(100% - 28px)",
+    });
+  });
+
+  it("routes typography specimens through the scoped NYT Games font variables while keeping source-family metadata", () => {
+    render(<BrandNYTGamesSection />);
+
+    const navButtonCard = screen.getByText("Header subscribe CTA and shell controls").parentElement;
+    expect(navButtonCard).not.toBeNull();
+    expect(within(navButtonCard as HTMLElement).getByText("Subscribe")).toHaveStyle({
+      fontFamily: "var(--dd-font-ui)",
+    });
+    expect(within(navButtonCard as HTMLElement).getByText("nyt-franklin")).toBeInTheDocument();
+
+    const hubCardTitleCard = screen.getByText("Game portfolio titles on the non-specific games page").parentElement;
+    expect(hubCardTitleCard).not.toBeNull();
+    expect(within(hubCardTitleCard as HTMLElement).getByText("Connections")).toHaveStyle({
+      fontFamily: "var(--dd-font-headline)",
+    });
+    expect(within(hubCardTitleCard as HTMLElement).getByText("nyt-karnakcondensed")).toBeInTheDocument();
+  });
+
+  it("uses the same scoped font variables in the featured hub preview chrome", () => {
+    render(<BrandNYTGamesSection />);
+
+    const featuredCard = screen.getByTestId("nyt-games-featured-article-card");
+    expect(
+      within(featuredCard).getByRole("heading", { name: /How to Solve The New York Times Crossword/i }),
+    ).toHaveStyle({
+      fontFamily: "var(--dd-font-headline)",
+    });
+    expect(within(featuredCard).getByText("Featured Article")).toHaveStyle({
+      fontFamily: "var(--dd-font-ui)",
     });
   });
 });

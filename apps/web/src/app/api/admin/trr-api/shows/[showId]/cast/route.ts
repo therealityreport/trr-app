@@ -19,8 +19,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const DEFAULT_MIN_EPISODES = 1;
-
 type CastRosterMode = "episode_evidence" | "imdb_show_membership";
 
 interface RouteParams {
@@ -74,8 +72,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           offset: String(offset),
           roster_mode: rosterMode,
           photo_fallback: photoFallbackMode,
-          minEpisodes: minEpisodes ?? String(DEFAULT_MIN_EPISODES),
         });
+        if (typeof minEpisodes === "string" && minEpisodes.trim().length > 0) {
+          upstreamParams.set("minEpisodes", minEpisodes.trim());
+        }
         if (excludeZeroEpisodeMembers) upstreamParams.set("exclude_zero_episode_members", "true");
         if (requireImage === "true" || requireImage === "1") upstreamParams.set("requireImage", "true");
         if (!includePhotos) upstreamParams.set("include_photos", "false");

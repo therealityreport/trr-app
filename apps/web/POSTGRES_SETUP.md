@@ -72,12 +72,22 @@ ADMIN_EMAIL_ALLOWLIST=your-email@example.com,another-admin@example.com
 - Only users with these emails can access `/admin/survey-responses`
 - Leave empty to allow ANY authenticated user (not recommended for production)
 
-### 4. (Optional) TRR Backend Facebank Seed Proxy Auth
+### 4. TRR Supabase Admin/Auth Inputs
+
+Set these when server-side Supabase admin/auth flows are enabled:
+
+```bash
+TRR_CORE_SUPABASE_URL=https://your-project.supabase.co
+TRR_CORE_SUPABASE_SERVICE_ROLE_KEY=...
+TRR_INTERNAL_ADMIN_SHARED_SECRET=
+```
+
+`TRR_CORE_SUPABASE_URL` and `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY` are used by
+the server-side Supabase auth adapter when `TRR_AUTH_PROVIDER=supabase`.
 
 If you use the admin person-gallery facebank seed toggle, also set:
 
 ```bash
-TRR_CORE_SUPABASE_SERVICE_ROLE_KEY=...
 TRR_INTERNAL_ADMIN_SHARED_SECRET=...
 ```
 

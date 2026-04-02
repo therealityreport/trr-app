@@ -7,6 +7,8 @@ import {
   type BrandProfileFamily,
   type BrandProfileFamilySuggestion,
   type BrandProfilePayload,
+  type BrandProfileSocialProfile,
+  type BrandProfileSocialProfileShow,
   type BrandProfileSharedLink,
   type BrandProfileShow,
   type BrandProfileSuggestion,
@@ -112,6 +114,26 @@ type FamilyContextPayload = {
   }>;
 };
 
+type SharedAccountSourceRow = {
+  platform: string;
+  account_handle: string;
+  is_active: boolean;
+};
+
+type SharedAccountSourcesPayload = {
+  sources?: unknown[];
+};
+
+type SocialProfileSummary = {
+  platform: string;
+  account_handle: string;
+  profile_url: string | null;
+  avatar_url: string | null;
+  total_posts: number;
+  total_engagement: number;
+  total_views: number;
+};
+
 type ExactMatchSeed =
   | {
       kind: "network";
@@ -156,6 +178,8 @@ const asStringArray = (value: unknown): string[] =>
 
 const asBoolean = (value: unknown): boolean => value === true;
 const isPresent = <T>(value: T | null): value is T => value !== null;
+const NETWORK_BRAND_TARGET_TYPES = new Set<BrandProfileTargetType>(["network", "streaming", "production"]);
+const BRAVO_SCOPE_BRAND_SLUGS = new Set(["bravo", "bravotv"]);
 
 const fetchBackendJson = async <T>(
   path: string,
@@ -180,6 +204,132 @@ const fetchBackendJson = async <T>(
 
   if (!response.ok) return null;
   return (await response.json().catch(() => null)) as T | null;
+};
+
+const asNumber = (value: unknown): number => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const normalizeAccountHandle = (value: string | null): string | null => {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^@+/, "");
+};
+
+const buildCanonicalBrandHref = (value: string | null): string | null => {
+  const slug = toFriendlyBrandSlug(value ?? "");
+  return slug ? `/brands/${slug}` : null;
+};
+
+const resolveBrandSocialScope = (targets: readonly BrandProfileTarget[]): string | null => {
+  for (const target of targets) {
+    if (!NETWORK_BRAND_TARGET_TYPES.has(target.target_type)) continue;
+    const candidates = [target.friendly_slug, target.target_key, target.target_label];
+    if (candidates.some((candidate) => BRAVO_SCOPE_BRAND_SLUGS.has(toFriendlyBrandSlug(candidate ?? "")))) {
+      return "bravo";
+    }
+  }
+  return null;
+};
+
+const loadSharedAccountSources = async (sourceScope: string): Promise<SharedAccountSourceRow[]> => {
+  const payload = await fetchBackendJson<SharedAccountSourcesPayload>(
+    "/admin/socials/shared/sources",
+    new URLSearchParams({
+      source_scope: sourceScope,
+      include_inactive: "false",
+    }),
+  );
+  const rows = Array.isArray(payload?.sources) ? payload.sources : [];
+  return rows
+    .map((row) => {
+      const record = asRecord(row);
+      if (!record) return null;
+      const platform = asString(record.platform);
+      const accountHandle = normalizeAccountHandle(asString(record.account_handle));
+      if (!platform || !accountHandle) return null;
+      return {
+        platform,
+        account_handle: accountHandle,
+        is_active: record.is_active !== false,
+      } satisfies SharedAccountSourceRow;
+    })
+    .filter((row): row is SharedAccountSourceRow => Boolean(row?.is_active));
+};
+
+const loadSocialProfileSummary = async (
+  platform: string,
+  accountHandle: string,
+): Promise<SocialProfileSummary | null> => {
+  const payload = await fetchBackendJson<Record<string, unknown>>(
+    `/admin/socials/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(accountHandle)}/summary`,
+  );
+  const record = asRecord(payload);
+  if (!record) return null;
+  const normalizedPlatform = asString(record.platform) ?? platform;
+  const normalizedHandle = normalizeAccountHandle(asString(record.account_handle)) ?? accountHandle;
+  if (!normalizedPlatform || !normalizedHandle) return null;
+  return {
+    platform: normalizedPlatform,
+    account_handle: normalizedHandle,
+    profile_url: asString(record.profile_url),
+    avatar_url: asString(record.avatar_url),
+    total_posts: asNumber(record.total_posts),
+    total_engagement: asNumber(record.total_engagement),
+    total_views: asNumber(record.total_views),
+  } satisfies SocialProfileSummary;
+};
+
+const loadBrandSocialProfiles = async (
+  targets: readonly BrandProfileTarget[],
+  shows: readonly BrandProfileShow[],
+): Promise<BrandProfileSocialProfile[]> => {
+  const sourceScope = resolveBrandSocialScope(targets);
+  if (!sourceScope) return [];
+
+  const scopedTargetIds = new Set(
+    targets
+      .filter((target) => NETWORK_BRAND_TARGET_TYPES.has(target.target_type))
+      .map((target) => target.id),
+  );
+  const assignedShows = shows
+    .filter((show) => show.source_target_ids.some((sourceTargetId) => scopedTargetIds.has(sourceTargetId)))
+    .map((show) => ({
+      id: show.id,
+      name: show.name,
+      canonical_slug: show.canonical_slug,
+    }) satisfies BrandProfileSocialProfileShow);
+
+  if (assignedShows.length === 0) return [];
+
+  const sharedSources = await loadSharedAccountSources(sourceScope);
+  if (sharedSources.length === 0) return [];
+
+  const hydrated = await Promise.all(
+    sharedSources.map(async (source) => {
+      const summary = await loadSocialProfileSummary(source.platform, source.account_handle);
+      return {
+        platform: summary?.platform ?? source.platform,
+        account_handle: summary?.account_handle ?? source.account_handle,
+        profile_url: summary?.profile_url ?? null,
+        avatar_url: summary?.avatar_url ?? null,
+        total_posts: summary?.total_posts ?? 0,
+        total_engagement: summary?.total_engagement ?? 0,
+        total_views: summary?.total_views ?? 0,
+        assigned_shows: assignedShows,
+      } satisfies BrandProfileSocialProfile;
+    }),
+  );
+
+  return hydrated.sort((left, right) => {
+    if (left.platform !== right.platform) return left.platform.localeCompare(right.platform);
+    return left.account_handle.localeCompare(right.account_handle);
+  });
 };
 
 const loadGenericTargets = async (targetType: GenericTargetType): Promise<GenericBrandTargetRow[]> => {
@@ -391,17 +541,10 @@ const toSectionHref = (targetType: BrandProfileTargetType): string =>
   getUnifiedBrandsSectionHref(targetType);
 
 const toDetailHref = (
-  targetType: BrandProfileTargetType,
   targetLabel: string,
   entitySlug: string | null,
 ): string | null => {
-  if (targetType === "network" || targetType === "streaming") {
-    return `/brands/networks-and-streaming/${targetType}/${entitySlug ?? toEntitySlug(targetLabel)}`;
-  }
-  if (targetType === "production") {
-    return `/brands/networks-and-streaming/production/${entitySlug ?? toEntitySlug(targetLabel)}`;
-  }
-  return null;
+  return buildCanonicalBrandHref(entitySlug || targetLabel);
 };
 
 const resolveAssetRole = (value: string | null, isPrimary: boolean): BrandProfileAssetRole =>
@@ -548,7 +691,7 @@ const buildNetworkTarget = async (
   });
 
   const familyContext = await loadFamilyContext(seed.target_type, seed.target_key);
-  const detailHref = toDetailHref(seed.target_type, seed.target_label, seed.entity_slug);
+  const detailHref = toDetailHref(seed.target_label, seed.entity_slug);
 
   const target: BrandProfileTarget = {
     id: `${seed.target_type}:${seed.target_key}`,
@@ -604,7 +747,7 @@ const buildGenericTarget = async (
   shows: BrandProfileShow[];
   assets: BrandProfileAsset[];
 }> => {
-  const detailHref = toDetailHref(seed.target_type, seed.target_label, null);
+  const detailHref = toDetailHref(seed.target_label, null);
   const target: BrandProfileTarget = {
     id: `${seed.target_type}:${seed.target_key}`,
     target_type: seed.target_type,
@@ -726,7 +869,7 @@ const loadSuggestionSeeds = async (): Promise<BrandProfileSuggestion[]> => {
     target_type: row.type,
     target_key: row.name.trim().toLowerCase(),
     href:
-      toDetailHref(row.type, row.name, toEntitySlug(row.name)) ??
+      toDetailHref(row.name, toEntitySlug(row.name)) ??
       appendSearchParam(toSectionHref(row.type), "q", row.name),
   })) satisfies BrandProfileSuggestion[];
 
@@ -832,6 +975,7 @@ export async function getBrandProfileBySlug(
     }
     return left.id.localeCompare(right.id);
   });
+  const socialProfiles = await loadBrandSocialProfiles(targets, shows);
 
   return {
     slug: normalizedSlug,
@@ -846,5 +990,6 @@ export async function getBrandProfileBySlug(
     targets,
     shows,
     assets,
+    social_profiles: socialProfiles,
   };
 }

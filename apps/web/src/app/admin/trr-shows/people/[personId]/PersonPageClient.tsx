@@ -1225,6 +1225,10 @@ const isSignalAbortedWithoutReasonError = (error: unknown): boolean => {
   return error.message.toLowerCase().includes("signal is aborted without reason");
 };
 
+const isAdminRequestTimeoutError = (error: unknown): boolean =>
+  error instanceof AdminRequestError &&
+  (error.code === "REQUEST_TIMEOUT" || error.status === 408);
+
 const createNamedError = (name: string, message: string): Error => {
   const error = new Error(message);
   error.name = name;
@@ -6100,6 +6104,13 @@ export default function PersonProfilePage() {
     if (!personId) return;
     const signal = options?.signal;
     if (signal?.aborted) return;
+    const startedAt = Date.now();
+    logAdminPageReadDiagnostic({
+      pageFamily: "people-gallery",
+      resource: "credits",
+      requestRole: "secondary",
+      phase: "start",
+    });
     try {
       setCreditsLoading(true);
       const headers = await getAuthHeaders();
@@ -6108,20 +6119,17 @@ export default function PersonProfilePage() {
       if (showIdForApi) {
         params.set("showId", showIdForApi);
       }
-      const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/credits?${params.toString()}`,
-        { headers, signal }
-      );
-      const data = (await response.json().catch(() => ({}))) as {
+      const data = await adminGetJson<{
         credits?: TrrPersonCredit[];
         show_scope?: PersonCreditShowScope;
         credits_by_show?: PersonCreditsByShow[];
-        error?: string;
-      };
+      }>(`/api/admin/trr-api/people/${personId}/credits?${params.toString()}`, {
+        headers,
+        externalSignal: signal,
+        requestRole: "secondary",
+        dedupeKey: `person:${personId}:credits:${params.toString()}`,
+      });
       if (signal?.aborted) return;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to fetch credits");
-      }
       setCredits(Array.isArray(data.credits) ? data.credits : []);
       setShowScopedCredits(
         data.show_scope && typeof data.show_scope === "object"
@@ -6130,12 +6138,32 @@ export default function PersonProfilePage() {
       );
       setCreditsByShow(Array.isArray(data.credits_by_show) ? data.credits_by_show : []);
       setCreditsError(null);
+      logAdminPageReadDiagnostic({
+        pageFamily: "people-gallery",
+        resource: "credits",
+        requestRole: "secondary",
+        phase: "success",
+        durationMs: Date.now() - startedAt,
+        payloadBytes: measurePayloadBytes({
+          credits: Array.isArray(data.credits) ? data.credits : [],
+          show_scope: data.show_scope ?? null,
+          credits_by_show: Array.isArray(data.credits_by_show) ? data.credits_by_show : [],
+        }),
+      });
     } catch (err) {
-      if (signal?.aborted || isAbortError(err)) return;
+      if (signal?.aborted || isAbortError(err) || isSignalAbortedWithoutReasonError(err)) return;
       setCredits([]);
       setShowScopedCredits(null);
       setCreditsByShow([]);
       setCreditsError(err instanceof Error ? err.message : "Failed to fetch credits");
+      logAdminPageReadDiagnostic({
+        pageFamily: "people-gallery",
+        resource: "credits",
+        requestRole: "secondary",
+        phase: "error",
+        durationMs: Date.now() - startedAt,
+        message: err instanceof Error ? err.message : "Failed to fetch credits",
+      });
       console.error("Failed to fetch credits:", err);
     } finally {
       setCreditsLoading(false);
@@ -6177,6 +6205,18 @@ export default function PersonProfilePage() {
       });
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) return;
+      if (isAdminRequestTimeoutError(err)) {
+        setCoverPhoto(null);
+        logAdminPageReadDiagnostic({
+          pageFamily: "people-gallery",
+          resource: "cover-photo",
+          requestRole: "secondary",
+          phase: "error",
+          durationMs: Date.now() - startedAt,
+          message: "Optional cover photo request timed out",
+        });
+        return;
+      }
       console.error("Failed to fetch cover photo:", err);
       logAdminPageReadDiagnostic({
         pageFamily: "people-gallery",

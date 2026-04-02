@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildHostedFontsStylesheetFromTemplates } from "@/lib/fonts/hosted-font-stylesheet";
@@ -11,6 +14,11 @@ import {
 } from "@/lib/fonts/hosted-fonts";
 
 const ORIGINAL_HOSTED_FONT_BASE_URL = process.env.NEXT_PUBLIC_HOSTED_FONT_BASE_URL;
+const REALITEASE_FONTS_TEMPLATE_PATH = join(process.cwd(), "src/styles/realitease-fonts.css");
+const FILTER_CARD_TRACKER_CSS_PATH = join(
+  process.cwd(),
+  "src/components/admin/design-docs/FilterCardTracker.module.css",
+);
 
 afterEach(() => {
   if (ORIGINAL_HOSTED_FONT_BASE_URL === undefined) {
@@ -68,6 +76,19 @@ describe("hosted font helpers", () => {
     );
     expect(css).not.toContain("https://fonts.legacy.example");
     expect(css).not.toContain(DEFAULT_HOSTED_FONT_BASE_URL);
+  });
+
+  it("emits NYT Games alias font families used by shared design-doc consumers", () => {
+    const css = buildHostedFontsStylesheetFromTemplates([
+      readFileSync(REALITEASE_FONTS_TEMPLATE_PATH, "utf8"),
+    ]);
+    const filterTrackerCss = readFileSync(FILTER_CARD_TRACKER_CSS_PATH, "utf8");
+
+    expect(filterTrackerCss).toContain('"nyt-franklin"');
+    expect(css).toMatch(/font-family:\s*['"]nyt-franklin['"]/);
+    expect(css).toMatch(/font-family:\s*['"]nyt-karnakcondensed['"]/);
+    expect(css).toMatch(/font-family:\s*['"]nyt-karnak['"]/);
+    expect(css).toMatch(/font-family:\s*['"]nyt-stymie['"]/);
   });
 
   it("extracts concrete upstream font file links from hosted stylesheet css", () => {

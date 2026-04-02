@@ -8,17 +8,18 @@ Purpose: active-work index for multi-turn AI agent sessions in `TRR-APP`. Keep t
 - `TASK14 Supabase runtime contract cleanup` | last updated `2026-03-30` | current phase `deploy environment cleanup complete` | next action `monitor future env changes; no additional app deploy cleanup is required in this task` | details `../cross-collab/TASK14/STATUS.md`
 
 ## Blocked / Waiting
-- `TASK11 Tab-Isolated Admin Operations + Resumable Streams` | last updated `2026-03-17` | current phase `waiting for deploy credentials` | next action `Obtain Vercel CLI credentials, redeploy, and verify /admin same-host fallback on the live host` | details `../cross-collab/TASK11/STATUS.md`
+- None.
 
 ## Recent Completions
+- `TASK23 Final Supabase connection audit and donor transition inventory` | last updated `2026-04-02` | current phase `app parity inventory recorded` | next action `preserve these app-facing flows while backend ownership replaces screenalytics` | details `../cross-collab/TASK23/STATUS.md`
 - `TASK20 Follow-up validation and regression hardening` | last updated `2026-03-31` | current phase `validated` | next action `Await backend full-suite closure, then final handoff sync` | details `../cross-collab/TASK20/STATUS.md`
 - `Social Instagram Tab Reddit Summary Guard` | last updated `2026-03-26` | current phase `instagram tab reddit-summary regression fixed in season social analytics` | next action `reload /rhoslc/social/s6/instagram and confirm the overview still shows Reddit cards while the Instagram tab does not` | details `local-status/social-instagram-tab-reddit-summary-guard.md`
 - `Reddit Stable Reads Proxy Cutover` | last updated `2026-03-26` | current phase `app proxy and cache cutover shipped for Batch 2.5 stable reddit reads` | next action `keep live/discover/backfill flows out of scope and treat unresolved community/window deep-link mismatches as follow-up parity notes, not Batch 2.5 expansion` | details `local-status/reddit-stable-reads-proxy-cutover.md`
 - `Networks Streaming Summary Proxy Cache Cutover` | last updated `2026-03-26` | current phase `app proxy and hidden-tab polling cleanup shipped for Batch 2.4 networks-streaming summary` | next action `verify in managed Chrome that legacy /admin/networks summary refreshes resume correctly after tab visibility changes` | details `local-status/networks-streaming-summary-proxy-cache-cutover.md`
-- `Pooler Egress Loop Reduction` | last updated `2026-03-25` | current phase `app-side pooler egress loops removed from person gallery and social profile pages` | next action `verify in managed Chrome that gallery and social profile pages remain usable with reduced background refresh behavior` | details `local-status/pooler-egress-loop-reduction.md`
 
 ## Older Plans
-- None.
+- `Pooler Egress Loop Reduction` | last updated `2026-03-25` | current phase `app-side pooler egress loops removed from person gallery and social profile pages` | next action `verify in managed Chrome that gallery and social profile pages remain usable with reduced background refresh behavior` | details `local-status/pooler-egress-loop-reduction.md`
+- `TASK11 Tab-Isolated Admin Operations + Resumable Streams` | last updated `2026-03-17` | current phase `waiting for deploy credentials` | next action `Obtain Vercel CLI credentials, redeploy, and verify /admin same-host fallback on the live host` | details `../cross-collab/TASK11/STATUS.md`
 
 ## Archives / Canonical Links
 - History archive: `archive/HANDOFF-legacy-2026-03-16.md`

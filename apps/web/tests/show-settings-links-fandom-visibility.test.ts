@@ -11,6 +11,7 @@ describe("show settings links UI structure", () => {
     expect(contents).toMatch(/title: "Show Pages"/);
     expect(contents).toMatch(/title: "Season Pages"/);
     expect(contents).toMatch(/title: "Cast Member Pages"/);
+    expect(contents).toMatch(/Refresh Links/);
     expect(contents).toMatch(/showSocialLinks = useMemo/);
     expect(contents).not.toMatch(/Active Fandom Seeds/);
     expect(contents).toMatch(/isFandomSeedUrl/);
@@ -49,6 +50,18 @@ describe("show settings links UI structure", () => {
     expect(contents).toMatch(/<span className="truncate text-zinc-900">\{pill\.text\}<\/span>/);
     expect(contents).toMatch(/<SocialHandlePill key=\{`overview-social-link-/);
     expect(contents).toMatch(/overviewSocialHandleLinks = useMemo\(\(\) => showSocialLinks/);
+  });
+
+  it("renders Reddit and regional networks-streaming sections on the overview and settings pages", () => {
+    expect(contents).toMatch(/<h4 className="text-sm font-semibold text-zinc-700">Reddit<\/h4>/);
+    expect(contents).toMatch(/Open Reddit Admin/);
+    expect(contents).toMatch(/Open Community/);
+    expect(contents).toMatch(/Assigned Flairs/);
+    expect(contents).toMatch(/Networks & Streaming/);
+    expect(contents).toMatch(/overviewWatchAvailability\.map/);
+    expect(contents).toMatch(/Stream/);
+    expect(contents).toMatch(/Buy/);
+    expect(contents).not.toMatch(/Brands \(Network & Streaming\)/);
   });
 
   it("makes persisted settings links editable with the shared editable component", () => {
