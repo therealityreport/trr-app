@@ -28,4 +28,31 @@ describe("browser supabase env contract", () => {
     expect(clientModule.createClient()).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
   });
+
+  it("builds a client when both NEXT_PUBLIC_SUPABASE_* vars are present", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://test.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "test-anon-key");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const clientModule = await import("@/lib/supabase/client");
+
+    const client = clientModule.createClient();
+    expect(client).not.toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("flashback bootstrap failure messaging", () => {
+  it("throws with descriptive error when browser supabase is unconfigured", async () => {
+    // Ensure NEXT_PUBLIC vars are missing so createClient returns null
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "");
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { getTodaysQuiz } = await import("@/lib/flashback/supabase");
+
+    await expect(getTodaysQuiz()).rejects.toThrow(
+      "Supabase is not configured",
+    );
+  });
 });
