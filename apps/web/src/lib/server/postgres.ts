@@ -111,13 +111,12 @@ export const isDeployedRuntime = (env: EnvLike = process.env): boolean => {
   return true;
 };
 
-export function validateRuntimeLane(connectionClass: ConnectionClass, _isDeployed: boolean): void {
-  void _isDeployed;
+export function validateRuntimeLane(connectionClass: ConnectionClass, isDeployed: boolean): void {
   if (connectionClass === "session" || connectionClass === "local") {
     return;
   }
   throw new Error(
-    `[postgres] connection class "${connectionClass}" is not allowed in runtime. ` +
+    `[postgres] connection class "${connectionClass}" is not allowed. ` +
       `Only "session" (Supavisor pooler :5432) and "local" lanes are permitted.`,
   );
 }

@@ -158,31 +158,31 @@ describe("validateRuntimeLane", () => {
 
   it("rejects transaction in deployed runtime", () => {
     expect(() => validateRuntimeLane("transaction", true)).toThrow(
-      /connection class "transaction" is not allowed in runtime/,
+      /connection class "transaction" is not allowed\b/,
     );
   });
 
   it("rejects direct in deployed runtime", () => {
     expect(() => validateRuntimeLane("direct", true)).toThrow(
-      /connection class "direct" is not allowed in runtime/,
+      /connection class "direct" is not allowed\b/,
     );
   });
 
   it("rejects transaction in local dev", () => {
     expect(() => validateRuntimeLane("transaction", false)).toThrow(
-      /connection class "transaction" is not allowed in runtime/,
+      /connection class "transaction" is not allowed\b/,
     );
   });
 
   it("rejects direct in local dev", () => {
     expect(() => validateRuntimeLane("direct", false)).toThrow(
-      /connection class "direct" is not allowed in runtime/,
+      /connection class "direct" is not allowed\b/,
     );
   });
 
   it("rejects unknown lanes in local dev", () => {
     expect(() => validateRuntimeLane("other", false)).toThrow(
-      /connection class "other" is not allowed in runtime/,
+      /connection class "other" is not allowed\b/,
     );
   });
 });
