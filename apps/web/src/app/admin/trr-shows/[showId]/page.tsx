@@ -488,7 +488,7 @@ const normalizeShowCreditsCastRoster = (value: unknown): TrrCastMember[] => {
         latest_season:
           typeof candidate.latest_season === "number" ? candidate.latest_season : null,
         seasons_appeared: seasonNumbers,
-      } satisfies TrrCastMember;
+      } as TrrCastMember;
     })
     .filter((row): row is TrrCastMember => row !== null);
 };
