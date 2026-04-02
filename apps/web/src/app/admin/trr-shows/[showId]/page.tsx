@@ -13930,7 +13930,7 @@ export default function TrrShowDetailPage() {
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                          title={`${link.sourceLabel} | ${resolveLinkPageTitle(link.link) || `Season ${row.seasonNumber}`}`}
+                                          title={`${link.sourceLabel} | ${(link.link && resolveLinkPageTitle(link.link)) || `Season ${row.seasonNumber}`}`}
                                         >
                                           <SourceBadge
                                             kind={link.sourceKind}
