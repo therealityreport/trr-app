@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { queryMock, buildTypographyStateSnapshotMock, buildSeededTypographyStateMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
-  buildTypographyStateSnapshotMock: vi.fn(),
+  buildTypographyStateSnapshotMock: vi.fn().mockReturnValue({ sets: [], assignments: [] }),
   buildSeededTypographyStateMock: vi.fn(),
 }));
 

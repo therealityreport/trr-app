@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock, fetchMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, fetchMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   fetchMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn().mockReturnValue("test-admin-token"),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -13,6 +14,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/social-growth/refresh-batch/route";
