@@ -23,9 +23,8 @@ export const deriveShowDetailsNickname = (show: ShowDetailsSource | null | undef
 };
 
 export const deriveShowDetailsAlternativeNames = (show: ShowDetailsSource | null | undefined): string[] => {
-  const nickname = deriveShowDetailsNickname(show).toLowerCase();
+  const nickname = deriveShowDetailsNickname(show).trim();
   const displayName = typeof show?.name === "string" ? show.name.trim().toLowerCase() : "";
-  const excluded = new Set([nickname, displayName].filter((value) => value.length > 0));
   const seen = new Set<string>();
   const out: string[] = [];
 
@@ -34,7 +33,7 @@ export const deriveShowDetailsAlternativeNames = (show: ShowDetailsSource | null
     const trimmed = raw.trim();
     if (!trimmed) continue;
     const key = trimmed.toLowerCase();
-    if (excluded.has(key) || seen.has(key)) continue;
+    if (key === displayName || trimmed === nickname || seen.has(key)) continue;
     seen.add(key);
     out.push(trimmed);
   }
@@ -54,14 +53,13 @@ export const buildCanonicalShowAlternativeNames = ({
   alternativeNames: string[];
 }): string[] => {
   const canonicalNickname = slugifyToken(nickname.trim());
-  const excluded = new Set(
-    [canonicalNickname.toLowerCase(), displayName.trim().toLowerCase()].filter((value) => value.length > 0)
-  );
+  const canonicalNicknameKey = canonicalNickname.toLowerCase();
+  const excludedDisplayName = displayName.trim().toLowerCase();
   const seen = new Set<string>();
   const out: string[] = [];
+  let preservedPreferredAlias: string | null = null;
 
   if (canonicalNickname) {
-    seen.add(canonicalNickname.toLowerCase());
     out.push(canonicalNickname);
   }
 
@@ -69,9 +67,18 @@ export const buildCanonicalShowAlternativeNames = ({
     const trimmed = raw.trim();
     if (!trimmed) continue;
     const key = trimmed.toLowerCase();
-    if (excluded.has(key) || seen.has(key)) continue;
+    if (key === excludedDisplayName || trimmed === canonicalNickname) continue;
+    if (key === canonicalNicknameKey) {
+      if (!preservedPreferredAlias) preservedPreferredAlias = trimmed;
+      continue;
+    }
+    if (seen.has(key)) continue;
     seen.add(key);
     out.push(trimmed);
+  }
+
+  if (preservedPreferredAlias) {
+    out.splice(canonicalNickname ? 1 : 0, 0, preservedPreferredAlias);
   }
 
   return out;

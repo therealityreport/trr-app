@@ -58,8 +58,13 @@ Behavior:
 For the admin gallery facebank seed toggle proxy route
 `/api/admin/trr-api/people/[personId]/gallery/[linkId]/facebank-seed`, set:
 
+- `TRR_CORE_SUPABASE_URL`
 - `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY`
 - `TRR_INTERNAL_ADMIN_SHARED_SECRET`
+
+`TRR_CORE_SUPABASE_URL` and `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY` are also the
+active server-side Supabase auth inputs when `TRR_AUTH_PROVIDER=supabase`.
+They are not dormant scaffolding.
 
 The proxy sends:
 
@@ -67,6 +72,10 @@ The proxy sends:
 - `X-TRR-Internal-Admin-Secret: <TRR_INTERNAL_ADMIN_SHARED_SECRET>`
 
 Backend accepts this service-role path only for the facebank seed toggle endpoint and only when the shared secret matches.
+
+Flashback browser routes are the only active consumers of
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Leave those
+unset unless `/flashback/*` must work in that environment.
 
 ## Learn More
 

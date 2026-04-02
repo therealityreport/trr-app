@@ -19,6 +19,7 @@ type ProxyErrorCode =
   | "BACKEND_UNREACHABLE"
   | "UPSTREAM_TIMEOUT"
   | "UPSTREAM_ERROR"
+  | "BACKEND_REQUEST_TIMEOUT"
   | "INTERNAL_ERROR";
 
 export type SocialProxyErrorBody = {
@@ -83,9 +84,9 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
   return parsed;
 };
 
-export const SOCIAL_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_SHORT_TIMEOUT_MS", 25_000);
-export const SOCIAL_PROXY_DEFAULT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_DEFAULT_TIMEOUT_MS", 45_000);
-export const SOCIAL_PROXY_LONG_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_LONG_TIMEOUT_MS", 90_000);
+export const SOCIAL_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_SHORT_TIMEOUT_MS", 10_000);
+export const SOCIAL_PROXY_DEFAULT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_DEFAULT_TIMEOUT_MS", 25_000);
+export const SOCIAL_PROXY_LONG_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_LONG_TIMEOUT_MS", 60_000);
 const SEASON_ID_RESOLUTION_CACHE_TTL_MS = readPositiveIntEnv(
   "TRR_SOCIAL_PROXY_SEASON_ID_CACHE_TTL_MS",
   5 * 60 * 1000,
@@ -530,6 +531,17 @@ async function fetchBackend(
               upstreamDetailCode,
             },
           )
+        : response.status === 504 && upstreamDetailCode === "REQUEST_TIMEOUT"
+          ? new SocialProxyError(normalizedMessage, {
+              status: 504,
+              code: "BACKEND_REQUEST_TIMEOUT",
+              retryable: true,
+              retryAfterSeconds,
+              traceId: responseTraceId,
+              upstreamStatus: response.status,
+              upstreamDetail,
+              upstreamDetailCode,
+            })
         : hasBackendSaturation
           ? new SocialProxyError(backendSaturatedMessage(), {
               status: 503,

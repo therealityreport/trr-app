@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ComponentType, CSSProperties, ReactNode } from "react";
 import { HUB } from "./game-palettes";
+import { NYT_GAMES_RUNTIME_FONT_STACKS as NYT_GAMES_FONT_STACKS } from "./font-stacks";
 import {
   NYT_GAMES_ICON_BY_SLUG,
   NYT_GAMES_LOGO_ASSET,
@@ -54,14 +55,6 @@ const linkResetStyle: CSSProperties = {
   color: "inherit",
   textDecoration: "none",
 };
-
-const NYT_GAMES_FONT_STACKS = {
-  ui: '"NYTFranklin","nyt-franklin","Helvetica Neue",Arial,sans-serif',
-  body: '"NYTFranklin","nyt-franklin","Helvetica Neue",Arial,sans-serif',
-  headline: '"NYTKarnak_Condensed","nyt-karnakcondensed",Georgia,serif',
-  display: '"KarnakPro-Book","nyt-karnak",Georgia,serif',
-  slab: '"Stymie","nyt-stymie","Rockwell",serif',
-} as const;
 
 type RecentTabKey = "last-7-days" | "in-progress";
 

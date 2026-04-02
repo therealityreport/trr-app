@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -14,20 +15,25 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 import { GET } from "@/app/api/admin/trr-api/operations/health/route";
 
 describe("admin operations health route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
 
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/operations/health");
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
   });
 
-  it("forwards query params with service-role auth", async () => {
+  it("forwards query params with internal admin auth", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -53,7 +59,7 @@ describe("admin operations health route", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("stale_after_seconds=600");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "GET",
-      headers: { Authorization: "Bearer service-role-secret" },
+      headers: { Authorization: "Bearer internal-admin-token" },
     });
   });
 

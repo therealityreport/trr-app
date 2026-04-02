@@ -78,6 +78,7 @@ import {
   type AdvancedFilterState,
 } from "@/lib/admin/advanced-filters";
 import {
+  buildAdminRedditCommunityUrl,
   buildPersonAdminUrl,
   buildPersonRouteSlug,
   buildSocialAccountProfileUrl,
@@ -195,6 +196,17 @@ import {
   deriveShowDetailsSlugPreview,
 } from "@/lib/admin/show-page/details-form";
 import {
+  buildOverviewAlternativeNamesText,
+  buildOverviewRedditGroups,
+  buildOverviewWatchAvailability,
+  buildSeasonCoverageRows,
+  getOverviewNetworks,
+  getOverviewStreamingProviders,
+  type OverviewRedditGroup,
+  type OverviewSeasonCoverageLink,
+  type OverviewWatchAvailabilityRow,
+} from "@/lib/admin/show-page/overview-display";
+import {
 } from "@/lib/admin/show-page/link-discovery-progress";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -205,14 +217,24 @@ interface TrrShow {
   slug: string;
   canonical_slug: string;
   alternative_names: string[];
+  overview_alternative_names?: string[] | null;
   imdb_id: string | null;
   tmdb_id: number | null;
   external_ids?: Record<string, unknown> | null;
+  derived_external_links?: {
+    justwatch_url?: string | null;
+  } | null;
+  overview_watch_availability?: Array<{
+    region: "US" | "GB" | "CA" | "AU";
+    stream: string[];
+    buy: string[];
+  }> | null;
   show_total_seasons: number | null;
   show_total_episodes: number | null;
   description: string | null;
   premiere_date: string | null;
   networks: string[];
+  overview_networks?: string[] | null;
   genres: string[];
   tags: string[];
   tmdb_status: string | null;
@@ -223,7 +245,20 @@ interface TrrShow {
   primary_logo_image_id?: string | null;
   logo_url?: string | null;
   streaming_providers?: string[] | null;
+  overview_streaming_providers?: string[] | null;
   watch_providers?: string[] | null;
+}
+
+interface ShowRedditCommunity {
+  id: string;
+  subreddit: string;
+  display_name: string | null;
+  post_flairs: string[];
+  analysis_flairs: string[];
+  analysis_all_flairs: string[];
+  is_show_focused: boolean;
+  network_focus_targets: string[];
+  franchise_focus_targets: string[];
 }
 
 interface TrrSeason {
@@ -241,6 +276,8 @@ interface TrrSeason {
   episode_airdate_count?: number | null;
   first_episode_air_date?: string | null;
   last_episode_air_date?: string | null;
+  fandom_source_url?: string | null;
+  fandom_page_title?: string | null;
 }
 
 type SeasonEpisodeSummary = {
@@ -317,6 +354,7 @@ interface TrrCastMember {
   full_name: string | null;
   cast_member_name: string | null;
   role: string | null;
+  roles?: string[] | null;
   billing_order: number | null;
   credit_category: string;
   photo_url: string | null;
@@ -400,6 +438,60 @@ interface ShowCreditsPayload {
     last_synced_at?: string | null;
   } | null;
 }
+
+const normalizeShowCreditsCastRoster = (value: unknown): TrrCastMember[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row) => {
+      if (!row || typeof row !== "object") return null;
+      const candidate = row as Record<string, unknown>;
+      const personId =
+        typeof candidate.person_id === "string" ? candidate.person_id.trim() : "";
+      if (!personId) return null;
+      const roles = Array.isArray(candidate.roles)
+        ? candidate.roles.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+      const seasonNumbers = Array.isArray(candidate.season_numbers)
+        ? candidate.season_numbers.filter(
+            (item): item is number => typeof item === "number" && Number.isFinite(item)
+          )
+        : [];
+      return {
+        id:
+          typeof candidate.person_id === "string" && candidate.person_id.trim()
+            ? candidate.person_id.trim()
+            : typeof candidate.show_id === "string"
+              ? `${candidate.show_id}:${personId}`
+              : personId,
+        person_id: personId,
+        full_name:
+          typeof candidate.person_name === "string" && candidate.person_name.trim()
+            ? candidate.person_name
+            : null,
+        cast_member_name:
+          typeof candidate.person_name === "string" && candidate.person_name.trim()
+            ? candidate.person_name
+            : null,
+        role: roles[0] ?? null,
+        roles,
+        billing_order: null,
+        credit_category: "Self",
+        photo_url:
+          typeof candidate.photo_url === "string" && candidate.photo_url.trim()
+            ? candidate.photo_url
+            : null,
+        cover_photo_url: null,
+        total_episodes:
+          typeof candidate.total_episodes === "number" ? candidate.total_episodes : null,
+        archive_episode_count:
+          typeof candidate.archive_episodes === "number" ? candidate.archive_episodes : null,
+        latest_season:
+          typeof candidate.latest_season === "number" ? candidate.latest_season : null,
+        seasons_appeared: seasonNumbers,
+      } as TrrCastMember;
+    })
+    .filter((row): row is TrrCastMember => row !== null);
+};
 
 interface BravoPersonTag {
   person_id?: string | null;
@@ -661,11 +753,13 @@ type PersonLinkCoverageCard = {
 
 type SeasonCoverageLinkPill = {
   id: string;
+  seasonNumber: number;
   url: string;
   sourceKind: LinkSourceBadgeKind;
   sourceLabel: string;
   iconUrl: string | null;
-  link: EntityLink;
+  linkTitle: string | null;
+  link?: EntityLink;
 };
 
 type SeasonUrlCoverageRow = {
@@ -2292,6 +2386,7 @@ export default function TrrShowDetailPage() {
   const [castRoleMembersLoading, setCastRoleMembersLoading] = useState(false);
   const [castRoleMembersError, setCastRoleMembersError] = useState<string | null>(null);
   const [castRoleMembersWarning, setCastRoleMembersWarning] = useState<string | null>(null);
+  const [showCreditsCastRoster, setShowCreditsCastRoster] = useState<TrrCastMember[]>([]);
   const [showCrewSections, setShowCrewSections] = useState<ShowCrewSection[]>([]);
   const [showCreditsLoadedOnce, setShowCreditsLoadedOnce] = useState(false);
   const [showCreditsLoading, setShowCreditsLoading] = useState(false);
@@ -2333,6 +2428,7 @@ export default function TrrShowDetailPage() {
   const [newsPersonFilter, setNewsPersonFilter] = useState<string>("");
   const [newsTopicFilter, setNewsTopicFilter] = useState<string>("");
   const [newsSeasonFilter, setNewsSeasonFilter] = useState<string>("");
+  const showCreditsCastRosterRef = useRef<TrrCastMember[]>([]);
   const newsLoadInFlightRef = useRef<Promise<void> | null>(null);
   const newsSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const newsAutoSyncAttemptedRef = useRef(false);
@@ -2425,6 +2521,13 @@ export default function TrrShowDetailPage() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsEditing, setDetailsEditing] = useState(false);
   const detailsBaseline = useMemo(() => buildShowDetailsFormValue(show), [show]);
+  const overviewAlternativeNamesText = useMemo(() => buildOverviewAlternativeNamesText(show), [show]);
+  const overviewNetworks = useMemo(() => getOverviewNetworks(show), [show]);
+  const overviewStreamingProviders = useMemo(() => getOverviewStreamingProviders(show), [show]);
+  const overviewWatchAvailability = useMemo<OverviewWatchAvailabilityRow[]>(
+    () => buildOverviewWatchAvailability(show),
+    [show]
+  );
   const hasUnsavedDetailsChanges = useMemo(() => {
     if (!detailsEditing) return false;
     return (
@@ -2455,6 +2558,10 @@ export default function TrrShowDetailPage() {
   const [linksError, setLinksError] = useState<string | null>(null);
   const [linksLoadTimedOut, setLinksLoadTimedOut] = useState(false);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
+  const [linksRefreshing, setLinksRefreshing] = useState(false);
+  const [redditCommunities, setRedditCommunities] = useState<ShowRedditCommunity[]>([]);
+  const [redditLoading, setRedditLoading] = useState(false);
+  const [redditError, setRedditError] = useState<string | null>(null);
   const [showLogoSyncing, setShowLogoSyncing] = useState(false);
   const [showLogoSyncError, setShowLogoSyncError] = useState<string | null>(null);
   const [showLogoSyncNotice, setShowLogoSyncNotice] = useState<string | null>(null);
@@ -2737,6 +2844,10 @@ export default function TrrShowDetailPage() {
   useEffect(() => {
     castSnapshotRef.current = { cast, archive: archiveFootageCast };
   }, [archiveFootageCast, cast]);
+
+  useEffect(() => {
+    showCreditsCastRosterRef.current = showCreditsCastRoster;
+  }, [showCreditsCastRoster]);
 
   useEffect(() => {
     castLoadedOnceRef.current = castLoadedOnce;
@@ -4586,11 +4697,16 @@ export default function TrrShowDetailPage() {
           const archiveCastRaw = (data as { archive_footage_cast?: unknown }).archive_footage_cast;
           const castSourceRaw = (data as { cast_source?: unknown }).cast_source;
           const eligibilityWarningRaw = (data as { eligibility_warning?: unknown }).eligibility_warning;
-          const nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
+          let nextCast = Array.isArray(castRaw) ? (castRaw as TrrCastMember[]) : [];
           const nextArchiveCast = Array.isArray(archiveCastRaw)
             ? (archiveCastRaw as TrrCastMember[])
             : [];
           if (!isCurrentShowId(requestShowId)) return nextCast;
+
+          const creditsRoster = activeTab === "cast" ? showCreditsCastRosterRef.current : [];
+          if (creditsRoster.length > 0) {
+            nextCast = mergeMissingPhotoFields(creditsRoster, nextCast);
+          }
 
           let appliedCast = nextCast;
           let appliedArchiveCast = nextArchiveCast;
@@ -4692,7 +4808,7 @@ export default function TrrShowDetailPage() {
         }
       }
     },
-    [getAuthHeaders, isCurrentShowId, showId]
+    [activeTab, getAuthHeaders, isCurrentShowId, showId]
   );
 
   const fetchShowCredits = useCallback(async () => {
@@ -4712,16 +4828,28 @@ export default function TrrShowDetailPage() {
       if (!response.ok) {
         throw new Error(data.error || "Failed to load crew credits");
       }
+      const creditsCastRoster = normalizeShowCreditsCastRoster(data.cast_roster);
+      setShowCreditsCastRoster(creditsCastRoster);
       setShowCrewSections(Array.isArray(data.crew_sections) ? data.crew_sections : []);
       setShowCreditsSourceUrl(
         typeof data.source_metadata?.source_page_url === "string" ? data.source_metadata.source_page_url : null
       );
+      if (creditsCastRoster.length > 0) {
+        setCast(creditsCastRoster);
+        setCastLoadedOnce(true);
+        castLoadedOnceRef.current = true;
+        setCastLoadError(null);
+        setCastLoadWarning(null);
+        setCastSource("imdb_show_membership");
+        setCastEligibilityWarning(null);
+      }
       setShowCreditsLoadedOnce(true);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to load crew credits";
       setShowCreditsError(message);
       if (!showCreditsLoadedOnce) {
+        setShowCreditsCastRoster([]);
         setShowCrewSections([]);
       }
     } finally {
@@ -4766,6 +4894,92 @@ export default function TrrShowDetailPage() {
       setLinksLoading(false);
     }
   }, [getAuthHeaders, showId]);
+
+  const fetchRedditCommunities = useCallback(async () => {
+    if (!showId) return;
+    setRedditLoading(true);
+    setRedditError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchWithTimeout(
+        `/api/admin/reddit/communities?trr_show_id=${encodeURIComponent(showId)}&include_assigned_threads=0`,
+        {
+          headers,
+          cache: "no-store",
+        },
+        SETTINGS_READ_TIMEOUT_MS
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        communities?: ShowRedditCommunity[];
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load Reddit communities");
+      }
+      setRedditCommunities(Array.isArray(data.communities) ? data.communities : []);
+    } catch (error) {
+      setRedditError(error instanceof Error ? error.message : "Failed to load Reddit communities");
+    } finally {
+      setRedditLoading(false);
+    }
+  }, [getAuthHeaders, showId]);
+
+  const refreshShowLinks = useCallback(async () => {
+    if (!showId) return;
+    setLinksRefreshing(true);
+    setLinksError(null);
+    setLinksLoadTimedOut(false);
+    setLinksNotice("Refreshing links...");
+    try {
+      const headers = await getAuthHeaders();
+      let sawComplete = false;
+      await adminStream(`/api/admin/trr-api/shows/${showId}/links/discover/stream`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ include_seasons: true, include_people: true }),
+        timeoutMs: 12 * 60 * 1000,
+        onEvent: async ({ event, payload }) => {
+          if (event === "progress" && payload && typeof payload === "object") {
+            const message =
+              typeof (payload as { message?: unknown }).message === "string"
+                ? String((payload as { message?: unknown }).message)
+                : "Refreshing links...";
+            setLinksNotice(message);
+            return;
+          }
+          if (event === "error") {
+            const detail =
+              payload && typeof payload === "object"
+                ? (payload as { error?: unknown; detail?: unknown })
+                : null;
+            const errorMessage =
+              typeof detail?.detail === "string" && detail.detail
+                ? detail.detail
+                : typeof detail?.error === "string" && detail.error
+                  ? detail.error
+                  : "Failed to refresh links";
+            throw new Error(errorMessage);
+          }
+          if (event === "complete") {
+            sawComplete = true;
+          }
+        },
+      });
+      if (!sawComplete) {
+        throw new Error("Links refresh ended before completion.");
+      }
+      await Promise.all([fetchShowLinks(), fetchSeasons()]);
+      setLinksNotice("Link refresh complete.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh links";
+      const isTimeout = /timed out|timeout|aborted/i.test(message);
+      setLinksLoadTimedOut(isTimeout);
+      setLinksError(message);
+      setLinksNotice(null);
+    } finally {
+      setLinksRefreshing(false);
+    }
+  }, [fetchSeasons, fetchShowLinks, getAuthHeaders, showId]);
 
   const syncShowScopedBrandLogos = useCallback(async () => {
     if (!showId) return;
@@ -4849,16 +5063,19 @@ export default function TrrShowDetailPage() {
         error?: string;
         added?: number;
         connected_links_added?: number;
+        network_default_links_upserted?: number;
         errors?: Array<{ input?: string; error?: string }>;
       };
       if (!response.ok) throw new Error(data.error || "Failed to add links");
       const added = typeof data.added === "number" ? data.added : 0;
       const connected = typeof data.connected_links_added === "number" ? data.connected_links_added : 0;
+      const restoredSharedLinks =
+        typeof data.network_default_links_upserted === "number" ? data.network_default_links_upserted : 0;
       const errorRows = Array.isArray(data.errors) ? data.errors : [];
       setLinksNotice(
         `Added ${added} link${added === 1 ? "" : "s"}${
           connected > 0 ? ` (${connected} connected Wikipedia/Wikidata companion link${connected === 1 ? "" : "s"})` : ""
-        }.`
+        }${restoredSharedLinks > 0 ? ` Restored ${restoredSharedLinks} shared network handle${restoredSharedLinks === 1 ? "" : "s"}.` : ""}`
       );
       if (errorRows.length > 0) {
         const preview = errorRows
@@ -7215,6 +7432,13 @@ export default function TrrShowDetailPage() {
   }, [activeTab, fetchShowLinks, hasAccess, showId]);
 
   useEffect(() => {
+    if (!hasAccess || !showId || (activeTab !== "settings" && activeTab !== "details")) {
+      return;
+    }
+    void fetchRedditCommunities();
+  }, [activeTab, fetchRedditCommunities, hasAccess, showId]);
+
+  useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "cast" && activeTab !== "settings")) return;
     const autoLoadKey = `${showId}:roles`;
     if (showRolesAutoLoadAttemptedRef.current === autoLoadKey) return;
@@ -7393,6 +7617,9 @@ export default function TrrShowDetailPage() {
     pendingNewsReloadArgsRef.current = null;
     newsCursorQueryKeyRef.current = null;
     setShowLinks([]);
+    setRedditCommunities([]);
+    setRedditLoading(false);
+    setRedditError(null);
     setCast([]);
     setArchiveFootageCast([]);
     setCastLoadedOnce(false);
@@ -7426,6 +7653,7 @@ export default function TrrShowDetailPage() {
     setCastRoleMembersError(null);
     setCastRoleMembersWarning(null);
     setLastSuccessfulCastRoleMembersAt(null);
+    setShowCreditsCastRoster([]);
     setShowCrewSections([]);
     setShowCreditsLoadedOnce(false);
     setShowCreditsLoading(false);
@@ -7450,6 +7678,7 @@ export default function TrrShowDetailPage() {
     setLinksError(null);
     setLinksLoadTimedOut(false);
     setLinksNotice(null);
+    setLinksRefreshing(false);
     setRolesLoadTimedOut(false);
     setLinkBulkInput("");
     setLinkBulkSaving(false);
@@ -8008,7 +8237,7 @@ export default function TrrShowDetailPage() {
       }
     }
 
-    const linksBySeasonNumber = new Map<number, SeasonCoverageLinkPill[]>();
+    const seasonLinkPills: OverviewSeasonCoverageLink[] = [];
     for (const link of showLinks) {
       if (!isRenderableSeasonPageLink(link)) continue;
 
@@ -8021,42 +8250,32 @@ export default function TrrShowDetailPage() {
       const sourceKind = getLinkSourceBadgeKind(link);
       const entry: SeasonCoverageLinkPill = {
         id: link.id,
+        seasonNumber,
         url: String(link.url || "").trim(),
         sourceKind,
         sourceLabel: getLinkSourceLabel(link),
         iconUrl: sourceKind === "fandom" ? buildHostFaviconUrl(link.url) : null,
+        linkTitle: resolveLinkPageTitle(link) || `Season ${seasonNumber}`,
         link,
       };
-
-      const existing = linksBySeasonNumber.get(seasonNumber) ?? [];
-      existing.push(entry);
-      linksBySeasonNumber.set(seasonNumber, existing);
+      seasonLinkPills.push(entry);
     }
 
-    return Array.from(linksBySeasonNumber.entries())
-      .sort((a, b) => b[0] - a[0])
-      .map(([seasonNumber, links]) => {
-        const deduped = Array.from(
-          new Map(
-            links.map((link) => [
-              `${String(link.link.link_kind || "").trim().toLowerCase()}::${link.url.toLowerCase()}`,
-              link,
-            ] as const)
-          ).values()
-        ).sort((a, b) => {
-          const orderDiff = getSourceBadgeOrder(a.sourceKind) - getSourceBadgeOrder(b.sourceKind);
-          if (orderDiff !== 0) return orderDiff;
-          const labelDiff = a.sourceLabel.localeCompare(b.sourceLabel);
-          if (labelDiff !== 0) return labelDiff;
-          return a.url.localeCompare(b.url);
-        });
-
-        return {
-          seasonNumber,
-          links: deduped,
-        };
-      });
+    return buildSeasonCoverageRows({
+      seasons,
+      entityLinkPills: seasonLinkPills,
+    }) as SeasonUrlCoverageRow[];
   }, [seasons, showLinks]);
+
+  const overviewRedditGroups = useMemo<OverviewRedditGroup[]>(
+    () =>
+      buildOverviewRedditGroups({
+        showName: show?.name,
+        networks: overviewNetworks,
+        communities: redditCommunities,
+      }),
+    [overviewNetworks, redditCommunities, show?.name]
+  );
 
   const castMemberLinkCoverageCards = useMemo<PersonLinkCoverageCard[]>(() => {
     const personLinks = showLinks.filter((link) => link.entity_type === "person");
@@ -13548,6 +13767,14 @@ export default function TrrShowDetailPage() {
                 <section>
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-sm font-semibold text-zinc-700">Links</h4>
+                    <button
+                      type="button"
+                      onClick={() => void refreshShowLinks()}
+                      disabled={linksRefreshing}
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                    >
+                      {linksRefreshing ? "Refreshing..." : "Refresh Links"}
+                    </button>
                   </div>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                     <div className="mb-4 rounded-lg border border-zinc-200 bg-white p-3">
@@ -13703,7 +13930,7 @@ export default function TrrShowDetailPage() {
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                          title={`${link.sourceLabel} | ${resolveLinkPageTitle(link.link) || `Season ${row.seasonNumber}`}`}
+                                          title={`${link.sourceLabel} | ${(link.link && resolveLinkPageTitle(link.link)) || `Season ${row.seasonNumber}`}`}
                                         >
                                           <SourceBadge
                                             kind={link.sourceKind}
@@ -13716,20 +13943,20 @@ export default function TrrShowDetailPage() {
                                     </div>
                                   </div>
                                   <div className="mt-3 grid gap-2">
-                                    {row.links.map((link) => (
+                                    {row.links.filter((link) => link.link).map((link) => (
                                       <InlineEditableLinkUrl
                                         key={`settings-season-link-editor-${row.seasonNumber}-${link.id}`}
-                                        linkId={link.link.id}
+                                        linkId={link.link!.id}
                                         url={link.url}
                                         openUrl={link.url}
                                         label={`${link.sourceLabel} season page`}
-                                        saving={Boolean(savingLinkIds[link.link.id])}
+                                        saving={Boolean(savingLinkIds[link.link!.id])}
                                         onSubmit={updateShowLinkUrl}
                                         containerClassName="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2"
                                         actions={
                                           <button
                                             type="button"
-                                            onClick={() => void deleteShowLink(link.link.id)}
+                                            onClick={() => void deleteShowLink(link.link!.id)}
                                             className="rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700"
                                           >
                                             Delete
@@ -13885,6 +14112,99 @@ export default function TrrShowDetailPage() {
                     )}
                   </div>
                 </section>
+
+                <section>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-zinc-700">Reddit</h4>
+                    <Link
+                      href={"/admin/social/reddit"}
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Open Reddit Admin
+                    </Link>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    {redditLoading ? (
+                      <p className="text-sm text-zinc-500">Loading Reddit communities...</p>
+                    ) : redditError ? (
+                      <p className="text-sm text-red-600">{redditError}</p>
+                    ) : overviewRedditGroups.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No relevant Reddit communities configured for this show.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {overviewRedditGroups.map((group) => (
+                          <div key={`settings-reddit-group-${group.key}`} className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                              {group.label}
+                            </p>
+                            <div className="space-y-2">
+                              {group.communities.map((community) => (
+                                <div
+                                  key={`settings-reddit-community-${community.id}`}
+                                  className="rounded-lg border border-zinc-200 bg-white p-3"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                      <p className="text-sm font-semibold text-zinc-900">{community.displayName}</p>
+                                      <p className="text-xs text-zinc-500">r/{community.subreddit}</p>
+                                    </div>
+                                    <Link
+                                      href={buildAdminRedditCommunityUrl({
+                                        communitySlug: community.subreddit,
+                                        showSlug: showSlugForRouting,
+                                      })}
+                                      className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                    >
+                                      Open Community
+                                    </Link>
+                                  </div>
+                                  <div className="mt-3 space-y-2">
+                                    <div>
+                                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                        Assigned Flairs
+                                      </p>
+                                      <div className="mt-1 flex flex-wrap gap-1.5">
+                                        {community.assignedFlairs.length > 0 ? (
+                                          community.assignedFlairs.map((flair) => (
+                                            <span
+                                              key={`settings-reddit-flair-${community.id}-${flair}`}
+                                              className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                            >
+                                              {flair}
+                                            </span>
+                                          ))
+                                        ) : (
+                                          <span className="text-xs text-zinc-500">No assigned flairs</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {community.postFlairs.length > 0 && (
+                                      <div>
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                          Post Flairs
+                                        </p>
+                                        <div className="mt-1 flex flex-wrap gap-1.5">
+                                          {community.postFlairs.map((flair) => (
+                                            <span
+                                              key={`settings-reddit-post-flair-${community.id}-${flair}`}
+                                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                            >
+                                              {flair}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
               </div>
             </div>
             </ShowSettingsTab>
@@ -13979,7 +14299,7 @@ export default function TrrShowDetailPage() {
                           Alt Names
                         </p>
                         <p className="text-sm text-zinc-900 whitespace-pre-line">
-                          {detailsBaseline.altNamesText || "None"}
+                          {overviewAlternativeNamesText || "None"}
                         </p>
                       </div>
                       <div className="md:col-span-2">
@@ -14001,6 +14321,7 @@ export default function TrrShowDetailPage() {
                       externalIds={(show.external_ids as Record<string, unknown> | null) ?? null}
                       tmdbId={show.tmdb_id}
                       imdbId={show.imdb_id}
+                      derivedLinks={show.derived_external_links ?? null}
                       type="show"
                     />
                     {overviewExternalIdLinks.length > 0 ? (
@@ -14049,6 +14370,75 @@ export default function TrrShowDetailPage() {
                 </div>
 
                 <div>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-zinc-700">Reddit</h4>
+                    <Link
+                      href={"/admin/social/reddit"}
+                      className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Open Reddit Admin
+                    </Link>
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                    {redditLoading ? (
+                      <p className="text-sm text-zinc-500">Loading Reddit communities...</p>
+                    ) : redditError ? (
+                      <p className="text-sm text-red-600">{redditError}</p>
+                    ) : overviewRedditGroups.length === 0 ? (
+                      <p className="text-sm text-zinc-500">No relevant Reddit communities configured for this show.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {overviewRedditGroups.map((group) => (
+                          <div key={`overview-reddit-group-${group.key}`} className="space-y-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                              {group.label}
+                            </p>
+                            <div className="grid gap-3 md:grid-cols-2">
+                              {group.communities.map((community) => (
+                                <div
+                                  key={`overview-reddit-community-${community.id}`}
+                                  className="rounded-lg border border-zinc-200 bg-white p-3"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                      <p className="text-sm font-semibold text-zinc-900">{community.displayName}</p>
+                                      <p className="text-xs text-zinc-500">r/{community.subreddit}</p>
+                                    </div>
+                                    <Link
+                                      href={buildAdminRedditCommunityUrl({
+                                        communitySlug: community.subreddit,
+                                        showSlug: showSlugForRouting,
+                                      })}
+                                      className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                                    >
+                                      Open Community
+                                    </Link>
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-1.5">
+                                    {community.assignedFlairs.length > 0 ? (
+                                      community.assignedFlairs.map((flair) => (
+                                        <span
+                                          key={`overview-reddit-flair-${community.id}-${flair}`}
+                                          className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                        >
+                                          {flair}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span className="text-xs text-zinc-500">No assigned flairs</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">Season URL Coverage</h4>
                   <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                     {seasonUrlCoverageRows.length === 0 ? (
@@ -14073,7 +14463,7 @@ export default function TrrShowDetailPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
-                                  title={`${link.sourceLabel} | ${resolveLinkPageTitle(link.link) || `Season ${row.seasonNumber}`}`}
+                                  title={`${link.sourceLabel} | ${link.linkTitle || `Season ${row.seasonNumber}`}`}
                                 >
                                   <SourceBadge
                                     kind={link.sourceKind}
@@ -14112,15 +14502,15 @@ export default function TrrShowDetailPage() {
 
                 <div>
                   <h4 className="mb-3 text-sm font-semibold text-zinc-700">
-                    Brands (Network & Streaming)
+                    Networks & Streaming
                   </h4>
                   <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                       Networks
                     </p>
                     <div className="mb-4 flex flex-wrap gap-2">
-                      {(show.networks ?? []).length > 0 ? (
-                        show.networks.map((network) => (
+                      {overviewNetworks.length > 0 ? (
+                        overviewNetworks.map((network) => (
                           <span
                             key={network}
                             className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
@@ -14133,31 +14523,90 @@ export default function TrrShowDetailPage() {
                       )}
                     </div>
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                      Streaming
+                      Availability
                     </p>
-                    <div className="flex flex-wrap gap-2">
-                      {(
-                        (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
-                        (Array.isArray(show.watch_providers) ? show.watch_providers : []) ??
-                        []
-                      ).length > 0 ? (
-                        (
-                          (Array.isArray(show.streaming_providers)
-                            ? show.streaming_providers
-                            : Array.isArray(show.watch_providers)
-                              ? show.watch_providers
-                              : []) ?? []
-                        ).map((provider) => (
-                          <span
-                            key={provider}
-                            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
+                    {overviewWatchAvailability.length > 0 ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {overviewWatchAvailability.map((region) => (
+                          <div
+                            key={`overview-watch-availability-${region.regionCode}`}
+                            className="rounded-lg border border-zinc-200 bg-white p-3"
                           >
-                            {provider}
-                          </span>
-                        ))
-                      ) : (
-                        <p className="text-sm text-zinc-500">No streaming providers on this record.</p>
-                      )}
+                            <p className="text-sm font-semibold text-zinc-900">{region.regionLabel}</p>
+                            <div className="mt-3 space-y-3">
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                  Stream
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                  {region.stream.length > 0 ? (
+                                    region.stream.map((provider) => (
+                                      <span
+                                        key={`overview-watch-stream-${region.regionCode}-${provider}`}
+                                        className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                                      >
+                                        {provider}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-zinc-500">None</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                  Buy
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                  {region.buy.length > 0 ? (
+                                    region.buy.map((provider) => (
+                                      <span
+                                        key={`overview-watch-buy-${region.regionCode}-${provider}`}
+                                        className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+                                      >
+                                        {provider}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-zinc-500">None</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                          {overviewStreamingProviders.length > 0 ? (
+                            overviewStreamingProviders.map((provider) => (
+                              <span
+                                key={provider}
+                                className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
+                              >
+                                {provider}
+                              </span>
+                            ))
+                          ) : (
+                            <p className="text-sm text-zinc-500">No streaming providers on this record.</p>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-500">
+                          Regional stream and buy availability is limited to the United States, United Kingdom, Canada,
+                          and Australia.
+                        </p>
+                      </div>
+                    )}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {overviewStreamingProviders.map((provider) => (
+                        <span
+                          key={`overview-streaming-summary-${provider}`}
+                          className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700"
+                        >
+                          {provider}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 </div>

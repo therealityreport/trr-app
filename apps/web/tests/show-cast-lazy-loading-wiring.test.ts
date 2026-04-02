@@ -146,6 +146,16 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/CAST_REFRESH_PHASE_BUTTON_LABELS\[castRefreshActivePhase\.id\]/);
   });
 
+  it("hydrates cast cards from the credits roster and preserves that roster against empty legacy cast responses", () => {
+    expect(contents).toMatch(/const normalizeShowCreditsCastRoster = \(value: unknown\): TrrCastMember\[\] =>/);
+    expect(contents).toMatch(/const \[showCreditsCastRoster, setShowCreditsCastRoster\] = useState<TrrCastMember\[]>\(\[\]\);/);
+    expect(contents).toMatch(/const creditsCastRoster = normalizeShowCreditsCastRoster\(data\.cast_roster\);/);
+    expect(contents).toMatch(/setShowCreditsCastRoster\(creditsCastRoster\);/);
+    expect(contents).toMatch(/setCast\(creditsCastRoster\);/);
+    expect(contents).toMatch(/const creditsRoster = activeTab === "cast" \? showCreditsCastRosterRef\.current : \[\];/);
+    expect(contents).toMatch(/nextCast = mergeMissingPhotoFields\(creditsRoster, nextCast\);/);
+  });
+
   it("defers cast search filtering work and waits for role data before deep-link editor open", () => {
     expect(contents).toMatch(/useDeferredValue/);
     expect(contents).toMatch(/const castSearchQueryDeferred = useDeferredValue/);

@@ -138,7 +138,31 @@ export async function fetchAdminBackendJson(
       signal: controller.signal,
     });
     const data = await parseJsonRecord(response);
-    const result = {
+    // Backend-generated 504 with REQUEST_TIMEOUT must be normalized to a
+    // typed error so callers get retryable timeout handling, not an opaque
+    // upstream 504 result.
+    if (
+      response.status === 504 &&
+      typeof data.detail === "object" &&
+      data.detail !== null &&
+      (data.detail as Record<string, unknown>).code === "REQUEST_TIMEOUT"
+    ) {
+      const upstreamDetail = data.detail as Record<string, unknown>;
+      throw new AdminReadProxyError(
+        `Backend request timed out (${upstreamDetail.message ?? "REQUEST_TIMEOUT"})`,
+        504,
+        {
+          code: "BACKEND_REQUEST_TIMEOUT",
+          retryable: true,
+          detail: {
+            route: options?.routeName ?? path,
+            request_role: requestRole,
+            upstream_detail: upstreamDetail,
+          },
+        },
+      );
+    }
+    const result: AdminBackendJsonResult = {
       status: response.status,
       data,
       durationMs: performance.now() - startedAt,

@@ -356,6 +356,49 @@ describe("social-admin-proxy", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("classifies backend 504 with REQUEST_TIMEOUT as BACKEND_REQUEST_TIMEOUT (retryable)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 504,
+      headers: { get: () => null },
+      json: async () => ({
+        error: "request timed out",
+        detail: { code: "REQUEST_TIMEOUT", message: "The request exceeded the maximum allowed duration" },
+      }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    let thrown: unknown;
+    try {
+      await fetchSeasonBackendJson("show-1", "6", "/analytics", {
+        fallbackError: "Failed to fetch social analytics",
+        retries: 0,
+        timeoutMs: 1000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    const response = socialProxyErrorResponse(thrown, "[test] backend request timeout");
+    const payload = (await response.json()) as {
+      error: string;
+      code?: string;
+      retryable?: boolean;
+      trace_id?: string;
+      upstream_status?: number;
+      upstream_detail?: unknown;
+      upstream_detail_code?: string;
+    };
+
+    expect(response.status).toBe(504);
+    expect(payload.code).toBe("BACKEND_REQUEST_TIMEOUT");
+    expect(payload.retryable).toBe(true);
+    expect(typeof payload.trace_id).toBe("string");
+    expect(payload.upstream_status).toBe(504);
+    expect(payload.upstream_detail_code).toBe("REQUEST_TIMEOUT");
+  });
+
   it("maps missing backend configuration to BACKEND_UNREACHABLE", async () => {
     getBackendApiUrlMock.mockReturnValue(null);
 

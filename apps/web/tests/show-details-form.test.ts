@@ -39,7 +39,7 @@ describe("show details form helpers", () => {
     ).toEqual(["Bravo Alias"]);
   });
 
-  it("omits the preferred alias slug from editable alternative names", () => {
+  it("keeps the preferred alias display value in editable alternative names", () => {
     expect(
       deriveShowDetailsAlternativeNames({
         name: "The Real Housewives of Salt Lake City",
@@ -47,17 +47,17 @@ describe("show details form helpers", () => {
         canonical_slug: "the-real-housewives-of-salt-lake-city",
         alternative_names: ["RHOSLC", "Salt Lake City", "The Real Housewives of Salt Lake City"],
       })
-    ).toEqual(["Salt Lake City"]);
+    ).toEqual(["RHOSLC", "Salt Lake City"]);
   });
 
-  it("heals outbound alternative names so the normalized slug stays first", () => {
+  it("keeps the normalized slug first while preserving the preferred alias display value", () => {
     expect(
       buildCanonicalShowAlternativeNames({
         displayName: "Test Show",
         nickname: " RHOSLC!!! ",
-        alternativeNames: ["Salt Lake", "rhoslc", "Test Show"],
+        alternativeNames: ["Salt Lake", "RHOSLC", "rhoslc", "Test Show"],
       })
-    ).toEqual(["rhoslc", "Salt Lake"]);
+    ).toEqual(["rhoslc", "RHOSLC", "Salt Lake"]);
   });
 
   it("uses the shared slugification rule for the preview", () => {

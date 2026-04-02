@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyConnectionClass,
+  isDeployedRuntime,
   isSupavisorSessionPoolerConnectionString,
   resolvePostgresConnectionCandidates,
   resolvePostgresPoolSizing,
   resolvePostgresConnectionString,
   resolvePostgresSslConfig,
+  validateRuntimeLane,
 } from "@/lib/server/postgres";
 
 describe("resolvePostgresConnectionString", () => {
@@ -26,19 +28,7 @@ describe("resolvePostgresConnectionString", () => {
     expect(value).toBe("postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres");
   });
 
-  it("does not add a direct-host fallback unless explicitly enabled", () => {
-    const values = resolvePostgresConnectionCandidates({
-      TRR_DB_URL: "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
-      TRR_DB_FALLBACK_URL: "postgresql://fallback:legacy@localhost:5432/trr",
-    });
-
-    expect(values).toEqual([
-      "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
-      "postgresql://fallback:legacy@localhost:5432/trr",
-    ]);
-  });
-
-  it("adds a direct-host fallback after a Supabase pooler URL when enabled", () => {
+  it("never derives direct-host fallback candidates", () => {
     const values = resolvePostgresConnectionCandidates({
       TRR_DB_URL: "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
       TRR_DB_FALLBACK_URL: "postgresql://fallback:legacy@localhost:5432/trr",
@@ -47,7 +37,6 @@ describe("resolvePostgresConnectionString", () => {
 
     expect(values).toEqual([
       "postgresql://postgres.abcdefghijklmno:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
-      "postgresql://postgres.abcdefghijklmno:secret@db.abcdefghijklmno.supabase.co:5432/postgres",
       "postgresql://fallback:legacy@localhost:5432/trr",
     ]);
   });
@@ -133,5 +122,67 @@ describe("resolvePostgresPoolSizing", () => {
       maxConcurrentOperations: 2,
       poolMax: 4,
     });
+  });
+});
+
+describe("isDeployedRuntime", () => {
+  it("returns false for NODE_ENV=development", () => {
+    expect(isDeployedRuntime({ NODE_ENV: "development" })).toBe(false);
+  });
+
+  it("returns false for VERCEL_ENV=preview", () => {
+    expect(isDeployedRuntime({ NODE_ENV: "production", VERCEL_ENV: "preview" })).toBe(false);
+  });
+
+  it("returns false for VERCEL_ENV=development", () => {
+    expect(isDeployedRuntime({ NODE_ENV: "production", VERCEL_ENV: "development" })).toBe(false);
+  });
+
+  it("returns true for production without VERCEL_ENV override", () => {
+    expect(isDeployedRuntime({ NODE_ENV: "production" })).toBe(true);
+  });
+
+  it("returns true for VERCEL_ENV=production", () => {
+    expect(isDeployedRuntime({ NODE_ENV: "production", VERCEL_ENV: "production" })).toBe(true);
+  });
+});
+
+describe("validateRuntimeLane", () => {
+  it("allows session in deployed runtime", () => {
+    expect(() => validateRuntimeLane("session", true)).not.toThrow();
+  });
+
+  it("allows local in deployed runtime", () => {
+    expect(() => validateRuntimeLane("local", true)).not.toThrow();
+  });
+
+  it("rejects transaction in deployed runtime", () => {
+    expect(() => validateRuntimeLane("transaction", true)).toThrow(
+      /connection class "transaction" is not allowed\b/,
+    );
+  });
+
+  it("rejects direct in deployed runtime", () => {
+    expect(() => validateRuntimeLane("direct", true)).toThrow(
+      /connection class "direct" is not allowed\b/,
+    );
+  });
+
+  it("rejects transaction in local dev", () => {
+    expect(() => validateRuntimeLane("transaction", false)).toThrow(
+      /connection class "transaction" is not allowed\b/,
+    );
+  });
+
+  it("rejects direct in local dev", () => {
+    expect(() => validateRuntimeLane("direct", false)).toThrow(
+      /connection class "direct" is not allowed\b/,
+    );
+  });
+
+  it("rejects unknown lanes in local dev", () => {
+    expect(() => validateRuntimeLane("other", false)).toThrow(
+      /connection class "other" is not allowed\b/,
+    );
   });
 });

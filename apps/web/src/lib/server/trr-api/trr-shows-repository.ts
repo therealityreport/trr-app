@@ -32,16 +32,29 @@ export interface TrrShow {
   slug: string;
   canonical_slug: string;
   alternative_names: string[];
+  overview_alternative_names?: string[] | null;
   imdb_id: string | null;
   tmdb_id: number | null;
   external_ids?: Record<string, unknown> | null;
+  derived_external_links?: {
+    justwatch_url?: string | null;
+  } | null;
+  overview_watch_availability?:
+    | Array<{
+        region: "US" | "GB" | "CA" | "AU";
+        stream: string[];
+        buy: string[];
+      }>
+    | null;
   show_total_seasons: number | null;
   show_total_episodes: number | null;
   description: string | null;
   premiere_date: string | null;
   genres: string[];
   networks: string[];
+  overview_networks?: string[] | null;
   streaming_providers?: string[] | null;
+  overview_streaming_providers?: string[] | null;
   watch_providers?: string[] | null;
   tags: string[];
   // Image fields (from primary_* columns or joined)
@@ -97,6 +110,8 @@ export interface TrrSeason {
   tmdb_season_id: number | null;
   has_scheduled_or_aired_episode?: boolean;
   episode_airdate_count?: number;
+  fandom_source_url?: string | null;
+  fandom_page_title?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -186,12 +201,45 @@ const normalizeStringArray = (value: unknown): string[] => {
   return value.filter((item): item is string => typeof item === "string");
 };
 
+const normalizeOverviewWatchAvailability = (
+  value: unknown,
+): NonNullable<TrrShow["overview_watch_availability"]> => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as Record<string, unknown>;
+      const region = String(row.region || "").trim().toUpperCase();
+      if (region !== "US" && region !== "GB" && region !== "CA" && region !== "AU") {
+        return null;
+      }
+      return {
+        region,
+        stream: normalizeStringArray(row.stream),
+        buy: normalizeStringArray(row.buy),
+      } as const;
+    })
+    .filter(
+      (
+        item
+      ): item is {
+        region: "US" | "GB" | "CA" | "AU";
+        stream: string[];
+        buy: string[];
+      } => item !== null
+    );
+};
+
 const normalizeTrrShowRow = (row: TrrShow): TrrShow => ({
   ...row,
   alternative_names: normalizeStringArray(row.alternative_names),
+  overview_alternative_names: normalizeStringArray(row.overview_alternative_names),
   genres: normalizeStringArray(row.genres),
   networks: normalizeStringArray(row.networks),
+  overview_networks: normalizeStringArray(row.overview_networks),
   streaming_providers: normalizeStringArray(row.streaming_providers),
+  overview_streaming_providers: normalizeStringArray(row.overview_streaming_providers),
+  overview_watch_availability: normalizeOverviewWatchAvailability(row.overview_watch_availability),
   watch_providers: normalizeStringArray(row.watch_providers),
   tags: normalizeStringArray(row.tags),
 });

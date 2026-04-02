@@ -33,6 +33,61 @@
   font-display: swap;
 }
 
+/* Legacy NYT family aliases used across design docs */
+@font-face {
+  font-family: 'nyt-karnakcondensed';
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTKarnak_Condensed.woff2') format('woff2'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTKarnak_Condensed.woff') format('woff'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTKarnak_Condensed.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'nyt-karnak';
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/KarnakPro-Book.woff2') format('woff2'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/KarnakPro-Book.woff') format('woff'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/KarnakPro-Book.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'nyt-franklin';
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTFranklin.woff2') format('woff2'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTFranklin.woff') format('woff'),
+       url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/reference%20fonts/NYTimes/NYTFranklin.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'nyt-stymie';
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stymie/Stymie%20Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'nyt-stymie';
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stymie/StymieBold-1086428.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'nyt-stymie';
+  src: url('https://pub-a3c452f3df0d40319f7c585253a4776c.r2.dev/fonts/trr/Stymie%20Extra%20Bold/StymieExtraBold-5907011.otf') format('opentype');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* TN_Web_Use_Only for date */
 @font-face {
   font-family: 'TN_Web_Use_Only';

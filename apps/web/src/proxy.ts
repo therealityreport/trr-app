@@ -5,11 +5,15 @@ import {
   ADMIN_DEV_DASHBOARD_PATH,
   ADMIN_SOCIAL_PATH,
 } from "@/lib/admin/admin-route-paths";
+import { toFriendlyBrandSlug } from "@/lib/admin/brand-profile";
 
 const DEFAULT_DEV_ADMIN_ORIGIN = "http://admin.localhost:3000";
 const DEFAULT_DEV_ADMIN_API_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const STATIC_PATH_PREFIXES = ["/_next", "/favicon.ico", "/robots.txt", "/sitemap.xml"];
 const INTERNAL_ADMIN_REWRITE_HEADER = "x-trr-admin-rewrite";
+const CANONICAL_SOCIAL_PATH = "/social";
+const CANONICAL_API_REFERENCES_PATH = "/api-references";
+const CANONICAL_DEV_DASHBOARD_PATH = "/dev-dashboard";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const ROOT_SHOW_ROUTE_RESERVED_FIRST_SEGMENTS = new Set([
   "admin",
@@ -137,17 +141,17 @@ const ROOT_ONLY_ADMIN_SECTION_CANONICAL_PATHS = new Map<string, string>([
   ["docs", "/docs"],
 ]);
 const NESTED_ADMIN_SECTION_CANONICAL_PREFIXES = [
-  ["/admin/social-media", ADMIN_SOCIAL_PATH],
-  ["/admin/social", ADMIN_SOCIAL_PATH],
+  ["/admin/social-media", CANONICAL_SOCIAL_PATH],
+  ["/admin/social", CANONICAL_SOCIAL_PATH],
   ["/admin/design-docs", ADMIN_DESIGN_DOCS_PATH],
-  ["/admin/api-references", ADMIN_API_REFERENCES_PATH],
-  ["/admin/dev-dashboard", ADMIN_DEV_DASHBOARD_PATH],
+  ["/admin/api-references", CANONICAL_API_REFERENCES_PATH],
+  ["/admin/dev-dashboard", CANONICAL_DEV_DASHBOARD_PATH],
 ] as const;
 const CANONICAL_ADMIN_REWRITE_PREFIXES = [
-  [ADMIN_SOCIAL_PATH, "/admin/social"],
+  [CANONICAL_SOCIAL_PATH, ADMIN_SOCIAL_PATH],
   [ADMIN_DESIGN_DOCS_PATH, "/admin/design-docs"],
-  [ADMIN_API_REFERENCES_PATH, "/admin/api-references"],
-  [ADMIN_DEV_DASHBOARD_PATH, "/admin/dev-dashboard"],
+  [CANONICAL_API_REFERENCES_PATH, ADMIN_API_REFERENCES_PATH],
+  [CANONICAL_DEV_DASHBOARD_PATH, ADMIN_DEV_DASHBOARD_PATH],
 ] as const;
 
 function parseOptionalBoolean(value: string | undefined): boolean | null {
@@ -948,24 +952,34 @@ function isAdminUiPath(pathname: string): boolean {
   );
 }
 
+function mapLegacyBrandDetailPath(pathname: string, searchParams?: URLSearchParams): string | null {
+  const patterns = [
+    "/brands/networks-and-streaming/",
+    "/admin/networks-and-streaming/",
+    "/admin/networks/",
+  ];
+  for (const prefix of patterns) {
+    if (!pathname.startsWith(prefix)) continue;
+    const segments = pathname.slice(prefix.length).split("/").filter(Boolean);
+    if (segments.length < 2) return null;
+    const legacySlug = toFriendlyBrandSlug(segments[1] || "");
+    if (!legacySlug) return null;
+    return appendSearch(`/brands/${legacySlug}`, searchParams);
+  }
+  return null;
+}
+
 function mapLegacyBrandsPath(pathname: string, searchParams?: URLSearchParams): string | null {
   if (pathname === "/admin/brands") return appendSearch("/brands", searchParams);
   if (pathname.startsWith("/admin/brands/")) {
     return appendSearch(pathname.replace("/admin/brands/", "/brands/"), searchParams);
   }
+  const legacyBrandDetailPath = mapLegacyBrandDetailPath(pathname, searchParams);
+  if (legacyBrandDetailPath) return legacyBrandDetailPath;
   if (pathname === "/brands/networks-and-streaming" || pathname === "/admin/networks-and-streaming") {
     return buildBrandsWorkspaceRedirect("all", searchParams);
   }
-  if (pathname.startsWith("/admin/networks-and-streaming/")) {
-    return appendSearch(
-      pathname.replace("/admin/networks-and-streaming/", "/brands/networks-and-streaming/"),
-      searchParams,
-    );
-  }
   if (pathname === "/admin/networks") return buildBrandsWorkspaceRedirect("all", searchParams);
-  if (pathname.startsWith("/admin/networks/")) {
-    return appendSearch(pathname.replace("/admin/networks/", "/brands/networks-and-streaming/"), searchParams);
-  }
   if (pathname === "/brands/production-companies" || pathname === "/admin/production-companies") {
     return buildBrandsWorkspaceRedirect("production", searchParams);
   }

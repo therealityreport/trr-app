@@ -15,6 +15,7 @@ import {
   type BrandProfileAsset,
   type BrandProfilePayload,
   type BrandProfileShow,
+  type BrandProfileSocialProfile,
   type BrandProfileSuggestion,
   type BrandProfileTarget,
   formatBrandTargetType,
@@ -26,6 +27,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { canonicalizeHostedMediaUrl } from "@/lib/hosted-media";
 
 type BrandProfileResponse = BrandProfilePayload & { suggestions?: BrandProfileSuggestion[] };
+type BrandPageTab = "overview" | "logos";
 
 const COLOR_BADGE_CLASSNAMES: Record<string, string> = {
   network: "bg-cyan-100 text-cyan-900 border-cyan-200",
@@ -49,90 +51,243 @@ const joinClasses = (...values: Array<string | false | null | undefined>): strin
 const buildSectionSearchHref = (href: string, query: string): string =>
   appendSearchParam(href, "q", query);
 
-function IdentityList({
+const formatCount = (value: number): string => value.toLocaleString("en-US");
+
+const uniqueUrls = (values: Array<string | null | undefined>): string[] =>
+  Array.from(new Set(values.map((value) => (value ?? "").trim()).filter(Boolean)));
+
+const metadataValue = (value: string | number | null | undefined): string => {
+  if (value === null || value === undefined) return "Missing";
+  const serialized = String(value).trim();
+  return serialized || "Missing";
+};
+
+function MetadataCard({
   label,
-  values,
+  value,
+  href,
 }: {
   label: string;
-  values: string[];
+  value: string | number | null | undefined;
+  href?: string | null;
 }) {
-  if (values.length === 0) return null;
+  const resolvedValue = metadataValue(value);
   return (
-    <div className="rounded-2xl border border-zinc-200 bg-white/80 p-4 shadow-sm shadow-zinc-200/50">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">{label}</p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {values.map((value) => (
-          <span
-            key={`${label}:${value}`}
-            className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-700"
-          >
-            {value}
-          </span>
-        ))}
-      </div>
+    <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">{label}</p>
+      {href && resolvedValue !== "Missing" ? (
+        <a href={href} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm font-medium text-zinc-900 underline decoration-zinc-300">
+          {resolvedValue}
+        </a>
+      ) : (
+        <p className="mt-2 break-all text-sm font-medium text-zinc-900">{resolvedValue}</p>
+      )}
     </div>
   );
 }
 
-function EvidenceSection({ target }: { target: BrandProfileTarget }) {
-  const evidenceLinks = [
-    ...(target.discovered_from_urls ?? []),
-    ...(target.discovered_from ? [target.discovered_from] : []),
-    ...(target.shared_links ?? []).map((item) => item.url),
-    ...(target.wikipedia_show_urls ?? []).map((item) => item.show_url),
-  ].filter(Boolean);
-
-  const uniqueEvidence = Array.from(new Set(evidenceLinks));
-  const hasEvidence =
-    uniqueEvidence.length > 0 ||
-    target.source_link_kinds.length > 0 ||
-    target.family !== null ||
-    target.family_suggestions.length > 0;
-
-  if (!hasEvidence) return null;
+function LogoGrid({
+  assets,
+  onManage,
+  title,
+  subtitle,
+}: {
+  assets: BrandProfileAsset[];
+  onManage: (target: BrandProfileTarget) => void;
+  title: string;
+  subtitle: string;
+}) {
+  if (assets.length === 0) {
+    return (
+      <section className="rounded-3xl border border-zinc-200 bg-white px-6 py-10 shadow-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">{title}</p>
+        <h2 className="mt-3 text-2xl font-semibold text-zinc-900">{subtitle}</h2>
+        <p className="mt-4 text-sm text-zinc-500">No saved logos are attached to this brand yet.</p>
+      </section>
+    );
+  }
 
   return (
-    <article className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-200/60">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-lg font-semibold text-zinc-900">{target.target_label}</h3>
-        <span
-          className={joinClasses(
-            "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.2em]",
-            COLOR_BADGE_CLASSNAMES[target.target_type],
-          )}
-        >
-          {formatBrandTargetType(target.target_type)}
+    <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">{title}</p>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-2xl font-semibold text-zinc-900">{subtitle}</h2>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600">
+          {assets.length} saved
         </span>
       </div>
-      {target.source_link_kinds.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {target.source_link_kinds.map((kind) => (
-            <span
-              key={`${target.id}:${kind}`}
-              className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-700"
-            >
-              {kind}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {uniqueEvidence.length > 0 ? (
-        <ul className="mt-4 space-y-2 text-sm text-zinc-700">
-          {uniqueEvidence.map((url) => (
-            <li key={`${target.id}:${url}`} className="rounded-2xl border border-zinc-100 bg-zinc-50 px-3 py-2">
-              <a href={url} target="_blank" rel="noreferrer" className="break-all underline decoration-zinc-300">
-                {url}
+      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {assets.map((asset) => (
+          <article
+            key={asset.id}
+            className="rounded-3xl border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#fafaf9_100%)] p-4 shadow-sm"
+          >
+            <div className="flex flex-wrap gap-2">
+              <span
+                className={joinClasses(
+                  "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
+                  COLOR_BADGE_CLASSNAMES[asset.target_type],
+                )}
+              >
+                {formatBrandTargetType(asset.target_type)}
+              </span>
+              <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+                {asset.role}
+              </span>
+            </div>
+            <div className="mt-4 flex min-h-36 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+              {pickAssetDisplayUrl(asset) ? (
+                <img
+                  src={pickAssetDisplayUrl(asset) ?? ""}
+                  alt={`${asset.target_label} ${asset.role}`}
+                  className="max-h-24 w-full object-contain"
+                />
+              ) : (
+                <div className="text-xs uppercase tracking-[0.2em] text-zinc-400">Missing</div>
+              )}
+            </div>
+            <div className="mt-4 space-y-1">
+              <p className="text-sm font-semibold text-zinc-900">{asset.target_label}</p>
+              <p className="text-xs text-zinc-500">{asset.source_provider ?? "stored"}{asset.variant ? ` · ${asset.variant}` : ""}</p>
+            </div>
+            {asset.source_url ? (
+              <a
+                href={asset.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 block truncate text-xs text-zinc-500 underline decoration-zinc-300"
+                title={asset.source_url}
+              >
+                {asset.source_url}
               </a>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {target.family ? (
-        <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-700">
-          Family: <span className="font-semibold">{target.family.display_name}</span>
-        </div>
-      ) : null}
-    </article>
+            ) : null}
+            <button
+              type="button"
+              onClick={() =>
+                onManage({
+                  id: asset.target_id,
+                  target_type: asset.target_type,
+                  target_key: asset.target_key,
+                  target_label: asset.target_label,
+                  friendly_slug: "",
+                  section_href: "",
+                  detail_href: null,
+                  entity_slug: null,
+                  entity_id: null,
+                  available_show_count: null,
+                  added_show_count: null,
+                  homepage_url: null,
+                  wikipedia_url: null,
+                  wikidata_id: null,
+                  instagram_id: null,
+                  twitter_id: null,
+                  tiktok_id: null,
+                  facebook_id: null,
+                  discovered_from: null,
+                  discovered_from_urls: [],
+                  source_link_kinds: [],
+                  family: null,
+                  family_suggestions: [],
+                  shared_links: [],
+                  wikipedia_show_urls: [],
+                })
+              }
+              className="mt-4 rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+            >
+              Manage Logos
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SocialProfilesSection({
+  profiles,
+}: {
+  profiles: BrandProfileSocialProfile[];
+}) {
+  if (profiles.length === 0) return null;
+
+  return (
+    <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Social Profiles</p>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-2xl font-semibold text-zinc-900">Shared accounts auto-assigned to this brand</h2>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600">
+          {profiles.length} profiles
+        </span>
+      </div>
+      <div className="mt-6 grid gap-4 xl:grid-cols-2">
+        {profiles.map((profile) => (
+          <article key={`${profile.platform}:${profile.account_handle}`} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-zinc-200 bg-white">
+                {profile.avatar_url ? (
+                  <img src={profile.avatar_url} alt={`${profile.account_handle} avatar`} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-400">
+                    {profile.platform.slice(0, 2)}
+                  </span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
+                    {profile.platform}
+                  </span>
+                  <p className="text-lg font-semibold text-zinc-900">@{profile.account_handle}</p>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-600">
+                  <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1">
+                    Posts {formatCount(profile.total_posts)}
+                  </span>
+                  <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1">
+                    Engagement {formatCount(profile.total_engagement)}
+                  </span>
+                  <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1">
+                    Views {formatCount(profile.total_views)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/social/${encodeURIComponent(profile.platform)}/${encodeURIComponent(profile.account_handle)}` as Route}
+                  className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                >
+                  Open Profile
+                </Link>
+                {profile.profile_url ? (
+                  <a
+                    href={profile.profile_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                  >
+                    Open Platform
+                  </a>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Assigned Shows</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {profile.assigned_shows.map((show) => (
+                  <Link
+                    key={`${profile.platform}:${profile.account_handle}:${show.id}`}
+                    href={buildShowAdminUrl({ showSlug: show.canonical_slug ?? show.id }) as Route}
+                    className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100"
+                  >
+                    {show.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -146,6 +301,7 @@ export default function BrandProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [logoTarget, setLogoTarget] = useState<BrandProfileTarget | null>(null);
+  const [activeTab, setActiveTab] = useState<BrandPageTab>("overview");
 
   const fetchWithAuth = useCallback(
     (input: RequestInfo | URL, init?: RequestInit) =>
@@ -169,13 +325,10 @@ export default function BrandProfilePage() {
     setError(null);
 
     try {
-      const response = await fetchWithAuth(
-        `/api/admin/brands/profile?slug=${encodeURIComponent(brandSlug)}`,
-        {
-          method: "GET",
-          cache: "no-store",
-        },
-      );
+      const response = await fetchWithAuth(`/api/admin/brands/profile?slug=${encodeURIComponent(brandSlug)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
         suggestions?: BrandProfileSuggestion[];
@@ -193,10 +346,7 @@ export default function BrandProfilePage() {
 
       setPayload(data as BrandProfileResponse);
       setSuggestions([]);
-      setLogoTarget((current) => {
-        if (!current) return null;
-        return (data.targets ?? []).find((target) => target.id === current.id) ?? null;
-      });
+      setLogoTarget((current) => (current ? (data.targets ?? []).find((target) => target.id === current.id) ?? null : null));
     } catch (loadError) {
       setPayload(null);
       setSuggestions([]);
@@ -215,33 +365,36 @@ export default function BrandProfilePage() {
     () => payload?.targets.find((target) => target.id === payload.primary_target_id) ?? null,
     [payload],
   );
-
-  const identityGroups = useMemo(() => {
-    const targets = payload?.targets ?? [];
-    const collect = (selector: (target: BrandProfileTarget) => string | null) =>
-      Array.from(new Set(targets.map(selector).filter((value): value is string => Boolean(value))));
-
+  const networkTarget = useMemo(
+    () => payload?.targets.find((target) => ["network", "streaming", "production"].includes(target.target_type)) ?? primaryTarget ?? null,
+    [payload, primaryTarget],
+  );
+  const overviewAssets = useMemo(() => (payload?.assets ?? []).slice(0, 6), [payload]);
+  const allSourceUrls = useMemo(
+    () =>
+      uniqueUrls(
+        (payload?.assets ?? []).flatMap((asset) => [asset.source_url, asset.discovered_from]),
+      ),
+    [payload],
+  );
+  const overviewSourceUrls = useMemo(() => allSourceUrls.slice(0, 6), [allSourceUrls]);
+  const familyTargets = useMemo(
+    () => (payload?.targets ?? []).filter((target) => target.family || target.family_suggestions.length > 0),
+    [payload],
+  );
+  const compactMetadata = useMemo(() => {
+    if (!networkTarget) return [];
     return [
-      { label: "Known Keys", values: collect((target) => target.target_key) },
-      { label: "Wikipedia", values: collect((target) => target.wikipedia_url) },
-      { label: "Wikidata IDs", values: collect((target) => target.wikidata_id) },
-      { label: "Facebook IDs", values: collect((target) => target.facebook_id) },
-      { label: "Instagram IDs", values: collect((target) => target.instagram_id) },
-      { label: "Twitter IDs", values: collect((target) => target.twitter_id) },
-      { label: "TikTok IDs", values: collect((target) => target.tiktok_id) },
-    ].filter((group) => group.values.length > 0);
-  }, [payload]);
-
-  const showsByCategory = useMemo(() => {
-    const grouped = new Map<string, BrandProfileShow[]>();
-    for (const show of payload?.shows ?? []) {
-      const key = show.categories[0] ?? "other";
-      const current = grouped.get(key) ?? [];
-      current.push(show);
-      grouped.set(key, current);
-    }
-    return [...grouped.entries()].sort((left, right) => left[0].localeCompare(right[0]));
-  }, [payload]);
+      { label: "Brand Slug", value: payload?.slug ?? brandSlug },
+      { label: "Entity Key", value: networkTarget.target_key },
+      { label: "Entity ID", value: networkTarget.entity_id },
+      { label: "Homepage", value: networkTarget.homepage_url, href: networkTarget.homepage_url },
+      { label: "Wikidata ID", value: networkTarget.wikidata_id },
+      { label: "Wikipedia URL", value: networkTarget.wikipedia_url, href: networkTarget.wikipedia_url },
+      { label: "Available Shows", value: networkTarget.available_show_count },
+      { label: "Added Shows", value: networkTarget.added_show_count },
+    ];
+  }, [brandSlug, networkTarget, payload?.slug]);
 
   if (checking) {
     return (
@@ -254,9 +407,7 @@ export default function BrandProfilePage() {
     );
   }
 
-  if (!user || !hasAccess) {
-    return null;
-  }
+  if (!user || !hasAccess) return null;
 
   return (
     <ClientOnly>
@@ -264,10 +415,7 @@ export default function BrandProfilePage() {
         <AdminGlobalHeader bodyClassName="px-6 py-6">
           <div className="mx-auto max-w-7xl">
             <AdminBreadcrumbs
-              items={buildBrandsPageBreadcrumb(
-                payload?.display_name ?? humanizeSlug(brandSlug),
-                `/brands/${brandSlug}`,
-              )}
+              items={buildBrandsPageBreadcrumb(payload?.display_name ?? humanizeSlug(brandSlug), `/brands/${brandSlug}`)}
               className="mb-1"
             />
             <div className="mt-4 overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-[0_30px_80px_-40px_rgba(24,24,27,0.45)]">
@@ -275,15 +423,12 @@ export default function BrandProfilePage() {
                 <div className="absolute inset-y-0 right-0 w-1/3 bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(255,255,255,0))]" />
                 <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
                   <div className="max-w-3xl">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-100/90">
-                      Brand Profile
-                    </p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-100/90">Brand Profile</p>
                     <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white">
                       {payload?.display_name ?? humanizeSlug(brandSlug)}
                     </h1>
                     <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-200">
-                      Editorial and platform footprint across the TRR brand graph, with related shows, saved assets,
-                      and quick links back into existing brand workflows.
+                      Canonical brand view for shows, shared social accounts, and saved logo discovery.
                     </p>
                     <div className="mt-4 flex flex-wrap gap-2">
                       {(payload?.categories ?? []).map((category) => (
@@ -305,13 +450,8 @@ export default function BrandProfilePage() {
                       ["Shows", String(payload?.counts.shows ?? 0)],
                       ["Assets", String(payload?.counts.assets ?? 0)],
                     ].map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur"
-                      >
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-200">
-                          {label}
-                        </p>
+                      <div key={label} className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-zinc-200">{label}</p>
                         <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
                       </div>
                     ))}
@@ -322,25 +462,18 @@ export default function BrandProfilePage() {
               <div className="flex flex-col gap-4 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
                 <BrandsTabs activeTab="brands" />
                 <div className="flex flex-wrap gap-2">
-                  {primaryTarget ? (
+                  {networkTarget ? (
                     <button
                       type="button"
-                      onClick={() => setLogoTarget(primaryTarget)}
+                      onClick={() => setLogoTarget(networkTarget)}
                       className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
                     >
                       Manage Logos
                     </button>
                   ) : null}
-                  {primaryTarget?.detail_href ? (
+                  {networkTarget ? (
                     <Link
-                      href={primaryTarget.detail_href as Route}
-                      className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                    >
-                      Open Source Detail
-                    </Link>
-                  ) : primaryTarget ? (
-                    <Link
-                      href={buildSectionSearchHref(primaryTarget.section_href, primaryTarget.target_label) as Route}
+                      href={buildSectionSearchHref(networkTarget.section_href, networkTarget.target_label) as Route}
                       className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
                     >
                       Open Section
@@ -354,9 +487,7 @@ export default function BrandProfilePage() {
 
         <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
           {error && error !== "not_found" ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
           ) : null}
 
           {loading ? (
@@ -371,9 +502,7 @@ export default function BrandProfilePage() {
               <h2 className="mt-3 text-2xl font-semibold text-amber-950">
                 No brand matched <span className="lowercase">/{brandSlug}</span>
               </h2>
-              <p className="mt-2 text-sm text-amber-900/80">
-                Exact friendly-slug matching is enabled for this page. Try one of the nearby brand candidates below.
-              </p>
+              <p className="mt-2 text-sm text-amber-900/80">Try one of the nearby brand candidates below.</p>
               <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {suggestions.map((item) => (
                   <Link
@@ -381,16 +510,14 @@ export default function BrandProfilePage() {
                     href={item.href as Route}
                     className="rounded-2xl border border-amber-200 bg-white px-4 py-4 transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-sm"
                   >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={joinClasses(
-                          "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
-                          COLOR_BADGE_CLASSNAMES[item.target_type],
-                        )}
-                      >
-                        {formatBrandTargetType(item.target_type)}
-                      </span>
-                    </div>
+                    <span
+                      className={joinClasses(
+                        "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
+                        COLOR_BADGE_CLASSNAMES[item.target_type],
+                      )}
+                    >
+                      {formatBrandTargetType(item.target_type)}
+                    </span>
                     <p className="mt-3 text-base font-semibold text-zinc-900">{item.label}</p>
                     <p className="mt-1 text-xs text-zinc-500">/{item.slug}</p>
                   </Link>
@@ -401,45 +528,153 @@ export default function BrandProfilePage() {
 
           {payload ? (
             <>
-              <section className="grid gap-6 xl:grid-cols-[1.2fr,0.8fr]">
-                <div className="rounded-3xl border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#fafaf9_100%)] p-6 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Identity</p>
-                      <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Known Handles, Keys, and URLs</h2>
+              <section className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ["overview", "Overview"],
+                    ["logos", `Logos (${payload.assets.length})`],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setActiveTab(value)}
+                      className={joinClasses(
+                        "rounded-full border px-4 py-2 text-sm font-semibold transition",
+                        activeTab === value
+                          ? "border-zinc-900 bg-zinc-900 text-white"
+                          : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {activeTab === "overview" ? (
+                <>
+                  <LogoGrid
+                    assets={overviewAssets}
+                    onManage={(target) => setLogoTarget(target)}
+                    title="Saved Logos"
+                    subtitle="Overview"
+                  />
+                  {payload.assets.length > 6 ? (
+                    <div className="-mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("logos")}
+                        className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                      >
+                        View More Logos
+                      </button>
                     </div>
-                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-600">
-                      /{payload.slug}
-                    </span>
-                  </div>
-                  <div className="mt-5 grid gap-4 md:grid-cols-2">
-                    {identityGroups.length > 0 ? (
-                      identityGroups.map((group) => (
-                        <IdentityList key={group.label} label={group.label} values={group.values} />
-                      ))
+                  ) : null}
+
+                  <SocialProfilesSection profiles={payload.social_profiles ?? []} />
+
+                  <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Saved Info / URLs</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-zinc-900">Cleaned brand metadata</h2>
+                    <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      {compactMetadata.map((item) => (
+                        <MetadataCard key={item.label} label={item.label} value={item.value} href={item.href} />
+                      ))}
+                    </div>
+                    <div className="mt-6">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Source URLs</p>
+                          <p className="mt-1 text-sm text-zinc-600">Showing the first 6 on overview.</p>
+                        </div>
+                        {allSourceUrls.length > 6 ? (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab("logos")}
+                            className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                          >
+                            View More
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="mt-4 grid gap-3">
+                        {overviewSourceUrls.length > 0 ? (
+                          overviewSourceUrls.map((url) => (
+                            <a
+                              key={url}
+                              href={url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="truncate rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700 underline decoration-zinc-300"
+                              title={url}
+                            >
+                              {url}
+                            </a>
+                          ))
+                        ) : (
+                          <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
+                            No source URLs saved yet.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Added Shows</p>
+                        <h2 className="mt-3 text-2xl font-semibold text-zinc-900">Shows currently assigned to this brand</h2>
+                      </div>
+                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600">
+                        {payload.shows.length} added shows
+                      </span>
+                    </div>
+                    {payload.shows.length === 0 ? (
+                      <p className="mt-6 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
+                        No added shows are currently linked to this brand.
+                      </p>
                     ) : (
-                      <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
-                        No structured identity fields have been captured for this brand yet.
+                      <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {payload.shows.map((show) => (
+                          <Link
+                            key={show.id}
+                            href={buildShowAdminUrl({ showSlug: show.canonical_slug ?? show.id }) as Route}
+                            className="group rounded-3xl border border-zinc-200 bg-zinc-50 p-4 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:bg-white hover:shadow-sm"
+                          >
+                            <div className="flex gap-4">
+                              <div className="h-24 w-16 shrink-0 overflow-hidden rounded-2xl border border-zinc-200 bg-white">
+                                {pickShowPosterUrl(show) ? (
+                                  <img src={pickShowPosterUrl(show) ?? ""} alt={show.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <div className="flex h-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
+                                    No Art
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-zinc-900 group-hover:text-zinc-950">{show.name}</p>
+                                <p className="mt-2 line-clamp-3 text-xs text-zinc-500">{show.source_labels.join(" · ")}</p>
+                              </div>
+                            </div>
+                          </Link>
+                        ))}
                       </div>
                     )}
-                  </div>
-                </div>
+                  </section>
 
-                <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Underlying Targets</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Where This Brand Lives</h2>
-                  <div className="mt-5 space-y-3">
-                    {payload.targets.map((target) => (
-                      <article
-                        key={target.id}
-                        className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-4 shadow-sm shadow-zinc-200/40"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
+                  <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Brand Family</p>
+                    <h2 className="mt-3 text-2xl font-semibold text-zinc-900">Family and ownership context</h2>
+                    {familyTargets.length === 0 ? (
+                      <p className="mt-6 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
+                        No family assignments or suggestions are attached to this brand yet.
+                      </p>
+                    ) : (
+                      <div className="mt-6 grid gap-4 xl:grid-cols-2">
+                        {familyTargets.map((target) => (
+                          <article key={target.id} className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5">
                             <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="truncate text-base font-semibold text-zinc-900">
-                                {target.target_label}
-                              </h3>
                               <span
                                 className={joinClasses(
                                   "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
@@ -448,231 +683,71 @@ export default function BrandProfilePage() {
                               >
                                 {formatBrandTargetType(target.target_type)}
                               </span>
+                              <p className="text-lg font-semibold text-zinc-900">{target.target_label}</p>
                             </div>
-                            <p className="mt-1 break-all text-xs text-zinc-500">{target.target_key}</p>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setLogoTarget(target)}
-                              className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                            >
-                              Manage Logos
-                            </button>
-                            <Link
-                              href={
-                                (target.detail_href ??
-                                  buildSectionSearchHref(target.section_href, target.target_label)) as Route
-                              }
-                              className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                            >
-                              Open Source
-                            </Link>
-                          </div>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-600">
-                          {typeof target.available_show_count === "number" ? (
-                            <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1">
-                              Available shows: {target.available_show_count}
-                            </span>
-                          ) : null}
-                          {typeof target.added_show_count === "number" ? (
-                            <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1">
-                              Added shows: {target.added_show_count}
-                            </span>
-                          ) : null}
-                          {target.family ? (
-                            <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1">
-                              Family: {target.family.display_name}
-                            </span>
-                          ) : null}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Related Shows</p>
-                    <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Shows Connected to This Brand</h2>
-                  </div>
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-600">
-                    {payload.counts.shows} linked shows
-                  </span>
-                </div>
-                {payload.shows.length === 0 ? (
-                  <div className="mt-6 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
-                    No related shows are currently attached to this brand target set.
-                  </div>
-                ) : (
-                  <div className="mt-6 space-y-6">
-                    {showsByCategory.map(([category, shows]) => (
-                      <div key={category}>
-                        <div className="mb-3 flex items-center gap-2">
-                          <span
-                            className={joinClasses(
-                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
-                              COLOR_BADGE_CLASSNAMES[category],
-                            )}
-                          >
-                            {formatBrandTargetType(category as BrandProfileTarget["target_type"])}
-                          </span>
-                        </div>
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                          {shows.map((show) => (
-                            <Link
-                              key={show.id}
-                              href={
-                                buildShowAdminUrl({
-                                  showSlug: show.canonical_slug ?? show.id,
-                                }) as Route
-                              }
-                              className="group rounded-2xl border border-zinc-200 bg-zinc-50 p-3 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:bg-white hover:shadow-sm"
-                            >
-                              <div className="flex gap-3">
-                                <div className="h-24 w-16 shrink-0 overflow-hidden rounded-xl border border-zinc-200 bg-white">
-                                  {pickShowPosterUrl(show) ? (
-                                    <img
-                                      src={pickShowPosterUrl(show) ?? ""}
-                                      alt={show.name}
-                                      className="h-full w-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="flex h-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.2em] text-zinc-400">
-                                      No Art
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-semibold text-zinc-900 group-hover:text-zinc-950">
-                                    {show.name}
-                                  </p>
-                                  <p className="mt-1 line-clamp-2 text-xs text-zinc-500">
-                                    {show.source_labels.join(" · ")}
-                                  </p>
+                            {target.family ? (
+                              <div className="mt-4 rounded-2xl border border-zinc-200 bg-white px-4 py-3">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Current Family</p>
+                                <p className="mt-2 text-sm font-medium text-zinc-900">{target.family.display_name}</p>
+                              </div>
+                            ) : null}
+                            {target.family_suggestions.length > 0 ? (
+                              <div className="mt-4">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Suggestions</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {target.family_suggestions.map((suggestion) => (
+                                    <span key={`${target.id}:${suggestion.owner_wikidata_id}`} className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700">
+                                      {suggestion.owner_label}
+                                    </span>
+                                  ))}
                                 </div>
                               </div>
-                            </Link>
-                          ))}
-                        </div>
+                            ) : null}
+                          </article>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Brand Assets</p>
-                    <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Wordmarks, Icons, and Variants</h2>
-                  </div>
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-600">
-                    {payload.counts.assets} saved assets
-                  </span>
-                </div>
-                {payload.assets.length === 0 ? (
-                  <div className="mt-6 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
-                    No saved assets have been attached to the matched targets yet.
-                  </div>
-                ) : (
-                  <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {payload.assets.map((asset) => (
-                      <article
-                        key={asset.id}
-                        className="rounded-2xl border border-zinc-200 bg-[linear-gradient(180deg,#ffffff_0%,#fafaf9_100%)] p-4 shadow-sm shadow-zinc-200/40"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={joinClasses(
-                              "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]",
-                              COLOR_BADGE_CLASSNAMES[asset.target_type],
-                            )}
+                    )}
+                  </section>
+                </>
+              ) : (
+                <>
+                  <LogoGrid
+                    assets={payload.assets}
+                    onManage={(target) => setLogoTarget(target)}
+                    title="Saved Logos"
+                    subtitle="Full library"
+                  />
+                  <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Source URLs</p>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                      <h2 className="text-2xl font-semibold text-zinc-900">All discovered and saved source links</h2>
+                      <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600">
+                        {allSourceUrls.length} URLs
+                      </span>
+                    </div>
+                    <div className="mt-6 grid gap-3">
+                      {allSourceUrls.length > 0 ? (
+                        allSourceUrls.map((url) => (
+                          <a
+                            key={url}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="truncate rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700 underline decoration-zinc-300"
+                            title={url}
                           >
-                            {formatBrandTargetType(asset.target_type)}
-                          </span>
-                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
-                            {asset.role}
-                          </span>
-                          {asset.variant ? (
-                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">
-                              {asset.variant}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-4 flex min-h-28 items-center justify-center rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                          {pickAssetDisplayUrl(asset) ? (
-                            <img
-                              src={pickAssetDisplayUrl(asset) ?? ""}
-                              alt={`${asset.target_label} ${asset.role}`}
-                              className="max-h-20 w-full object-contain"
-                            />
-                          ) : (
-                            <div className="text-xs uppercase tracking-[0.2em] text-zinc-400">Missing</div>
-                          )}
-                        </div>
-                        <div className="mt-4 space-y-1">
-                          <p className="text-sm font-semibold text-zinc-900">{asset.target_label}</p>
-                          <p className="text-xs text-zinc-500">
-                            {asset.source_provider ?? "Stored"} · {asset.option_kind ?? "stored"}
-                          </p>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="grid gap-6 xl:grid-cols-2">
-                <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Evidence</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Source Links and Family Context</h2>
-                  <div className="mt-6 space-y-4">
-                    {payload.targets.map((target) => (
-                      <EvidenceSection key={target.id} target={target} />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Quick Access</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Jump Back Into Existing Workflows</h2>
-                  <div className="mt-6 grid gap-3">
-                    {payload.targets.map((target) => (
-                      <div
-                        key={`jump:${target.id}`}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3"
-                      >
-                        <div>
-                          <p className="text-sm font-semibold text-zinc-900">{target.target_label}</p>
-                          <p className="text-xs text-zinc-500">{formatBrandTargetType(target.target_type)}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setLogoTarget(target)}
-                            className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                          >
-                            Manage Logos
-                          </button>
-                          <Link
-                            href={
-                              (target.detail_href ??
-                                buildSectionSearchHref(target.section_href, target.target_label)) as Route
-                            }
-                            className="rounded-full bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-zinc-800"
-                          >
-                            Open Workflow
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
+                            {url}
+                          </a>
+                        ))
+                      ) : (
+                        <p className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
+                          No source URLs saved yet.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                </>
+              )}
             </>
           ) : null}
         </main>

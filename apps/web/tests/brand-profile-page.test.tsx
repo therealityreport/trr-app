@@ -1,11 +1,11 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import BrandProfilePage from "@/app/brands/[brandSlug]/page";
 
 const mocks = vi.hoisted(() => ({
   fetchAdminWithAuth: vi.fn(),
-  params: { brandSlug: "instagram" },
+  params: { brandSlug: "bravo" },
   guardState: {
     user: { uid: "admin-1", email: "admin@example.com" },
     checking: false,
@@ -63,55 +63,28 @@ describe("brand profile page", () => {
     mocks.fetchAdminWithAuth.mockReset();
     mocks.fetchAdminWithAuth.mockResolvedValue(
       jsonResponse({
-        slug: "instagram",
-        display_name: "Instagram",
-        primary_target_id: "social:instagram.com",
-        categories: ["network", "social"],
+        slug: "bravo",
+        display_name: "Bravo",
+        primary_target_id: "network:bravo",
+        categories: ["network"],
         counts: {
-          targets: 2,
+          targets: 1,
           shows: 2,
-          assets: 2,
+          assets: 8,
         },
         targets: [
-          {
-            id: "social:instagram.com",
-            target_type: "social",
-            target_key: "instagram.com",
-            target_label: "Instagram",
-            friendly_slug: "instagram",
-            section_href: "/brands?category=social",
-            detail_href: null,
-            entity_slug: null,
-            entity_id: null,
-            available_show_count: 2,
-            added_show_count: null,
-            homepage_url: "https://instagram.com",
-            wikipedia_url: null,
-            wikidata_id: null,
-            instagram_id: "instagram",
-            twitter_id: null,
-            tiktok_id: null,
-            facebook_id: null,
-            discovered_from: "https://instagram.com",
-            discovered_from_urls: ["https://instagram.com/queensofbravo"],
-            source_link_kinds: ["social_profile"],
-            family: null,
-            family_suggestions: [],
-            shared_links: [],
-            wikipedia_show_urls: [],
-          },
           {
             id: "network:bravo",
             target_type: "network",
             target_key: "bravo",
             target_label: "Bravo",
-            friendly_slug: "bravotv",
+            friendly_slug: "bravo",
             section_href: "/brands?category=network",
-            detail_href: "/brands/networks-and-streaming/network/bravo",
+            detail_href: "/brands/bravo",
             entity_slug: "bravo",
             entity_id: "74",
             available_show_count: 62,
-            added_show_count: 9,
+            added_show_count: 2,
             homepage_url: "https://bravotv.com",
             wikipedia_url: "https://en.wikipedia.org/wiki/Bravo_(American_TV_network)",
             wikidata_id: "Q902771",
@@ -122,7 +95,13 @@ describe("brand profile page", () => {
             discovered_from: "https://bravotv.com",
             discovered_from_urls: ["https://bravotv.com"],
             source_link_kinds: ["homepage"],
-            family: null,
+            family: {
+              id: "family-1",
+              family_key: "nbcu-cable",
+              display_name: "NBCUniversal Cable",
+              owner_wikidata_id: "Q123",
+              owner_label: "NBCUniversal",
+            },
             family_suggestions: [],
             shared_links: [],
             wikipedia_show_urls: [],
@@ -134,84 +113,98 @@ describe("brand profile page", () => {
             name: "The Valley",
             canonical_slug: "the-valley",
             poster_url: null,
-            categories: ["social"],
-            source_target_ids: ["social:instagram.com"],
-            source_labels: ["Instagram"],
+            categories: ["network"],
+            source_target_ids: ["network:bravo"],
+            source_labels: ["Bravo"],
           },
           {
             id: "show-2",
-            name: "The Real Housewives of Beverly Hills",
-            canonical_slug: "the-real-housewives-of-beverly-hills",
+            name: "Watch What Happens Live",
+            canonical_slug: "watch-what-happens-live",
             poster_url: null,
             categories: ["network"],
             source_target_ids: ["network:bravo"],
             source_labels: ["Bravo"],
           },
         ],
-        assets: [
+        assets: Array.from({ length: 8 }, (_, index) => ({
+          id: `asset-${index + 1}`,
+          target_id: "network:bravo",
+          target_type: "network",
+          target_key: "bravo",
+          target_label: "Bravo",
+          role: "wordmark",
+          variant: "color",
+          display_url: `https://cdn.example.com/bravo-${index + 1}.svg`,
+          source_url: `https://source.example.com/bravo-${index + 1}.svg`,
+          source_provider: "wikimedia_commons",
+          discovered_from: `https://commons.example.com/bravo-${index + 1}`,
+          is_primary: index === 0,
+          is_selected_for_role: index === 0,
+          option_kind: "stored",
+          updated_at: "2026-03-16T12:00:00Z",
+        })),
+        social_profiles: [
           {
-            id: "asset-1",
-            target_id: "social:instagram.com",
-            target_type: "social",
-            target_key: "instagram.com",
-            target_label: "Instagram",
-            role: "wordmark",
-            variant: "color",
-            display_url: "https://cdn.example.com/instagram-wordmark.svg",
-            source_url: "https://instagram.com",
-            source_provider: "official",
-            discovered_from: "https://instagram.com",
-            is_primary: true,
-            is_selected_for_role: true,
-            option_kind: "stored",
-            updated_at: "2026-03-16T12:00:00Z",
-          },
-          {
-            id: "asset-2",
-            target_id: "network:bravo",
-            target_type: "network",
-            target_key: "bravo",
-            target_label: "Bravo",
-            role: "wordmark",
-            variant: "color",
-            display_url: "https://cdn.example.com/bravo-wordmark.svg",
-            source_url: "https://bravotv.com",
-            source_provider: "stored_existing",
-            discovered_from: "https://bravotv.com",
-            is_primary: true,
-            is_selected_for_role: true,
-            option_kind: "stored",
-            updated_at: "2026-03-16T12:00:00Z",
+            platform: "instagram",
+            account_handle: "BravoTV",
+            profile_url: "https://instagram.com/BravoTV",
+            avatar_url: "https://cdn.example.com/bravotv.jpg",
+            total_posts: 1200,
+            total_engagement: 55000,
+            total_views: 600000,
+            assigned_shows: [
+              {
+                id: "show-1",
+                name: "The Valley",
+                canonical_slug: "the-valley",
+              },
+              {
+                id: "show-2",
+                name: "Watch What Happens Live",
+                canonical_slug: "watch-what-happens-live",
+              },
+            ],
           },
         ],
       }),
     );
   });
 
-  it("renders hero counts, grouped shows, target links, and opens the logo modal", async () => {
+  it("renders the canonical overview, social profiles, and switches to the full logos tab", async () => {
     render(<BrandProfilePage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Instagram" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Bravo" })).toBeInTheDocument();
     });
 
-    expect(screen.getByText("2 linked shows")).toBeInTheDocument();
-    expect(screen.getAllByText("Network").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Social Media").length).toBeGreaterThan(0);
-    expect(screen.getByText("The Valley")).toBeInTheDocument();
-    expect(screen.getByText("The Real Housewives of Beverly Hills")).toBeInTheDocument();
+    expect(screen.getByText("Shared accounts auto-assigned to this brand")).toBeInTheDocument();
+    expect(screen.getByText("@BravoTV")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Profile" })).toHaveAttribute(
+      "href",
+      "/social/instagram/BravoTV",
+    );
 
-    const sourceLink = screen.getAllByRole("link", { name: "Open Source" })[1];
-    expect(sourceLink).toHaveAttribute("href", "/brands/networks-and-streaming/network/bravo");
+    const savedLogosSection = screen.getByRole("heading", { name: "Overview" }).closest("section");
+    expect(savedLogosSection).toBeTruthy();
+    expect(within(savedLogosSection ?? document.body).getAllByText("Manage Logos")).toHaveLength(6);
 
-    const bravoWorkflowLink = screen.getAllByRole("link", { name: "Open Workflow" })[1];
-    expect(bravoWorkflowLink).toHaveAttribute("href", "/brands/networks-and-streaming/network/bravo");
+    const savedInfoSection = screen.getByRole("heading", { name: "Cleaned brand metadata" }).closest("section");
+    expect(savedInfoSection).toBeTruthy();
+    expect(within(savedInfoSection ?? document.body).getAllByRole("link")).toHaveLength(8);
+    expect(screen.getAllByText("Added Shows").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Brand Family").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Manage Logos" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "View More Logos" }));
+    expect(await screen.findByRole("heading", { name: "Full library" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "All discovered and saved source links" })).toBeInTheDocument();
+    expect(screen.getAllByText("Manage Logos")).toHaveLength(9);
 
-    expect(await screen.findByTestId("brand-logo-modal")).toHaveTextContent("Instagram");
+    fireEvent.click(screen.getAllByText("Manage Logos")[0]);
+    expect(await screen.findByTestId("brand-logo-modal")).toHaveTextContent("Bravo");
+
     expect(mocks.fetchAdminWithAuth).toHaveBeenCalledWith(
-      "/api/admin/brands/profile?slug=instagram",
+      "/api/admin/brands/profile?slug=bravo",
       expect.objectContaining({ method: "GET", cache: "no-store" }),
       expect.objectContaining({
         allowDevAdminBypass: true,

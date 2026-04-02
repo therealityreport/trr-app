@@ -62,7 +62,7 @@ describe("AdminGlobalHeader", () => {
 
     expect(screen.getByRole("button", { name: "Toggle shows submenu" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("No recent shows yet.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/shows");
+    expect(screen.getByRole("link", { name: "View All Shows" })).toHaveAttribute("href", "/admin/shows");
   });
 
   it("renders recent shows from storage and limits to five", async () => {

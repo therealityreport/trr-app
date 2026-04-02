@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-const { requireAdminMock, fetchAdminBackendJsonMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, fetchAdminBackendJsonMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn().mockReturnValue("test-admin-token"),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -23,6 +24,10 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { DELETE, GET, PUT } from "@/app/api/admin/social-posts/[postId]/route";
@@ -139,8 +144,7 @@ describe("/api/admin/social-posts/[postId] route", () => {
       }),
     );
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer service-role-secret");
-    expect(headers["X-TRR-Internal-Admin-Secret"]).toBe("internal-secret");
+    expect(headers.Authorization).toBe("Bearer test-admin-token");
     expect(headers["X-TRR-Admin-User-Uid"]).toBe("admin-uid");
   });
 
@@ -184,8 +188,7 @@ describe("/api/admin/social-posts/[postId] route", () => {
 
     expect(response.status).toBe(200);
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer service-role-secret");
-    expect(headers["X-TRR-Internal-Admin-Secret"]).toBe("internal-secret");
+    expect(headers.Authorization).toBe("Bearer test-admin-token");
     expect(headers["X-TRR-Admin-User-Uid"]).toBe("admin-uid");
   });
 });

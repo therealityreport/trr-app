@@ -101,6 +101,23 @@ export interface BrandProfileAsset {
   updated_at: string | null;
 }
 
+export interface BrandProfileSocialProfileShow {
+  id: string;
+  name: string;
+  canonical_slug: string | null;
+}
+
+export interface BrandProfileSocialProfile {
+  platform: string;
+  account_handle: string;
+  profile_url: string | null;
+  avatar_url: string | null;
+  total_posts: number;
+  total_engagement: number;
+  total_views: number;
+  assigned_shows: BrandProfileSocialProfileShow[];
+}
+
 export interface BrandProfileSuggestion {
   slug: string;
   label: string;
@@ -129,6 +146,7 @@ export interface BrandProfilePayload {
   targets: BrandProfileTarget[];
   shows: BrandProfileShow[];
   assets: BrandProfileAsset[];
+  social_profiles: BrandProfileSocialProfile[];
 }
 
 const FRIENDLY_HOST_SUFFIXES = [".com", ".org", ".tv", ".net", ".co", ".io", ".app"] as const;
