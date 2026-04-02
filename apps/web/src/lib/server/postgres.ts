@@ -63,7 +63,7 @@ type EnvLike = Record<string, string | undefined>;
 type ConnectionClass = "local" | "session" | "transaction" | "direct" | "other" | "unknown";
 type CandidateDetail = {
   value: string;
-  source: "TRR_DB_URL" | "TRR_DB_FALLBACK_URL" | `${string}:derived_direct`;
+  source: "TRR_DB_URL" | "TRR_DB_FALLBACK_URL";
   hostClass: "local" | "pooler" | "direct" | "other" | "unknown";
   connectionClass: ConnectionClass;
 };
@@ -75,7 +75,6 @@ type PostgresPoolSizing = {
 
 const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app-server";
 const warnedNonDefaultConnectionClasses = new Set<string>();
-let warnedDirectFallbackOverride = false;
 
 const classifyHostClass = (connectionString: string): CandidateDetail["hostClass"] => {
   const host = parseConnectionHostname(connectionString);
@@ -106,40 +105,34 @@ export const isSupavisorSessionPoolerConnectionString = (connectionString: strin
   return Boolean(host?.endsWith("pooler.supabase.com") && port === "5432");
 };
 
-function deriveSupabaseDirectConnectionString(connectionString: string): string | null {
-  try {
-    const parsed = new URL(connectionString);
-    const host = parsed.hostname.toLowerCase();
-    if (!host.endsWith("pooler.supabase.com")) {
-      return null;
-    }
-
-    const username = decodeURIComponent(parsed.username || "");
-    const projectRefMatch = username.match(/^postgres\.([a-zA-Z0-9]+)$/);
-    if (!projectRefMatch?.[1]) {
-      return null;
-    }
-
-    parsed.hostname = `db.${projectRefMatch[1]}.supabase.co`;
-    parsed.port = "5432";
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
-const isSupabaseDirectFallbackEnabled = (env: EnvLike = process.env): boolean => {
-  const value =
-    env.POSTGRES_ENABLE_SUPABASE_DIRECT_FALLBACK ?? env.POSTGRES_ENABLE_DIRECT_FALLBACK ?? "";
-  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+export const isDeployedRuntime = (env: EnvLike = process.env): boolean => {
+  if (env.NODE_ENV === "development") return false;
+  const vercelEnv = env.VERCEL_ENV?.toLowerCase();
+  if (vercelEnv === "development" || vercelEnv === "preview") return false;
+  return true;
 };
+
+export function validateRuntimeLane(connectionClass: ConnectionClass, isDeployed: boolean): void {
+  if (connectionClass === "session" || connectionClass === "local") {
+    return;
+  }
+  if (isDeployed) {
+    throw new Error(
+      `[postgres] connection class "${connectionClass}" is not allowed in deployed runtime. ` +
+        `Only "session" (Supavisor pooler :5432) and "local" lanes are permitted.`,
+    );
+  }
+  console.warn(
+    `[postgres] connection class "${connectionClass}" is not recommended for runtime use; ` +
+      `default lane is Supavisor session mode on pooler.supabase.com:5432.`,
+  );
+}
 
 function resolvePostgresConnectionCandidateDetails(env: EnvLike = process.env): CandidateDetail[] {
   const ordered: Array<Pick<CandidateDetail, "source"> & { value: string | undefined }> = [
     { source: "TRR_DB_URL", value: env.TRR_DB_URL },
     { source: "TRR_DB_FALLBACK_URL", value: env.TRR_DB_FALLBACK_URL },
   ];
-  const includeDirectFallback = isSupabaseDirectFallbackEnabled(env);
   const candidates: CandidateDetail[] = [];
   const seen = new Set<string>();
   for (const entry of ordered) {
@@ -152,16 +145,6 @@ function resolvePostgresConnectionCandidateDetails(env: EnvLike = process.env): 
       connectionClass: classifyConnectionClass(candidate),
     });
     seen.add(candidate);
-    if (!includeDirectFallback) continue;
-    const directFallback = deriveSupabaseDirectConnectionString(candidate);
-    if (!directFallback || seen.has(directFallback)) continue;
-    candidates.push({
-      value: directFallback,
-      source: `${entry.source}:derived_direct`,
-      hostClass: classifyHostClass(directFallback),
-      connectionClass: classifyConnectionClass(directFallback),
-    });
-    seen.add(directFallback);
   }
   return candidates;
 }
@@ -303,9 +286,13 @@ const getPool = (): Pool => {
   }
 
   const candidateDetails = resolvePostgresConnectionCandidateDetails(process.env);
-  const candidates = candidateDetails.map((candidate) => candidate.value);
   const selectedCandidate = candidateDetails[activeCandidateIndex];
   const connectionString = selectedCandidate?.value ?? getConnectionString();
+
+  if (selectedCandidate) {
+    validateRuntimeLane(selectedCandidate.connectionClass, isDeployedRuntime(process.env));
+  }
+
   const isDevelopment = process.env.NODE_ENV === "development";
   const isSessionPooler = isSupavisorSessionPoolerConnectionString(connectionString);
   const { poolMax: max } = resolvePostgresPoolSizing(connectionString, process.env);
@@ -336,12 +323,6 @@ const getPool = (): Pool => {
     pool,
   };
   if (selectedCandidate) {
-    if (selectedCandidate.source.endsWith(":derived_direct") && !warnedDirectFallbackOverride) {
-      warnedDirectFallbackOverride = true;
-      console.warn(
-        "[postgres] direct-host derivation override is active; this is intended only for debug or migration use.",
-      );
-    }
     if (
       selectedCandidate.connectionClass !== "session" &&
       selectedCandidate.connectionClass !== "local" &&
