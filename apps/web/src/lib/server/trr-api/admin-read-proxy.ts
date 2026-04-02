@@ -29,6 +29,7 @@ export type AdminBackendJsonResult = {
   status: number;
   data: Record<string, unknown>;
   durationMs: number;
+  backendTimeoutDetected?: boolean;
 };
 
 export type AdminReadCacheStatus = "hit" | "miss" | "refresh";
@@ -138,10 +139,16 @@ export async function fetchAdminBackendJson(
       signal: controller.signal,
     });
     const data = await parseJsonRecord(response);
-    const result = {
+    const backendTimeoutDetected =
+      response.status === 504 &&
+      typeof data.detail === "object" &&
+      data.detail !== null &&
+      (data.detail as Record<string, unknown>).code === "REQUEST_TIMEOUT";
+    const result: AdminBackendJsonResult = {
       status: response.status,
       data,
       durationMs: performance.now() - startedAt,
+      ...(backendTimeoutDetected ? { backendTimeoutDetected: true } : {}),
     };
     if (options?.routeName && adminReadDiagnosticsEnabled()) {
       console.info(
