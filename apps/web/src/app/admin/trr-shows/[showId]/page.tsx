@@ -36,6 +36,12 @@ import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import ShowSurveysTab from "@/components/admin/show-tabs/ShowSurveysTab";
 import ShowOverviewTab from "@/components/admin/show-tabs/ShowOverviewTab";
 import {
+  ShowCreditsCastMembers,
+  ShowCreditsCastViewControls,
+  ShowCreditsCrewSections,
+  type ShowCreditsCrewSectionData,
+} from "@/components/admin/show-tabs/ShowCreditsViews";
+import {
   CastMatrixSyncPanel,
   type CastMatrixSyncResult,
 } from "@/components/admin/CastMatrixSyncPanel";
@@ -199,13 +205,16 @@ import {
 import {
   buildOverviewAlternativeNamesText,
   buildOverviewRedditGroups,
-  buildOverviewWatchAvailability,
+  buildOverviewWatchProviderFallback,
+  buildOverviewWatchProviderRegionOptions,
+  buildOverviewWatchProviderRegions,
   buildSeasonCoverageRows,
   getOverviewNetworks,
-  getOverviewStreamingProviders,
   type OverviewRedditGroup,
   type OverviewSeasonCoverageLink,
-  type OverviewWatchAvailabilityRow,
+  type OverviewWatchProviderRegionRow,
+  resolveDefaultOverviewWatchProviderRegion,
+  resolveOverviewWatchProviderRegion,
 } from "@/lib/admin/show-page/overview-display";
 import {
   buildLinkDiscoveryProgressSummary,
@@ -232,6 +241,12 @@ interface TrrShow {
     region: "US" | "GB" | "CA" | "AU";
     stream: string[];
     buy: string[];
+  }> | null;
+  watch_provider_regions?: Array<{
+    region: string;
+    stream: string[];
+    free: string[];
+    buy_rent: string[];
   }> | null;
   show_total_seasons: number | null;
   show_total_episodes: number | null;
@@ -437,9 +452,16 @@ interface ShowCrewCreditRow {
   display_order: number | null;
 }
 
+interface ShowCrewGroupedRow {
+  person_id: string;
+  person_name: string | null;
+  role_lines: ShowCrewCreditRow[];
+}
+
 interface ShowCrewSection {
   title: string;
   rows: ShowCrewCreditRow[];
+  grouped_rows?: ShowCrewGroupedRow[];
 }
 
 interface ShowCreditsPayload {
@@ -504,6 +526,48 @@ const normalizeShowCreditsCastRoster = (value: unknown): TrrCastMember[] => {
       } as TrrCastMember;
     })
     .filter((row): row is TrrCastMember => row !== null);
+};
+
+const shouldHideShowCreditsRoleChip = (role: string): boolean => {
+  const normalized = role.trim().toLowerCase();
+  return (
+    normalized === "cast" ||
+    normalized === "self" ||
+    normalized.startsWith("self ") ||
+    normalized.startsWith("self-") ||
+    normalized.startsWith("self/")
+  );
+};
+
+const getMeaningfulShowCreditsRoles = (roles: string[] | null | undefined): string[] => {
+  if (!Array.isArray(roles)) return [];
+  return roles
+    .map((role) => role.trim())
+    .filter((role) => role.length > 0 && !shouldHideShowCreditsRoleChip(role));
+};
+
+const groupShowCrewRows = (rows: ShowCrewCreditRow[]): ShowCrewGroupedRow[] => {
+  const grouped = new Map<string, ShowCrewGroupedRow>();
+  const orderedKeys: string[] = [];
+
+  for (const row of rows) {
+    const personId = typeof row.person_id === "string" && row.person_id.trim() ? row.person_id.trim() : row.credit_id;
+    const existing = grouped.get(personId);
+    if (existing) {
+      existing.role_lines.push(row);
+      continue;
+    }
+    grouped.set(personId, {
+      person_id: personId,
+      person_name: row.person_name,
+      role_lines: [row],
+    });
+    orderedKeys.push(personId);
+  }
+
+  return orderedKeys
+    .map((key) => grouped.get(key))
+    .filter((row): row is ShowCrewGroupedRow => Boolean(row));
 };
 
 interface BravoPersonTag {
@@ -1063,9 +1127,12 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
   resizing: "Resizing",
 };
 
-const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
-const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
-const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+// Aligned with Modal's 60-min worker timeout.
+// Idle: a step emitting zero events for 15 min is stuck.
+// Max: full 60 min plus 5-min grace for SSE drain.
+const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 15 * 60 * 1000;   // 15 min idle
+const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 65 * 60 * 1000;   // 65 min total
+const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 10 * 60 * 1000;      // 10 min fallback
 const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
@@ -2700,14 +2767,43 @@ export default function TrrShowDetailPage() {
   const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [detailsEditing, setDetailsEditing] = useState(false);
+  const [selectedAvailabilityRegionCode, setSelectedAvailabilityRegionCode] = useState<string>("");
   const detailsBaseline = useMemo(() => buildShowDetailsFormValue(show), [show]);
   const overviewAlternativeNamesText = useMemo(() => buildOverviewAlternativeNamesText(show), [show]);
   const overviewNetworks = useMemo(() => getOverviewNetworks(show), [show]);
-  const overviewStreamingProviders = useMemo(() => getOverviewStreamingProviders(show), [show]);
-  const overviewWatchAvailability = useMemo<OverviewWatchAvailabilityRow[]>(
-    () => buildOverviewWatchAvailability(show),
+  const watchProviderRegions = useMemo<OverviewWatchProviderRegionRow[]>(
+    () => buildOverviewWatchProviderRegions(show),
     [show]
   );
+  const watchProviderRegionOptions = useMemo(
+    () => buildOverviewWatchProviderRegionOptions(show),
+    [show]
+  );
+  const fallbackWatchProviders = useMemo(
+    () => buildOverviewWatchProviderFallback(show),
+    [show]
+  );
+  const selectedAvailabilityRegion = useMemo(
+    () =>
+      resolveOverviewWatchProviderRegion({
+        regions: watchProviderRegions,
+        selectedRegionCode: selectedAvailabilityRegionCode,
+      }),
+    [selectedAvailabilityRegionCode, watchProviderRegions]
+  );
+  useEffect(() => {
+    const defaultRegion = resolveDefaultOverviewWatchProviderRegion(watchProviderRegions);
+    setSelectedAvailabilityRegionCode((current) => {
+      const normalizedCurrent = current.trim().toUpperCase();
+      if (
+        normalizedCurrent &&
+        watchProviderRegions.some((region) => region.regionCode === normalizedCurrent)
+      ) {
+        return normalizedCurrent;
+      }
+      return defaultRegion ?? "";
+    });
+  }, [watchProviderRegions]);
   const hasUnsavedDetailsChanges = useMemo(() => {
     if (!detailsEditing) return false;
     return (
@@ -2804,6 +2900,8 @@ export default function TrrShowDetailPage() {
   const [castMaxEpisodeCount, setCastMaxEpisodeCount] = useState<number | null>(null);
   const [castSearchQuery, setCastSearchQuery] = useState("");
   const [castSearchQueryDebounced, setCastSearchQueryDebounced] = useState("");
+  const [castViewMode, setCastViewMode] = useState<"gallery" | "list">("gallery");
+  const [castGalleryColumns, setCastGalleryColumns] = useState<4 | 5 | 6>(4);
   const [castRenderLimit, setCastRenderLimit] = useState(CAST_INCREMENTAL_INITIAL_LIMIT);
   const [crewRenderLimit, setCrewRenderLimit] = useState(CAST_INCREMENTAL_INITIAL_LIMIT);
   const castIncrementalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3069,6 +3167,8 @@ export default function TrrShowDetailPage() {
     setCastExactEpisodeCount(showCastRouteState.exactEpisodeCount);
     setCastMinEpisodeCount(showCastRouteState.minEpisodeCount);
     setCastMaxEpisodeCount(showCastRouteState.maxEpisodeCount);
+    setCastViewMode(showCastRouteState.viewMode);
+    setCastGalleryColumns(showCastRouteState.galleryColumns);
     setCastSeasonFilters((prev) =>
       areNumberArraysEqual(prev, showCastRouteState.seasonFilters)
         ? prev
@@ -3082,12 +3182,14 @@ export default function TrrShowDetailPage() {
     showCastRouteState.hasImageFilter,
     showCastRouteState.filters,
     showCastRouteState.exactEpisodeCount,
+    showCastRouteState.galleryColumns,
     showCastRouteState.searchQuery,
     showCastRouteState.maxEpisodeCount,
     showCastRouteState.minEpisodeCount,
     showCastRouteState.seasonFilters,
     showCastRouteState.sortBy,
     showCastRouteState.sortOrder,
+    showCastRouteState.viewMode,
   ]);
 
   useEffect(() => {
@@ -3223,6 +3325,8 @@ export default function TrrShowDetailPage() {
       exactEpisodeCount: castExactEpisodeCount,
       minEpisodeCount: castMinEpisodeCount,
       maxEpisodeCount: castMaxEpisodeCount,
+      viewMode: castViewMode,
+      galleryColumns: castGalleryColumns,
     });
     const nextUrl = buildShowAdminUrl({
       showSlug: showSlugForRouting,
@@ -3236,6 +3340,7 @@ export default function TrrShowDetailPage() {
     activeTab,
     castHasImageFilter,
     castExactEpisodeCount,
+    castGalleryColumns,
     castMaxEpisodeCount,
     castMinEpisodeCount,
     castRoleAndCreditFilters,
@@ -3243,6 +3348,7 @@ export default function TrrShowDetailPage() {
     castSeasonFilters,
     castSortBy,
     castSortOrder,
+    castViewMode,
     pathname,
     router,
     searchParams,
@@ -8451,9 +8557,6 @@ export default function TrrShowDetailPage() {
         }
       }
       const hasScopedRoleOrSeasonMatch = castRoleMemberByPersonId.has(member.person_id);
-      if (castRoleMembersLoadedOnce && castRoleMembers.length > 0 && !hasScopedRoleOrSeasonMatch) {
-        return false;
-      }
       if (
         !shouldIncludeCastMemberForSeasonFilter({
           castSeasonFilters,
@@ -8533,19 +8636,39 @@ export default function TrrShowDetailPage() {
     () => castDisplayMembers,
     [castDisplayMembers]
   );
-  const crewDisplaySections = useMemo(() => {
+  const showCreditsCrewSections = useMemo<ShowCreditsCrewSectionData[]>(() => {
+    return showCrewSections.map((section) => {
+      const groupedRows =
+        Array.isArray(section.grouped_rows) && section.grouped_rows.length > 0
+          ? section.grouped_rows
+          : groupShowCrewRows(section.rows);
+
+      return {
+        title: section.title,
+        groupedRows: groupedRows.map((row) => ({
+          personId: row.person_id,
+          personName: row.person_name,
+          roleLines: row.role_lines.map((roleLine) => ({
+            creditId: roleLine.credit_id,
+            role: roleLine.role,
+            episodesLabel: roleLine.episodes_label,
+            yearsLabel: roleLine.years_label,
+          })),
+        })),
+      };
+    });
+  }, [showCrewSections]);
+  const crewDisplaySections = useMemo<ShowCreditsCrewSectionData[]>(() => {
     const query = castSearchQueryDeferred.trim();
-    if (!query) return showCrewSections;
-    return showCrewSections
+    if (!query) return showCreditsCrewSections;
+    return showCreditsCrewSections
       .map((section) => ({
         ...section,
-        rows: section.rows.filter((row) => {
+        groupedRows: section.groupedRows.filter((row) => {
           const haystack = [
-            row.person_name,
-            row.role,
-            row.episodes_label,
-            row.years_label,
+            row.personName,
             section.title,
+            ...row.roleLines.flatMap((roleLine) => [roleLine.role, roleLine.episodesLabel, roleLine.yearsLabel]),
           ]
             .filter(Boolean)
             .join(" ")
@@ -8553,32 +8676,39 @@ export default function TrrShowDetailPage() {
           return haystack.includes(query);
         }),
       }))
-      .filter((section) => section.rows.length > 0);
-  }, [castSearchQueryDeferred, showCrewSections]);
+      .filter((section) => section.groupedRows.length > 0);
+  }, [castSearchQueryDeferred, showCreditsCrewSections]);
+  const visibleCrewSections = useMemo<ShowCreditsCrewSectionData[]>(
+    () =>
+      crewDisplaySections
+        .map((section) => ({
+          ...section,
+          groupedRows: section.groupedRows.slice(0, crewRenderLimit),
+        }))
+        .filter((section) => section.groupedRows.length > 0),
+    [crewDisplaySections, crewRenderLimit]
+  );
   const castDisplayTotals = useMemo(() => {
-    const castTotal =
-      castRoleMembersLoadedOnce && castRoleMembers.length > 0
-        ? castDisplayBaseMembers.filter((member) => castRoleMemberByPersonId.has(member.person_id)).length
-        : castDisplayBaseMembers.length;
-    const crewTotal = showCrewSections.reduce((sum, section) => sum + section.rows.length, 0);
+    const castTotal = castDisplayBaseMembers.length;
+    const crewTotal = showCreditsCrewSections.reduce((sum, section) => sum + section.groupedRows.length, 0);
     return {
       cast: castTotal,
       crew: crewTotal,
       total: castTotal + crewTotal,
     };
-  }, [castDisplayBaseMembers, castRoleMemberByPersonId, castRoleMembers.length, castRoleMembersLoadedOnce, showCrewSections]);
-  const visibleCastGalleryMembers = useMemo(
+  }, [castDisplayBaseMembers, showCreditsCrewSections]);
+  const visibleCastMembers = useMemo(
     () => castGalleryMembers.slice(0, castRenderLimit),
     [castGalleryMembers, castRenderLimit]
   );
-  const renderedCastCount = visibleCastGalleryMembers.length;
+  const renderedCastCount = visibleCastMembers.length;
   const matchedCastCount = castGalleryMembers.length;
   const totalCastCount = castDisplayTotals.cast;
   const renderedCrewCount = crewDisplaySections.reduce(
-    (sum, section) => sum + Math.min(section.rows.length, crewRenderLimit),
+    (sum, section) => sum + Math.min(section.groupedRows.length, crewRenderLimit),
     0
   );
-  const matchedCrewCount = crewDisplaySections.reduce((sum, section) => sum + section.rows.length, 0);
+  const matchedCrewCount = crewDisplaySections.reduce((sum, section) => sum + section.groupedRows.length, 0);
   const totalCrewCount = castDisplayTotals.crew;
   const renderedVisibleCount = renderedCastCount + renderedCrewCount;
   const matchedVisibleCount = matchedCastCount + matchedCrewCount;
@@ -8586,7 +8716,7 @@ export default function TrrShowDetailPage() {
   const castRenderProgressLabel = useMemo(() => {
     const rendered =
       Math.min(castRenderLimit, castGalleryMembers.length) +
-      crewDisplaySections.reduce((sum, section) => sum + Math.min(section.rows.length, crewRenderLimit), 0);
+      crewDisplaySections.reduce((sum, section) => sum + Math.min(section.groupedRows.length, crewRenderLimit), 0);
     const total = castGalleryMembers.length + matchedCrewCount;
     if (total === 0 || rendered >= total) return null;
     return `Rendering ${rendered.toLocaleString()}/${total.toLocaleString()}`;
@@ -8609,7 +8739,7 @@ export default function TrrShowDetailPage() {
     if (activeTab !== "cast") return;
     if (
       castRenderLimit >= castGalleryMembers.length &&
-      crewDisplaySections.every((section) => crewRenderLimit >= section.rows.length)
+      crewDisplaySections.every((section) => crewRenderLimit >= section.groupedRows.length)
     ) {
       return;
     }
@@ -8622,7 +8752,7 @@ export default function TrrShowDetailPage() {
             : Math.min(prev + CAST_INCREMENTAL_BATCH_SIZE, castGalleryMembers.length)
         );
         setCrewRenderLimit((prev) =>
-          crewDisplaySections.every((section) => prev >= section.rows.length)
+          crewDisplaySections.every((section) => prev >= section.groupedRows.length)
             ? prev
             : prev + CAST_INCREMENTAL_BATCH_SIZE
         );
@@ -10877,6 +11007,7 @@ export default function TrrShowDetailPage() {
           fetchSeasons(),
           fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
           loadBravoData({ force: true }),
+          loadUnifiedNews({ force: true }),
           ensureDefaultRedditCommunity(),
         ]);
 
@@ -12357,6 +12488,124 @@ export default function TrrShowDetailPage() {
     if (status === "skipped") return "Skipped";
     return "Pending";
   };
+  const renderShowCreditsCastMember = (member: TrrCastMember & { merged_photo_url?: string | null }) => {
+    const thumbnailUrl = member.merged_photo_url;
+    const episodeLabel =
+      typeof member.total_episodes === "number" ? `${member.total_episodes} episodes` : null;
+    const meaningfulRoles = getMeaningfulShowCreditsRoles(member.roles);
+    const personName = member.full_name || member.cast_member_name || "Unknown";
+    const personHref = buildPersonAdminUrl({
+      showSlug: showSlugForRouting,
+      personSlug: buildPersonRouteSlug({
+        personName: member.full_name || member.cast_member_name || null,
+        personId: member.person_id,
+      }),
+      tab: "overview",
+    }) as Route;
+
+    if (castViewMode === "list") {
+      return (
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50">
+          <div className="flex items-start gap-4">
+            <Link
+              href={personHref}
+              className="block w-24 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+            >
+              <div className="relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                {thumbnailUrl ? (
+                  <CastPhoto
+                    src={thumbnailUrl}
+                    alt={personName}
+                    thumbnail_focus_x={member.thumbnail_focus_x}
+                    thumbnail_focus_y={member.thumbnail_focus_y}
+                    thumbnail_zoom={member.thumbnail_zoom}
+                    thumbnail_crop_mode={member.thumbnail_crop_mode}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-zinc-400">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                      <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </Link>
+            <div className="min-w-0 flex-1">
+              <Link
+                href={personHref}
+                className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+              >
+                <p className="font-semibold text-zinc-900">{personName}</p>
+              </Link>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-600">
+                {episodeLabel && <span>{episodeLabel}</span>}
+                {member.latest_season && <span>Latest season: {member.latest_season}</span>}
+              </div>
+              {meaningfulRoles.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {meaningfulRoles.map((role) => (
+                    <span
+                      key={`${member.person_id}-${role}`}
+                      className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                    >
+                      {role}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50">
+        <Link
+          href={personHref}
+          className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+        >
+          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+            {thumbnailUrl ? (
+              <CastPhoto
+                src={thumbnailUrl}
+                alt={personName}
+                thumbnail_focus_x={member.thumbnail_focus_x}
+                thumbnail_focus_y={member.thumbnail_focus_y}
+                thumbnail_zoom={member.thumbnail_zoom}
+                thumbnail_crop_mode={member.thumbnail_crop_mode}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-zinc-400">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </div>
+            )}
+          </div>
+          <p className="font-semibold text-zinc-900">{personName}</p>
+          {episodeLabel && <p className="text-sm text-zinc-600">{episodeLabel}</p>}
+          {member.latest_season && (
+            <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
+          )}
+          {meaningfulRoles.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {meaningfulRoles.map((role) => (
+                <span
+                  key={`${member.person_id}-${role}`}
+                  className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                >
+                  {role}
+                </span>
+              ))}
+            </div>
+          )}
+        </Link>
+      </div>
+    );
+  };
 
   const healthBadgeClassName = (status: HealthStatus): string => {
     if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -13272,12 +13521,7 @@ export default function TrrShowDetailPage() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Credits
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">
-                    {show.name}
-                  </h3>
+                  <h3 className="text-xl font-bold text-zinc-900">Credits</h3>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
@@ -13759,9 +14003,17 @@ export default function TrrShowDetailPage() {
               )}
               <div className="space-y-8">
                 <section>
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                    Cast
-                  </p>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                      Cast
+                    </p>
+                    <ShowCreditsCastViewControls
+                      viewMode={castViewMode}
+                      galleryColumns={castGalleryColumns}
+                      onViewModeChange={setCastViewMode}
+                      onGalleryColumnsChange={setCastGalleryColumns}
+                    />
+                  </div>
                   {castGalleryMembers.length === 0 ? (
                     !castRosterReady ? (
                       <p className="text-sm text-zinc-500">Loading cast roster...</p>
@@ -13771,110 +14023,12 @@ export default function TrrShowDetailPage() {
                       <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                     )
                   ) : (
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {visibleCastGalleryMembers.map((member) => {
-                        const thumbnailUrl = member.merged_photo_url;
-                        const episodeLabel =
-                          typeof member.total_episodes === "number"
-                            ? `${member.total_episodes} episodes`
-                            : null;
-
-                        return (
-                          <div
-                            key={member.id}
-                            className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                          >
-                            <Link
-                              href={buildPersonAdminUrl({
-                                showSlug: showSlugForRouting,
-                                personSlug: buildPersonRouteSlug({
-                                  personName: member.full_name || member.cast_member_name || null,
-                                  personId: member.person_id,
-                                }),
-                                tab: "overview",
-                              }) as Route}
-                              className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
-                            >
-                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                              {thumbnailUrl ? (
-                                <CastPhoto
-                                  src={thumbnailUrl}
-                                  alt={member.full_name || member.cast_member_name || "Cast member"}
-                                  thumbnail_focus_x={member.thumbnail_focus_x}
-                                  thumbnail_focus_y={member.thumbnail_focus_y}
-                                  thumbnail_zoom={member.thumbnail_zoom}
-                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
-                                />
-                              ) : (
-                                <div className="flex h-full items-center justify-center text-zinc-400">
-                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                  </svg>
-                                </div>
-                              )}
-                            </div>
-                            <p className="font-semibold text-zinc-900">
-                              {member.full_name || member.cast_member_name || "Unknown"}
-                            </p>
-                            {episodeLabel && <p className="text-sm text-zinc-600">{episodeLabel}</p>}
-                            {member.latest_season && (
-                              <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
-                            )}
-                            {member.roles.length > 0 && (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {member.roles.map((role) => (
-                                  <span
-                                    key={`${member.person_id}-${role}`}
-                                    className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                  >
-                                    {role}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleRefreshCastMember(
-                                  member.person_id,
-                                  member.full_name || member.cast_member_name || "Cast member"
-                                );
-                              }}
-                              disabled={castAnyJobRunning || Boolean(refreshingPersonIds[member.person_id])}
-                              title={castAnyJobRunning ? "Cast sync in progress" : undefined}
-                              className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
-                            >
-                              {refreshingPersonIds[member.person_id]
-                                ? "Refreshing..."
-                                : "Refresh Person"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                openCastRoleEditor(
-                                  member.person_id,
-                                  member.full_name || member.cast_member_name || "Cast member"
-                                );
-                              }}
-                              disabled={castAnyJobRunning}
-                              title={castAnyJobRunning ? "Cast sync in progress" : undefined}
-                              className="mt-2 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
-                            >
-                              Edit Roles
-                            </button>
-                            <RefreshProgressBar
-                              show={Boolean(refreshingPersonIds[member.person_id])}
-                              stage={refreshingPersonProgress[member.person_id]?.stage}
-                              message={refreshingPersonProgress[member.person_id]?.message}
-                              current={refreshingPersonProgress[member.person_id]?.current}
-                              total={refreshingPersonProgress[member.person_id]?.total}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <ShowCreditsCastMembers
+                      members={visibleCastMembers}
+                      viewMode={castViewMode}
+                      galleryColumns={castGalleryColumns}
+                      renderMember={renderShowCreditsCastMember}
+                    />
                   )}
                 </section>
 
@@ -13883,43 +14037,24 @@ export default function TrrShowDetailPage() {
                     <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
                       Crew
                     </p>
-                    <div className="space-y-4">
-                      {crewDisplaySections.map((section) => (
-                        <div key={section.title} className="rounded-xl border border-zinc-200 bg-zinc-50/80">
-                          <div className="border-b border-zinc-200 px-4 py-3">
-                            <p className="text-sm font-semibold text-zinc-900">{section.title}</p>
-                          </div>
-                          <div className="divide-y divide-zinc-200">
-                            {section.rows.slice(0, crewRenderLimit).map((row) => (
-                              <div
-                                key={row.credit_id}
-                                className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]"
-                              >
-                                <div className="min-w-0">
-                                  <Link
-                                    href={buildPersonAdminUrl({
-                                      showSlug: showSlugForRouting,
-                                      personSlug: buildPersonRouteSlug({
-                                        personName: row.person_name,
-                                        personId: row.person_id,
-                                      }),
-                                      tab: "overview",
-                                    }) as Route}
-                                    className="font-semibold text-zinc-900 hover:underline"
-                                  >
-                                    {row.person_name || "Unknown"}
-                                  </Link>
-                                </div>
-                                <div className="min-w-0 text-sm text-zinc-600">{row.role || "Unspecified"}</div>
-                                <div className="text-right text-xs text-zinc-500">
-                                  {[row.episodes_label, row.years_label].filter(Boolean).join(" • ") || "IMDb"}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <ShowCreditsCrewSections
+                      sections={visibleCrewSections}
+                      renderPersonName={(row) => (
+                        <Link
+                          href={buildPersonAdminUrl({
+                            showSlug: showSlugForRouting,
+                            personSlug: buildPersonRouteSlug({
+                              personName: row.personName,
+                              personId: row.personId,
+                            }),
+                            tab: "overview",
+                          }) as Route}
+                          className="hover:underline"
+                        >
+                          {row.personName || "Unknown"}
+                        </Link>
+                      )}
+                    />
                   </section>
                 )}
 
@@ -15199,24 +15334,45 @@ export default function TrrShowDetailPage() {
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                       Availability
                     </p>
-                    {overviewWatchAvailability.length > 0 ? (
-                      <div className="grid gap-3 md:grid-cols-2">
-                        {overviewWatchAvailability.map((region) => (
-                          <div
-                            key={`overview-watch-availability-${region.regionCode}`}
-                            className="rounded-lg border border-zinc-200 bg-white p-3"
-                          >
-                            <p className="text-sm font-semibold text-zinc-900">{region.regionLabel}</p>
+                    {watchProviderRegions.length > 0 ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                            Region
+                          </span>
+                          <div className="relative inline-flex">
+                            <select
+                              aria-label="Availability region"
+                              className="appearance-none rounded-full border border-zinc-200 bg-white px-3 py-1 pr-8 text-sm font-medium text-zinc-700 shadow-sm"
+                              value={selectedAvailabilityRegion?.regionCode ?? ""}
+                              onChange={(event) => setSelectedAvailabilityRegionCode(event.target.value)}
+                            >
+                              {watchProviderRegionOptions.map((option) => (
+                                <option key={`availability-region-${option.regionCode}`} value={option.regionCode}>
+                                  {option.regionCode} · {option.regionLabel}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-zinc-500">
+                              ▾
+                            </span>
+                          </div>
+                        </div>
+                        {selectedAvailabilityRegion ? (
+                          <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                            <p className="text-sm font-semibold text-zinc-900">
+                              {selectedAvailabilityRegion.regionLabel}
+                            </p>
                             <div className="mt-3 space-y-3">
                               <div>
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
                                   Stream
                                 </p>
                                 <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {region.stream.length > 0 ? (
-                                    region.stream.map((provider) => (
+                                  {selectedAvailabilityRegion.stream.length > 0 ? (
+                                    selectedAvailabilityRegion.stream.map((provider) => (
                                       <span
-                                        key={`overview-watch-stream-${region.regionCode}-${provider}`}
+                                        key={`overview-watch-stream-${selectedAvailabilityRegion.regionCode}-${provider}`}
                                         className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
                                       >
                                         {provider}
@@ -15229,13 +15385,32 @@ export default function TrrShowDetailPage() {
                               </div>
                               <div>
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                  Buy
+                                  Free
                                 </p>
                                 <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {region.buy.length > 0 ? (
-                                    region.buy.map((provider) => (
+                                  {selectedAvailabilityRegion.free.length > 0 ? (
+                                    selectedAvailabilityRegion.free.map((provider) => (
                                       <span
-                                        key={`overview-watch-buy-${region.regionCode}-${provider}`}
+                                        key={`overview-watch-free-${selectedAvailabilityRegion.regionCode}-${provider}`}
+                                        className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                      >
+                                        {provider}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-zinc-500">None</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                  Rent / Buy
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                  {selectedAvailabilityRegion.buyRent.length > 0 ? (
+                                    selectedAvailabilityRegion.buyRent.map((provider) => (
+                                      <span
+                                        key={`overview-watch-buy-rent-${selectedAvailabilityRegion.regionCode}-${provider}`}
                                         className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
                                       >
                                         {provider}
@@ -15248,15 +15423,15 @@ export default function TrrShowDetailPage() {
                               </div>
                             </div>
                           </div>
-                        ))}
+                        ) : null}
                       </div>
                     ) : (
                       <div className="space-y-3">
                         <div className="flex flex-wrap gap-2">
-                          {overviewStreamingProviders.length > 0 ? (
-                            overviewStreamingProviders.map((provider) => (
+                          {fallbackWatchProviders.length > 0 ? (
+                            fallbackWatchProviders.map((provider) => (
                               <span
-                                key={provider}
+                                key={`overview-watch-fallback-${provider}`}
                                 className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
                               >
                                 {provider}
@@ -15267,21 +15442,10 @@ export default function TrrShowDetailPage() {
                           )}
                         </div>
                         <p className="text-xs text-zinc-500">
-                          Regional stream and buy availability is limited to the United States, United Kingdom, Canada,
-                          and Australia.
+                          Typed TMDb availability is unavailable for this show.
                         </p>
                       </div>
                     )}
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {overviewStreamingProviders.map((provider) => (
-                        <span
-                          key={`overview-streaming-summary-${provider}`}
-                          className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700"
-                        >
-                          {provider}
-                        </span>
-                      ))}
-                    </div>
                   </div>
                 </div>
 

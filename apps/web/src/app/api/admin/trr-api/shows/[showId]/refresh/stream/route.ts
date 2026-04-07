@@ -9,7 +9,9 @@ import {
 } from "@/lib/server/sse-proxy";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
+// 65 minutes — exceeds Modal's 60-minute timeout so the proxy
+// is never the bottleneck for a remotely-executed refresh.
+export const maxDuration = 3900;
 
 const DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS = 20_000;
 const DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS = 2_000;
