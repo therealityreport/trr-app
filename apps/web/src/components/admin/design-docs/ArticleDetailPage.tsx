@@ -421,7 +421,7 @@ function getArticleBlockBaseLabel(block: ContentBlock) {
     case "reporting-credit":
       return "Reporting Credit";
     default:
-      return prettifyBlockType(block.type);
+      return prettifyBlockType((block as { type: string }).type);
   }
 }
 
