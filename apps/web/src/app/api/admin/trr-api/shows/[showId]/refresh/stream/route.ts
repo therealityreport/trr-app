@@ -9,9 +9,10 @@ import {
 } from "@/lib/server/sse-proxy";
 
 export const dynamic = "force-dynamic";
-// 65 minutes — exceeds Modal's 60-minute timeout so the proxy
-// is never the bottleneck for a remotely-executed refresh.
-export const maxDuration = 3900;
+// Vercel pro plan caps at 800s — the client-side health center
+// polls operation status independently, so the proxy doesn't need
+// to outlive the full Modal worker window.
+export const maxDuration = 800;
 
 const DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS = 20_000;
 const DEFAULT_CONNECT_HEARTBEAT_INTERVAL_MS = 2_000;
