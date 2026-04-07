@@ -43,7 +43,8 @@ describe("show links refresh progress", () => {
     expect(summary.metrics).toEqual(
       expect.arrayContaining([
         { label: "Discovered", value: "8" },
-        { label: "Fandom Tested", value: "14" },
+        { label: "Fandom Tested (run)", value: "14" },
+        { label: "Fandom Tested (stage)", value: "14" },
         { label: "Candidate Budget", value: "14/180" },
       ])
     );
@@ -95,5 +96,81 @@ describe("show links refresh progress", () => {
         { label: "Approved", value: "5" },
       ])
     );
+  });
+
+  it("surfaces exhausted candidate budgets when fandom scanning hits limits", () => {
+    const summary = buildLinkDiscoveryProgressSummary(
+      {
+        stage: "heartbeat",
+        current_stage: "people_discovery_started",
+        heartbeat: true,
+        message: "Discovery still running...",
+        stage_budget: {
+          stage: "people",
+          max_fandom_candidates: 180,
+          stage_fandom_candidates_tested: 180,
+          budget_exhausted: true,
+          budget_reason: "fandom_candidate_limit",
+        },
+      },
+      STAGE_LABELS
+    );
+
+    expect(summary.budgetLabel).toBe("Budget exhausted: fandom candidate limit");
+    expect(summary.metrics).toEqual(
+      expect.arrayContaining([{ label: "Candidate Budget", value: "180/180" }])
+    );
+  });
+
+  it("formats cleanup and terminal completion without stale in-progress messaging", () => {
+    const summary = buildLinkDiscoveryProgressSummary(
+      {
+        current_stage: "completed",
+        status: "ok",
+        message: "Links refresh complete.",
+        elapsed_ms: 641_000,
+        stage_elapsed_ms: 87_000,
+        scan_targets: {
+          show_scanned: 1,
+          season_scanned: 7,
+          people_scanned: 142,
+        },
+        stage_progress: {
+          validated_links: 467,
+          promoted_links: 0,
+          deleted_links: 1,
+          normalized_social_urls: 2,
+        },
+        stalled: false,
+      },
+      STAGE_LABELS
+    );
+
+    expect(summary.terminal).toBe(true);
+    expect(summary.headline).toBe("Links refresh complete.");
+    expect(summary.stageLabel).toBe("Completed");
+    expect(summary.stageProgressLabel).toBe("467 validated · 0 promoted · 1 deleted · 2 normalized");
+    expect(summary.currentTargetLabel).toBeNull();
+  });
+
+  it("surfaces stalled worker metadata from heartbeat payloads", () => {
+    const summary = buildLinkDiscoveryProgressSummary(
+      {
+        stage: "heartbeat",
+        current_stage: "season_discovery_started",
+        heartbeat: true,
+        message: "Discovery still running...",
+        stalled: true,
+        stalled_reason: "stage_timeout_budget",
+        last_progress_at: "2026-04-02T10:00:00Z",
+        last_stage_transition_at: "2026-04-02T09:59:00Z",
+      },
+      STAGE_LABELS
+    );
+
+    expect(summary.stalled).toBe(true);
+    expect(summary.stalledReason).toBe("stage timeout budget");
+    expect(summary.lastProgressAt).toBe("2026-04-02T10:00:00Z");
+    expect(summary.lastStageTransitionAt).toBe("2026-04-02T09:59:00Z");
   });
 });

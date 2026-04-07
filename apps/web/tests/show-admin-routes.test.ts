@@ -169,7 +169,7 @@ describe("show-admin-routes", () => {
         platform: "instagram",
         handle: "@BravoTV",
       }),
-    ).toBe("/social/instagram/bravotv");
+    ).toBe("/admin/social/instagram/bravotv");
 
     expect(
       buildSocialAccountProfileUrl({
@@ -177,7 +177,7 @@ describe("show-admin-routes", () => {
         handle: "@BravoTV",
         tab: "catalog",
       }),
-    ).toBe("/social/instagram/bravotv/catalog");
+    ).toBe("/admin/social/instagram/bravotv/catalog");
 
     expect(
       buildSocialAccountProfileUrl({
@@ -185,41 +185,41 @@ describe("show-admin-routes", () => {
         handle: "@BravoTV",
         tab: "hashtags",
       }),
-    ).toBe("/social/instagram/bravotv/hashtags");
+    ).toBe("/admin/social/instagram/bravotv/hashtags");
 
     expect(
       buildSocialAccountProfileUrl({
         platform: "instagram",
         handle: "wwhlbravo",
       }),
-    ).toBe("/social/instagram/bravowwhl");
+    ).toBe("/admin/social/instagram/bravowwhl");
 
     expect(parseSocialAccountProfilePath("/social/instagram/bravotv")).toMatchObject({
       platform: "instagram",
       handle: "bravotv",
       tab: "stats",
-      canonicalPath: "/social/instagram/bravotv",
+      canonicalPath: "/admin/social/instagram/bravotv",
     });
 
     expect(parseSocialAccountProfilePath("/admin/social/instagram/wwhlbravo")).toMatchObject({
       platform: "instagram",
       handle: "bravowwhl",
       tab: "stats",
-      canonicalPath: "/social/instagram/bravowwhl",
+      canonicalPath: "/admin/social/instagram/bravowwhl",
     });
 
     expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/collaborators-tags")).toMatchObject({
       platform: "instagram",
       handle: "bravotv",
       tab: "collaborators-tags",
-      canonicalPath: "/social/instagram/bravotv/collaborators-tags",
+      canonicalPath: "/admin/social/instagram/bravotv/collaborators-tags",
     });
 
     expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/catalog")).toMatchObject({
       platform: "instagram",
       handle: "bravotv",
       tab: "catalog",
-      canonicalPath: "/social/instagram/bravotv/catalog",
+      canonicalPath: "/admin/social/instagram/bravotv/catalog",
     });
   });
 
@@ -601,7 +601,7 @@ describe("show-admin-routes", () => {
         communitySlug: "BravoRealHousewives",
         showSlug: "rhoslc",
       }),
-    ).toBe("/social/reddit/BravoRealHousewives/rhoslc");
+    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc");
 
     expect(
       buildAdminRedditCommunityUrl({
@@ -609,7 +609,7 @@ describe("show-admin-routes", () => {
         showSlug: "rhoslc",
         seasonNumber: 6,
       }),
-    ).toBe("/social/reddit/BravoRealHousewives/rhoslc/s6");
+    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6");
 
     expect(
       buildAdminRedditCommunityWindowUrl({
@@ -618,7 +618,7 @@ describe("show-admin-routes", () => {
         seasonNumber: 6,
         windowKey: "episode-1",
       }),
-    ).toBe("/social/reddit/BravoRealHousewives/rhoslc/s6/e1");
+    ).toBe("/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1");
 
     expect(
       buildAdminRedditCommunityWindowPostUrl({
@@ -631,7 +631,7 @@ describe("show-admin-routes", () => {
         author: "AutoModerator",
       }),
     ).toBe(
-      "/social/reddit/BravoRealHousewives/rhoslc/s6/e1/the-real-housewives-of-salt-lake-city-season-6-episode-1-pre-episode-discussion--u-automoderator",
+      "/admin/social/reddit/BravoRealHousewives/rhoslc/s6/e1/the-real-housewives-of-salt-lake-city-season-6-episode-1-pre-episode-discussion--u-automoderator",
     );
   });
 

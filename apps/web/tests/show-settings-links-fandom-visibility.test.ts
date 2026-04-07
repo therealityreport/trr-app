@@ -76,4 +76,36 @@ describe("show settings links UI structure", () => {
     expect(contents).toMatch(/Save URL/);
     expect(contents).toMatch(/containerClassName="rounded-md border border-zinc-200 bg-white px-3 py-2"/);
   });
+
+  it("runs links refresh through a resumable progress modal with run and operation ids", () => {
+    expect(contents).toMatch(/const buildLinksDiscoveryFlowScope = \(showId: string\): string =>/);
+    expect(contents).toMatch(/buildLinkDiscoveryProgressSummary/);
+    expect(contents).toMatch(/ariaLabel="Links discovery progress"/);
+    expect(contents).toMatch(/Reconnected to Links refresh from this tab/);
+    expect(contents).toMatch(/Run ID/);
+    expect(contents).toMatch(/Operation ID/);
+    expect(contents).toMatch(/remote worker/);
+    expect(contents).toMatch(/const cancelShowLinksRefresh = useCallback/);
+    expect(contents).toMatch(/\/api\/admin\/trr-api\/operations\/\$\{operationId\}\/cancel/);
+    expect(contents).toMatch(/Cancel job/);
+    expect(contents).toMatch(/Worker Monitor/);
+    expect(contents).toMatch(/Correct \/ Live by Source/);
+    expect(contents).toMatch(/Last stream update/);
+  });
+
+  it("filters settings cast-member coverage through a dedicated links-eligible roster", () => {
+    expect(contents).toMatch(/const \[linksEligibleCast, setLinksEligibleCast\] = useState<TrrCastMember\[]>\(\[\]\)/);
+    expect(contents).toMatch(/eligibilityMode: "links"/);
+    expect(contents).toMatch(/const linksEligiblePersonIds = useMemo/);
+    expect(contents).toMatch(/if \(linksEligiblePersonIds\.size > 0 && !linksEligiblePersonIds\.has\(personId\)\) continue;/);
+  });
+
+  it("adds exact and min\\/max episode filters to the credits gallery controls", () => {
+    expect(contents).toMatch(/Episode Exact/);
+    expect(contents).toMatch(/Episode Min/);
+    expect(contents).toMatch(/Episode Max/);
+    expect(contents).toMatch(/castExactEpisodeCount/);
+    expect(contents).toMatch(/castMinEpisodeCount/);
+    expect(contents).toMatch(/castMaxEpisodeCount/);
+  });
 });

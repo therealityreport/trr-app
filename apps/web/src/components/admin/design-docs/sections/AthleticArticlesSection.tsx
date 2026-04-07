@@ -3,9 +3,8 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
-import { ARTICLES } from "@/lib/admin/design-docs-config";
-
-const ATHLETIC_ARTICLES = ARTICLES.filter((a) => a.url.includes("/athletic/"));
+import { ATHLETIC_ARTICLES } from "@/lib/admin/design-docs-config";
+import { ArticleListFeaturedImage } from "./ArticleListFeaturedImage";
 
 export default function AthleticArticlesSection() {
   return (
@@ -104,23 +103,7 @@ export default function AthleticArticlesSection() {
             </div>
           </div>
 
-          {/* OG image preview */}
-          {article.ogImage && (
-            <div style={{ padding: "20px 28px", background: "#f7f5f0" }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={article.ogImage}
-                alt={article.title}
-                style={{
-                  width: "100%",
-                  maxHeight: 340,
-                  objectFit: "cover",
-                  borderRadius: 6,
-                  border: "1px solid var(--dd-paper-grey)",
-                }}
-              />
-            </div>
-          )}
+          <ArticleListFeaturedImage article={article} />
 
           {/* Quick stats */}
           <div style={{

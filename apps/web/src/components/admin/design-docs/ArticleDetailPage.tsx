@@ -1,15 +1,19 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { ARTICLES, isAthleticArticle } from "@/lib/admin/design-docs-config";
 import type { ContentBlock } from "@/lib/admin/design-docs-config";
 import Ai2htmlArtboard, {
   TRUMP_REPORT_CARD_DESKTOP_OVERLAYS,
   TRUMP_REPORT_CARD_MOBILE_OVERLAYS,
   SWEEPSTAKES_FLOWCHART_MOBILE_OVERLAYS,
   SWEEPSTAKES_FLOWCHART_DESKTOP_OVERLAYS,
+  TRUMP_TARIFFS_US_IMPORTS_TOPPER_MOBILE_OVERLAYS,
+  TRUMP_TARIFFS_US_IMPORTS_TOPPER_DESKTOP_OVERLAYS,
+  TRADE_TREEMAP_MOBILE_OVERLAYS,
+  TRADE_TREEMAP_DESKTOP_OVERLAYS,
 } from "./Ai2htmlArtboard";
 import InteractiveBarChart from "./InteractiveBarChart";
 import InteractiveLineChart from "./InteractiveLineChart";
@@ -37,6 +41,9 @@ import {
   ATHLETIC_NFL_FOURTH_DOWN_DATA,
 } from "./chart-data";
 import FilterCardTracker from "./FilterCardTracker";
+import InteractiveTariffTable from "./InteractiveTariffTable";
+import InteractiveTariffRateArrowChart from "./InteractiveTariffRateArrowChart";
+import InteractiveTariffRateTable from "./InteractiveTariffRateTable";
 import { NFL_FREE_AGENTS_2026 } from "./free-agent-data";
 import type { BarChartData } from "./InteractiveBarChart";
 import type { LineChartData } from "./InteractiveLineChart";
@@ -46,8 +53,6 @@ import type {
   MedalTableGridData,
   DatawrapperTableData,
 } from "./chart-data";
-
-import { useRef, useCallback } from "react";
 import { LightboxShell } from "@/components/admin/image-lightbox/LightboxShell";
 import { LightboxImageStage } from "@/components/admin/image-lightbox/LightboxImageStage";
 import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
@@ -99,6 +104,98 @@ function ClickableImage({ src, alt, style, className }: { src: string; alt: stri
   );
 }
 
+type ShareToolButton = {
+  kind: "gift" | "more" | "save" | "share";
+  label: string;
+};
+
+function BirdkitShareTools({ buttons }: { buttons: readonly ShareToolButton[] }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
+      }}
+    >
+      {buttons.map((button) => {
+        const isIconOnly = button.kind === "more" || button.kind === "save" || button.kind === "share";
+
+        return (
+          <button
+            key={`${button.kind}-${button.label}`}
+            type="button"
+            aria-label={button.label}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: button.kind === "gift" ? 6 : 0,
+              minWidth: button.kind === "gift" ? "auto" : 32,
+              height: 32,
+              padding: button.kind === "gift" ? "6px 10px 6px" : "0",
+              border: "1px solid #dfdfdf",
+              borderRadius: button.kind === "gift" ? 30 : "999px",
+              background: "#ffffff",
+              color: "#121212",
+              fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+              fontSize: 12,
+              fontWeight: 500,
+              lineHeight: "15px",
+              cursor: "default",
+            }}
+          >
+            {button.kind === "gift" ? (
+              <>
+                <svg aria-hidden="true" width="19" height="19" viewBox="0 0 19 19">
+                  <path d="M18.04 5.293h-2.725c.286-.34.493-.74.606-1.17a2.875 2.875 0 0 0-.333-2.322A2.906 2.906 0 0 0 13.64.48a3.31 3.31 0 0 0-2.372.464 3.775 3.775 0 0 0-1.534 2.483l-.141.797-.142-.847A3.745 3.745 0 0 0 7.927.923 3.31 3.31 0 0 0 5.555.459 2.907 2.907 0 0 0 3.607 1.78a2.877 2.877 0 0 0-.333 2.321c.117.429.324.828.606 1.171H1.155a.767.767 0 0 0-.757.757v3.674a.767.767 0 0 0 .757.757h.424v7.53A1.01 1.01 0 0 0 2.588 19h14.13a1.01 1.01 0 0 0 1.01-.959v-7.56h.424a.758.758 0 0 0 .757-.757V6.05a.759.759 0 0 0-.868-.757Zm-7.196-1.625a2.665 2.665 0 0 1 1.01-1.736 2.24 2.24 0 0 1 1.574-.313 1.817 1.817 0 0 1 1.211.818 1.857 1.857 0 0 1 .202 1.453 2.2 2.2 0 0 1-.838 1.191h-3.431l.272-1.413ZM4.576 2.386a1.837 1.837 0 0 1 1.221-.817 2.23 2.23 0 0 1 1.565.313 2.624 2.624 0 0 1 1.01 1.736l.242 1.453H5.182a2.2 2.2 0 0 1-.838-1.19 1.857 1.857 0 0 1 .202-1.495h.03ZM1.548 6.424h7.54V9.39h-7.58l.04-2.967Zm1.181 4.128h6.359v7.287H2.729v-7.287Zm13.777 7.287h-6.348v-7.307h6.348v7.307Zm1.181-8.468h-7.53V6.404h7.53V9.37Z" fill="#121212" fillRule="nonzero" />
+                </svg>
+                <span>{button.label}</span>
+              </>
+            ) : null}
+            {button.kind === "more" ? (
+              <svg aria-hidden="true" width="23" height="18" viewBox="0 0 23 18">
+                <path d="M1.357 17.192a.663.663 0 0 1-.642-.81c1.82-7.955 6.197-12.068 12.331-11.68V1.127a.779.779 0 0 1 .42-.653.726.726 0 0 1 .78.106l8.195 6.986a.81.81 0 0 1 .253.557.82.82 0 0 1-.263.547l-8.196 6.955a.83.83 0 0 1-.779.105.747.747 0 0 1-.42-.663V11.29c-8.418-.905-10.974 5.177-11.08 5.45a.662.662 0 0 1-.6.453Zm10.048-7.26a16.37 16.37 0 0 1 2.314.158.81.81 0 0 1 .642.726v3.02l6.702-5.682-6.702-5.692v2.883a.767.767 0 0 1-.242.536.747.747 0 0 1-.547.18c-4.808-.537-8.364 1.85-10.448 6.922a11.679 11.679 0 0 1 8.28-3.093v.042Z" fill="#000" fillRule="nonzero" />
+              </svg>
+            ) : null}
+            {button.kind === "save" ? (
+              <svg aria-hidden="true" width="12" height="18" viewBox="0 0 12 18">
+                <g fillRule="nonzero">
+                  <path d="M1.157 1.268v14.288l4.96-3.813 4.753 3.843V1.268z" fill="none" />
+                  <path d="m12 18-5.9-4.756L0 17.98V1.014C0 .745.095.487.265.297.435.107.664 0 .904 0h10.192c.24 0 .47.107.64.297.169.19.264.448.264.717V18ZM1.157 1.268v14.288l4.96-3.813 4.753 3.843V1.268H1.158Z" fill="#121212" />
+                </g>
+              </svg>
+            ) : null}
+            {button.kind === "share" ? (
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18">
+                <path d="M13.4 12.2 5.7 8.7a2.8 2.8 0 0 0 0 .6c0 .2 0 .4-.1.6l7.8 3.6a2.7 2.7 0 1 0 .8-1.3Zm-8-4.8 7.9-3.7a2.7 2.7 0 1 0-.7-1.4L4.9 6a2.7 2.7 0 1 0 .5 1.4Z" fill="#121212" fillRule="nonzero" />
+              </svg>
+            ) : null}
+            {isIconOnly ? (
+              <span
+                style={{
+                  position: "absolute",
+                  width: 1,
+                  height: 1,
+                  margin: -1,
+                  padding: 0,
+                  overflow: "hidden",
+                  clip: "rect(0 0 0 0)",
+                  whiteSpace: "nowrap",
+                  border: 0,
+                }}
+              >
+                {button.label}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  ArticleDetailPage — Data-driven component showcase                 */
 /*  Renders each content block based on the article's config data.     */
@@ -107,6 +204,90 @@ function ClickableImage({ src, alt, style, className }: { src: string; alt: stri
 
 interface ArticleDetailPageProps {
   articleId: string;
+}
+
+type ArticleSocialImage = {
+  name: string;
+  url: string;
+  ratio?: string;
+  width?: number;
+  desc?: string;
+};
+
+const TRUMP_TARIFFS_REACTION_ARTICLE_ID = "trump-tariffs-reaction";
+const TRUMP_TARIFFS_US_IMPORTS_ARTICLE_ID = "trump-tariffs-us-imports";
+
+function buildNytAuthorHref(name: string) {
+  const slug = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `https://www.nytimes.com/by/${slug}`;
+}
+
+function formatArticleDisplayDate(date: string) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+function extractTextFromHtml(html: string) {
+  if (typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return doc.body.textContent?.replace(/\s+/g, " ").trim() ?? "";
+  }
+
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractFirstSentence(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const protectedPeriodToken = "__DD_PERIOD__";
+  const protectedText = [
+    "Mr.",
+    "Mrs.",
+    "Ms.",
+    "Dr.",
+    "Prof.",
+    "Sr.",
+    "Jr.",
+    "St.",
+    "U.S.",
+    "U.S.A.",
+    "U.K.",
+    "No.",
+    "vs.",
+    "etc.",
+  ].reduce(
+    (current, abbreviation) =>
+      current.replaceAll(abbreviation, abbreviation.replaceAll(".", protectedPeriodToken)),
+    normalized,
+  );
+
+  if (!normalized) {
+    return "";
+  }
+
+  const match = protectedText.match(/^.*?[.!?](?=(?:["'”’)\]]|\s|$))["'”’)\]]*/);
+  const sentence = match ? match[0].trim() : protectedText;
+  return sentence.replaceAll(protectedPeriodToken, ".");
+}
+
+function extractFirstSentenceFromHtml(html: string) {
+  return extractFirstSentence(extractTextFromHtml(html));
 }
 
 /* ── Chart-to-section mapping (Trump economy article only) ──────── */
@@ -127,6 +308,21 @@ const SECTION_CHARTS: ChartEntry[] = [
   null,                                             // 7 Trade Deficit (no data yet)
 ];
 
+const AI2HTML_OVERLAY_MAP = {
+  "sweepstakes-flowchart": {
+    mobile: SWEEPSTAKES_FLOWCHART_MOBILE_OVERLAYS,
+    desktop: SWEEPSTAKES_FLOWCHART_DESKTOP_OVERLAYS,
+  },
+  "trump-tariffs-us-imports-topper": {
+    mobile: TRUMP_TARIFFS_US_IMPORTS_TOPPER_MOBILE_OVERLAYS,
+    desktop: TRUMP_TARIFFS_US_IMPORTS_TOPPER_DESKTOP_OVERLAYS,
+  },
+  "trade-treemap": {
+    mobile: TRADE_TREEMAP_MOBILE_OVERLAYS,
+    desktop: TRADE_TREEMAP_DESKTOP_OVERLAYS,
+  },
+} as const;
+
 /* ── Medal-table title → data lookup (winter olympics article) ── */
 
 const MEDAL_TABLE_MAP: Record<string, MedalTableData | MedalTableGridData> = {
@@ -144,6 +340,112 @@ const MEDAL_TABLE_MAP: Record<string, MedalTableData | MedalTableGridData> = {
 const DW_TABLE_MAP: Record<string, DatawrapperTableData> = {
   UYsk6: ATHLETIC_NFL_FOURTH_DOWN_DATA,
 };
+
+type ArticleBlockSectionEntry = {
+  type: ContentBlock["type"];
+  id: string;
+  label: string;
+};
+
+function slugifyArticleBlockLabel(label: string) {
+  return label
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function prettifyBlockType(type: ContentBlock["type"]) {
+  return type
+    .split("-")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
+function getArticleBlockBaseLabel(block: ContentBlock) {
+  switch (block.type) {
+    case "header":
+      return "Header";
+    case "byline":
+      return "Byline";
+    case "sharetools-bar":
+      return "Share Tools";
+    case "ai2html":
+    case "birdkit-table":
+    case "birdkit-table-interactive":
+    case "datawrapper-table":
+    case "showcase-link":
+    case "related-link":
+    case "tariff-country-table":
+    case "tariff-rate-arrow-chart":
+    case "tariff-rate-table":
+      return block.title;
+    case "subhed":
+      return block.text;
+    case "body-copy":
+      return "Body Copy";
+    case "birdkit-chart":
+      return block.title;
+    case "twitter-embed":
+      return `Tweet: ${block.author}`;
+    case "ad-container":
+      return `Ad Container ${block.position}`;
+    case "puzzle-entry-point":
+      return block.title;
+    case "featured-image":
+      return "Featured Image";
+    case "storyline":
+      return block.title;
+    case "author-bio":
+      return "Author Bio";
+    case "quote":
+      return block.section;
+    case "datawrapper-chart":
+      return block.title;
+    case "birdkit-countdown":
+      return block.label;
+    case "birdkit-animated-headline":
+      return "Animated Headline";
+    case "birdkit-state-selector":
+      return `${block.defaultState} State Selector`;
+    case "birdkit-calendar":
+      return "Calendar";
+    case "birdkit-state-data-section":
+      return block.title;
+    case "correction":
+      return "Correction";
+    case "filter-card-tracker":
+      return block.title;
+    case "video-embed":
+      return "Video Embed";
+    case "reporting-credit":
+      return "Reporting Credit";
+    default:
+      return prettifyBlockType(block.type);
+  }
+}
+
+function buildArticleBlockSections(blocks: readonly ContentBlock[]): ArticleBlockSectionEntry[] {
+  const totals = new Map<string, number>();
+  const seen = new Map<string, number>();
+
+  for (const block of blocks) {
+    const baseLabel = getArticleBlockBaseLabel(block);
+    totals.set(baseLabel, (totals.get(baseLabel) ?? 0) + 1);
+  }
+
+  return blocks.map((block) => {
+    const baseLabel = getArticleBlockBaseLabel(block);
+    const occurrence = (seen.get(baseLabel) ?? 0) + 1;
+    seen.set(baseLabel, occurrence);
+    const label = (totals.get(baseLabel) ?? 0) > 1 ? `${baseLabel} ${occurrence}` : baseLabel;
+    return {
+      type: block.type,
+      id: slugifyArticleBlockLabel(label),
+      label,
+    };
+  });
+}
 
 /* ── DatawrapperTable — Interactive Athletic-themed heatmap table ── */
 /* Matches The Athletic Datawrapper theme exactly:
@@ -338,7 +640,6 @@ function DatawrapperTable({ data }: { data: DatawrapperTableData }) {
                     }}>
                       {teamIcon ? (
                         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={teamIcon} alt={teamSlug} style={{ width: 20, height: 20, objectFit: "contain", flexShrink: 0 }} />
                           {valStr}
                         </span>
@@ -424,6 +725,45 @@ function BlockAnnotation({
       )}
       {children}
     </div>
+  );
+}
+
+function ArticleBlockSection({
+  id,
+  label,
+  children,
+  showHeading = true,
+}: {
+  id: string;
+  label: string;
+  children?: React.ReactNode;
+  showHeading?: boolean;
+}) {
+  return (
+    <section
+      id={id}
+      style={{
+        scrollMarginTop: 28,
+        marginBottom: 40,
+      }}
+    >
+      {showHeading ? (
+        <h2
+          style={{
+            fontFamily: "var(--dd-font-ui, sans-serif)",
+            fontSize: 13,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            color: "var(--dd-brand-text-secondary)",
+            margin: "0 0 12px",
+          }}
+        >
+          {label}
+        </h2>
+      ) : null}
+      {children}
+    </section>
   );
 }
 
@@ -648,6 +988,7 @@ function getSpecimenText(
 export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps) {
   const article = ARTICLES.find((a) => a.id === articleId);
   const [showCss, setShowCss] = useState(false);
+  const [isTocOpen, setIsTocOpen] = useState(false);
 
   /* Load NYT web fonts for live specimens */
   useEffect(() => {
@@ -689,11 +1030,32 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
   const hasQuoteSections = quoteSections.length > 0;
   const hasChartTypes = article.chartTypes.length > 0;
   const isInteractive = article.type === "interactive";
-  const isAthletic = article.url.includes("nytimes.com/athletic/") || article.url.includes("theathletic.com");
+  const isAthletic = isAthleticArticle(article);
   const articleIndexPath = isAthletic
     ? buildDesignDocsPath("athletic-articles")
     : buildDesignDocsPath("nyt-articles");
   const athleticIcons = isAthletic ? (a.architecture?.publicAssets?.icons ?? []) : [];
+  const contentBlocks = (a.contentBlocks as readonly ContentBlock[] | undefined) ?? [];
+  const blockSections = buildArticleBlockSections(contentBlocks);
+  const isTrumpTariffsReaction =
+    article.id === TRUMP_TARIFFS_REACTION_ARTICLE_ID;
+  const isTrumpTariffsImports =
+    article.id === TRUMP_TARIFFS_US_IMPORTS_ARTICLE_ID;
+  const showBlockStructure = isTrumpTariffsReaction;
+  const socialImages: readonly ArticleSocialImage[] =
+    publicAssets?.socialImages && publicAssets.socialImages.length > 0
+      ? publicAssets.socialImages
+      : article.ogImage
+        ? [
+            {
+              name: "featuredImage",
+              url: article.ogImage,
+              desc: "Primary featured image",
+            },
+          ]
+        : [];
+  const sectionForType = (type: ContentBlock["type"]) =>
+    blockSections.find((entry) => entry.type === type);
 
   return (
     <div
@@ -701,8 +1063,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         maxWidth: "100%",
         width: "100%",
         padding: "0",
-        background: "var(--dd-brand-bg)",
-        color: "var(--dd-brand-text-primary)",
+        background: isTrumpTariffsReaction ? "#ffffff" : "var(--dd-brand-bg)",
+        color: isTrumpTariffsReaction
+          ? "#121212"
+          : "var(--dd-brand-text-primary)",
       }}
     >
       {/* ── 1. Breadcrumb + Toggle ── */}
@@ -727,6 +1091,120 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           &larr; Pages
         </Link>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {showBlockStructure && blockSections.length > 0 ? (
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                onClick={() => setIsTocOpen((open) => !open)}
+                aria-label={isTocOpen ? "Close table of contents" : "Open table of contents"}
+                style={{
+                  fontFamily: "var(--dd-font-ui, sans-serif)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                  color: "var(--dd-brand-text-secondary)",
+                  background: "#fff",
+                  border: "1px solid var(--dd-brand-border)",
+                  borderRadius: 999,
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                }}
+              >
+                Contents
+              </button>
+              {isTocOpen ? (
+                <div
+                  role="dialog"
+                  aria-label="Page table of contents"
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 10px)",
+                    right: 0,
+                    zIndex: 80,
+                    width: "min(420px, 80vw)",
+                    background: "#ffffff",
+                    border: "1px solid var(--dd-brand-border)",
+                    borderRadius: 16,
+                    boxShadow: "0 24px 60px rgba(15, 23, 42, 0.18)",
+                    padding: 18,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      marginBottom: 14,
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontFamily: "var(--dd-font-ui, sans-serif)",
+                          fontSize: 15,
+                          fontWeight: 700,
+                          color: "#18181b",
+                          marginBottom: 2,
+                        }}
+                      >
+                        Table of Contents
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "var(--dd-font-mono, monospace)",
+                          fontSize: 11,
+                          color: "#71717a",
+                        }}
+                      >
+                        Every documented block on this article page.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsTocOpen(false)}
+                      aria-label="Close table of contents"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 999,
+                        border: "1px solid #e4e4e7",
+                        background: "#ffffff",
+                        color: "#52525b",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
+                    {blockSections.map((section) => (
+                      <a
+                        key={section.id}
+                        href={`#${section.id}`}
+                        onClick={() => setIsTocOpen(false)}
+                        style={{
+                          display: "block",
+                          borderRadius: 12,
+                          border: "1px solid #f1f5f9",
+                          background: "#fafafa",
+                          padding: "10px 12px",
+                          textDecoration: "none",
+                          color: "#18181b",
+                          fontFamily: "var(--dd-font-ui, sans-serif)",
+                          fontSize: 14,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {section.label}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <a
             href={article.url}
             target="_blank"
@@ -770,151 +1248,519 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         </div>
       </div>
 
+      {isTrumpTariffsImports ? (
+        <ArticleBlockSection
+          id={sectionForType("storyline")?.id ?? "storyline"}
+          label={sectionForType("storyline")?.label ?? "Storyline"}
+          showHeading={showBlockStructure}
+        >
+          <BlockAnnotation
+            type="storyline"
+            css={[
+              "css-1gwp8pp storyline rail with NYT T-logo, 15px Franklin title, and 14px/500 link labels",
+              "Border-bottom #DFDFDF, horizontal scroll on smaller widths, white background",
+            ]}
+            show={showCss}
+          >
+            <div
+              className="css-1gwp8pp"
+              data-testid="imports-storyline-rail"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#ffffff",
+                minHeight: 55,
+                position: "relative",
+                borderBottom: "1px solid #dfdfdf",
+                overflowX: "auto",
+                marginBottom: 16,
+              }}
+            >
+              <span
+                className="css-1aygtno"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  flexShrink: 1,
+                  paddingRight: 10,
+                }}
+              >
+                <Link
+                  href="/"
+                  data-testid="tlogo-home-link"
+                  aria-label="The New York Times Home Page"
+                  style={{
+                    display: "block",
+                    color: "#121212",
+                  }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center" }}>
+                    <svg
+                      viewBox="0 0 44 57"
+                      className="css-1v2bmad"
+                      aria-hidden="true"
+                      style={{ width: 45, height: 45, display: "block", flexShrink: 0 }}
+                    >
+                      <defs />
+                      <g stroke="none" strokeWidth="1" fill="none" fillRule="evenodd">
+                        <g fill="var(--color-content-primary,#121212)">
+                          <path d="M43.6284633,34.8996508 C41.83393,39.6379642 38.53153,43.2989842 33.7932167,45.2371375 L33.7932167,34.8996508 L39.46463,29.8027175 L33.7932167,24.7777375 L33.7932167,17.6709842 C38.9621033,17.3120775 42.5514567,13.5074375 42.5514567,8.84136417 C42.5514567,2.73966417 36.7369967,0.5859375 33.4345967,0.5859375 C32.71707,0.5859375 31.9270167,0.5859375 30.7789167,0.872890833 L30.7789167,1.16013083 C31.20949,1.16013083 31.8550633,1.08846417 32.0709233,1.08846417 C34.36827,1.08846417 36.0911367,2.16518417 36.0911367,4.2469575 C36.0911367,5.82620417 34.7988433,7.40545083 32.5017833,7.40545083 C26.83037,7.40545083 20.15419,2.81133083 12.9038167,2.81133083 C6.44292333,2.81133083 1.99242333,7.6207375 1.99242333,12.5023842 C1.99242333,17.3120775 4.79201,18.8913242 7.73521667,19.9680442 L7.80717,19.6808042 C6.87378333,19.1066108 6.22763667,18.1018442 6.22763667,16.5223108 C6.22763667,14.3688708 8.23774333,12.5743375 10.7503767,12.5743375 C16.8520767,12.5743375 26.68675,17.6709842 32.7887367,17.6709842 L33.36293,17.6709842 L33.36293,24.8496908 L27.6918033,29.8027175 L33.36293,34.8996508 L33.36293,45.3804708 C30.9942033,46.2416175 28.5532367,46.6010975 26.0406033,46.6010975 C16.5648367,46.6010975 10.53509,40.8577308 10.53509,31.3102975 C10.53509,29.0135242 10.8220433,26.7878442 11.46819,24.6341175 L16.20593,22.5526308 L16.20593,43.6576042 L25.8253167,39.4226775 L25.8253167,17.8146042 L11.6834767,24.1315908 C13.1191033,19.9680442 16.06231,16.9531708 19.5799967,15.2303042 L19.50833,15.0150175 C10.0322767,17.0967908 0.84375,24.2754975 0.84375,35.0432708 C0.84375,47.4622442 11.32457,56.0768642 23.5285433,56.0768642 C36.4497567,56.0768642 43.7720833,47.4622442 43.84375,34.8996508 L43.6284633,34.8996508 Z" />
+                        </g>
+                      </g>
+                    </svg>
+                  </span>
+                </Link>
+              </span>
+              <nav
+                className="css-34mlm7"
+                aria-labelledby="storyline-menu-title"
+                role="navigation"
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  minWidth: "max-content",
+                  paddingLeft: 20,
+                }}
+              >
+                <p
+                  id="storyline-menu-title"
+                  style={{
+                    margin: 0,
+                    padding: "0 15px 0 0",
+                    flexShrink: 0,
+                  }}
+                >
+                  <span
+                    className="css-1uhlowv"
+                    data-testid="imports-storyline-title"
+                    style={{
+                      fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                      fontSize: 15,
+                      fontWeight: 700,
+                      lineHeight: "15px",
+                      color: "#121212",
+                      display: "flex",
+                      paddingRight: 15,
+                      marginRight: 16,
+                    }}
+                  >
+                    <span>
+                      <span className="css-1rxm0ex" data-testid="text-balancer">
+                        {((
+                          "contentBlocks" in article && Array.isArray(article.contentBlocks)
+                            ? article.contentBlocks.find((block) => block.type === "storyline")?.title
+                            : null
+                        ) ?? "Tariffs and Trade").split(" ").slice(0, 2).join(" ")}
+                        &nbsp;
+                      </span>
+                      <span className="css-1rxm0ex" data-testid="text-balancer">
+                        {((
+                          "contentBlocks" in article && Array.isArray(article.contentBlocks)
+                            ? article.contentBlocks.find((block) => block.type === "storyline")?.title
+                            : null
+                        ) ?? "Tariffs and Trade").split(" ").slice(2).join(" ")}
+                      </span>
+                    </span>
+                  </span>
+                </p>
+                <ul
+                  className="css-go3nob"
+                  aria-labelledby="storyline-menu-title"
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    margin: 0,
+                    padding: 0,
+                    listStyle: "none",
+                  }}
+                >
+                  {"contentBlocks" in article && Array.isArray(article.contentBlocks)
+                    ? article.contentBlocks
+                        .find((block) => block.type === "storyline")
+                        ?.links.map((item) => (
+                          <li
+                            className="css-1qej4jr"
+                            key={item.href}
+                            style={{
+                              marginRight: 22.4,
+                              minHeight: 48,
+                              display: "flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            <span className="css-fi5tub" data-testid="menu-link">
+                              <a
+                                className="css-etxl5s"
+                                href={item.href}
+                                style={{
+                                  color: "#121212",
+                                  textDecoration: "none",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                <span
+                                  className="css-knunh2"
+                                  style={{
+                                    fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                                    fontSize: 14,
+                                    fontWeight: 500,
+                                    lineHeight: "14px",
+                                    color: "#121212",
+                                    paddingBottom: 1,
+                                  }}
+                                >
+                                  {item.label}
+                                </span>
+                              </a>
+                            </span>
+                          </li>
+                        ))
+                    : null}
+                </ul>
+              </nav>
+            </div>
+          </BlockAnnotation>
+        </ArticleBlockSection>
+      ) : null}
+
       {/* ── 2. Article Header Block (always) ── */}
       {/* Birdkit "interactive" articles: text-align center (g-header → g-heading-wrapper → g-heading)
          Standard "article" type: text-align left */}
-      <BlockAnnotation
-        type="header"
-        css={[
-          isAthletic
-            ? `h1.Article_Headline__ou0D2.Article_Featured__tTXwK: nyt-cheltenham 40px/400/44px italic #121212`
-            : `text-align: ${isInteractive ? "center" : "left"} (${isInteractive ? "Birdkit g-header inherits to g-heading" : "standard vi-story layout"})`,
-          isAthletic
-            ? `div.Article_HeadlineContainer__PR98W.Article_FeaturedHeadlineContainer__WPinJ`
-            : `font-family: nyt-cheltenham; font-size: ${isInteractive ? "45px" : "31px (1.9375rem)"}; font-weight: ${isInteractive ? "800" : "700"}; font-style: ${isInteractive ? "normal" : "italic"}`,
-          isAthletic
-            ? `p (description): nyt-imperial 20px/400/30px #121212 (inside .Article_ContentContainer)`
-            : `max-width: ${isInteractive ? "1000px" : "600px"}; margin: ${isInteractive ? "0 auto" : "0"}`,
-        ]}
-        show={showCss}
+      <ArticleBlockSection
+        id={sectionForType("header")?.id ?? "header"}
+        label={sectionForType("header")?.label ?? "Header"}
+        showHeading={showBlockStructure}
       >
-        <div
-          style={{
-            fontFamily: "var(--dd-font-ui, sans-serif)",
-            fontSize: 11,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "var(--dd-brand-text-muted)",
-            marginBottom: 8,
-            textAlign: isInteractive ? "center" : "left",
-          }}
+        <BlockAnnotation
+          type="header"
+          css={[
+            isAthletic
+              ? `h1.Article_Headline__ou0D2.Article_Featured__tTXwK: nyt-cheltenham 40px/400/44px italic #121212`
+              : isTrumpTariffsReaction
+                ? "Birdkit interactive header: nyt-cheltenham italic 36px/500/40px on a 600px text column"
+                : `text-align: ${isInteractive ? "center" : "left"} (${isInteractive ? "Birdkit g-header inherits to g-heading" : "standard vi-story layout"})`,
+            isAthletic
+              ? `div.Article_HeadlineContainer__PR98W.Article_FeaturedHeadlineContainer__WPinJ`
+              : isTrumpTariffsReaction
+                ? "g-header-container.g-theme-news.g-style-bolditalic with text-wrap: balance"
+                : isTrumpTariffsImports
+                  ? "g-header-wrapper > .g-header-container.g-theme-news.g-style-bolditalic with left-aligned 48px italic headline"
+                  : `font-family: nyt-cheltenham; font-size: ${isInteractive ? "45px" : "31px (1.9375rem)"}; font-weight: ${isInteractive ? "800" : "700"}; font-style: ${isInteractive ? "normal" : "italic"}`,
+            isAthletic
+              ? `p (description): nyt-imperial 20px/400/30px #121212 (inside .Article_ContentContainer)`
+              : isTrumpTariffsReaction
+                ? "No visible deck on this source page; heading is left-aligned despite the global interactive shell"
+                : isTrumpTariffsImports
+                  ? "Header includes byline and sharetools in the same 600px left-aligned Birdkit stack"
+                  : `max-width: ${isInteractive ? "1000px" : "600px"}; margin: ${isInteractive ? "0 auto" : "0"}`,
+          ]}
+          show={showCss}
         >
-          {article.section} &middot; {article.type} &middot; {article.date}
-        </div>
-        <h1
-          style={isAthletic ? {
-            /* h1.Article_Headline.Article_Featured: nyt-cheltenham 40px/400/44px #121212
-               Inside div.Article_FeaturedHeadlineContainer — centered layout, NO italic */
-            fontFamily: 'nyt-cheltenham, georgia, "times new roman", times, serif',
-            fontSize: 40,
-            fontWeight: 400,
-            fontStyle: "normal",
-            lineHeight: "44px",
-            color: "#121212",
-            margin: 0,
-            textAlign: "center",
-          } : {
-            fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
-            fontSize: isInteractive ? 45 : 31,
-            fontWeight: isInteractive ? 800 : 700,
-            fontStyle: isInteractive ? "normal" : "italic",
-            lineHeight: isInteractive ? 1.1 : 1.16,
-            color: "#121212",
-            margin: 0,
-            textAlign: isInteractive ? "center" : "left",
-          }}
-        >
-          {article.title}
-        </h1>
-        <p
-          style={isAthletic ? {
-            /* Athletic description: nyt-imperial 20px/400/30px #121212 — centered to match header */
-            fontFamily: '"nyt-imperial", georgia, "times new roman", times, serif',
-            fontSize: 20,
-            fontWeight: 400,
-            lineHeight: "30px",
-            color: "#121212",
-            marginTop: 12,
-            textAlign: "center",
-          } : {
-            fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
-            fontSize: 20,
-            fontWeight: 300,
-            lineHeight: 1.5,
-            color: "#363636",
-            marginTop: 12,
-            textAlign: isInteractive ? "center" : "left",
-          }}
-        >
-          {article.description}
-        </p>
-      </BlockAnnotation>
+          {isTrumpTariffsReaction ? (
+            <div style={{ maxWidth: 600 }}>
+              <h1
+                style={{
+                  fontFamily:
+                    'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+                  fontSize: "clamp(36px, 5vw, 45px)",
+                  fontWeight: 500,
+                  fontStyle: "italic",
+                  lineHeight: 1.08,
+                  letterSpacing: "-0.02em",
+                  color: "#121212",
+                  margin: 0,
+                  textAlign: "left",
+                  textWrap: "balance",
+                }}
+              >
+                {article.title}
+              </h1>
+            </div>
+          ) : isTrumpTariffsImports ? (
+            <div style={{ maxWidth: 600 }}>
+              <h1
+                style={{
+                  fontFamily:
+                    'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+                  fontSize: 48,
+                  fontWeight: 700,
+                  fontStyle: "italic",
+                  lineHeight: "58.08px",
+                  letterSpacing: "normal",
+                  color: "#121212",
+                  margin: 0,
+                  textAlign: "left",
+                  textWrap: "balance",
+                }}
+              >
+                {article.title}
+              </h1>
+              <div style={{ marginTop: 20 }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                    fontSize: 15,
+                    fontWeight: 600,
+                    lineHeight: "19.995px",
+                    letterSpacing: "normal",
+                    color: "#363636",
+                  }}
+                >
+                  <span style={{ marginRight: 4 }}>By</span>
+                  <a
+                    href={buildNytAuthorHref(article.authors[0] ?? "")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      fontWeight: 600,
+                      color: "#363636",
+                      textDecoration: "underline",
+                      textUnderlineOffset: 2,
+                      textDecorationThickness: "1px",
+                    }}
+                  >
+                    {article.authors.join(", ")}
+                  </a>
+                </p>
+                <time
+                  style={{
+                    display: "block",
+                    marginTop: 2,
+                    fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    lineHeight: "18px",
+                    letterSpacing: "normal",
+                    color: "#cc0000",
+                  }}
+                  dateTime={`${article.date}T00:00:00Z`}
+                >
+                  {article.date}
+                </time>
+              </div>
+              <div style={{ marginTop: 18 }}>
+                <BirdkitShareTools
+                  buttons={[
+                    { kind: "gift", label: "Share full article" },
+                    { kind: "more", label: "More sharing options" },
+                    { kind: "save", label: "Save article" },
+                  ]}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              {!isTrumpTariffsImports ? (
+                <div
+                  style={{
+                    fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "#727272",
+                    marginBottom: 8,
+                    textAlign: isInteractive ? "center" : "left",
+                  }}
+                >
+                  {article.section} &middot; {article.type} &middot; {article.date}
+                </div>
+              ) : null}
+              <h1
+                style={isAthletic ? {
+                  fontFamily: 'nyt-cheltenham, georgia, "times new roman", times, serif',
+                  fontSize: 40,
+                  fontWeight: 400,
+                  fontStyle: "normal",
+                  lineHeight: "44px",
+                  color: "#121212",
+                  margin: 0,
+                  textAlign: "center",
+                } : isTrumpTariffsImports ? {
+                  fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+                  fontSize: 48,
+                  fontWeight: 700,
+                  lineHeight: "58.08px",
+                  color: "#121212",
+                  margin: 0,
+                  textAlign: "center",
+                } : {
+                  fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+                  fontSize: isInteractive ? 45 : 31,
+                  fontWeight: isInteractive ? 800 : 700,
+                  fontStyle: isInteractive ? "normal" : "italic",
+                  lineHeight: isInteractive ? 1.1 : 1.16,
+                  color: "#121212",
+                  margin: 0,
+                  textAlign: isInteractive ? "center" : "left",
+                }}
+              >
+                {article.title}
+              </h1>
+              {!isTrumpTariffsImports ? (
+                <p
+                  style={isAthletic ? {
+                    fontFamily: '"nyt-imperial", georgia, "times new roman", times, serif',
+                    fontSize: 20,
+                    fontWeight: 400,
+                    lineHeight: "30px",
+                    color: "#121212",
+                    marginTop: 12,
+                    textAlign: "center",
+                  } : {
+                    fontFamily: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+                    fontSize: 20,
+                    fontWeight: 300,
+                    lineHeight: 1.5,
+                    color: "#363636",
+                    marginTop: 12,
+                    textAlign: isInteractive ? "center" : "left",
+                  }}
+                >
+                  {article.description}
+                </p>
+              ) : null}
+            </>
+          )}
+        </BlockAnnotation>
+      </ArticleBlockSection>
 
       {/* ── 3. Extended Byline Block (always) ── */}
-      <BlockAnnotation
-        type="extendedbyline"
-        css={isAthletic ? [
-          "span.Article_BylineString: nyt-franklin 14px/500/16.8px letter-spacing:0.25px #121212",
-          "a (author name): nyt-franklin 14px/700/16.8px #121212 underlined",
-          "time: nyt-franklin 13px/500/17px #121212",
-          "headshot: 40px border-radius: 20px (circular)",
-        ] : [
-          "font-family: nyt-franklin; font-size: 15px; font-weight: 500",
-          "headshot: 48px border-radius: 50%",
-        ]}
-        show={showCss}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            fontFamily: isAthletic
-              ? '"nyt-franklin", helvetica, arial, sans-serif'
-              : "var(--dd-font-ui, sans-serif)",
-          }}
+      {!isTrumpTariffsImports ? (
+        <ArticleBlockSection
+          id={sectionForType("byline")?.id ?? "byline"}
+          label={sectionForType("byline")?.label ?? "Byline"}
+          showHeading={showBlockStructure}
         >
-          {publicAssets?.authorHeadshot?.url && (
-            <img
-              src={publicAssets.authorHeadshot.url}
-              alt="Author headshot"
+          <BlockAnnotation
+            type="extendedbyline"
+            css={isAthletic ? [
+              "span.Article_BylineString: nyt-franklin 14px/500/16.8px letter-spacing:0.25px #121212",
+              "a (author name): nyt-franklin 14px/700/16.8px #121212 underlined",
+              "time: nyt-franklin 13px/500/17px #121212",
+              "headshot: 40px border-radius: 20px (circular)",
+            ] : isTrumpTariffsReaction ? [
+              "p.g-byline: nyt-franklin 14px/700/18px #363636 with linked author names",
+              "time.g-interactive-timestamp: nyt-franklin 13px/500/18px #363636",
+              "g-byline-wrapper is left-aligned on a 600px text column",
+            ] : [
+              "font-family: nyt-franklin; font-size: 15px; font-weight: 500",
+              "headshot: 48px border-radius: 50%",
+            ]}
+            show={showCss}
+          >
+          {isTrumpTariffsReaction ? (
+            <div style={{ maxWidth: 600 }}>
+              <p
+                style={{
+                  fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  lineHeight: "18px",
+                  color: "#363636",
+                  margin: 0,
+                }}
+              >
+                <span style={{ marginRight: 4 }}>By</span>
+                {article.authors.map((author, index) => (
+                  <span key={author}>
+                    <a
+                      href={buildNytAuthorHref(author)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: "#363636",
+                        textDecoration: "underline",
+                        textUnderlineOffset: 2,
+                        textDecorationThickness: "1px",
+                      }}
+                    >
+                      {author}
+                    </a>
+                    {index < article.authors.length - 2 ? ", " : null}
+                    {index === article.authors.length - 2 ? " and " : null}
+                  </span>
+                ))}
+              </p>
+              <time
+                style={{
+                  display: "block",
+                  fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  lineHeight: "18px",
+                  color: "#363636",
+                  marginTop: 2,
+                }}
+                dateTime={`${article.date}T00:00:00Z`}
+              >
+                {formatArticleDisplayDate(article.date)}
+              </time>
+            </div>
+          ) : (
+            <div
               style={{
-                width: isAthletic ? 40 : 48,
-                height: isAthletic ? 40 : 48,
-                borderRadius: isAthletic ? 20 : "50%",
-                objectFit: "cover",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                fontFamily: isAthletic
+                  ? '"nyt-franklin", helvetica, arial, sans-serif'
+                  : '"nyt-franklin", helvetica, arial, sans-serif',
               }}
-            />
+            >
+              {publicAssets?.authorHeadshot?.url && !isTrumpTariffsImports && (
+                <img
+                  src={publicAssets.authorHeadshot.url}
+                  alt="Author headshot"
+                  style={{
+                    width: isAthletic ? 40 : 48,
+                    height: isAthletic ? 40 : 48,
+                    borderRadius: isAthletic ? 20 : "50%",
+                    objectFit: "cover",
+                  }}
+                />
+              )}
+              <div>
+                <div style={{
+                  fontSize: isAthletic ? 14 : 15,
+                  fontWeight: isAthletic ? 500 : isTrumpTariffsImports ? 400 : 500,
+                  color: isTrumpTariffsImports ? "#363636" : "#121212",
+                  letterSpacing: isAthletic ? "0.25px" : undefined,
+                  lineHeight: isAthletic ? "16.8px" : isTrumpTariffsImports ? "19.995px" : undefined,
+                }}>
+                  By{" "}
+                  <a
+                    href={buildNytAuthorHref(article.authors[0] ?? "")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      fontWeight: isTrumpTariffsImports ? 600 : 700,
+                      color: isTrumpTariffsImports ? "#363636" : "#121212",
+                      textDecoration: isAthletic || isTrumpTariffsImports ? "underline" : "none",
+                      textUnderlineOffset: isTrumpTariffsImports ? 2 : undefined,
+                      textDecorationThickness: isTrumpTariffsImports ? "1px" : undefined,
+                    }}
+                  >
+                    {article.authors.join(", ")}
+                  </a>
+                </div>
+                <div style={{
+                  fontSize: 13,
+                  fontWeight: isAthletic ? 500 : isTrumpTariffsImports ? 500 : 400,
+                  color: isAthletic ? "#121212" : isTrumpTariffsImports ? "#cc0000" : "#727272",
+                  marginTop: 2,
+                  lineHeight: isAthletic ? "17px" : isTrumpTariffsImports ? "18px" : undefined,
+                }}>
+                  {article.date}
+                </div>
+              </div>
+            </div>
           )}
-          <div>
-            <div style={{
-              fontSize: isAthletic ? 14 : 15,
-              fontWeight: isAthletic ? 500 : 500,
-              color: "#121212",
-              letterSpacing: isAthletic ? "0.25px" : undefined,
-              lineHeight: isAthletic ? "16.8px" : undefined,
-            }}>
-              By{" "}
-              <span style={{
-                fontWeight: 700,
-                textDecoration: isAthletic ? "underline" : "none",
-              }}>
-                {article.authors.join(", ")}
-              </span>
-            </div>
-            <div style={{
-              fontSize: 13,
-              fontWeight: isAthletic ? 500 : 400,
-              color: isAthletic ? "#121212" : "#727272",
-              marginTop: 2,
-              lineHeight: isAthletic ? "17px" : undefined,
-            }}>
-              {article.date}
-            </div>
-          </div>
-        </div>
-      </BlockAnnotation>
+          </BlockAnnotation>
+        </ArticleBlockSection>
+      ) : null}
 
       {/* ── 4. ai2html / Graphic Block — full-size comparison at top ── */}
       {/* ── 4. ai2html Report Card (Trump article) — with text overlays ── */}
@@ -968,116 +1814,211 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
       )}
 
       {/* ── 4b. Content Blocks (sweepstakes article and future block-based articles) ── */}
-      {a.contentBlocks && a.contentBlocks.length > 0 && (() => {
-        const blocks = a.contentBlocks as readonly ContentBlock[];
-        return blocks.map((block: ContentBlock, bi: number) => {
+      {contentBlocks.length > 0 && (() => {
+        return contentBlocks.map((block: ContentBlock, bi: number) => {
+          const section = blockSections[bi];
           /* header, byline, author-bio are already rendered by existing code — skip */
-          if (block.type === "header" || block.type === "byline" || block.type === "author-bio") {
+          if (block.type === "header" || block.type === "byline") {
             return null;
           }
 
-          if (block.type === "ai2html") {
+          if (
+            isTrumpTariffsImports &&
+            (block.type === "storyline" || block.type === "sharetools-bar")
+          ) {
+            return null;
+          }
+
+          if (block.type === "author-bio") {
             return (
-              <BlockAnnotation
+              <ArticleBlockSection
                 key={`cb-${bi}`}
-                type="ai2html"
-                css={[
-                  "ai2html v0.121.1 — Illustrator → responsive HTML",
-                  `Mobile: ${block.artboards.mobile.width}×${block.artboards.mobile.height} | Desktop: ${block.artboards.desktop.width}×${block.artboards.desktop.height}`,
-                ]}
-                show={showCss}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              />
+            );
+          }
+
+          if (block.type === "sharetools-bar") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
               >
-                <div style={{ marginBottom: 8 }}>
+                <BlockAnnotation
+                  type="sharetools-bar"
+                  css={[
+                    "Tier 2 facsimile of NYT action chrome",
+                    "Pill buttons with 1px #DFDFDF borders, uppercase Franklin labels, white background",
+                    "Product-aware save/gift/menu states are documented in architecture notes, not live-wired here",
+                  ]}
+                  show={showCss}
+                >
                   <div
                     style={{
-                      fontFamily: "var(--dd-font-ui, sans-serif)",
-                      fontSize: 16,
-                      fontWeight: 700,
-                      color: "#121212",
-                      lineHeight: 1.3,
-                      marginBottom: 12,
+                      marginBottom: 24,
                     }}
                   >
-                    {block.title}
+                    <BirdkitShareTools buttons={block.buttons} />
                   </div>
-                  {/* Stacked vertically at production size with text overlays */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                    {/* Mobile artboard WITH text overlays */}
-                    <div style={{ maxWidth: 335, width: "50%" }}>
-                      <div style={{ border: "1px solid #e8e5e0", borderRadius: 4, overflow: "hidden" }}>
-                        <Ai2htmlArtboard
-                          imageUrl={block.artboards.mobile.url}
-                          width={block.artboards.mobile.width}
-                          height={block.artboards.mobile.height}
-                          overlays={SWEEPSTAKES_FLOWCHART_MOBILE_OVERLAYS}
-                        />
+                </BlockAnnotation>
+              </ArticleBlockSection>
+            );
+          }
+
+          if (block.type === "ai2html") {
+            const overlaySet = block.overlaySet ?? "sweepstakes-flowchart";
+            const overlays = AI2HTML_OVERLAY_MAP[overlaySet];
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="ai2html"
+                  css={[
+                    "ai2html v0.121.1 — Illustrator → responsive HTML",
+                    `Mobile: ${block.artboards.mobile.width}×${block.artboards.mobile.height} | Desktop: ${block.artboards.desktop.width}×${block.artboards.desktop.height}`,
+                  ]}
+                  show={showCss}
+                >
+                  <div style={{ marginBottom: 8 }}>
+                    {/* Stacked vertically at production size with text overlays */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                      {/* Mobile artboard WITH text overlays */}
+                      <div style={{ maxWidth: 335, width: "100%" }}>
+                        <div style={{ border: "1px solid #e8e5e0", borderRadius: 4, overflow: "hidden" }}>
+                          <Ai2htmlArtboard
+                            imageUrl={block.artboards.mobile.url}
+                            width={block.artboards.mobile.width}
+                            height={block.artboards.mobile.height}
+                            overlays={overlays.mobile}
+                          />
+                        </div>
+                        <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 6 }}>
+                          Mobile · {block.artboards.mobile.width}&times;{block.artboards.mobile.height}px · {(block.artboards.mobile.url.match(/\.([a-zA-Z]+)(?:\?|$)/) || [])[1]?.toUpperCase() || "IMG"} + HTML overlays
+                        </div>
                       </div>
-                      <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 6 }}>
-                        Mobile · {block.artboards.mobile.width}&times;{block.artboards.mobile.height}px · {(block.artboards.mobile.url.match(/\.([a-zA-Z]+)(?:\?|$)/) || [])[1]?.toUpperCase() || "IMG"} + HTML overlays
-                      </div>
-                    </div>
-                    {/* Desktop artboard WITH text overlays */}
-                    <div style={{ maxWidth: 600, width: "100%" }}>
-                      <div style={{ border: "1px solid #e8e5e0", borderRadius: 4, overflow: "hidden" }}>
-                        <Ai2htmlArtboard
-                          imageUrl={block.artboards.desktop.url}
-                          width={block.artboards.desktop.width}
-                          height={block.artboards.desktop.height}
-                          overlays={SWEEPSTAKES_FLOWCHART_DESKTOP_OVERLAYS}
-                        />
-                      </div>
-                      <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 6 }}>
-                        Desktop · {block.artboards.desktop.width}&times;{block.artboards.desktop.height}px · {(block.artboards.desktop.url.match(/\.([a-zA-Z]+)(?:\?|$)/) || [])[1]?.toUpperCase() || "IMG"} + HTML overlays
+                      {/* Desktop artboard WITH text overlays */}
+                      <div style={{ maxWidth: 600, width: "100%" }}>
+                        <div style={{ border: "1px solid #e8e5e0", borderRadius: 4, overflow: "hidden" }}>
+                          <Ai2htmlArtboard
+                            imageUrl={block.artboards.desktop.url}
+                            width={block.artboards.desktop.width}
+                            height={block.artboards.desktop.height}
+                            overlays={overlays.desktop}
+                          />
+                        </div>
+                        <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "#727272", marginTop: 6 }}>
+                          Desktop · {block.artboards.desktop.width}&times;{block.artboards.desktop.height}px · {(block.artboards.desktop.url.match(/\.([a-zA-Z]+)(?:\?|$)/) || [])[1]?.toUpperCase() || "IMG"} + HTML overlays
+                        </div>
                       </div>
                     </div>
                   </div>
                   <div
                     style={{
-                      fontFamily: "var(--dd-font-ui, sans-serif)",
-                      fontSize: 12,
-                      fontWeight: 300,
+                      fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                      fontSize: 13,
+                      fontWeight: 500,
                       color: "#727272",
                       marginTop: 10,
-                      lineHeight: 1.4,
+                      lineHeight: "17px",
                     }}
                   >
-                    <span style={{ fontStyle: "italic" }}>{block.note}</span>
-                    {"  "}
-                    <span style={{ fontWeight: 500 }}>{block.credit}</span>
+                    {block.source ? (
+                      <p style={{ margin: 0 }}>
+                        Source: {block.source}
+                      </p>
+                    ) : null}
+                    <p style={{ margin: block.source ? "4px 0 0" : 0 }}>
+                      Note: {block.note}
+                    </p>
+                    <p style={{ margin: "4px 0 0" }}>{block.credit}</p>
                   </div>
-                </div>
-              </BlockAnnotation>
+                </BlockAnnotation>
+              </ArticleBlockSection>
+            );
+          }
+
+          if (block.type === "body-copy") {
+            const firstSentence = extractFirstSentenceFromHtml(block.html);
+
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="body-copy"
+                  css={[
+                    "Birdkit body copy excerpt uses NYT Imperial on a 600px text column",
+                    "Only the first sentence of each source paragraph is shown in design docs",
+                    "20px/30px, 500 weight, #121212",
+                  ]}
+                  show={showCss}
+                >
+                  <div style={{ maxWidth: 600 }}>
+                    <p
+                      style={{
+                        fontFamily:
+                          '"nyt-imperial", georgia, "times new roman", times, serif',
+                        fontSize: 20,
+                        fontWeight: 500,
+                        lineHeight: "30px",
+                        color: "#121212",
+                        margin: "0 0 12px",
+                      }}
+                    >
+                      {firstSentence}
+                    </p>
+                  </div>
+                </BlockAnnotation>
+              </ArticleBlockSection>
             );
           }
 
           if (block.type === "subhed") {
             return (
-              <BlockAnnotation
+              <ArticleBlockSection
                 key={`cb-${bi}`}
-                type="subhed"
-                css={[
-                  `font-family: nyt-franklin; font-size: 13px; font-weight: 700; text-transform: uppercase`,
-                  `letter-spacing: 0.02em; color: #121212; border-top: 2px solid #121212; padding-top: 8px`,
-                ]}
-                show={showCss}
+                id={section.id}
+                label={section.label}
+                showHeading={false}
               >
-                <h2
-                  style={{
-                    fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.02em",
-                    color: "#121212",
-                    borderTop: "2px solid #121212",
-                    paddingTop: 8,
-                    marginTop: 32,
-                    marginBottom: 16,
-                  }}
+                <BlockAnnotation
+                  type="subhed"
+                  css={[
+                    "g-subhed-wrapper.g-theme-news",
+                    "nyt-franklin 700 section subhead with sentence case and no border rule",
+                  ]}
+                  show={showCss}
                 >
-                  {block.text}
-                </h2>
-              </BlockAnnotation>
+                  <div style={{ maxWidth: 600 }}>
+                    <h2
+                      style={{
+                        fontFamily:
+                          '"nyt-franklin", helvetica, arial, sans-serif',
+                        fontSize: 28,
+                        fontWeight: 700,
+                        lineHeight: "34px",
+                        letterSpacing: "-0.01em",
+                        color: "#121212",
+                        marginTop: 32,
+                        marginBottom: 20,
+                      }}
+                    >
+                      {block.text}
+                    </h2>
+                  </div>
+                </BlockAnnotation>
+              </ArticleBlockSection>
             );
           }
 
@@ -1356,6 +2297,120 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   colorScheme={block.colorScheme}
                   filters={block.filters}
                 />
+              </BlockAnnotation>
+            );
+          }
+
+          /* ── tariff-country-table: NYT tariff response tracker table ── */
+          if (block.type === "tariff-country-table") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="tariff-country-table"
+                  css={[
+                    `div.g-table — Birdkit/Svelte interactive status table (20 countries)`,
+                    `div.g-row: flex row, gap 12px, padding 10px 0, border-bottom 1px #E8E8E8`,
+                    `span.g-status (.g-retaliated): 11px/700 uppercase letter-spacing:0.04em bg:#B86200 color:#fff`,
+                    `span.g-status (.g-trying-to-negotiate): 11px/700 uppercase bg:#4E9493 color:#fff`,
+                    `span.g-status (.g-no-retaliation): 11px/700 color:#666666 border:1px #D3D3D3`,
+                    `span.g-status (.g-offered-concessions): 11px/700 uppercase bg:#4E9493 color:#fff`,
+                    `td.g-country: nyt-franklin 14px/700 #121212`,
+                    `td.g-tariff: nyt-franklin 14px/500 #121212 tabular-nums`,
+                    `td.g-exports: nyt-franklin 13px/500 #666666`,
+                    `p.g-note: nyt-franklin 12px/400/18px #666666 (expanded per row)`,
+                  ]}
+                  show={showCss}
+                >
+                  <InteractiveTariffTable
+                    source={block.source}
+                    noteText={block.noteText}
+                  />
+                </BlockAnnotation>
+              </ArticleBlockSection>
+            );
+          }
+
+          if (block.type === "tariff-rate-arrow-chart") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="tariff-rate-arrow-chart"
+                css={[
+                  "Birdkit/Svelte arrow-chart recreation extracted from NYT SSR markup for the 10 largest U.S. import partners",
+                  "600px body-width module with Franklin heading, labels, and end-anchored percentage values on a 4px ochre stem",
+                ]}
+                show={showCss}
+              >
+                <InteractiveTariffRateArrowChart
+                  title={block.title}
+                  leadin={block.leadin}
+                  source={block.source}
+                  credit={block.credit}
+                />
+              </BlockAnnotation>
+            );
+          }
+
+          if (block.type === "tariff-rate-table") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="tariff-rate-table"
+                css={[
+                  "Birdkit/Svelte table facsimile with 86 tariff rows and Franklin/Cheltenham hybrid typography",
+                  "Initial state shows 10 rows with expandable remainder",
+                ]}
+                show={showCss}
+              >
+                <InteractiveTariffRateTable
+                  title={block.title}
+                  leadin={block.leadin}
+                  source={block.source}
+                  credit={block.credit}
+                  initialVisibleRows={block.initialVisibleRows}
+                />
+              </BlockAnnotation>
+            );
+          }
+
+          if (block.type === "reporting-credit") {
+            return (
+              <BlockAnnotation
+                key={`cb-${bi}`}
+                type="reporting-credit"
+                css={[
+                  "Small NYT Franklin reporting note with rule-before treatment",
+                  "15px/20px paragraph with 120px rule pseudo-element approximated inline",
+                ]}
+                show={showCss}
+              >
+                <div style={{ margin: "10px 0 24px" }}>
+                  <div
+                    style={{
+                      width: 120,
+                      height: 1,
+                      background: "#121212",
+                      margin: "0 0 18px",
+                    }}
+                  />
+                  <p
+                    style={{
+                      fontFamily: '"nyt-franklin", arial, helvetica, sans-serif',
+                      fontSize: 15,
+                      fontWeight: 500,
+                      lineHeight: "20px",
+                      color: "#333333",
+                      margin: 0,
+                    }}
+                  >
+                    {block.text}
+                  </p>
+                </div>
               </BlockAnnotation>
             );
           }
@@ -2499,7 +3554,6 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                       justifyContent: "center", borderRadius: 6,
                       background: isWhiteFill ? "#121212" : "var(--dd-brand-surface)",
                     }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={icon.file} alt={icon.name} style={{
                         maxWidth: icon.name === "wordmark" ? 42 : 24, maxHeight: 24,
                         filter: isWhiteFill ? "invert(1)" : "none",
@@ -2539,7 +3593,6 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     width: 48, height: 48, display: "flex", alignItems: "center",
                     justifyContent: "center", borderRadius: 6, background: "var(--dd-brand-surface)",
                   }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={icon.file} alt={icon.name} style={{ maxWidth: 40, maxHeight: 40, objectFit: "contain" }} />
                   </div>
                   <div style={{ textAlign: "center" }}>
@@ -2575,7 +3628,6 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     width: 36, height: 36, display: "flex", alignItems: "center",
                     justifyContent: "center",
                   }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={icon.file} alt={icon.name} style={{ width: 36, height: 36, objectFit: "contain" }} />
                   </div>
                   <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, fontWeight: 600, color: "var(--dd-brand-text-primary)", textAlign: "center" }}>
@@ -2897,7 +3949,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
       )}
 
       {/* ── 8. Images — ai2html comparisons + Social/OG ── */}
-      {(publicAssets?.socialImages?.length || hasReportCard || hasAi2htmlArtboards) && (
+      {(socialImages.length > 0 || hasReportCard || hasAi2htmlArtboards) && (
         <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16 }}>
           <h3
             style={{
@@ -2975,11 +4027,11 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   <div>
                     <ClickableImage
                       src={publicAssets.ai2htmlArtboards.mobile.url}
-                      alt={`Blank flowchart (mobile) · ${publicAssets.ai2htmlArtboards.mobile.width || 335}px · JPG`}
+                      alt={`${publicAssets.ai2htmlArtboards.mobile.desc || "Blank ai2html artboard"} · ${publicAssets.ai2htmlArtboards.mobile.width || 335}px`}
                       style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid var(--dd-brand-border)", borderRadius: 4, display: "block" }}
                     />
                     <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 4, lineHeight: 1.4 }}>
-                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Artboard_copy_4 (mobile)</span> · {publicAssets.ai2htmlArtboards.mobile.width || 335}px · JPG
+                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>{publicAssets.ai2htmlArtboards.mobile.desc || "Mobile artboard"}</span> · {publicAssets.ai2htmlArtboards.mobile.width || 335}px
                     </div>
                   </div>
                 )}
@@ -2987,11 +4039,11 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   <div>
                     <ClickableImage
                       src={publicAssets.ai2htmlArtboards.desktop.url}
-                      alt={`Blank flowchart (desktop) · ${publicAssets.ai2htmlArtboards.desktop.width || 600}px · JPG`}
+                      alt={`${publicAssets.ai2htmlArtboards.desktop.desc || "Blank ai2html artboard"} · ${publicAssets.ai2htmlArtboards.desktop.width || 600}px`}
                       style={{ width: "100%", maxHeight: 120, objectFit: "cover", border: "1px solid var(--dd-brand-border)", borderRadius: 4, display: "block" }}
                     />
                     <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, color: "var(--dd-brand-text-muted)", marginTop: 4, lineHeight: 1.4 }}>
-                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>Artboard_copy_5 (desktop)</span> · {publicAssets.ai2htmlArtboards.desktop.width || 600}px · JPG
+                      <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>{publicAssets.ai2htmlArtboards.desktop.desc || "Desktop artboard"}</span> · {publicAssets.ai2htmlArtboards.desktop.width || 600}px
                     </div>
                   </div>
                 )}
@@ -3001,7 +4053,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           )}
 
           {/* Social/OG Images grid */}
-          {publicAssets?.socialImages && publicAssets.socialImages.length > 0 && (
+          {socialImages.length > 0 && (
             <>
               <div style={{
                 fontFamily: "var(--dd-font-ui, sans-serif)",
@@ -3021,14 +4073,20 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   gap: 16,
                 }}
               >
-                {publicAssets.socialImages.map(
-                  (img: { name: string; url: string; ratio: string; width?: number; desc?: string }) => {
+                {socialImages.map(
+                  (img) => {
                     const ext = (img.url.match(/\.([a-zA-Z]+)(?:\?|$)/) || [])[1]?.toUpperCase() || "IMG";
+                    const metadata = [
+                      img.name,
+                      img.ratio,
+                      img.width ? `${img.width}px` : null,
+                      ext,
+                    ].filter(Boolean).join(" · ");
                     return (
                       <div key={img.name}>
                         <ClickableImage
                           src={img.url}
-                          alt={`${img.name} · ${img.ratio}${img.width ? ` · ${img.width}px` : ""} · ${ext}`}
+                          alt={metadata}
                           style={{
                             width: "100%",
                             maxHeight: 120,
@@ -3048,7 +4106,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                           }}
                         >
                           <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>{img.name}</span>
-                          {" · "}{img.ratio}
+                          {img.ratio ? ` · ${img.ratio}` : ""}
                           {img.width ? ` · ${img.width}px` : ""}
                           {" · "}<span style={{ color: "var(--dd-brand-text-muted)", textTransform: "uppercase" as const }}>{ext}</span>
                         </div>
@@ -3161,6 +4219,80 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 </div>
               )}
             </div>
+            {a.architecture.tierNotes && (
+              <div style={{ display: "grid", gap: 16, marginBottom: 24 }}>
+                {a.architecture.tierNotes.excluded?.length > 0 && (
+                  <div>
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-ui, sans-serif)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--dd-brand-text-secondary)",
+                        letterSpacing: "0.05em",
+                        textTransform: "uppercase",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Excluded
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18, color: "var(--dd-brand-text-muted)", fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 13, lineHeight: 1.5 }}>
+                      {a.architecture.tierNotes.excluded.map((item: string) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {a.architecture.tierNotes.tier2?.length > 0 && (
+                  <div>
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-ui, sans-serif)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--dd-brand-text-secondary)",
+                        letterSpacing: "0.05em",
+                        textTransform: "uppercase",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Tier 2 Facsimiles
+                    </div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {a.architecture.tierNotes.tier2.map((item: { name: string; reason: string }) => (
+                        <div key={item.name} style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 13, lineHeight: 1.5, color: "var(--dd-brand-text-muted)" }}>
+                          <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>{item.name}:</span> {item.reason}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {a.architecture.tierNotes.tier3?.length > 0 && (
+                  <div>
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-ui, sans-serif)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--dd-brand-text-secondary)",
+                        letterSpacing: "0.05em",
+                        textTransform: "uppercase",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Tier 3 Documentation
+                    </div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {a.architecture.tierNotes.tier3.map((item: { name: string; reason: string }) => (
+                        <div key={item.name} style={{ fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 13, lineHeight: 1.5, color: "var(--dd-brand-text-muted)" }}>
+                          <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>{item.name}:</span> {item.reason}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 

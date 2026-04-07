@@ -72,12 +72,18 @@ export default function AdminGamesPage() {
                   >
                     Open Admin
                   </Link>
-                  <Link
-                    href={game.playHref}
-                    className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-                  >
-                    Open Live Game
-                  </Link>
+                  {game.isLiveEnabled ? (
+                    <Link
+                      href={game.playHref}
+                      className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                    >
+                      Open Live Game
+                    </Link>
+                  ) : (
+                    <span className="rounded-lg border border-zinc-200 bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-500">
+                      {game.liveStatusLabel ?? "Live gameplay unavailable"}
+                    </span>
+                  )}
                 </div>
               </article>
             ))}

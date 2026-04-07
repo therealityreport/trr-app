@@ -36,7 +36,7 @@ describe("show refresh stream proxy route", () => {
     vi.restoreAllMocks();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(BACKEND_STREAM_URL);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret";
   });
 
   it("retries transient fetch errors and then returns streamed response", async () => {

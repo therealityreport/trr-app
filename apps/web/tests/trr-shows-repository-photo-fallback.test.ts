@@ -109,4 +109,61 @@ describe("trr shows repository cast photo fallback mode", () => {
     expect(fetchSpy).toHaveBeenCalled();
     expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain("https://www.bravotv.com/people/person-one");
   });
+
+  it("prefers entity link featured image metadata before live Bravo fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      text: async () => "",
+    } as Response);
+    queryMock.mockImplementation(async (text: string) => {
+      if (text.includes("FROM core.v_show_cast")) {
+        return { rows: [buildShowCastRow()] };
+      }
+      if (text.includes("FROM core.people") && text.includes("known_for")) {
+        return { rows: [{ id: "person-1", full_name: "Person One", known_for: null }] };
+      }
+      if (text.includes("FROM core.media_links ml")) {
+        return { rows: [] };
+      }
+      if (text.includes("FROM core.v_cast_photos")) {
+        return { rows: [] };
+      }
+      if (text.includes("FROM core.entity_links") && text.includes("featured_image_url")) {
+        return {
+          rows: [
+            {
+              person_id: "person-1",
+              featured_image_url: "https://cdn.example.com/person-one-link.jpg",
+            },
+          ],
+        };
+      }
+      if (text.includes("FROM core.entity_links")) {
+        return { rows: [] };
+      }
+      if (text.includes("FROM core.people") && text.includes("profile_image_url")) {
+        return {
+          rows: [
+            {
+              id: "person-1",
+              full_name: "Person One",
+              profile_image_url: null,
+              homepage: null,
+            },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await getCastByShowId("show-1", {
+      limit: 10,
+      offset: 0,
+      photoFallbackMode: "bravo",
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.photo_url).toBe("https://cdn.example.com/person-one-link.jpg");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

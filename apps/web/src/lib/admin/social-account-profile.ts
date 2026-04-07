@@ -23,6 +23,7 @@ export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatf
 export type SocialAccountProfileSummary = {
   platform: SocialPlatformSlug;
   account_handle: string;
+  network_name?: string | null;
   profile_url?: string | null;
   avatar_url?: string | null;
   display_name?: string | null;
@@ -186,6 +187,20 @@ export type SocialAccountCatalogRunDispatchHealth = {
   max_stale_dispatch_retries?: number;
 };
 
+export type SocialAccountOperationalAlert = {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  reason?: string | null;
+  count?: number;
+  threshold_seconds?: number;
+  waited_seconds?: number;
+  retry_count?: number;
+  lease_owner?: string | null;
+  frontier_status?: string | null;
+  error_code?: string | null;
+};
+
 export type SocialAccountCatalogVerification = {
   platform: SocialPlatformSlug;
   account_handle: string;
@@ -277,13 +292,38 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   season_id?: string | null;
   run_id: string;
   run_status: string;
+  run_state?: "discovering" | "fetching" | "classifying" | "completed" | "failed" | "cancelled";
   source_scope: string;
+  network_name?: string | null;
+  profile_kind?: string | null;
+  assignment_mode?: string | null;
+  assignment_rules?: Record<string, unknown> | null;
+  shared_profile?: {
+    source_scope: string;
+    profile_kind: string;
+    network_name?: string | null;
+    assignment_mode: string;
+    assignment_rules: Record<string, unknown>;
+    account_handle: string;
+    platform: string | null;
+  };
   created_at?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
   stages: Record<string, SocialAccountCatalogRunProgressStage>;
+  queued_jobs_by_type?: Record<string, number>;
+  capacity_waiting?: boolean;
+  active_transport?: string | null;
   per_handle: SocialAccountCatalogRunProgressHandle[];
   recent_log: SocialAccountCatalogRunProgressLogEntry[];
+  runtime_version?: {
+    commit_sha?: string | null;
+    modal_image?: string | null;
+    modal_environment?: string | null;
+    modal_function?: string | null;
+    execution_backend?: string | null;
+    label?: string | null;
+  };
   worker_runtime?: {
     runner_strategy?: string | null;
     runner_count?: number;
@@ -292,6 +332,16 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     scheduler_lanes?: string[];
     active_workers_now?: number;
     worker_ids_sample?: string[];
+    runtime_version?: {
+      commit_sha?: string | null;
+      modal_image?: string | null;
+      modal_environment?: string | null;
+      modal_function?: string | null;
+      execution_backend?: string | null;
+      label?: string | null;
+    };
+    runtime_versions_observed?: Array<Record<string, unknown>>;
+    runtime_version_drift?: boolean;
   };
   partition_strategy?: string | null;
   discovery?: {
@@ -329,6 +379,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   completion_gap_reason?: string | null;
   scrape_complete?: boolean;
   classify_incomplete?: boolean;
+  alerts?: SocialAccountOperationalAlert[];
   dispatch_health?: SocialAccountCatalogRunDispatchHealth;
   summary?: SocialAccountCatalogRunProgressSummary;
   updated_at?: string | null;

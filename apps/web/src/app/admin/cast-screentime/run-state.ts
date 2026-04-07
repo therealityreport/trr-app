@@ -2,6 +2,8 @@ export type ReviewableRunState = {
   status?: string | null;
   review_status?: string | null;
   is_publishable?: boolean;
+  publication_mode?: string | null;
+  is_canonical_publication?: boolean;
   error_message?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
@@ -11,6 +13,7 @@ export type ReviewableRunState = {
 export type CurrentPublishVersionState = {
   is_current: boolean;
   version_number: number;
+  publication_mode?: string | null;
 };
 
 export const allowedReviewTransitions: Record<string, string[]> = {
@@ -58,11 +61,14 @@ export function getRunOverviewMessage(
     return "";
   }
 
+  const publicationMode = run.publication_mode || (run.is_canonical_publication ? "canonical_episode" : "supplementary_reference");
+  const isCanonicalPublication = publicationMode === "canonical_episode";
+
   if (isDispatchFailedRun(run) || run.status === "failed" || run.status === "cancelled") {
     return "This run did not complete successfully. Fix the execution issue and launch a new run before entering review.";
   }
 
-  if (run.is_publishable === false) {
+  if (run.is_publishable === false && isCanonicalPublication) {
     if (isRunReviewable(run)) {
       return "This run is a completed independent report. It remains reviewable, but it never contributes to canonical episode, season, or show totals.";
     }
@@ -70,15 +76,21 @@ export function getRunOverviewMessage(
   }
 
   if (currentPublishVersion?.is_current) {
-    return `This run is the current canonical published version (v${currentPublishVersion.version_number}).`;
+    return isCanonicalPublication
+      ? `This run is the current canonical published version (v${currentPublishVersion.version_number}).`
+      : `This run is the current supplementary internal-reference version (v${currentPublishVersion.version_number}).`;
   }
 
   if (run.status === "success" && (run.review_status || "draft") === "approved") {
-    return "This run is approved and eligible to be published into canonical episode, season, and show totals.";
+    return isCanonicalPublication
+      ? "This run is approved and eligible to be published into canonical episode, season, and show totals."
+      : "This run is approved and eligible to be published as a supplementary internal reference without affecting canonical episode, season, or show totals.";
   }
 
   if (isRunReviewable(run)) {
-    return "This run is still in review flow. Draft totals are visible but not canonical until approval and explicit publish.";
+    return isCanonicalPublication
+      ? "This run is still in review flow. Draft totals are visible but not canonical until approval and explicit publish."
+      : "This run is still in review flow. Reviewed totals stay internal-reference only until approval and explicit publish.";
   }
 
   return "This run is still executing. Review stays unavailable until it completes successfully.";

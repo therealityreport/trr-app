@@ -85,6 +85,8 @@ TRR_INTERNAL_ADMIN_SHARED_SECRET=
 `TRR_CORE_SUPABASE_URL` and `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY` are used by
 the server-side Supabase auth adapter when `TRR_AUTH_PROVIDER=supabase`.
 
+No browser-side `NEXT_PUBLIC_SUPABASE_*` runtime envs are required for TRR-APP.
+
 If you use the admin person-gallery facebank seed toggle, also set:
 
 ```bash

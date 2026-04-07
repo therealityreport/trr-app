@@ -179,6 +179,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     requestId = request.headers.get("x-trr-request-id")?.trim() || null;
     const tabSessionId = request.headers.get("x-trr-tab-session-id")?.trim() || null;
     const flowKey = request.headers.get("x-trr-flow-key")?.trim() || null;
+    const preferLocalExecution = request.headers.get("x-trr-prefer-local-execution")?.trim() || null;
 
     const { showId } = await params;
     if (!showId) {
@@ -319,6 +320,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               ...(requestId ? { "x-trr-request-id": requestId } : {}),
               ...(tabSessionId ? { "x-trr-tab-session-id": tabSessionId } : {}),
               ...(flowKey ? { "x-trr-flow-key": flowKey } : {}),
+              ...(preferLocalExecution ? { "x-trr-prefer-local-execution": preferLocalExecution } : {}),
             },
             body: JSON.stringify(body),
             signal: requestController.signal,

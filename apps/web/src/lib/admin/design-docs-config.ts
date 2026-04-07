@@ -472,12 +472,23 @@ export type ContentBlock =
   | { type: "header" }
   | { type: "byline" }
   | {
+      type: "sharetools-bar";
+      buttons: readonly { label: string; kind: "share" | "save" | "gift" | "more" }[];
+      tier: "tier-2-facsimile";
+    }
+  | {
       type: "ai2html";
       title: string;
       note: string;
       credit: string;
+      source?: string;
+      overlaySet?:
+        | "sweepstakes-flowchart"
+        | "trump-tariffs-us-imports-topper"
+        | "trade-treemap";
       artboards: { mobile: Ai2htmlArtboard; desktop: Ai2htmlArtboard };
     }
+  | { type: "body-copy"; html: string }
   | { type: "subhed"; text: string }
   | {
       type: "birdkit-chart";
@@ -505,12 +516,18 @@ export type ContentBlock =
   | { type: "birdkit-state-data-section"; title: string }
   | { type: "correction"; text: string; date: string }
   | { type: "filter-card-tracker"; title: string; colorScheme: string; cardCount: number; filters: readonly { label: string; options: readonly string[] }[]; searchEnabled: boolean; expandCollapse: boolean }
-  | { type: "video-embed"; streamId: string; sources: readonly { type: string; url: string }[] };
+  | { type: "video-embed"; streamId: string; sources: readonly { type: string; url: string }[] }
+  | { type: "tariff-country-table"; title: string; source: string; noteText: string }
+  | { type: "tariff-rate-arrow-chart"; title: string; leadin: string; source: string; credit: string }
+  | { type: "tariff-rate-table"; title: string; leadin: string; source: string; credit: string; initialVisibleRows?: number }
+  | { type: "reporting-credit"; text: string };
 
 export const CONTENT_BLOCK_TYPE_IDS = [
   "header",
   "byline",
+  "sharetools-bar",
   "ai2html",
+  "body-copy",
   "subhed",
   "birdkit-chart",
   "birdkit-table",
@@ -534,6 +551,10 @@ export const CONTENT_BLOCK_TYPE_IDS = [
   "correction",
   "filter-card-tracker",
   "video-embed",
+  "tariff-country-table",
+  "tariff-rate-arrow-chart",
+  "tariff-rate-table",
+  "reporting-credit",
 ] as const satisfies readonly ContentBlock["type"][];
 
 /* ── Article References ──────────────────────────── */
@@ -2023,16 +2044,505 @@ export const ARTICLES = [
       { type: "author-bio" },
     ],
   },
+  /* ── NYT Interactive — Trump Tariffs U.S. Imports ───────────────── */
+  {
+    id: "trump-tariffs-us-imports",
+    title: "How Much Will Trump\u2019s Tariffs Cost U.S. Importers?",
+    url: "https://www.nytimes.com/interactive/2025/04/03/business/economy/trump-tariffs-us-imports.html",
+    authors: ["Lazaro Gamio"],
+    date: "Updated April 9, 2025",
+    section: "Business/Economy",
+    type: "interactive" as const,
+    description: "It will cost an extra nearly $900 billion in tariffs to bring shoes, TVs and all other imports into the United States, a new analysis of trade data shows.",
+    ogImage: "https://static01.nyt.com/images/2025/04/03/multimedia/2025-04-01-tariff-revenue-analysis-index/2025-04-01-tariff-revenue-analysis-index-facebookJumbo-v10.png",
+    tags: ["Tariff", "International Trade", "Donald Trump", "China", "Canada", "Mexico", "Protectionism", "Business", "Economy", "vis-design"],
+    graphicsCount: 3,
+    figuresCount: 14,
+    tools: {
+      topper: "ai2html v0.121.1",
+      charts: "Birdkit/Svelte custom chart + Birdkit/Svelte sortable table",
+      framework: "Birdkit (Svelte/SvelteKit) embedded in vi-interactive (React shell)",
+      hosting: "static01.nytimes.com/newsgraphics/2025-04-01-tariff-revenue-analysis/",
+    },
+    chartTypes: [
+      { type: "ai2html", tool: "ai2html v0.121.1", topic: "Tariff cost topper" },
+      { type: "arrow-chart", tool: "Birdkit/Svelte", topic: "Trade-weighted tariff-rate change across top import partners" },
+      { type: "table", tool: "Birdkit/Svelte", topic: "Average tariff-rate change across countries with $1B+ in imports" },
+    ],
+    quoteSections: [],
+    fonts: [
+      {
+        name: "nyt-cheltenham",
+        cssVar: "--g-chelt",
+        fullStack: 'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+        weights: [500, 700],
+        role: "Display serif for chart values, table headings, and topper numerics",
+        usedIn: [
+          "Topper totals: 22px/26px mobile, 32px/38px desktop",
+          "Section headings: 28px/500 editorial serif",
+          "Increase column: bold serif accent in orange",
+        ],
+      },
+      {
+        name: "nyt-franklin",
+        cssVar: "--g-franklin",
+        fullStack: '"nyt-franklin", arial, helvetica, sans-serif',
+        weights: [400, 500, 700],
+        role: "Primary sans-serif for body copy, action chrome, labels, notes, and table text",
+        usedIn: [
+          "Body paragraphs: 15px/20px #363636",
+          "Share/save/gift/more action pills: uppercase Franklin chrome",
+          "Storyline nav, chart labels, source credits, and table headers",
+        ],
+      },
+    ],
+    brandFonts: {
+      editorial: ["nyt-cheltenham", "nyt-franklin"],
+      graphics: ["nyt-franklin", "nyt-cheltenham"],
+      games: [],
+    },
+    colors: {
+      chartPalette: [
+        { name: "Tariff Accent", hex: "#BC6C14" },
+        { name: "Deep Navy", hex: "#000333" },
+        { name: "Body Gray", hex: "#363636" },
+        { name: "Muted Gray", hex: "#727272" },
+        { name: "Divider", hex: "#DFDFDF" },
+        { name: "Background", hex: "#FFFFFF" },
+      ],
+      editorial: {
+        primary: "#121212",
+        secondary: "#363636",
+        faint: "#727272",
+        nytBlue: "#326891",
+        background: "#FFFFFF",
+      },
+    },
+    architecture: {
+      framework: "Birdkit (Svelte/SvelteKit) embedded in vi-interactive (React shell)",
+      projectId: "2025-04-01-tariff-revenue-analysis",
+      hydrationId: "c069d52d-68cf-4000-a726-5acfd8161fa6",
+      hosting: "static01.nytimes.com/newsgraphics/2025-04-01-tariff-revenue-analysis/",
+      hierarchy: [
+        "div#story-top (vi-interactive React shell)",
+        "  header (headline, byline, metered sharetools/action chrome)",
+        "  div.storyline-nav (Tariffs and Trade facsimile rail)",
+        "  div.ai2html-container (responsive topper with separate mobile and desktop artboards)",
+        "  article.g-body (Franklin body copy with inline links)",
+        "  section.arrow-chart (trade-weighted average tariff-rate change among top 10 partners)",
+        "  section.tariff-table (sortable/collapsible tariff-rate table across 86 countries)",
+        "  p.reporting-credit (Ana Swanson contributed reporting.)",
+      ],
+      layoutTokens: {
+        bodyWidth: "600px",
+        topperMobileWidth: "320px",
+        topperDesktopWidth: "600px",
+        sectionHeading: "nyt-cheltenham 28px/500",
+        bodyCopy: "nyt-franklin 15px/20px #363636",
+        actionBar: "pill buttons with 1px #DFDFDF border, 30px radius",
+      },
+      cssFiles: [
+        "vi-interactive platform bundle",
+        "ai2html topper inline stylesheet",
+        "Birdkit/Svelte component CSS for chart and table modules",
+      ],
+      publicAssets: {
+        ai2htmlArtboards: {
+          mobile: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-01-tariff-revenue-analysis/c069d52d-68cf-4000-a726-5acfd8161fa6/_assets/topper-as-mobile.png",
+            width: 320,
+            desc: "Mobile tariff topper artboard (320×1179)",
+          },
+          desktop: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-01-tariff-revenue-analysis/c069d52d-68cf-4000-a726-5acfd8161fa6/_assets/topper-as-middle.png",
+            width: 600,
+            desc: "Desktop tariff topper artboard (600×2110)",
+          },
+        },
+        socialImages: [
+          { name: "facebookJumbo", url: "https://static01.nyt.com/images/2025/04/03/multimedia/2025-04-01-tariff-revenue-analysis-index/2025-04-01-tariff-revenue-analysis-index-facebookJumbo-v10.png", ratio: "1.91:1", desc: "Facebook/OG share image" },
+          { name: "video16x9-3000", url: "https://static01.nyt.com/images/2025/04/03/multimedia/2025-04-01-tariff-revenue-analysis-index/2025-04-01-tariff-revenue-analysis-index-videoSixteenByNine3000-v6.png", ratio: "16:9", width: 3000, desc: "Twitter card image" },
+          { name: "video16x9-1600", url: "https://static01.nyt.com/images/2025/04/03/multimedia/2025-04-01-tariff-revenue-analysis-index/2025-04-01-tariff-revenue-analysis-index-videoSixteenByNineJumbo1600-v12.png", ratio: "16:9", width: 1600, desc: "JSON-LD primary image" },
+          { name: "google4x3", url: "https://static01.nyt.com/images/2025/04/03/multimedia/2025-04-01-tariff-revenue-analysis-index/2025-04-01-tariff-revenue-analysis-index-googleFourByThree-v8.png", ratio: "4:3", width: 800, desc: "Google Discover image" },
+          { name: "square3x", url: "https://static01.nyt.com/images/2025/04/03/multimedia/2025-04-01-tariff-revenue-analysis-index/2025-04-01-tariff-revenue-analysis-index-mediumSquareAt3X-v9.png", ratio: "1:1", width: 1000, desc: "Square thumbnail" },
+        ],
+      },
+      tierNotes: {
+        excluded: [
+          "Advertising containers, ad labels, and ad-tech scripts are intentionally omitted by request.",
+        ],
+        tier2: [
+          {
+            name: "Share/save/gift/more action bar",
+            reason: "Visual chrome is recreated, but NYT account-aware state, gifting flows, and popup behaviors depend on product backends that are not part of the saved source bundle.",
+          },
+          {
+            name: "Tariffs and Trade storyline rail",
+            reason: "The navigation treatment is reproduced, but not the upstream NYT storyline CMS wiring behind those links.",
+          },
+          {
+            name: "Recirculation card shells",
+            reason: "The page references live editorial recommendation systems, but the saved bundle does not preserve a stable recommendation feed contract for faithful replay.",
+          },
+        ],
+        tier3: [
+          {
+            name: "vi-interactive platform shell",
+            reason: "Rendering, hydration, and orchestration belong to NYT platform infrastructure rather than the article-authored modules themselves.",
+          },
+          {
+            name: "Analytics, consent, and instrumentation",
+            reason: "Tracking, privacy, and observability scripts are operational layers, not reusable article components.",
+          },
+          {
+            name: "Authenticated save/gift/subscriber states",
+            reason: "These states require NYT identity, entitlement, and persistence services that are unavailable in the saved page snapshot.",
+          },
+          {
+            name: "Footer and sitewide utility shell",
+            reason: "Site information and legal chrome are documented as platform furniture rather than rebuilt as article-specific design-doc components.",
+          },
+        ],
+      },
+    },
+    contentBlocks: [
+      { type: "header" },
+      { type: "byline" },
+      {
+        type: "sharetools-bar",
+        tier: "tier-2-facsimile",
+        buttons: [
+          { label: "Share full article", kind: "gift" },
+          { label: "More sharing options", kind: "more" },
+          { label: "Save article", kind: "save" },
+        ],
+      },
+      {
+        type: "storyline",
+        title: "Tariffs and Trade",
+        links: [
+          { label: "Metals and Pharmaceuticals", href: "https://www.nytimes.com/2026/04/02/business/economy/trump-metal-pharmaceutical-tariffs.html" },
+          { label: "U.S.-E.U. Trade Deal", href: "https://www.nytimes.com/2026/03/26/world/europe/eu-trade-deal-us-european-parliament.html" },
+          { label: "Tariff Refunds", href: "https://www.nytimes.com/2026/03/12/us/politics/trump-tariff-refunds-delay.html" },
+          { label: "U.S. Trade Deficit", href: "https://www.nytimes.com/2026/03/12/business/economy/us-trade-deficit-january.html" },
+          { label: "Trade Investigation", href: "https://www.nytimes.com/2026/03/12/us/politics/trump-forced-labor-tariffs.html" },
+          { label: "Tariff Tracker", href: "https://www.nytimes.com/interactive/2026/business/economy/trump-tariff-tracker.html" },
+        ],
+      },
+      {
+        type: "ai2html",
+        title: "The cost of new tariffs on U.S. imports",
+        source: "Trade Partnership Worldwide analysis of Census Bureau trade data",
+        note: "Figures are rounded and may not add up exactly to the total tally. The figures provided for China, Mexico and Canada are for the announced tariffs that target those countries specifically; they are also subject to tariffs on autos, steel and aluminum.",
+        credit: "The New York Times",
+        overlaySet: "trump-tariffs-us-imports-topper",
+        artboards: {
+          mobile: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-01-tariff-revenue-analysis/c069d52d-68cf-4000-a726-5acfd8161fa6/_assets/topper-as-mobile.png",
+            width: 320,
+            height: 1179.42848,
+          },
+          desktop: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-01-tariff-revenue-analysis/c069d52d-68cf-4000-a726-5acfd8161fa6/_assets/topper-as-middle.png",
+            width: 600,
+            height: 2110.0002,
+          },
+        },
+      },
+      { type: "body-copy", html: "It will cost an additional $898 billion to bring shoes, TVs and all other imports into the United States, a new analysis of trade data shows, as President Trump enacts an expansive wave of tariffs on America\u2019s biggest trading partners." },
+      { type: "body-copy", html: "Since entering office in January, Mr. Trump has placed a growing number of import taxes on products from Canada, Mexico, China and other nations, in addition to a range of goods that come from anywhere in the world. On Wednesday, expansive tariffs on most nations went into effect, even as many countries were trying to <a href=\"https://www.nytimes.com/interactive/2025/04/07/business/economy/trump-tariffs-reaction-china-eu-canada.html\">bargain their way</a> out of the higher rates." },
+      { type: "body-copy", html: "In many cases, new tariffs are being placed on top of other new tariffs \u2014 part of one of the most aggressive American trade policies in a century." },
+      { type: "body-copy", html: "China, one of the few countries that has retaliated against the Trump administration\u2019s new tariffs, was hit with an additional 50 percent duty in addition to previously announced 34 percent tariffs. Combined, that puts China\u2019s new tariff rate to 104 percent. China is also subject to additional duties on many products, so the total import tax on some of its products could be even higher." },
+      { type: "body-copy", html: "If the new global rates were applied to everything the United States imported last year, the combined cost in tariffs to bring in all of those goods from around the world would be more than 10 times what companies paid in 2024, according to a calculation from Trade Partnership Worldwide, an economic research firm in Washington." },
+      { type: "body-copy", html: "In practice, trade patterns will likely change as a result of these policies, and countries may be granted exemptions as they negotiate with the Trump administration. But the magnitude of the increase in tariffs will likely remain high for most nations." },
+      { type: "body-copy", html: "\u201cThese are staggering high tariffs that will have a major impact on costs for a wide range of products,\u201d said Dan Anthony, president of Trade Partnership Worldwide. \u201cBetween the new rates and China-specific tariffs announced in February, cellphones alone would have faced $27.5 billion in extra import taxes based on these 2024 import values.\u201d" },
+      { type: "body-copy", html: "Because of the compounding nature of many of the tariffs, rates for importing goods vary wildly for different countries. China, which was already subject to higher tariffs during Mr. Trump\u2019s first term, jumped to nearly 106 percent from 11 percent. Mexico and Canada, which were spared by the recent round, jumped to 16 percent and 13 percent." },
+      { type: "body-copy", html: "Some countries were spared even further. Ireland, for example, was hit with a 20 percent tariff given to all European Union members, but carve outs in Mr. Trump\u2019s executive order for pharmaceutical goods \u2014 Ireland\u2019s major export to the United States \u2014 meant the country\u2019s average tariff rate increased minimally." },
+      {
+        type: "tariff-rate-arrow-chart",
+        title: "Change in trade-weighted average tariff rate",
+        leadin: "Among the 10 largest U.S. import partners",
+        source: "Trade Partnership Worldwide analysis of Census Bureau trade data",
+        credit: "The New York Times",
+      },
+      { type: "body-copy", html: "Many countries have retaliated with tariffs of their own on American goods, with threats of more to follow. But even as nations wage a diplomatic battle, some companies have been rushing to bring in goods from overseas before the new tariffs take effect. Others have been racing to secure exemptions. But for many, the new costs will be unavoidable." },
+      { type: "body-copy", html: "As companies and consumers will largely bear the higher cost of importing goods, Mr. Trump\u2019s trade policies could come with a large economic toll. Consumer sentiment has begun to fall, inflation is <a href=\"https://www.nytimes.com/2025/03/31/business/trump-tariffs-higher-prices.html\">expected to rise</a>, and global <a href=\"https://www.nytimes.com/2025/04/02/business/trump-tariffs-global-stock-markets.html\">stocks have been plunging</a>. Even Mr. Trump has suggested that his policies could cause a recession." },
+      { type: "body-copy", html: "Nevertheless, Mr. Trump has continued to suggest that more trade actions could follow." },
+      {
+        type: "tariff-rate-table",
+        title: "See how the average tariff rate has changed across countries",
+        leadin: "Change in trade-weighted average tariff rate among countries with $1 billion or more of imports into the U.S., sorted by largest increase",
+        source: "Trade Partnership Worldwide analysis of Census Bureau trade data",
+        credit: "The New York Times",
+        initialVisibleRows: 10,
+      },
+      { type: "reporting-credit", text: "Ana Swanson contributed reporting." },
+      { type: "author-bio" },
+    ],
+  },
+  /* ── NYT Interactive — Trump Tariffs Country Reactions ──────────── */
+  {
+    id: "trump-tariffs-reaction",
+    title: "No Big Stick: Many Tariff Targets Avoid Hitting Back",
+    url: "https://www.nytimes.com/interactive/2025/04/07/business/economy/trump-tariffs-reaction-china-eu-canada.html",
+    authors: ["Agnes Chang", "Lazaro Gamio", "Samuel Granados", "Lauren Leatherby"],
+    date: "2025-04-07",
+    section: "Business/Economy",
+    type: "interactive" as const,
+    description: "Just two of the 20 largest exporters to the United States have matched Mr. Trump\u2019s moves with new tariffs of their own.",
+    ogImage: "https://static01.nytimes.com/newsgraphics/2025-04-07-tariff-country-negotiations/00fe2fc6-24b7-4305-8c9f-ffe96ec408a1/_assets/trade-treemap-Artboard_1_copy.png",
+    tags: ["Tariff", "International Trade", "Donald Trump", "China", "Canada", "European Union", "Trade War", "vis-design"],
+    graphicsCount: 2,
+    figuresCount: 20,
+    tools: {
+      topper: "ai2html v0.121.1 (responsive treemap)",
+      charts: "none (custom Birdkit/Svelte status table)",
+      framework: "Svelte (SvelteKit) + vi-interactive platform (React shell)",
+      hosting: "static01.nytimes.com/newsgraphics/2025-04-07-tariff-country-negotiations/",
+    },
+    chartTypes: [
+      { type: "treemap", tool: "ai2html", topic: "20 largest US export trading partners — boxes sized by export value" },
+      { type: "status-table", tool: "Birdkit/Svelte", topic: "20-country tariff response tracker — Retaliated / Negotiating / Offered Concessions" },
+    ],
+    quoteSections: [],
+    /** Fonts — extracted from article HTML/CSS */
+    fonts: [
+      {
+        name: "nyt-franklin",
+        cssVar: "--g-franklin",
+        fullStack: '"nyt-franklin", helvetica, arial, sans-serif',
+        weights: [500, 700],
+        role: "Primary sans-serif — header byline, graphic labels, table text, status badges",
+        usedIn: [
+          "p.Byline (.g-header .g-byline): 14px/700/18px #363636",
+          "time.Timestamp: 13px/500/18px #363636",
+          "span.GraphicLabel (ai2html .g-pstyle): 11px/500/- #121212 (treemap country labels)",
+          "th.TableHeader (.g-table .g-th): 12px/700/- uppercase letter-spacing:0.04em #121212",
+          "td.TableCell (.g-table .g-td): 14px/500/20px #121212",
+          "span.StatusBadge (.g-retaliated): 11px/700/- letter-spacing:0.04em uppercase #fff bg:#B86200",
+          "span.StatusBadge (.g-trying-to-negotiate): 11px/700/- uppercase #fff bg:#4E9493",
+          "span.StatusBadge (.g-no-retaliation): 11px/700/- uppercase #666666",
+          "span.GraphicNote (.g-note): 12px/500/- #666666",
+          "span.GraphicCredit (.g-credit): 12px/500/- #666666",
+        ],
+      },
+      {
+        name: "nyt-cheltenham",
+        cssVar: "--g-chelt",
+        fullStack: 'nyt-cheltenham, cheltenham-fallback-georgia, georgia, "times new roman", times, serif',
+        weights: [500],
+        role: "Display headline — bold italic header in g-style-bolditalic g-theme-news",
+        usedIn: [
+          "h1.Headline (.g-header): 36px/500/40px font-style:italic text-align:left #121212 (desktop: 45px/50px)",
+        ],
+      },
+      {
+        name: "nyt-imperial",
+        cssVar: "--g-imperial",
+        fullStack: '"nyt-imperial", georgia, "times new roman", times, serif',
+        weights: [500],
+        role: "Body copy serif — lead paragraphs between the treemap and tariff-response table",
+        usedIn: [
+          "p.g-text: 20px/500/30px #121212 with NYT blue inline links",
+        ],
+      },
+    ],
+    /** Brand-specific font context */
+    brandFonts: {
+      editorial: ["nyt-cheltenham"],
+      graphics: ["nyt-franklin", "nyt-imperial"],
+      games: [],
+    },
+    /** Color palette — extracted from source HTML/CSS */
+    colors: {
+      statusColors: {
+        retaliated: "#B86200",
+        possibleRetaliation: "#B86200",
+        negotiating: "#4E9493",
+        noRetaliation: "#666666",
+        offeredConcessions: "#4E9493",
+      },
+      chartPalette: [
+        { name: "Body text gray", hex: "#666666" },
+        { name: "Retaliation orange", hex: "#B86200" },
+        { name: "Negotiation teal", hex: "#4E9493" },
+        { name: "White text", hex: "#FFFFFF" },
+        { name: "Light gray", hex: "#D3D3D3" },
+        { name: "Pale gray", hex: "#E8E8E8" },
+      ],
+      editorial: {
+        primary: "#121212",
+        secondary: "#363636",
+        faint: "#727272",
+        nytBlue: "#326891",
+        background: "#FFFFFF",
+      },
+    },
+    /** Birdkit framework architecture */
+    architecture: {
+      framework: "Birdkit (Svelte/SvelteKit) embedded in vi-interactive (React shell)",
+      projectId: "2025-04-07-tariff-country-negotiations",
+      hydrationId: "00fe2fc6-24b7-4305-8c9f-ffe96ec408a1",
+      hosting: "static01.nytimes.com/newsgraphics/2025-04-07-tariff-country-negotiations/",
+      hierarchy: [
+        "div#story-top (vi-interactive React shell)",
+        "  header.g-header.g-style-bolditalic.g-theme-news (article header)",
+        "    h1 (nyt-cheltenham bold italic)",
+        "    p.g-byline (nyt-franklin 700)",
+        "  div.g-body (body paragraphs — nyt-imperial)",
+        "  div.ai2html-container (treemap — responsive artboards)",
+        "    div.g-artboard[data-min-width=0] (mobile ≤599px)",
+        "      img.g-aiImg (treemap PNG)",
+        "    div.g-artboard[data-min-width=600] (desktop ≥600px)",
+        "      img.g-aiImg (treemap PNG)",
+        "  h3.g-subhed (section subheading — nyt-franklin 700)",
+        "  div.g-table (interactive country response table)",
+        "    div.g-row (20 rows: status badge + country + tariff % + exports + note)",
+      ],
+      layoutTokens: {
+        bodyWidth: "600px (--g-width-body)",
+        headerStyle: "bold italic — g-style-bolditalic (nyt-cheltenham 500 italic)",
+        headerTheme: "g-theme-news (standard news article treatment)",
+        treemapMobileWidth: "≤599px",
+        treemapDesktopWidth: "≥600px",
+        tableStatusSystem: "5-class: g-retaliated · g-threatening-retaliation · g-no-retaliation · g-trying-to-negotiate · g-offered-concessions",
+      },
+      cssFiles: [
+        "Birdkit CSS bundle (vi-interactive platform)",
+      ],
+      publicAssets: {
+        ai2htmlArtboards: {
+          mobile: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-07-tariff-country-negotiations/00fe2fc6-24b7-4305-8c9f-ffe96ec408a1/_assets/trade-treemap-Artboard_1.png",
+            width: 700,
+            desc: "Mobile treemap artboard (≤599px)",
+          },
+          desktop: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-07-tariff-country-negotiations/00fe2fc6-24b7-4305-8c9f-ffe96ec408a1/_assets/trade-treemap-Artboard_1_copy.png",
+            width: 1200,
+            desc: "Desktop treemap artboard (≥600px)",
+          },
+        },
+      },
+    },
+    contentBlocks: [
+      { type: "header" },
+      { type: "byline" },
+      {
+        type: "sharetools-bar",
+        buttons: [
+          { kind: "gift", label: "Share full article" },
+          { kind: "more", label: "More" },
+          { kind: "save", label: "Save" },
+        ],
+        tier: "tier-2-facsimile",
+      },
+      {
+        type: "ai2html",
+        title: "The 20 Largest Exporters to the United States",
+        note: "Boxes sized by value of exports to the United States. Only the 20 largest exporters to the U.S. are shown.",
+        source: "U.S. International Trade Commission",
+        credit: "The New York Times",
+        overlaySet: "trade-treemap",
+        artboards: {
+          mobile: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-07-tariff-country-negotiations/00fe2fc6-24b7-4305-8c9f-ffe96ec408a1/_assets/trade-treemap-Artboard_1.png",
+            width: 700,
+            height: 880,
+          },
+          desktop: {
+            url: "https://static01.nytimes.com/newsgraphics/2025-04-07-tariff-country-negotiations/00fe2fc6-24b7-4305-8c9f-ffe96ec408a1/_assets/trade-treemap-Artboard_1_copy.png",
+            width: 1200,
+            height: 900,
+          },
+        },
+      },
+      {
+        type: "body-copy",
+        html: "For now, most world leaders are trying to bargain their way out of the sweeping new American tariffs. Just two of the 20 largest exporters to the United States have countered them with new tariffs of their own.",
+      },
+      {
+        type: "body-copy",
+        html: "One was China, which said Friday that it would impose a 34 percent import tax on products coming from the United States. That prompted escalation from the Trump administration: Rescind the tax, it warned, or American tariffs on China would go up another 50 percent.",
+      },
+      {
+        type: "body-copy",
+        html: "The other was Canada, which last month placed tariffs on a variety of U.S. goods. The European Union, while signalling that it would prefer to negotiate, is said to be working to <a href=\"https://www.nytimes.com/2025/04/07/world/europe/europe-tariffs-trump-response.html\">finalize a list</a> of U.S. goods that it would target.",
+      },
+      {
+        type: "body-copy",
+        html: "Other economies — even large ones like Japan and South Korea — don’t have the same leverage, and many are <a href=\"https://www.nytimes.com/2025/04/07/us/politics/trump-tariffs-foreign-governments-negotiations.html\">offering concessions</a>. Some are offering to lower their own tariff rates as they try to reach an agreement with the Trump administration.",
+      },
+      {
+        type: "body-copy",
+        html: "But it’s unclear how much President Trump wants to negotiate, and a White House trade advisor <a href=\"https://www.nytimes.com/live/2025/04/07/business/trump-tariffs-stock-market/a-top-white-house-adviser-indicates-that-offers-from-trading-partners-wont-convince-trump-to-retreat?smid=url-share\">warned</a> on Monday that even lowering tariffs to zero would not be enough to get the United States to back down.",
+      },
+      { type: "subhed", text: "How major trade partners are responding" },
+      {
+        type: "tariff-country-table",
+        title: "Tariff Responses by Trading Partner",
+        source: "U.S. International Trade Commission",
+        noteText: "Goods from Canada and Mexico that fall under the U.S.M.C.A. trade pact — the agreement that replaced NAFTA — are not subject to the 25 percent tariffs.",
+      },
+      { type: "author-bio" },
+    ],
+  },
 ] as const;
+
+export function isAthleticArticle(article: (typeof ARTICLES)[number]): boolean {
+  return article.url.includes("/athletic/");
+}
+
+export const NYT_ARTICLES = ARTICLES.filter((article) => !isAthleticArticle(article));
+
+export const ATHLETIC_ARTICLES = ARTICLES.filter((article) => isAthleticArticle(article));
+
+export type ArticleReference = (typeof ARTICLES)[number];
+
+export type ArticleSocialImageReference = {
+  name: string;
+  url: string;
+  ratio?: string;
+  width?: number;
+  desc?: string;
+};
+
+const ARTICLE_SHARE_IMAGE_PRIORITY = [
+  "video16x9-3000",
+  "video16x9-1600",
+  "facebookJumbo",
+  "og-image",
+  "google4x3",
+  "square3x",
+] as const;
+
+export function getArticleSocialImages(article: ArticleReference): readonly ArticleSocialImageReference[] {
+  const publicAssets = (article as { architecture?: { publicAssets?: { socialImages?: readonly ArticleSocialImageReference[] } } }).architecture?.publicAssets;
+  if (publicAssets?.socialImages?.length) {
+    return publicAssets.socialImages;
+  }
+  return article.ogImage ? [{ name: "ogImage", url: article.ogImage }] : [];
+}
+
+export function getPreferredArticleShareImage(article: ArticleReference): ArticleSocialImageReference | null {
+  const socialImages = getArticleSocialImages(article);
+  for (const name of ARTICLE_SHARE_IMAGE_PRIORITY) {
+    const match = socialImages.find((image) => image.name === name);
+    if (match) {
+      return match;
+    }
+  }
+  return socialImages[0] ?? null;
+}
 
 /** Returns article sub-links for the sidebar "Pages" sub-section */
 export function getArticleSubLinks(): { slug: string; label: string }[] {
-  return ARTICLES.filter((a) => !a.url.includes("/athletic/")).map((a) => ({ slug: a.id, label: a.title }));
+  return NYT_ARTICLES.map((article) => ({ slug: article.id, label: article.title }));
 }
 
 /** Returns Athletic article sub-links for the sidebar "Pages" sub-section */
 export function getAthleticArticleSubLinks(): { slug: string; label: string }[] {
-  return ARTICLES.filter((a) => a.url.includes("/athletic/")).map((a) => ({ slug: a.id, label: a.title }));
+  return ATHLETIC_ARTICLES.map((article) => ({ slug: article.id, label: article.title }));
 }
 
 /* ── Game Articles (per-game design docs) ───────────────────────── */

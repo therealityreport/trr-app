@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { POST } from "@/app/api/admin/networks-streaming/sync/route";
@@ -33,7 +38,8 @@ describe("networks-streaming sync proxy route", () => {
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/shows/sync-networks-streaming",
     );
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
     process.env.TRR_API_URL = "https://backend.example.com";
   });
 
@@ -109,7 +115,7 @@ describe("networks-streaming sync proxy route", () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "POST",
       headers: {
-        Authorization: "Bearer service-role-secret",
+        Authorization: "Bearer test-admin-token",
         "Content-Type": "application/json",
         "x-trr-request-id": "req-1",
         "x-trr-tab-session-id": "tab-1",

@@ -81,7 +81,7 @@ describe("person refresh-images stream proxy route", () => {
     hydrateGettyPrefetchPayloadMock.mockImplementation(async (raw: string) => raw);
     cleanupStaleGettyPrefetchFilesMock.mockReset();
     cleanupStaleGettyPrefetchFilesMock.mockResolvedValue(0);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret";
     process.env.TRR_STREAM_CONNECT_ATTEMPT_TIMEOUT_MS = "20000";
     process.env.TRR_STREAM_CONNECT_HEARTBEAT_INTERVAL_MS = "2000";
     process.env.TRR_STREAM_CONNECT_PREFLIGHT_TIMEOUT_MS = "3000";

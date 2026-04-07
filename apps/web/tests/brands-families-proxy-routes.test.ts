@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { GET as GET_FAMILIES, POST as POST_FAMILIES } from "@/app/api/admin/trr-api/brands/families/route";
@@ -25,7 +30,8 @@ describe("brands families proxy routes", () => {
     vi.restoreAllMocks();
 
     requireAdminMock.mockResolvedValue(undefined);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
   });
 
   it("GET /families forwards query params", async () => {
@@ -43,7 +49,7 @@ describe("brands families proxy routes", () => {
     expect(fetchMock.mock.calls[0][0]).toContain("active_only=true");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       headers: {
-        Authorization: "Bearer service-role-secret",
+        Authorization: "Bearer test-admin-token",
       },
     });
   });

@@ -7,7 +7,7 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
-const BRAVO_ACCOUNT_MAP = [
+const NETWORK_ACCOUNT_MAP = [
   { platform: "Instagram", accounts: ["bravotv", "bravodailydish", "bravowwhl"] },
   { platform: "TikTok", accounts: ["bravotv", "bravowwhl"] },
   { platform: "Threads", accounts: ["bravotv", "bravowwhl"] },
@@ -15,7 +15,7 @@ const BRAVO_ACCOUNT_MAP = [
   { platform: "YouTube", accounts: ["bravo", "wwhl"] },
 ];
 
-export default function BravoContentDashboardPage() {
+export default function NetworkContentDashboardPage() {
   const { user, checking, hasAccess } = useAdminGuard();
 
   if (checking) {
@@ -60,13 +60,13 @@ export default function BravoContentDashboardPage() {
               <AdminBreadcrumbs
                 items={[
                   ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
-                  { label: "Bravo Content", href: "/social/bravo-content" },
+                  { label: "Network Content", href: "/social/bravo-content" },
                 ]}
                 className="mb-1"
               />
-              <h1 className="text-3xl font-bold text-zinc-900">Bravo Content</h1>
+              <h1 className="text-3xl font-bold text-zinc-900">Network Content</h1>
               <p className="text-sm text-zinc-500">
-                Official Bravo account analysis, episode comparisons, cast sentiment, and hashtag trends.
+                Shared network and streaming account analysis, episode comparisons, cast sentiment, and hashtag trends.
               </p>
             </div>
             <div className="flex gap-2">
@@ -88,10 +88,10 @@ export default function BravoContentDashboardPage() {
 
         <main className="mx-auto max-w-6xl space-y-6 px-6 py-8">
           <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-zinc-900">Account Mapping</h2>
-            <p className="mt-1 text-sm text-zinc-600">Current Bravo Content account set by platform.</p>
+            <h2 className="text-lg font-semibold text-zinc-900">Network Account Mapping</h2>
+            <p className="mt-1 text-sm text-zinc-600">Current shared network-account set by platform.</p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {BRAVO_ACCOUNT_MAP.map((entry) => (
+              {NETWORK_ACCOUNT_MAP.map((entry) => (
                 <div key={entry.platform} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">{entry.platform}</p>
                   <p className="mt-2 text-sm text-zinc-800">{entry.accounts.join(", ")}</p>

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { GET as getOptionSources } from "@/app/api/admin/trr-api/brands/logos/options/sources/route";
@@ -27,7 +32,8 @@ describe("brands logo option proxy routes", () => {
     vi.restoreAllMocks();
 
     requireAdminMock.mockResolvedValue(undefined);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
     process.env.BRAND_LOGO_ROUTING_V2 = "true";
   });
 
@@ -55,7 +61,7 @@ describe("brands logo option proxy routes", () => {
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({
-          Authorization: "Bearer service-role-secret",
+          Authorization: "Bearer test-admin-token",
         }),
       }),
     );
@@ -86,7 +92,7 @@ describe("brands logo option proxy routes", () => {
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer service-role-secret",
+          Authorization: "Bearer test-admin-token",
           "Content-Type": "application/json",
         }),
       }),
@@ -117,7 +123,7 @@ describe("brands logo option proxy routes", () => {
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({
-          Authorization: "Bearer service-role-secret",
+          Authorization: "Bearer test-admin-token",
         }),
       }),
     );
@@ -156,7 +162,7 @@ describe("brands logo option proxy routes", () => {
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer service-role-secret",
+          Authorization: "Bearer test-admin-token",
           "Content-Type": "application/json",
         }),
       }),

@@ -23,6 +23,17 @@ const localCodexPluginPath = resolve(
 const referencesRoot = resolve(skillRoot, "references");
 const scriptsDir = resolve("/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/scripts/design-docs");
 
+async function readOptionalFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 type ParsedSkillEntry = {
   section: "supporting" | "owned";
   skill: string;
@@ -95,8 +106,8 @@ describe("design-docs-agent skill parity", () => {
       readFile(claudeAdapterPath, "utf8"),
       readFile(claudePluginPath, "utf8"),
       readFile(codexPluginPath, "utf8"),
-      readFile(localCodexWrapperPath, "utf8"),
-      readFile(localCodexPluginPath, "utf8"),
+      readOptionalFile(localCodexWrapperPath),
+      readOptionalFile(localCodexPluginPath),
     ]);
 
     const entries = parseSkillsetYaml(yamlContent);
@@ -118,14 +129,16 @@ describe("design-docs-agent skill parity", () => {
         longDescription?: string;
       };
     };
-    const localCodexPlugin = JSON.parse(localCodexPluginContent) as {
-      name: string;
-      description?: string;
-      interface?: {
-        shortDescription?: string;
-        longDescription?: string;
-      };
-    };
+    const localCodexPlugin = localCodexPluginContent
+      ? (JSON.parse(localCodexPluginContent) as {
+          name: string;
+          description?: string;
+          interface?: {
+            shortDescription?: string;
+            longDescription?: string;
+          };
+        })
+      : null;
 
     expect(entries).toHaveLength(21);
     expect(entries.every((entry) => entry.status === "active")).toBe(true);
@@ -160,11 +173,13 @@ describe("design-docs-agent skill parity", () => {
     expect(codexPlugin.interface?.shortDescription).toBe(interfaceShortDescription);
     expect(codexPlugin.interface?.longDescription).toContain("agents/openai.yaml");
     expect(codexPlugin.interface?.longDescription).toContain("package SKILL.md");
-    expect(localCodexPlugin.name).toBe("design-docs-agent");
-    expect(localCodexWrapper).toContain("/Users/thomashulihan/Projects/TRR/.agents/skills/design-docs-agent/SKILL.md");
-    expect(localCodexWrapper).not.toContain("/Users/thomashulihan/Projects/TRR/TRR-APP/.agents/skills/design-docs-agent/SKILL.md");
-    expect(localCodexWrapper).toContain("sourceBundle");
-    expect(localCodexPlugin.interface?.shortDescription).toContain("saved source bundles");
+    if (localCodexWrapper && localCodexPlugin) {
+      expect(localCodexPlugin.name).toBe("design-docs-agent");
+      expect(localCodexWrapper).toContain("/Users/thomashulihan/Projects/TRR/.agents/skills/design-docs-agent/SKILL.md");
+      expect(localCodexWrapper).not.toContain("/Users/thomashulihan/Projects/TRR/TRR-APP/.agents/skills/design-docs-agent/SKILL.md");
+      expect(localCodexWrapper).toContain("sourceBundle");
+      expect(localCodexPlugin.interface?.shortDescription).toContain("saved source bundles");
+    }
 
     for (const referenceName of [
       "README.md",

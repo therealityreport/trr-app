@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -14,16 +15,20 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 import { POST } from "@/app/api/admin/trr-api/shows/[showId]/links/discover/stream/route";
 
 const BACKEND_STREAM_URL =
   "https://backend.example.com/api/v1/admin/shows/show-1/links/discover/stream";
 const BACKEND_HEALTH_URL = "https://backend.example.com/health";
 
-const makeRequest = () =>
+const makeRequest = (headers?: Record<string, string>) =>
   new NextRequest("http://localhost/api/admin/trr-api/shows/show-1/links/discover/stream", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(headers ?? {}) },
     body: JSON.stringify({ include_seasons: true, include_people: true }),
   });
 
@@ -31,10 +36,11 @@ describe("show links discover stream proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(BACKEND_STREAM_URL);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReturnValue("service-role-secret");
   });
 
   it("retries transient fetch errors and returns backend SSE stream", async () => {
@@ -91,5 +97,33 @@ describe("show links discover stream proxy route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(text).toContain("\"checkpoint\":\"backend_preflight_failed\"");
     expect(text).toContain("\"error_code\":\"BACKEND_UNRESPONSIVE\"");
+  });
+
+  it("forwards local execution preference header to backend stream", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response('event: complete\\ndata: {"status":"completed"}\\n\\n', {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(
+      makeRequest({ "x-trr-prefer-local-execution": "1" }),
+      { params: Promise.resolve({ showId: "show-1" }) }
+    );
+    await response.text();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const backendFetch = fetchMock.mock.calls[1];
+    expect(String(backendFetch?.[0])).toBe(BACKEND_STREAM_URL);
+    const forwardedHeaders = new Headers((backendFetch?.[1] as RequestInit | undefined)?.headers);
+    expect(forwardedHeaders.get("x-trr-prefer-local-execution")).toBe("1");
   });
 });
