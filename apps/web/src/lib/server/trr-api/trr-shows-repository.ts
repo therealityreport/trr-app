@@ -1121,6 +1121,7 @@ export type CastPhotoFallbackMode = "none" | "bravo";
 export interface CastPhotoLookupDiagnostics {
   media_links_query_ms: number;
   cast_photos_query_ms: number;
+  link_featured_images_query_ms: number;
   people_query_ms: number;
   bravo_links_query_ms: number;
   bravo_profile_fetch_ms: number;
@@ -1490,9 +1491,69 @@ async function getPreferredCastPhotoMap(
     }
   }
 
+  const unresolvedPersonIds = personIds.filter((personId) => !map.has(personId));
+  if (unresolvedPersonIds.length > 0) {
+    const linkFeaturedImagesQueryStart = Date.now();
+    try {
+      const linkFeaturedImagesResult = await pgQuery<{
+        person_id: string;
+        featured_image_url: string | null;
+      }>(
+        `SELECT
+           entity_id::text AS person_id,
+           NULLIF(BTRIM(metadata->>'featured_image_url'), '') AS featured_image_url
+         FROM core.entity_links
+         WHERE entity_type = 'person'
+           AND entity_id = ANY($1::uuid[])
+           AND status <> 'rejected'
+           AND link_kind = ANY($2::text[])
+           AND NULLIF(BTRIM(metadata->>'featured_image_url'), '') IS NOT NULL
+         ORDER BY
+           entity_id,
+           CASE
+             WHEN status = 'approved' THEN 0
+             WHEN status = 'pending' THEN 1
+             ELSE 2
+           END,
+           CASE
+             WHEN link_kind = 'bravo_profile' THEN 0
+             WHEN link_kind = 'imdb' THEN 1
+             WHEN link_kind = 'tmdb' THEN 2
+             WHEN link_kind = 'wikipedia' THEN 3
+             WHEN link_kind = 'wikidata' THEN 4
+             WHEN link_kind = 'fandom' THEN 5
+             ELSE 6
+           END,
+           COALESCE(confidence, 0) DESC,
+           updated_at DESC`,
+        [unresolvedPersonIds, ["bravo_profile", "imdb", "tmdb", "wikipedia", "wikidata", "fandom"]]
+      );
+
+      for (const row of linkFeaturedImagesResult.rows) {
+        if (map.has(row.person_id)) continue;
+        const candidateUrl = typeof row.featured_image_url === "string" ? row.featured_image_url.trim() : "";
+        if (!candidateUrl || !isLikelyImage(null, candidateUrl)) continue;
+        map.set(row.person_id, {
+          url: candidateUrl,
+          ...EMPTY_CAST_THUMBNAIL_FIELDS,
+        });
+      }
+    } catch (error) {
+      console.warn(
+        "[trr-shows-repository] getPreferredCastPhotoMap person link featured image lookup failed",
+        error
+      );
+    } finally {
+      if (diagnostics) {
+        diagnostics.link_featured_images_query_ms =
+          (diagnostics.link_featured_images_query_ms ?? 0) + (Date.now() - linkFeaturedImagesQueryStart);
+      }
+    }
+  }
+
   if (photoFallbackMode === "bravo") {
-    const unresolvedPersonIds = personIds.filter((personId) => !map.has(personId));
-    if (unresolvedPersonIds.length > 0) {
+    const bravoFallbackPersonIds = personIds.filter((personId) => !map.has(personId));
+    if (bravoFallbackPersonIds.length > 0) {
       const profileLinksByPerson = new Map<string, string>();
       const bravoLinksQueryStart = Date.now();
       try {
@@ -1512,7 +1573,7 @@ async function getPreferredCastPhotoMap(
              END,
              COALESCE(confidence, 0) DESC,
              updated_at DESC`,
-          [unresolvedPersonIds]
+          [bravoFallbackPersonIds]
         );
         for (const row of bravoLinksResult.rows) {
           if (profileLinksByPerson.has(row.person_id)) continue;
@@ -1543,7 +1604,7 @@ async function getPreferredCastPhotoMap(
           `SELECT id, full_name, profile_image_url, homepage
            FROM core.people
            WHERE id = ANY($1::uuid[])`,
-          [unresolvedPersonIds]
+          [bravoFallbackPersonIds]
         );
         for (const row of peopleResult.rows) {
           if (map.has(row.id)) continue;

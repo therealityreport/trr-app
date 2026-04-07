@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock, updateShowByIdMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, updateShowByIdMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   updateShowByIdMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -17,6 +18,10 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
   updateShowById: updateShowByIdMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/shows/[showId]/logos/featured/route";
@@ -46,7 +51,8 @@ describe("show featured logo proxy route", () => {
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue("http://backend.local/api/v1/admin/shows/logos/set-primary");
     updateShowByIdMock.mockResolvedValue(SHOW_RECORD);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-token";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
   });
 
   it("returns 400 when neither media_asset_id nor show_image_id is provided", async () => {
@@ -82,7 +88,7 @@ describe("show featured logo proxy route", () => {
     const requestInit = init as RequestInit;
     expect(requestInit.method).toBe("POST");
     expect((requestInit.headers as Record<string, string>).Authorization).toBe(
-      "Bearer service-role-token"
+      "Bearer test-admin-token"
     );
     expect(JSON.parse(String(requestInit.body))).toEqual({
       target_type: "show",

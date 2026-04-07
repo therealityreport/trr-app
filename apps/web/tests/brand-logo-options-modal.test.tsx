@@ -46,6 +46,7 @@ const jsonResponse = (status: number, body: unknown): Response =>
 function createFetchMock() {
   const discoverCalls: Array<Record<string, unknown>> = [];
   const selectCalls: Array<Record<string, unknown>> = [];
+  const assignCalls: Array<Record<string, unknown>> = [];
 
   mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -56,6 +57,7 @@ function createFetchMock() {
             {
               id: "saved-wordmark",
               source_provider: "manual_import_url",
+              source_url: "https://stored.example/wordmark.svg",
               discovered_from: "https://stored.example/wordmark.svg",
               hosted_logo_url: "https://stored.example/wordmark.svg",
               selected_roles: ["wordmark"],
@@ -65,17 +67,28 @@ function createFetchMock() {
             },
             {
               id: "saved-icon",
-              source_provider: "manual_import_url",
-              discovered_from: "https://stored.example/icon.svg",
-              hosted_logo_url: "https://stored.example/icon.svg",
-              selected_roles: ["icon"],
-              file_type: "svg",
+              source_provider: "wikimedia_commons",
+              source_url: "https://static.wikia.nocookie.net/logopedia/images/a/a1/test.png",
+              discovered_from: "https://static.wikia.nocookie.net/logopedia/images/a/a1/test.png",
+              hosted_logo_url: null,
+              selected_roles: [],
+              file_type: "png",
               width: 128,
               height: 128,
             },
           ],
           featured_assets: {
-            wordmark: null,
+            wordmark: {
+              id: "saved-wordmark",
+              source_provider: "manual_import_url",
+              source_url: "https://stored.example/wordmark.svg",
+              discovered_from: "https://stored.example/wordmark.svg",
+              hosted_logo_url: "https://stored.example/wordmark.svg",
+              selected_roles: ["wordmark"],
+              file_type: "svg",
+              width: 400,
+              height: 120,
+            },
             icon: null,
           },
           sources: [
@@ -126,6 +139,12 @@ function createFetchMock() {
       return Promise.resolve(jsonResponse(200, { selected: { id: "saved-new" }, summary: {} }));
     }
 
+    if (url.includes("/brands/logos/options/assign")) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      assignCalls.push(body);
+      return Promise.resolve(jsonResponse(200, { selected: { id: "saved-icon", logo_role: body.logo_role }, summary: {} }));
+    }
+
     if (url.includes("/brands/logos/options/source-query")) {
       return Promise.resolve(
         jsonResponse(200, {
@@ -151,7 +170,7 @@ function createFetchMock() {
     return Promise.resolve(jsonResponse(404, { error: `Unhandled request: ${url}` }));
   });
 
-  return { discoverCalls, selectCalls };
+  return { assignCalls, discoverCalls, selectCalls };
 }
 
 describe("BrandLogoOptionsModal", () => {
@@ -159,7 +178,7 @@ describe("BrandLogoOptionsModal", () => {
     mocks.fetchAdminWithAuth.mockReset();
   });
 
-  it("prefetches 20 candidates per source and removes the old feature-assignment UI", async () => {
+  it("prefetches 20 candidates per source and renders featured assignment targets again", async () => {
     const { discoverCalls } = createFetchMock();
 
     render(
@@ -170,6 +189,7 @@ describe("BrandLogoOptionsModal", () => {
         targetType="publication"
         targetKey="bravotv.com"
         targetLabel="Bravo"
+        defaultIconUrl="/api/admin/trr-api/brands/logos/options/preview?url=https%3A%2F%2Fbravotv.com%2Ffavicon.ico"
         onSaved={() => {}}
       />,
     );
@@ -180,11 +200,14 @@ describe("BrandLogoOptionsModal", () => {
       expect(discoverCalls.length).toBeGreaterThan(0);
     });
     expect(discoverCalls[0]?.limit).toBe(20);
-    expect(screen.queryByText("Featured Wordmark")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Set as Wordmark" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Set as Icon" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
-    expect(screen.queryByText(/Drag into the wordmark or icon frame/i)).toBeNull();
+    expect(screen.getByText("Featured Wordmark")).toBeInTheDocument();
+    expect(screen.getByText("Featured Icon")).toBeInTheDocument();
+    expect(screen.getByText(/Drag a result card into either frame/i)).toBeInTheDocument();
+    expect(screen.getByAltText("Bravo featured wordmark")).toHaveAttribute("src", "https://stored.example/wordmark.svg");
+    expect(screen.getByAltText("Bravo featured icon")).toHaveAttribute(
+      "src",
+      "/api/admin/trr-api/brands/logos/options/preview?url=https%3A%2F%2Fbravotv.com%2Ffavicon.ico",
+    );
   });
 
   it("loads 20 more candidates when load more is pressed", async () => {
@@ -228,6 +251,7 @@ describe("BrandLogoOptionsModal", () => {
         targetType="publication"
         targetKey="bravotv.com"
         targetLabel="Bravo"
+        defaultIconUrl="/api/admin/trr-api/brands/logos/options/preview?url=https%3A%2F%2Fbravotv.com%2Ffavicon.ico"
         onSaved={() => {}}
       />,
     );
@@ -237,6 +261,11 @@ describe("BrandLogoOptionsModal", () => {
     const resultsPanel = await screen.findByTestId("brand-logo-results-panel");
     expect(within(resultsPanel).getAllByText("Saved library asset")).toHaveLength(2);
     expect(within(resultsPanel).getAllByAltText("Bravo option")).toHaveLength(2);
+    const savedImages = within(resultsPanel).getAllByAltText("Bravo option");
+    expect(savedImages[1]).toHaveAttribute(
+      "src",
+      "/api/admin/trr-api/brands/logos/options/preview?url=https%3A%2F%2Fstatic.wikia.nocookie.net%2Flogopedia%2Fimages%2Fa%2Fa1%2Ftest.png",
+    );
   });
 
   it("persists only selected candidates when save selected is pressed", async () => {
@@ -250,6 +279,7 @@ describe("BrandLogoOptionsModal", () => {
         targetType="publication"
         targetKey="bravotv.com"
         targetLabel="Bravo"
+        defaultIconUrl="/api/admin/trr-api/brands/logos/options/preview?url=https%3A%2F%2Fbravotv.com%2Ffavicon.ico"
         onSaved={() => {}}
       />,
     );
@@ -267,5 +297,59 @@ describe("BrandLogoOptionsModal", () => {
     });
     expect(selectCalls[0]?.set_featured).toBe(false);
     expect(selectCalls[1]?.set_featured).toBe(true);
+  });
+
+  it("assigns a dragged candidate into the featured icon frame", async () => {
+    const { assignCalls } = createFetchMock();
+
+    render(
+      <BrandLogoOptionsModal
+        isOpen
+        onClose={() => {}}
+        preferredUser={null}
+        targetType="publication"
+        targetKey="bravotv.com"
+        targetLabel="Bravo"
+        defaultIconUrl="/api/admin/trr-api/brands/logos/options/preview?url=https%3A%2F%2Fbravotv.com%2Ffavicon.ico"
+        onSaved={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "logos1000 (40)" }));
+
+    const resultsPanel = await screen.findByTestId("brand-logo-results-panel");
+    const candidateCard = within(resultsPanel).getAllByRole("button", { name: /Bravo option/i })[0];
+    const iconFrame = screen.getByTestId("featured-dropzone-icon");
+    const transfer = {
+      data: {} as Record<string, string>,
+      setData(type: string, value: string) {
+        this.data[type] = value;
+      },
+      getData(type: string) {
+        return this.data[type] ?? "";
+      },
+      clearData() {
+        this.data = {};
+      },
+      dropEffect: "move",
+      effectAllowed: "move",
+    };
+
+    fireEvent.dragStart(candidateCard, { dataTransfer: transfer });
+    fireEvent.dragOver(iconFrame, { dataTransfer: transfer });
+    fireEvent.drop(iconFrame, { dataTransfer: transfer });
+
+    await waitFor(() => {
+      expect(assignCalls).toHaveLength(1);
+    });
+    expect(assignCalls[0]).toMatchObject({
+      target_type: "publication",
+      target_key: "bravotv.com",
+      target_label: "Bravo",
+      logo_role: "icon",
+      candidate: {
+        source_provider: "logos1000",
+      },
+    });
   });
 });

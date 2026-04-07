@@ -20,6 +20,7 @@ import {
 export const dynamic = "force-dynamic";
 
 type CastRosterMode = "episode_evidence" | "imdb_show_membership";
+type CastEligibilityMode = "default" | "links";
 
 interface RouteParams {
   params: Promise<{ showId: string }>;
@@ -62,6 +63,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const rosterMode: CastRosterMode =
       rosterModeRaw === "imdb_show_membership" ? "imdb_show_membership" : "episode_evidence";
     const photoFallbackMode = parsePhotoFallbackMode(searchParams.get("photo_fallback"));
+    const eligibilityModeRaw = String(searchParams.get("eligibility_mode") ?? "").trim().toLowerCase();
+    const eligibilityMode: CastEligibilityMode = eligibilityModeRaw === "links" ? "links" : "default";
 
     const payload = await getOrCreateRouteResponsePromise(
       TRR_SHOW_CAST_CACHE_NAMESPACE,
@@ -79,6 +82,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         if (excludeZeroEpisodeMembers) upstreamParams.set("exclude_zero_episode_members", "true");
         if (requireImage === "true" || requireImage === "1") upstreamParams.set("requireImage", "true");
         if (!includePhotos) upstreamParams.set("include_photos", "false");
+        if (eligibilityMode === "links") upstreamParams.set("eligibility_mode", "links");
 
         const upstream = await fetchAdminBackendJson(
           `/admin/trr-api/shows/${showId}/cast?${upstreamParams.toString()}`,

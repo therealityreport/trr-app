@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent as ReactDragEvent } from "react";
 import type { User } from "firebase/auth";
 import AdminModal from "@/components/admin/AdminModal";
 import { Button } from "@/components/ui/button";
@@ -105,6 +106,7 @@ type BrandLogoOptionsModalProps = {
   targetType: ModalTargetType;
   targetKey: string;
   targetLabel: string;
+  defaultIconUrl?: string | null;
   onSaved: () => Promise<void> | void;
 };
 
@@ -115,6 +117,9 @@ type LogoCardProps = {
   targetLabel: string;
   onClick?: () => void;
   disabled?: boolean;
+  draggable?: boolean;
+  onDragStart?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDragEnd?: () => void;
 };
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
@@ -139,7 +144,7 @@ const pickDisplayUrl = (row: LogoOptionBase): string | null => {
   const hostedUrl = row.hosted_logo_url || row.hosted_logo_black_url || row.hosted_logo_white_url || null;
   if (hostedUrl) return hostedUrl;
 
-  if (row.option_kind === "candidate" && row.source_provider === "logos_fandom" && row.source_url) {
+  if (row.source_url && isHttpUrl(row.source_url)) {
     return buildBrandLogoPreviewProxyUrl(row.source_url);
   }
 
@@ -236,6 +241,13 @@ const getOptionPreferredRole = (option: SavedLogoAsset | DiscoverCandidate): Bra
   }
   return "wordmark";
 };
+
+const toFeaturedAsset = (option: SavedLogoAsset | DiscoverCandidate, role: BrandLogoRole): SavedLogoAsset => ({
+  ...option,
+  logo_role: role,
+  detected_logo_role: role,
+  selected_roles: [role],
+});
 
 async function parseErrorPayload(response: Response): Promise<string> {
   const fallback = `Request failed (${response.status})`;
@@ -424,6 +436,9 @@ function LogoCard({
   targetLabel,
   onClick,
   disabled = false,
+  draggable = false,
+  onDragStart,
+  onDragEnd,
 }: LogoCardProps) {
   const metadataBits = [
     option.file_type ? option.file_type.toUpperCase() : null,
@@ -446,6 +461,9 @@ function LogoCard({
         aria-label={onClick ? `${targetLabel} option${selected ? " selected" : ""}` : undefined}
         tabIndex={onClick ? 0 : undefined}
         onClick={disabled ? undefined : onClick}
+        draggable={draggable && !disabled}
+        onDragStart={disabled ? undefined : onDragStart}
+        onDragEnd={onDragEnd}
         onKeyDown={(event) => {
           if (!onClick || disabled) return;
           if (event.key === "Enter" || event.key === " ") {
@@ -456,6 +474,7 @@ function LogoCard({
         className={joinClassNames(
           "rounded-xl outline-none",
           onClick ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2" : "",
+          draggable ? "cursor-grab active:cursor-grabbing" : "",
           disabled ? "cursor-not-allowed opacity-70" : "",
         )}
       >
@@ -505,6 +524,7 @@ export default function BrandLogoOptionsModal({
   targetType,
   targetKey,
   targetLabel,
+  defaultIconUrl = null,
   onSaved,
 }: BrandLogoOptionsModalProps) {
   const includeRelated = targetType === "publication" || targetType === "social";
@@ -516,6 +536,7 @@ export default function BrandLogoOptionsModal({
   const [sources, setSources] = useState<SourceSummary[]>([]);
   const [activeSource, setActiveSource] = useState<string | null>(null);
   const [savedAssets, setSavedAssets] = useState<SavedLogoAsset[]>([]);
+  const [featuredAssets, setFeaturedAssets] = useState<Partial<Record<BrandLogoRole, SavedLogoAsset | null>>>({});
   const [discoveredOptionsBySource, setDiscoveredOptionsBySource] = useState<Record<string, DiscoverCandidate[]>>({});
   const [selectedOptionIdsBySource, setSelectedOptionIdsBySource] = useState<Record<string, string[]>>({});
   const [discoverOffsetBySource, setDiscoverOffsetBySource] = useState<Record<string, number>>({});
@@ -536,6 +557,7 @@ export default function BrandLogoOptionsModal({
   const [sourceSuggestionsBySource, setSourceSuggestionsBySource] = useState<Record<string, SourceSuggestion[]>>({});
   const [sourceSuggestionsLoadingBySource, setSourceSuggestionsLoadingBySource] = useState<Record<string, boolean>>({});
   const [sourceSuggestionsErrorBySource, setSourceSuggestionsErrorBySource] = useState<Record<string, string | null>>({});
+  const [draggedOptionId, setDraggedOptionId] = useState<string | null>(null);
   const sourcesRef = useRef<SourceSummary[]>([]);
   const discoverOffsetBySourceRef = useRef<Record<string, number>>({});
   const discoveredOptionsBySourceRef = useRef<Record<string, DiscoverCandidate[]>>({});
@@ -581,8 +603,15 @@ export default function BrandLogoOptionsModal({
     options?: { preferredActiveSource?: string | null },
   ) => {
     const nextSavedAssets = Array.isArray(payload.saved_assets) ? payload.saved_assets : [];
+    const nextFeaturedAssets = payload.featured_assets && typeof payload.featured_assets === "object"
+      ? {
+          wordmark: payload.featured_assets.wordmark ?? null,
+          icon: payload.featured_assets.icon ?? null,
+        }
+      : {};
     const nextSources = Array.isArray(payload.sources) ? payload.sources : [];
     setSavedAssets(nextSavedAssets);
+    setFeaturedAssets(nextFeaturedAssets);
     setSources(nextSources);
     setSharedSlugs(deriveSharedSlugsFromSources(nextSources));
     setDiscoverHasMoreBySource(
@@ -1163,6 +1192,69 @@ export default function BrandLogoOptionsModal({
     return true;
   }, [fetchModalPayloadWithFallback, hydrateFromModalPayload, prefetchSourceCandidates]);
 
+  const assignOptionToRole = useCallback(async (role: BrandLogoRole, option: SavedLogoAsset | DiscoverCandidate) => {
+    if (saving) return;
+
+    const previousFeaturedAssets = featuredAssets;
+    setSaving(true);
+    setError(null);
+    setFeaturedAssets((previous) => ({
+      ...previous,
+      [role]: toFeaturedAsset(option, role),
+    }));
+
+    try {
+      const body: Record<string, unknown> = {
+        target_type: targetType,
+        target_key: targetKey,
+        target_label: targetLabel,
+        logo_role: role,
+      };
+      if ((option.option_kind || "stored") === "candidate") {
+        body.candidate = {
+          source_url: option.source_url,
+          source_provider: option.source_provider || null,
+          discovered_from: option.discovered_from || null,
+        };
+      } else {
+        body.asset_id = option.id;
+      }
+
+      const response = await fetchWithAuth("/api/admin/trr-api/brands/logos/options/assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        throw new Error(normalizeLogoOptionsErrorMessage(await parseErrorPayload(response)));
+      }
+
+      await refreshModalAfterMutation(activeSource);
+      setHasPersistedChanges(true);
+      notifySaved();
+    } catch (assignError) {
+      setFeaturedAssets(previousFeaturedAssets);
+      setError(
+        normalizeLogoOptionsErrorMessage(
+          assignError instanceof Error ? assignError.message : "Failed to assign featured logo option",
+        ),
+      );
+    } finally {
+      setSaving(false);
+      setDraggedOptionId(null);
+    }
+  }, [
+    activeSource,
+    featuredAssets,
+    fetchWithAuth,
+    notifySaved,
+    refreshModalAfterMutation,
+    saving,
+    targetKey,
+    targetLabel,
+    targetType,
+  ]);
+
   const onSaveSelected = useCallback(async () => {
     if (saving) return;
     if (!activeSource || activeSource === SAVED_SOURCE_PROVIDER || activeSelectionIds.length === 0) {
@@ -1572,6 +1664,80 @@ export default function BrandLogoOptionsModal({
             ) : null}
           </div>
 
+          <div className="border-b border-zinc-200 bg-white px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Featured Assets</p>
+                <p className="text-sm text-zinc-600">Drag a result card into either frame to make it the featured wordmark or icon.</p>
+              </div>
+              {draggedOptionId ? (
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-cyan-700">Drop on a frame to assign</p>
+              ) : null}
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {(["wordmark", "icon"] as const).map((role) => {
+                const featuredAsset = featuredAssets[role] ?? null;
+                const displayUrl = featuredAsset
+                  ? pickDisplayUrl(featuredAsset)
+                  : role === "icon"
+                    ? defaultIconUrl || PLACEHOLDER_ICON_PATH
+                    : PLACEHOLDER_ICON_PATH;
+                const resolvedDisplayUrl = displayUrl || PLACEHOLDER_ICON_PATH;
+                const helperText = featuredAsset
+                  ? `Featured ${role} from ${formatProviderLabel(featuredAsset.source_provider)}`
+                  : role === "icon" && defaultIconUrl
+                    ? "Using the site favicon until a featured icon is selected."
+                    : "Drop a result here to feature it.";
+                return (
+                  <div
+                    key={role}
+                    data-testid={`featured-dropzone-${role}`}
+                    onDragOver={(event) => {
+                      if (!draggedOptionId || saving) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const optionId = event.dataTransfer.getData("text/plain") || draggedOptionId;
+                      if (!optionId) return;
+                      const option = optionsById.get(optionId);
+                      if (!option) return;
+                      void assignOptionToRole(role, option);
+                    }}
+                    className={joinClassNames(
+                      "rounded-2xl border bg-zinc-50 p-3 transition",
+                      draggedOptionId && !saving
+                        ? "border-cyan-400 ring-1 ring-cyan-200"
+                        : "border-zinc-200",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                        {role === "wordmark" ? "Featured Wordmark" : "Featured Icon"}
+                      </p>
+                      {featuredAsset ? (
+                        <span className="rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-semibold text-cyan-800">
+                          saved
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="relative mt-3 h-24 overflow-hidden rounded-xl border border-zinc-200 bg-white">
+                      <Image
+                        src={resolvedDisplayUrl}
+                        alt={`${targetLabel} featured ${role}`}
+                        fill
+                        className="object-contain p-2"
+                        unoptimized
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-zinc-500">{helperText}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="flex min-h-0 flex-1 flex-col px-4 py-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1619,7 +1785,14 @@ export default function BrandLogoOptionsModal({
                       isSaved={isSaved}
                       selected={isSelected}
                       targetLabel={targetLabel}
+                      draggable
                       disabled={saving || loading || activeSourceBusy}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData("text/plain", option.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        setDraggedOptionId(option.id);
+                      }}
+                      onDragEnd={() => setDraggedOptionId(null)}
                       onClick={
                         isSaved || !activeSource
                           ? undefined

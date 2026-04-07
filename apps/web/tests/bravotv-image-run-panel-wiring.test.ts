@@ -9,7 +9,7 @@ describe("bravotv image run panel wiring", () => {
   it("keeps person gallery bravotv support inside the main image pipeline", () => {
     const contents = read("../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx");
 
-    expect(contents).toContain('type BackendGetImagesSource = "nbcumv" | "bravotv" | "imdb" | "tmdb"');
+    expect(contents).toContain('type BackendGetImagesSource = "getty" | "nbcumv" | "bravotv" | "imdb" | "tmdb"');
     expect(contents).toContain('const GET_IMAGES_SOURCE_SELECTION_MAP');
     expect(contents).toContain('all: ["nbcumv", "imdb", "tmdb"]');
     expect(contents).toContain("fetchPhotos()");

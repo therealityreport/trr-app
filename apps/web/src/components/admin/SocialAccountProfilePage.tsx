@@ -24,6 +24,7 @@ import {
   type SocialAccountCatalogRunProgressLogEntry,
   type SocialAccountCatalogRunProgressSnapshot,
   type SocialAccountCatalogRunProgressStage,
+  type SocialAccountOperationalAlert,
   type SocialAccountProfileHashtag,
   type SocialAccountProfileHashtagAssignment,
   type SocialAccountProfileHashtagTimeline,
@@ -177,6 +178,7 @@ const CATALOG_GAP_ANALYSIS_BACKOFF_BASE_MS = 2_000;
 const CATALOG_GAP_ANALYSIS_BACKOFF_MAX_MS = 30_000;
 const HASHTAG_WINDOW_OPTIONS = [
   { value: "all", label: "All Time" },
+  { value: "7d", label: "This Week" },
   { value: "30d", label: "This Month" },
   { value: "365d", label: "This Year" },
 ] as const;
@@ -470,6 +472,20 @@ const formatRunStatusLabel = (value?: string | null): string => {
     .join(" ");
 };
 
+const getCatalogRunDisplayStatusLabel = (
+  value?: string | null,
+  progress?: SocialAccountCatalogRunProgressSnapshot | null,
+): string => {
+  const runState = String(progress?.run_state || "").trim().toLowerCase();
+  if (runState === "discovering") return "Discovering";
+  if (runState === "fetching") return "Fetching";
+  if (runState === "classifying") return "Classifying";
+  if (progress?.scrape_complete && progress?.classify_incomplete) {
+    return "Classifying";
+  }
+  return formatRunStatusLabel(value);
+};
+
 const formatRunStageLabel = (
   value?: string | null,
   options?: { frontierMode?: boolean; singleRunnerFallback?: boolean },
@@ -604,6 +620,7 @@ const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot
   const retryingDispatchJobs = Number(progress?.dispatch_health?.retrying_dispatch_jobs ?? 0);
   const staleDispatchFailedJobs = Number(progress?.dispatch_health?.stale_dispatch_failed_jobs ?? 0);
   const runStatus = normalizeCatalogRunStatus(progress?.run_status);
+  const runState = normalizeCatalogRunState(progress?.run_state);
   if (staleDispatchFailedJobs > 0) {
     return "Remote dispatch failed";
   }
@@ -612,6 +629,21 @@ const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot
   }
   if (retryingDispatchJobs > 0) {
     return "Retrying remote dispatch";
+  }
+  if (runState === "discovering") {
+    return "Bootstrapping history";
+  }
+  if (runState === "fetching") {
+    return "Fetching catalog posts";
+  }
+  if (runState === "classifying") {
+    return "Classifying posts";
+  }
+  if (runState === "completed") {
+    return "Catalog fetch complete";
+  }
+  if (progress?.scrape_complete) {
+    return progress?.classify_incomplete ? "Classifying posts" : "Catalog fetch complete";
   }
   if (runStatus === "queued" && modalPendingJobs > 0) {
     return "Waiting for Modal capacity";
@@ -630,9 +662,6 @@ const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot
     String(progress?.worker_runtime?.runner_strategy || "")
       .trim()
       .toLowerCase() === "single_runner_fallback";
-  if (progress?.scrape_complete) {
-    return progress?.classify_incomplete ? "Catalog fetch complete" : "Catalog fetch complete";
-  }
   const discovery = progress?.discovery;
   const frontier = progress?.frontier;
   const activeDiscoveryJobs = Number(progress?.stages?.shared_account_discovery?.jobs_active ?? 0);
@@ -676,6 +705,54 @@ const normalizeCatalogRunStatus = (value?: string | null): string => {
   return String(value || "").trim().toLowerCase();
 };
 
+const normalizeCatalogRunState = (value?: string | null): string => {
+  return String(value || "").trim().toLowerCase();
+};
+
+const resolveActiveCatalogSourceScope = (
+  summary?: SocialAccountProfileSummary | null,
+  progress?: SocialAccountCatalogRunProgressSnapshot | null,
+): string => {
+  const progressScope = String(progress?.source_scope || "").trim().toLowerCase();
+  if (progressScope) return progressScope;
+  const sourceStatusRows = Array.isArray(summary?.source_status) ? summary.source_status : [];
+  for (const row of sourceStatusRows) {
+    const scope = String((row as Record<string, unknown>).source_scope || "").trim().toLowerCase();
+    if (scope) return scope;
+  }
+  return "bravo";
+};
+
+const resolveNetworkProfileName = (
+  summary?: SocialAccountProfileSummary | null,
+  progress?: SocialAccountCatalogRunProgressSnapshot | null,
+): string | null => {
+  for (const candidate of [summary?.network_name, progress?.network_name, progress?.shared_profile?.network_name]) {
+    const value = String(candidate || "").trim();
+    if (value) return value;
+  }
+  const sourceStatusRows = Array.isArray(summary?.source_status) ? summary.source_status : [];
+  for (const row of sourceStatusRows) {
+    const networkName = String((row as Record<string, unknown>).network_name || "").trim();
+    if (networkName) return networkName;
+  }
+  return null;
+};
+
+const getOperationalAlertTone = (severity?: string | null): string => {
+  const normalized = String(severity || "").trim().toLowerCase();
+  if (normalized === "error") return "border-red-200 bg-red-50 text-red-700";
+  if (normalized === "info") return "border-sky-200 bg-sky-50 text-sky-700";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+};
+
+const formatOperationalAlertLabel = (alert: SocialAccountOperationalAlert): string =>
+  String(alert.code || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (token) => token.toUpperCase());
+
 const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgressSnapshot | null): {
   tone: "amber" | "red";
   text: string;
@@ -694,10 +771,16 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
   const latestRemoteBlockedReason = String(progress?.dispatch_health?.latest_remote_blocked_reason || "").trim();
   const modalEnvironment = String(progress?.dispatch_health?.modal_environment || "").trim();
   const modalTargetLabel = formatModalTargetLabel(progress);
+  const runState = normalizeCatalogRunState(progress?.run_state);
+  const backgroundClassify = Boolean(runState === "classifying" || (progress?.scrape_complete && progress?.classify_incomplete));
+  const formatJobLabel = (count: number): string =>
+    backgroundClassify
+      ? `${formatInteger(count)} classif${count === 1 ? "y job" : "y jobs"} from this run`
+      : `${formatInteger(count)} queued job${count === 1 ? "" : "s"}`;
   if (staleDispatchFailedJobs > 0) {
     return {
       tone: "red",
-      text: `${formatInteger(staleDispatchFailedJobs)} queued job${staleDispatchFailedJobs === 1 ? "" : "s"} exhausted ${
+      text: `${formatJobLabel(staleDispatchFailedJobs)} exhausted ${
         maxRetries > 0 ? formatInteger(maxRetries) : "the allowed"
       } remote dispatch retr${maxRetries === 1 ? "y" : "ies"} before any Modal worker claimed them. Cancel this run before retrying.`,
     };
@@ -707,7 +790,7 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
     const targetBits = [modalTargetLabel, modalEnvironment ? `env ${modalEnvironment}` : null].filter(Boolean).join(" in ");
     return {
       tone: "red",
-      text: `${formatInteger(dispatchBlockedJobs)} queued job${dispatchBlockedJobs === 1 ? "" : "s"} ${
+      text: `${formatJobLabel(dispatchBlockedJobs)} ${
         dispatchBlockedJobs === 1 ? "is" : "are"
       } blocked before claim. ${detail}${targetBits ? ` Target: ${targetBits}.` : ""}`,
     };
@@ -715,35 +798,35 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
   if (retryingDispatchJobs > 0) {
     return {
       tone: "amber",
-      text: `${formatInteger(retryingDispatchJobs)} job${retryingDispatchJobs === 1 ? "" : "s"} ${
+      text: `${backgroundClassify ? formatJobLabel(retryingDispatchJobs) : `${formatInteger(retryingDispatchJobs)} job${retryingDispatchJobs === 1 ? "" : "s"}`} ${
         retryingDispatchJobs === 1 ? "is" : "are"
       } retrying remote dispatch after an unclaimed Modal lease expired.`,
     };
   }
-  if (normalizeCatalogRunStatus(progress?.run_status) === "queued" && modalPendingJobs > 0) {
+  if ((runState === "classifying" || normalizeCatalogRunStatus(progress?.run_status) === "queued") && modalPendingJobs > 0) {
     return {
       tone: "amber",
-      text: `${formatInteger(modalPendingJobs)} queued job${modalPendingJobs === 1 ? "" : "s"} ${
+      text: `${formatJobLabel(modalPendingJobs)} ${
         modalPendingJobs === 1 ? "is" : "are"
       } already dispatched to Modal and waiting for capacity${
         remoteInvocationCheckedAt ? ` as of ${formatDateTime(remoteInvocationCheckedAt)}` : ""
       }.`,
     };
   }
-  if (normalizeCatalogRunStatus(progress?.run_status) === "queued" && modalRunningUnclaimedJobs > 0) {
+  if ((runState === "classifying" || normalizeCatalogRunStatus(progress?.run_status) === "queued") && modalRunningUnclaimedJobs > 0) {
     return {
       tone: "amber",
-      text: `${formatInteger(modalRunningUnclaimedJobs)} queued job${modalRunningUnclaimedJobs === 1 ? "" : "s"} ${
+      text: `${formatJobLabel(modalRunningUnclaimedJobs)} ${
         modalRunningUnclaimedJobs === 1 ? "is" : "are"
       } already running in Modal and waiting to claim the database job${
         remoteInvocationCheckedAt ? ` as of ${formatDateTime(remoteInvocationCheckedAt)}` : ""
       }.`,
     };
   }
-  if (normalizeCatalogRunStatus(progress?.run_status) === "queued" && queuedUnclaimedJobs > 0) {
+  if ((runState === "classifying" || normalizeCatalogRunStatus(progress?.run_status) === "queued") && queuedUnclaimedJobs > 0) {
     return {
       tone: "amber",
-      text: `${formatInteger(queuedUnclaimedJobs)} queued job${queuedUnclaimedJobs === 1 ? "" : "s"} ${
+      text: `${formatJobLabel(queuedUnclaimedJobs)} ${
         queuedUnclaimedJobs === 1 ? "is" : "are"
       } waiting for a Modal worker claim${latestDispatchRequestedAt ? ` since ${formatDateTime(latestDispatchRequestedAt)}` : ""}.`,
     };
@@ -1246,7 +1329,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [activeTab, catalogFilter, catalogPage, checking, fetchAdminWithAuth, handle, hasAccess, platform, summaryUninitialized, supportsCatalog, user]);
 
   useEffect(() => {
-    const shouldLoadHashtags = activeTab === "hashtags";
+    const shouldLoadHashtags = activeTab === "hashtags" || activeTab === "stats";
     if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
       return;
     }
@@ -1503,19 +1586,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogGapAnalysisRequestNonce((current) => current + 1);
   }, [catalogGapAnalysis]);
 
-  const displayedStatsHashtags = useMemo(() => {
-    if (activeTab === "stats" && platform === "instagram") {
-      return summary?.top_hashtags ?? [];
-    }
-    if (hashtags.length > 0 || hashtagWindow !== "all") {
-      return hashtags;
-    }
-    return summary?.top_hashtags ?? [];
-  }, [activeTab, hashtagWindow, hashtags, platform, summary?.top_hashtags]);
+  const displayedStatsHashtags = useMemo(() => hashtags, [hashtags]);
 
   const statsHashtagsPending = useMemo(() => {
-    return false;
-  }, [activeTab, hashtagsLoadedRequestKey, hashtagsRequestKey, platform]);
+    const shouldShowFetchedHashtags = activeTab === "stats" || activeTab === "hashtags";
+    if (!shouldShowFetchedHashtags) {
+      return false;
+    }
+    return hashtagsLoadedRequestKey !== hashtagsRequestKey;
+  }, [activeTab, hashtagsLoadedRequestKey, hashtagsRequestKey]);
 
   const hashtagsErrorMessage = useMemo(() => formatHashtagRequestErrorMessage(hashtagsError), [hashtagsError]);
   const hashtagsErrorToneClass = useMemo(() => {
@@ -1966,6 +2045,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
     return activeCatalogRunDisplayStatus || "";
   }, [activeCatalogRunDisplayStatus, cancellableCatalogRunId, displayedCatalogRunId, displayedCatalogRunStatus]);
+  const cancellableCatalogRunStatusLabel = useMemo(() => {
+    const progressForRun =
+      cancellableCatalogRunId && catalogRunProgress?.run_id === cancellableCatalogRunId ? catalogRunProgress : null;
+    return getCatalogRunDisplayStatusLabel(cancellableCatalogRunStatus, progressForRun);
+  }, [cancellableCatalogRunId, cancellableCatalogRunStatus, catalogRunProgress]);
 
   const cancellableCatalogRunIsActive = useMemo(() => {
     return Boolean(cancellableCatalogRunId) && ACTIVE_CATALOG_RUN_STATUSES.has(cancellableCatalogRunStatus || "");
@@ -1981,6 +2065,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const catalogDispatchStatusMessage = useMemo(() => {
     return getCatalogDispatchStatusMessage(catalogRunProgress);
   }, [catalogRunProgress]);
+  const activeCatalogSourceScope = useMemo(() => {
+    return resolveActiveCatalogSourceScope(summary, catalogRunProgress);
+  }, [catalogRunProgress, summary]);
+  const displayedCatalogRunStatusLabel = useMemo(() => {
+    return getCatalogRunDisplayStatusLabel(displayedCatalogRunStatus, catalogRunProgress);
+  }, [catalogRunProgress, displayedCatalogRunStatus]);
 
   const catalogGapAnalysisPresentation = useMemo(() => {
     if (!catalogGapAnalysis) return null;
@@ -2603,6 +2693,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         error?: string;
         message?: string;
         run_id?: string;
+        catalog_action?: string;
+        catalog_action_scope?: string;
         detail?: { message?: string; run_id?: string; status?: string };
       };
       if (!response.ok) {
@@ -2758,7 +2850,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
   };
 
-  const headerTitle = `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} · @${handle}`;
+  const networkProfileName = resolveNetworkProfileName(summary, catalogRunProgress);
+  const headerTitle = networkProfileName
+    ? `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} · ${networkProfileName} · @${handle}`
+    : `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} · @${handle}`;
   const breadcrumbs = [
     ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
     { label: `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} @${handle}`, href: buildSocialAccountProfileUrl({ platform, handle }) },
@@ -2846,7 +2941,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           type="button"
                           onClick={() =>
                             void runCatalogAction("sync_newer", {
-                              source_scope: "bravo",
+                              source_scope: activeCatalogSourceScope,
                             })
                           }
                           disabled={catalogActionsBlocked}
@@ -2860,7 +2955,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           type="button"
                           onClick={() =>
                             void runCatalogAction("resume_tail", {
-                              source_scope: "bravo",
+                              source_scope: activeCatalogSourceScope,
                             })
                           }
                           disabled={catalogActionsBlocked}
@@ -2881,8 +2976,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       ) : null}
                       {cancellableCatalogRunId ? (
                         <span className="text-xs font-medium text-zinc-500">
-                      {cancellableCatalogRunIsActive
-                            ? `Run ${shortRunId(cancellableCatalogRunId)} is ${formatRunStatusLabel(cancellableCatalogRunStatus)}. ${
+                          {cancellableCatalogRunIsActive
+                            ? `Run ${shortRunId(cancellableCatalogRunId)} is ${cancellableCatalogRunStatusLabel}. ${
                                 catalogDispatchStatusMessage?.text
                                   ? `${catalogDispatchStatusMessage.text} `
                                   : ""
@@ -2899,7 +2994,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 </div>
                 {supportsCatalog ? (
                   <p className="mt-2 text-xs text-zinc-500">
-                    Backfill Posts runs the full-history catalog job. Sync Newer fetches only posts published after the latest stored post. Resume Tail continues from where the last backfill stopped. Sync Recent runs the same pipeline, limited to the last day.
+                    All four actions use the same shared-profile catalog pipeline with different scopes. Backfill Posts covers full history or a bounded repair window. Sync Recent runs a recent canary window. Sync Newer repairs the head gap above the newest stored post. Resume Tail replays the saved frontier toward the oldest posts.
                   </p>
                 ) : null}
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
@@ -2962,10 +3057,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <button
                             type="button"
                             onClick={() =>
-                              void runCatalogAction("resume_tail", {
-                                source_scope: "bravo",
-                              })
-                            }
+                            void runCatalogAction("resume_tail", {
+                              source_scope: activeCatalogSourceScope,
+                            })
+                          }
                             disabled={catalogActionsBlocked}
                             className="mt-3 inline-flex rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:opacity-50"
                           >
@@ -2976,10 +3071,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <button
                             type="button"
                             onClick={() =>
-                              void runCatalogAction("sync_newer", {
-                                source_scope: "bravo",
-                              })
-                            }
+                            void runCatalogAction("sync_newer", {
+                              source_scope: activeCatalogSourceScope,
+                            })
+                          }
                             disabled={catalogActionsBlocked}
                             className="mt-3 inline-flex rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-900 disabled:cursor-not-allowed disabled:opacity-50"
                           >
@@ -3162,8 +3257,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             <section className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 text-sm text-sky-900">
               <p className="font-semibold">No saved posts yet for @{handle}.</p>
               <p className="mt-1 text-sky-800">
-                Use <span className="font-semibold">Backfill Posts</span> to load this account. If saved Bravo posts already include
-                this handle as a collaborator, they will appear here automatically.
+                Use <span className="font-semibold">Backfill Posts</span> to load this account. If saved network-profile posts
+                already include this handle as a collaborator, they will appear here automatically.
               </p>
             </section>
           ) : null}
@@ -3179,11 +3274,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         displayedCatalogRunStatus,
                       )}`}
                     >
-                      {formatRunStatusLabel(displayedCatalogRunStatus)}
+                      {displayedCatalogRunStatusLabel}
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-zinc-500">
-                    Run {shortRunId(displayedCatalogRunId)} · {formatRunStatusLabel(displayedCatalogRunStatus)}
+                    Run {shortRunId(displayedCatalogRunId)} · {displayedCatalogRunStatusLabel}
                     {catalogRunProgress?.created_at ? ` · queued ${formatDateTime(catalogRunProgress.created_at)}` : ""}
                     {catalogProgressLastSuccessAt ? ` · last refresh ${formatDateTime(catalogProgressLastSuccessAt)}` : ""}
                   </p>
@@ -3199,6 +3294,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     >
                       {catalogDispatchStatusMessage.text}
                     </p>
+                  ) : null}
+                  {(catalogRunProgress?.alerts ?? []).length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {(catalogRunProgress?.alerts ?? []).map((alert) => (
+                        <div
+                          key={`${alert.code}-${alert.message}`}
+                          className={`rounded-xl border px-3 py-2 text-sm ${getOperationalAlertTone(alert.severity)}`}
+                        >
+                          <p className="font-semibold">{formatOperationalAlertLabel(alert)}</p>
+                          <p className="mt-1">{alert.message}</p>
+                        </div>
+                      ))}
+                    </div>
                   ) : null}
                   {catalogScrapeCompletionMessage ? (
                     <p className="mt-2 text-sm text-emerald-700">{catalogScrapeCompletionMessage}</p>
@@ -3553,11 +3661,28 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <h2 className="text-lg font-semibold text-zinc-900">Source Status</h2>
                   <div className="mt-4 space-y-2">
                     {(summary?.source_status ?? []).length === 0 ? (
-                      <p className="text-sm text-zinc-500">No shared-source metadata was found for this handle.</p>
+                      <p className="text-sm text-zinc-500">No shared-source network metadata was found for this handle.</p>
                     ) : (
                       (summary?.source_status ?? []).map((item, index) => (
                         <div key={`${String(item.id ?? index)}`} className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm">
-                          <p className="font-semibold text-zinc-900">{String(item.source_scope ?? "bravo")}</p>
+                          <p className="font-semibold text-zinc-900">
+                            {String(item.network_name ?? item.source_scope ?? "Network profile")}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {String(
+                              item.profile_kind ??
+                                (item.metadata as Record<string, unknown> | undefined)?.profile_kind ??
+                                "shared_profile",
+                            ).replaceAll("_", " ")}
+                            {" · "}
+                            {String(
+                              item.assignment_mode ??
+                                (item.metadata as Record<string, unknown> | undefined)?.assignment_mode ??
+                                "multi_show_match",
+                            ).replaceAll("_", " ")}
+                            {" · "}
+                            {String(item.source_scope ?? "bravo")}
+                          </p>
                           <p className="mt-1 text-xs text-zinc-500">
                             Scrape {String(item.last_scrape_status ?? "Not run")} · Last scrape {formatDateTime(String(item.last_scrape_at ?? ""))}
                           </p>

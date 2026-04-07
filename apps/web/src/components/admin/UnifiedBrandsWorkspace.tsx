@@ -85,6 +85,7 @@ type LogoPickerState = {
   targetType: SyncTargetType;
   targetKey: string;
   targetLabel: string;
+  defaultIconUrl: string | null;
 };
 
 type UnifiedBrandsRecord = {
@@ -95,6 +96,7 @@ type UnifiedBrandsRecord = {
   detailHref: string | null;
   wordmarkUrl: string | null;
   iconUrl: string | null;
+  defaultIconUrl: string | null;
   availableShowCount: number | null;
   addedShowCount: number | null;
   sourceProvider: string | null;
@@ -122,6 +124,8 @@ interface SyncResponsePayload {
 }
 
 const PLACEHOLDER_ICON_PATH = "/icons/brand-placeholder.svg";
+const buildBrandLogoPreviewProxyUrl = (sourceUrl: string): string =>
+  `/api/admin/trr-api/brands/logos/options/preview?url=${encodeURIComponent(sourceUrl)}`;
 
 const LOGO_PAGE_SIZE: Record<GenericRowType, number> = {
   show: 1200,
@@ -225,6 +229,17 @@ const isKnownSocialHostname = (value: string | null | undefined): boolean => {
   return !!host && SOCIAL_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
 };
 
+const buildWebsiteFaviconUrl = (value: string | null | undefined): string | null => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw.startsWith("http://") || raw.startsWith("https://") ? raw : `https://${raw}`);
+    return buildBrandLogoPreviewProxyUrl(new URL("/favicon.ico", parsed.origin).toString());
+  } catch {
+    return null;
+  }
+};
+
 const resolveGenericRowType = (row: BrandLogoRow): GenericRowType => {
   if (row.target_type === "social" || row.target_type === "show" || row.target_type === "franchise") {
     return row.target_type;
@@ -283,6 +298,7 @@ const buildNetworkRecords = (rows: NetworksStreamingSummaryRow[]): UnifiedBrands
     detailHref: `/brands/networks-and-streaming/${row.type}/${toEntitySlug(row.name)}`,
     wordmarkUrl: pickDisplayUrl(row.hosted_logo_url),
     iconUrl: pickDisplayUrl(row.hosted_logo_black_url, row.hosted_logo_white_url),
+    defaultIconUrl: buildWebsiteFaviconUrl(row.homepage_url),
     availableShowCount: row.available_show_count,
     addedShowCount: row.added_show_count,
     sourceProvider: null,
@@ -315,6 +331,7 @@ const buildGenericRecords = (rows: BrandLogoRow[]): UnifiedBrandsRecord[] => {
       detailHref: isShowRecord(resolvedType) ? null : buildProfileHref(row.target_label || row.target_key),
       wordmarkUrl: null,
       iconUrl: null,
+      defaultIconUrl: null,
       availableShowCount: null,
       addedShowCount: null,
       sourceProvider: row.source_provider ?? null,
@@ -373,10 +390,11 @@ const buildShowRecords = (
       type: "show",
       label: row.show_name,
       targetKey: row.show_id,
-      detailHref: null,
-      wordmarkUrl: null,
-      iconUrl: null,
-      availableShowCount: 1,
+        detailHref: null,
+        wordmarkUrl: null,
+        iconUrl: null,
+        defaultIconUrl: null,
+        availableShowCount: 1,
       addedShowCount: null,
       sourceProvider: null,
       sourceDomain: null,
@@ -405,6 +423,7 @@ const buildShowRecords = (
         detailHref: buildProfileHref(row.franchise_name || franchiseKey),
         wordmarkUrl: null,
         iconUrl: null,
+        defaultIconUrl: null,
         availableShowCount: franchiseCounts.get(franchiseKey) ?? 0,
         addedShowCount: null,
         sourceProvider: null,
@@ -902,6 +921,7 @@ export default function UnifiedBrandsWorkspace() {
                             targetType: record.type,
                             targetKey: record.targetKey,
                             targetLabel: record.label,
+                            defaultIconUrl: record.defaultIconUrl,
                           })
                         }
                         onKeyDown={(event) => {
@@ -911,6 +931,7 @@ export default function UnifiedBrandsWorkspace() {
                             targetType: record.type,
                             targetKey: record.targetKey,
                             targetLabel: record.label,
+                            defaultIconUrl: record.defaultIconUrl,
                           });
                         }}
                       >
@@ -947,7 +968,7 @@ export default function UnifiedBrandsWorkspace() {
                             <div className="relative h-8 w-8 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
-                                src={record.iconUrl || PLACEHOLDER_ICON_PATH}
+                                src={record.iconUrl || record.defaultIconUrl || PLACEHOLDER_ICON_PATH}
                                 alt={`${record.label} icon`}
                                 className="h-full w-full object-contain p-1"
                               />
@@ -1057,6 +1078,7 @@ export default function UnifiedBrandsWorkspace() {
                         targetType: record.type,
                         targetKey: record.targetKey,
                         targetLabel: record.label,
+                        defaultIconUrl: record.defaultIconUrl,
                       })
                     }
                     onKeyDown={(event) => {
@@ -1066,6 +1088,7 @@ export default function UnifiedBrandsWorkspace() {
                         targetType: record.type,
                         targetKey: record.targetKey,
                         targetLabel: record.label,
+                        defaultIconUrl: record.defaultIconUrl,
                       });
                     }}
                   >
@@ -1096,7 +1119,7 @@ export default function UnifiedBrandsWorkspace() {
                       <div className="relative h-12 w-12 overflow-hidden rounded border border-zinc-200 bg-zinc-50">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={record.iconUrl || PLACEHOLDER_ICON_PATH}
+                          src={record.iconUrl || record.defaultIconUrl || PLACEHOLDER_ICON_PATH}
                           alt={`${record.label} icon`}
                           className="h-full w-full object-contain p-1"
                         />
@@ -1149,6 +1172,7 @@ export default function UnifiedBrandsWorkspace() {
             targetType={logoPickerState.targetType}
             targetKey={logoPickerState.targetKey}
             targetLabel={logoPickerState.targetLabel}
+            defaultIconUrl={logoPickerState.defaultIconUrl}
             onSaved={() => refreshData({ silent: true })}
           />
         ) : null}

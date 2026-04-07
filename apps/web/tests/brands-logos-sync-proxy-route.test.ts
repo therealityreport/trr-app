@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { POST as postBrandLogosSync } from "@/app/api/admin/trr-api/brands/logos/sync/route";
@@ -25,7 +30,8 @@ describe("brands logos sync proxy route", () => {
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/brands/logos/sync");
 
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
     process.env.BRAND_LOGO_ROUTING_V2 = "true";
   });
 
@@ -55,7 +61,7 @@ describe("brands logos sync proxy route", () => {
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer service-role-secret",
+          Authorization: "Bearer test-admin-token",
           "Content-Type": "application/json",
         }),
         body: JSON.stringify({ scope: "page", page: "news", only_missing: true }),

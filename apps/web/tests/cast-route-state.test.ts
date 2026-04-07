@@ -9,7 +9,7 @@ import {
 describe("cast route state", () => {
   it("reads canonical show keys and round-trips using canonical writers", () => {
     const initial = new URLSearchParams(
-      "tab=cast&cast_q=Lisa&cast_sort=name&cast_order=asc&cast_img=yes&cast_seasons=1,6&cast_filters=role:friend,credit:Crew"
+      "tab=cast&cast_q=Lisa&cast_sort=name&cast_order=asc&cast_img=yes&cast_seasons=1,6&cast_filters=role:friend,credit:Crew&cast_episode_exact=2&cast_episode_min=1&cast_episode_max=8"
     );
     const parsed = parseShowCastRouteState(initial);
     expect(parsed.searchQuery).toBe("Lisa");
@@ -18,6 +18,9 @@ describe("cast route state", () => {
     expect(parsed.hasImageFilter).toBe("yes");
     expect(parsed.seasonFilters).toEqual([1, 6]);
     expect(parsed.filters).toEqual(["role:friend", "credit:Crew"]);
+    expect(parsed.exactEpisodeCount).toBe(2);
+    expect(parsed.minEpisodeCount).toBe(1);
+    expect(parsed.maxEpisodeCount).toBe(8);
 
     const written = writeShowCastRouteState(new URLSearchParams(initial.toString()), parsed);
     expect(written.get("cast_q")).toBe("Lisa");
@@ -26,6 +29,9 @@ describe("cast route state", () => {
     expect(written.get("cast_img")).toBe("yes");
     expect(written.get("cast_seasons")).toBe("1,6");
     expect(written.get("cast_filters")).toBe("role:friend,credit:Crew");
+    expect(written.get("cast_episode_exact")).toBe("2");
+    expect(written.get("cast_episode_min")).toBe("1");
+    expect(written.get("cast_episode_max")).toBe("8");
     expect(written.get("cast_roles")).toBeNull();
   });
 
@@ -70,6 +76,9 @@ describe("cast route state", () => {
       hasImageFilter: "all",
       seasonFilters: [],
       filters: [],
+      exactEpisodeCount: null,
+      minEpisodeCount: null,
+      maxEpisodeCount: null,
     });
     expect(showWritten.get("cast_q")).toBeNull();
     expect(showWritten.get("cast_sort")).toBeNull();
@@ -77,5 +86,8 @@ describe("cast route state", () => {
     expect(showWritten.get("cast_img")).toBeNull();
     expect(showWritten.get("cast_seasons")).toBeNull();
     expect(showWritten.get("cast_filters")).toBeNull();
+    expect(showWritten.get("cast_episode_exact")).toBeNull();
+    expect(showWritten.get("cast_episode_min")).toBeNull();
+    expect(showWritten.get("cast_episode_max")).toBeNull();
   });
 });

@@ -73,10 +73,6 @@ The proxy sends:
 
 Backend accepts this service-role path only for the facebank seed toggle endpoint and only when the shared secret matches.
 
-Flashback browser routes are the only active consumers of
-`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Leave those
-unset unless `/flashback/*` must work in that environment.
-
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

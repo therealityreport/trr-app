@@ -44,6 +44,8 @@ describe("/api/admin/social-posts/[postId] route", () => {
 
     requireAdminMock.mockResolvedValue({ uid: "admin-uid" });
     getBackendApiUrlMock.mockImplementation((path: string) => `https://backend.example.com/api/v1${path}`);
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "internal-secret";
   });

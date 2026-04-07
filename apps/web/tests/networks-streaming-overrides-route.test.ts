@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { GET, POST } from "@/app/api/admin/networks-streaming/overrides/route";
@@ -24,7 +29,8 @@ describe("networks-streaming overrides proxy routes", () => {
     vi.restoreAllMocks();
 
     requireAdminMock.mockResolvedValue(undefined);
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
   });
 
   it("GET forwards query params and auth header", async () => {
@@ -48,7 +54,7 @@ describe("networks-streaming overrides proxy routes", () => {
     expect(fetchMock.mock.calls[0][0]).toContain("active_only=false");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       headers: {
-        Authorization: "Bearer service-role-secret",
+        Authorization: "Bearer test-admin-token",
       },
     });
   });
@@ -74,7 +80,7 @@ describe("networks-streaming overrides proxy routes", () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({
       method: "POST",
       headers: {
-        Authorization: "Bearer service-role-secret",
+        Authorization: "Bearer test-admin-token",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ entity_type: "network", entity_key: "bravo" }),
@@ -121,14 +127,15 @@ describe("networks-streaming overrides proxy routes", () => {
   it("returns stable error codes for override auth and backend configuration failures", async () => {
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/shows/networks-streaming/overrides");
 
-    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    getInternalAdminBearerTokenMock.mockImplementationOnce(() => {
+      throw new Error("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
+    });
     const noAuthResponse = await GET(new NextRequest("http://localhost/api/admin/networks-streaming/overrides"));
     expect(noAuthResponse.status).toBe(500);
     await expect(noAuthResponse.json()).resolves.toMatchObject({
       error_code: "backend_override_unavailable",
     });
 
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: "Not authenticated" }), {
         status: 403,

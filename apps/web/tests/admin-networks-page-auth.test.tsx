@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import AdminBrandsPage from "@/app/admin/brands/page";
 
 const navigationState = vi.hoisted(() => ({
@@ -96,7 +96,7 @@ const buildSummaryPayload = () => ({
       wikidata_id: null,
       wikipedia_url: null,
       tmdb_entity_id: null,
-      homepage_url: null,
+      homepage_url: "https://shedmedia.com/about",
       has_logo: false,
       has_bw_variants: false,
       has_links: false,
@@ -442,5 +442,24 @@ describe("unified brands workspace", () => {
 
     expect(screen.queryByText("Deadline")).not.toBeInTheDocument();
     expect(screen.getAllByText("Social Media").length).toBeGreaterThan(0);
+  });
+
+  it("uses the company favicon as the default production icon when no icon asset exists", async () => {
+    navigationState.search = "category=production&view=gallery";
+
+    render(<AdminBrandsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Shed Media")).toBeInTheDocument();
+    });
+
+    const shedCard = screen.getByText("Shed Media").closest("article");
+    expect(shedCard).toBeTruthy();
+    const images = within(shedCard ?? document.body).getAllByRole("img");
+    expect(images[1]).toHaveAttribute(
+      "src",
+      "/api/admin/trr-api/brands/logos/options/preview?url=https%3A%2F%2Fshedmedia.com%2Ffavicon.ico",
+    );
+    expect(within(shedCard ?? document.body).getByText(/Wordmark: missing · Icon: missing/)).toBeInTheDocument();
   });
 });

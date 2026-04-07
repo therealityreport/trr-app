@@ -114,6 +114,18 @@ describe("server auth adapter", () => {
     );
   });
 
+  it("does not attempt supabase fallback when TRR_CORE_SUPABASE_* is unset", async () => {
+    verifyIdTokenMock.mockRejectedValue(new Error("firebase down"));
+    delete process.env.TRR_CORE_SUPABASE_URL;
+    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.getUserFromRequest(requestWithBearer("token-no-supabase-env"));
+
+    expect(user).toBeNull();
+    expect(createClientMock).not.toHaveBeenCalled();
+  });
+
   it("logs shadow mismatch diagnostics when providers disagree", async () => {
     process.env.TRR_AUTH_SHADOW_MODE = "true";
     verifyIdTokenMock.mockResolvedValue({

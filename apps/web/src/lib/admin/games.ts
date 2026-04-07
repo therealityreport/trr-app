@@ -12,6 +12,8 @@ export interface AdminGameDefinition {
   coverHref: Route;
   playHref: Route;
   statsHref: string;
+  isLiveEnabled: boolean;
+  liveStatusLabel?: string;
 }
 
 export const ADMIN_GAMES: readonly AdminGameDefinition[] = [
@@ -26,6 +28,7 @@ export const ADMIN_GAMES: readonly AdminGameDefinition[] = [
     coverHref: "/bravodle/cover",
     playHref: "/bravodle/play",
     statsHref: "/bravodle/play?show=stats",
+    isLiveEnabled: true,
   },
   {
     key: "realitease",
@@ -38,6 +41,7 @@ export const ADMIN_GAMES: readonly AdminGameDefinition[] = [
     coverHref: "/realitease/cover",
     playHref: "/realitease/play",
     statsHref: "/realitease/play?show=stats",
+    isLiveEnabled: true,
   },
   {
     key: "flashback",
@@ -47,9 +51,11 @@ export const ADMIN_GAMES: readonly AdminGameDefinition[] = [
       "Weekly timeline quiz — place 8 reality TV moments in chronological order.",
     accentClassName: "bg-[#6B6BA0]",
     adminHref: "/admin/games/flashback",
-    coverHref: "/flashback",
-    playHref: "/flashback",
-    statsHref: "/flashback",
+    coverHref: "/hub",
+    playHref: "/hub",
+    statsHref: "/hub",
+    isLiveEnabled: false,
+    liveStatusLabel: "Gameplay disabled",
   },
 ] as const;
 

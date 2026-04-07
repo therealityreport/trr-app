@@ -88,6 +88,9 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/castSearchQueryDebounced/);
     expect(castRouteStateContents).toMatch(/cast_q/);
     expect(castRouteStateContents).toMatch(/cast_filters/);
+    expect(castRouteStateContents).toMatch(/cast_episode_exact/);
+    expect(castRouteStateContents).toMatch(/cast_episode_min/);
+    expect(castRouteStateContents).toMatch(/cast_episode_max/);
     expect(contents).toMatch(/Search Name/);
   });
 

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "2026-03-23.v2",
-  "inputHash": "cf742cb0bba31a68ffd0f12278388e0707d43f559df67da12489d97a97cd6383",
-  "generatedAt": "2026-03-24T16:55:39.192Z",
+  "inputHash": "c45ecbc23cb64a3c5fec83441ce4d572ed588b5ffa513fd2081f881f369888df",
+  "generatedAt": "2026-04-07T00:43:46.448Z",
   "scoringConfigVersion": "2026-03-23.score.v3",
   "data": [
     {
@@ -329,12 +329,11 @@
       "provenance": "design-doc-jsx",
       "confidence": "high",
       "evidenceLabel": "Primary Display",
-      "evidenceExcerpt": "Hamburg Serial Bold",
+      "evidenceExcerpt": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-        "anchor": "typography",
-        "lineHint": 504
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 9
       },
       "sourceTraitTokens": [
         "body-safe",
@@ -343,7 +342,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-nyt-games:jsx-label:504"
+        "brand-nyt-games:canonical:mapping-line:9"
       ]
     },
     {
@@ -371,19 +370,18 @@
       "provenance": "design-doc-jsx",
       "confidence": "high",
       "evidenceLabel": "Secondary Display",
-      "evidenceExcerpt": "Stymie Bold",
+      "evidenceExcerpt": "* nyt-stymie → Stymie (R2 CDN, same family)",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-        "anchor": "typography",
-        "lineHint": 562
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 12
       },
       "sourceTraitTokens": [
         "display",
         "slab"
       ],
       "evidenceIds": [
-        "brand-nyt-games:jsx-label:562"
+        "brand-nyt-games:canonical:mapping-line:12"
       ]
     },
     {
@@ -411,12 +409,11 @@
       "provenance": "design-doc-jsx",
       "confidence": "high",
       "evidenceLabel": "Tile Letters",
-      "evidenceExcerpt": "Hamburg Serial Black",
+      "evidenceExcerpt": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-        "anchor": "typography",
-        "lineHint": 667
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 9
       },
       "sourceTraitTokens": [
         "body-safe",
@@ -425,7 +422,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-nyt-games:jsx-label:667"
+        "brand-nyt-games:canonical:mapping-line:9"
       ]
     },
     {
@@ -453,12 +450,11 @@
       "provenance": "design-doc-jsx",
       "confidence": "high",
       "evidenceLabel": "Body / UI",
-      "evidenceExcerpt": "Hamburg Serial Regular",
+      "evidenceExcerpt": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-        "anchor": "typography",
-        "lineHint": 620
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 9
       },
       "sourceTraitTokens": [
         "body-safe",
@@ -467,7 +463,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-nyt-games:jsx-label:620"
+        "brand-nyt-games:canonical:mapping-line:9"
       ]
     },
     {
@@ -495,7 +491,7 @@
       "provenance": "explicit-mapping",
       "confidence": "high",
       "evidenceLabel": "nyt-karnak",
-      "evidenceExcerpt": "* nyt-karnak → Gloucester (var(--dd-font-serif))",
+      "evidenceExcerpt": "* nyt-karnak → KarnakPro-Book (R2 CDN, loaded via /hosted-fonts.css)",
       "evidenceNote": "Canonical family mapping from game-palettes.ts.",
       "evidencePath": {
         "type": "file",
@@ -536,7 +532,7 @@
       "provenance": "explicit-mapping",
       "confidence": "high",
       "evidenceLabel": "nyt-stymie",
-      "evidenceExcerpt": "* nyt-stymie → \"Stymie\" (var(--dd-font-slab))",
+      "evidenceExcerpt": "* nyt-stymie → Stymie (R2 CDN, same family)",
       "evidenceNote": "Canonical family mapping from game-palettes.ts.",
       "evidencePath": {
         "type": "file",
@@ -576,7 +572,7 @@
       "provenance": "explicit-mapping",
       "confidence": "high",
       "evidenceLabel": "nyt-cheltenham",
-      "evidenceExcerpt": "* nyt-cheltenham → \"Cheltenham\" (var(--dd-font-headline))",
+      "evidenceExcerpt": "* nyt-cheltenham → NYTKarnak_Condensed (closest match — condensed display serif)",
       "evidenceNote": "Canonical family mapping from game-palettes.ts.",
       "evidencePath": {
         "type": "file",
@@ -617,7 +613,7 @@
       "provenance": "explicit-mapping",
       "confidence": "high",
       "evidenceLabel": "nyt-karnakcondensed",
-      "evidenceExcerpt": "* nyt-karnakcondensed → Cheltenham (var(--dd-font-headline))",
+      "evidenceExcerpt": "* nyt-karnakcondensed → NYTKarnak_Condensed (R2 CDN, loaded via /hosted-fonts.css)",
       "evidenceNote": "Canonical family mapping from game-palettes.ts.",
       "evidencePath": {
         "type": "file",
@@ -658,7 +654,7 @@
       "provenance": "explicit-mapping",
       "confidence": "high",
       "evidenceLabel": "nyt-franklin",
-      "evidenceExcerpt": "* nyt-franklin → Hamburg Serial (var(--dd-font-ui))",
+      "evidenceExcerpt": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
       "evidenceNote": "Canonical family mapping from game-palettes.ts.",
       "evidencePath": {
         "type": "file",
@@ -700,12 +696,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-karnakcondensed",
-      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 32px / 700",
-      "evidenceNote": "Game-specific mapping captured from Connections specimen.",
+      "evidenceExcerpt": "* nyt-karnakcondensed → NYTKarnak_Condensed (R2 CDN, loaded via /hosted-fonts.css)",
+      "evidenceNote": "Canonical karnakcondensed mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameConnections.tsx",
-        "lineHint": 258
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 10
       },
       "sourceTraitTokens": [
         "condensed",
@@ -713,7 +709,7 @@
         "traditional"
       ],
       "evidenceIds": [
-        "brand-nyt-games:connections:mapping-line:258"
+        "brand-nyt-games:canonical:mapping-line:10"
       ]
     },
     {
@@ -741,12 +737,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-franklin",
-      "evidenceExcerpt": "nyt-franklin → Franklin Gothic · 16px / 400",
-      "evidenceNote": "Game-specific mapping captured from Connections specimen.",
+      "evidenceExcerpt": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
+      "evidenceNote": "Canonical franklin mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameConnections.tsx",
-        "lineHint": 273
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 9
       },
       "sourceTraitTokens": [
         "body-safe",
@@ -755,7 +751,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-nyt-games:connections:mapping-line:273"
+        "brand-nyt-games:canonical:mapping-line:9"
       ]
     },
     {
@@ -783,12 +779,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-karnakcondensed",
-      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 40px / 700",
-      "evidenceNote": "Game-specific mapping captured from Spelling Bee specimen.",
+      "evidenceExcerpt": "* nyt-karnakcondensed → NYTKarnak_Condensed (R2 CDN, loaded via /hosted-fonts.css)",
+      "evidenceNote": "Canonical karnakcondensed mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameSpellingBee.tsx",
-        "lineHint": 286
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 10
       },
       "sourceTraitTokens": [
         "condensed",
@@ -796,7 +792,7 @@
         "traditional"
       ],
       "evidenceIds": [
-        "brand-nyt-games:spelling-bee:mapping-line:286"
+        "brand-nyt-games:canonical:mapping-line:10"
       ]
     },
     {
@@ -824,12 +820,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-franklin",
-      "evidenceExcerpt": "nyt-franklin → Franklin Gothic · 16px / 400",
-      "evidenceNote": "Game-specific mapping captured from Spelling Bee specimen.",
+      "evidenceExcerpt": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
+      "evidenceNote": "Canonical franklin mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameSpellingBee.tsx",
-        "lineHint": 301
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 9
       },
       "sourceTraitTokens": [
         "body-safe",
@@ -838,7 +834,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-nyt-games:spelling-bee:mapping-line:301"
+        "brand-nyt-games:canonical:mapping-line:9"
       ]
     },
     {
@@ -866,12 +862,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-karnakcondensed",
-      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 32px / 700",
-      "evidenceNote": "Game-specific mapping captured from Tiles specimen.",
+      "evidenceExcerpt": "* nyt-karnakcondensed → NYTKarnak_Condensed (R2 CDN, loaded via /hosted-fonts.css)",
+      "evidenceNote": "Canonical karnakcondensed mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameTiles.tsx",
-        "lineHint": 296
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 10
       },
       "sourceTraitTokens": [
         "condensed",
@@ -879,7 +875,7 @@
         "traditional"
       ],
       "evidenceIds": [
-        "brand-nyt-games:tiles:mapping-line:296"
+        "brand-nyt-games:canonical:mapping-line:10"
       ]
     },
     {
@@ -907,12 +903,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-franklin",
-      "evidenceExcerpt": "nyt-franklin → Franklin Gothic · 16px / 400",
-      "evidenceNote": "Game-specific mapping captured from Tiles specimen.",
+      "evidenceExcerpt": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
+      "evidenceNote": "Canonical franklin mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameTiles.tsx",
-        "lineHint": 311
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 9
       },
       "sourceTraitTokens": [
         "body-safe",
@@ -921,7 +917,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-nyt-games:tiles:mapping-line:311"
+        "brand-nyt-games:canonical:mapping-line:9"
       ]
     },
     {
@@ -949,7 +945,7 @@
       "provenance": "explicit-mapping",
       "confidence": "high",
       "evidenceLabel": "Clear Sans",
-      "evidenceExcerpt": "* Clear Sans (Wordle) → \"Hamburg Serial\" (var(--dd-font-ui)) [closest match]",
+      "evidenceExcerpt": "* Clear Sans (Wordle) → system fallback chain (not hosted; --nytg-font-wordle)",
       "evidencePath": {
         "type": "file",
         "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
@@ -961,8 +957,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-nyt-games:canonical:mapping-line:14",
-        "brand-nyt-games:wordle:mapping-line:337"
+        "brand-nyt-games:canonical:mapping-line:14"
       ]
     },
     {
@@ -990,12 +985,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-karnak",
-      "evidenceExcerpt": "nyt-karnak → Stymie · 38px / 400",
-      "evidenceNote": "Game-specific mapping captured from Wordle specimen.",
+      "evidenceExcerpt": "* nyt-stymie → Stymie (R2 CDN, same family)",
+      "evidenceNote": "Canonical stymie mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameWordle.tsx",
-        "lineHint": 322
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 12
       },
       "sourceTraitTokens": [
         "editorial",
@@ -1003,7 +998,7 @@
         "traditional"
       ],
       "evidenceIds": [
-        "brand-nyt-games:wordle:mapping-line:322"
+        "brand-nyt-games:canonical:mapping-line:12"
       ]
     },
     {
@@ -1031,12 +1026,12 @@
       "provenance": "explicit-mapping",
       "confidence": "medium",
       "evidenceLabel": "nyt-karnakcondensed",
-      "evidenceExcerpt": "nyt-karnakcondensed → Rude Slab · 50px / 700",
-      "evidenceNote": "Game-specific mapping captured from Wordle specimen.",
+      "evidenceExcerpt": "* nyt-karnakcondensed → NYTKarnak_Condensed (R2 CDN, loaded via /hosted-fonts.css)",
+      "evidenceNote": "Canonical karnakcondensed mapping; game specimen restructured.",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/games/GameWordle.tsx",
-        "lineHint": 307
+        "path": "src/components/admin/design-docs/sections/games/game-palettes.ts",
+        "lineHint": 10
       },
       "sourceTraitTokens": [
         "condensed",
@@ -1044,7 +1039,7 @@
         "traditional"
       ],
       "evidenceIds": [
-        "brand-nyt-games:wordle:mapping-line:307"
+        "brand-nyt-games:canonical:mapping-line:10"
       ]
     },
     {
@@ -2058,7 +2053,7 @@
       "brandLabel": "The Athletic",
       "roleLabel": "Body",
       "roleType": "body",
-      "sourceFontFamily": "Gloucester",
+      "sourceFontFamily": "RegularSlab",
       "sourceWeightsRaw": [
         "Regular"
       ],
@@ -2074,67 +2069,22 @@
       "sourceWidthNormalized": [
         "normal"
       ],
-      "currentReferenceSubstitute": "Gloucester",
+      "currentReferenceSubstitute": "RegularSlab",
       "provenance": "design-doc-jsx",
       "confidence": "high",
       "evidenceLabel": "Body",
-      "evidenceExcerpt": "Body: Gloucester Regular | 17px | 1.7 line-height | #E0E0E0",
+      "evidenceExcerpt": "RegularSlab: 400 / 18px / Nav bar league labels — wordmark-style slab serif",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "path": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
         "anchor": "typography",
-        "lineHint": 680
+        "lineHint": 299
       },
       "sourceTraitTokens": [
-        "body-safe",
-        "editorial",
-        "text",
-        "traditional"
+        "slab"
       ],
       "evidenceIds": [
-        "brand-the-athletic:specimen-meta:680"
-      ]
-    },
-    {
-      "brandId": "brand-the-athletic",
-      "brandLabel": "The Athletic",
-      "roleLabel": "Metadata",
-      "roleType": "caption",
-      "sourceFontFamily": "Franklin Gothic",
-      "sourceWeightsRaw": [
-        "Regular"
-      ],
-      "sourceWeightsNormalized": [
-        400
-      ],
-      "sourceStyles": [
-        "normal"
-      ],
-      "sourceWidthRaw": [
-        "normal"
-      ],
-      "sourceWidthNormalized": [
-        "normal"
-      ],
-      "currentReferenceSubstitute": "Franklin Gothic",
-      "provenance": "design-doc-jsx",
-      "confidence": "high",
-      "evidenceLabel": "Metadata",
-      "evidenceExcerpt": "Metadata: Franklin Gothic | 12px | #888888",
-      "evidencePath": {
-        "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-        "anchor": "typography",
-        "lineHint": 744
-      },
-      "sourceTraitTokens": [
-        "body-safe",
-        "grotesque",
-        "news",
-        "text"
-      ],
-      "evidenceIds": [
-        "brand-the-athletic:specimen-meta:744"
+        "brand-the-athletic:specimen-meta:299"
       ]
     },
     {
@@ -2162,12 +2112,12 @@
       "provenance": "design-doc-jsx",
       "confidence": "high",
       "evidenceLabel": "Headlines",
-      "evidenceExcerpt": "Headlines: Cheltenham Bold | 32px | white",
+      "evidenceExcerpt": "nyt-cheltenham: 400 (h1) / 700 (h2 section heads) / 500 (h3 sub-sections)",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "path": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
         "anchor": "typography",
-        "lineHint": 644
+        "lineHint": 136
       },
       "sourceTraitTokens": [
         "editorial",
@@ -2175,61 +2125,21 @@
         "traditional"
       ],
       "evidenceIds": [
-        "brand-the-athletic:specimen-meta:644"
+        "brand-the-athletic:specimen-meta:136"
       ]
     },
     {
       "brandId": "brand-the-athletic",
       "brandLabel": "The Athletic",
-      "roleLabel": "Section Titles",
-      "roleType": "headline",
-      "sourceFontFamily": "Franklin Gothic",
-      "sourceWeightsRaw": [
-        "Bold"
-      ],
-      "sourceWeightsNormalized": [
-        700
-      ],
-      "sourceStyles": [
-        "normal"
-      ],
-      "sourceWidthRaw": [
-        "normal"
-      ],
-      "sourceWidthNormalized": [
-        "normal"
-      ],
-      "currentReferenceSubstitute": "Franklin Gothic",
-      "provenance": "design-doc-jsx",
-      "confidence": "high",
-      "evidenceLabel": "Section Titles",
-      "evidenceExcerpt": "Section Titles: Franklin Gothic Bold | 22px | uppercase | 0.08em tracking",
-      "evidencePath": {
-        "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-        "anchor": "typography",
-        "lineHint": 661
-      },
-      "sourceTraitTokens": [
-        "body-safe",
-        "grotesque",
-        "news",
-        "text"
-      ],
-      "evidenceIds": [
-        "brand-the-athletic:specimen-meta:661"
-      ]
-    },
-    {
-      "brandId": "brand-the-athletic",
-      "brandLabel": "The Athletic",
-      "roleLabel": "Live Indicator",
+      "roleLabel": "UI & Navigation",
       "roleType": "ui",
       "sourceFontFamily": "Franklin Gothic",
       "sourceWeightsRaw": [
+        "Regular",
         "Bold"
       ],
       "sourceWeightsNormalized": [
+        400,
         700
       ],
       "sourceStyles": [
@@ -2244,13 +2154,13 @@
       "currentReferenceSubstitute": "Franklin Gothic",
       "provenance": "design-doc-jsx",
       "confidence": "high",
-      "evidenceLabel": "Live Indicator",
-      "evidenceExcerpt": "Live Indicator: Franklin Gothic Bold | 11px | uppercase | red bg",
+      "evidenceLabel": "UI & Navigation",
+      "evidenceExcerpt": "nyt-franklin: 300-700 | UI chrome, nav, pills, byline, Datawrapper, storyline, ads",
       "evidencePath": {
         "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+        "path": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
         "anchor": "typography",
-        "lineHint": 769
+        "lineHint": 230
       },
       "sourceTraitTokens": [
         "body-safe",
@@ -2259,49 +2169,7 @@
         "text"
       ],
       "evidenceIds": [
-        "brand-the-athletic:specimen-meta:769"
-      ]
-    },
-    {
-      "brandId": "brand-the-athletic",
-      "brandLabel": "The Athletic",
-      "roleLabel": "Stat Numbers",
-      "roleType": "ui",
-      "sourceFontFamily": "Franklin Gothic",
-      "sourceWeightsRaw": [
-        "Bold"
-      ],
-      "sourceWeightsNormalized": [
-        700
-      ],
-      "sourceStyles": [
-        "normal"
-      ],
-      "sourceWidthRaw": [
-        "normal"
-      ],
-      "sourceWidthNormalized": [
-        "normal"
-      ],
-      "currentReferenceSubstitute": "Franklin Gothic",
-      "provenance": "design-doc-jsx",
-      "confidence": "high",
-      "evidenceLabel": "Stat Numbers",
-      "evidenceExcerpt": "Stat Numbers: Franklin Gothic Bold | 36px | tabular-nums | white",
-      "evidencePath": {
-        "type": "file",
-        "path": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-        "anchor": "typography",
-        "lineHint": 730
-      },
-      "sourceTraitTokens": [
-        "body-safe",
-        "grotesque",
-        "news",
-        "text"
-      ],
-      "evidenceIds": [
-        "brand-the-athletic:specimen-meta:730"
+        "brand-the-athletic:specimen-meta:230"
       ]
     },
     {

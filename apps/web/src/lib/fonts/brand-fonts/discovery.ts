@@ -78,9 +78,9 @@ export const BRAND_FONT_DISCOVERY_SOURCES: readonly SourceDefinition[] = [
   {
     brandId: "brand-the-athletic",
     brandLabel: "The Athletic",
-    relativePath: "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
+    relativePath: "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
     kind: "brand-section",
-    scanMode: "typography-block",
+    scanMode: "whole-file",
   },
   {
     brandId: "brand-wirecutter",

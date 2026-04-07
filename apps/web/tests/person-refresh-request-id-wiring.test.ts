@@ -84,9 +84,11 @@ describe("person refresh request-id diagnostics wiring", () => {
   });
 
   it("refreshes the gallery once per active operation state instead of polling full-gallery pages", () => {
-    expect(pageContents).toContain("const PERSON_GALLERY_PAGE_SIZE = 120;");
+    expect(pageContents).toContain("const PERSON_GALLERY_INITIAL_PAGE_SIZE = 48;");
     expect(pageContents).toContain('effectiveOperationStatus !== "running" && effectiveOperationStatus !== "queued"');
-    expect(pageContents).toContain("void fetchPhotos({ signal: controller.signal, includeBroken: showBrokenRows })");
+    expect(pageContents).toMatch(
+      /void fetchPhotos\(\{\s*signal: controller\.signal,\s*includeBroken: showBrokenRows,\s*includeTotalCount: false,\s*requestRole: "secondary",/
+    );
     expect(pageContents).not.toContain("window.setInterval(pollPhotos");
     expect(pageContents).toContain("Load More From Server");
   });

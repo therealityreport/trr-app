@@ -1,16 +1,16 @@
 # Status — Task 23 (Final Supabase connection audit and donor transition inventory)
 
 Repo: TRR-APP
-Last updated: 2026-04-02
+Last updated: 2026-04-03
 
 ## Handoff Snapshot
 ```yaml
 handoff:
   include: true
   state: recent
-  last_updated: 2026-04-02
-  current_phase: "app parity inventory recorded"
-  next_action: "preserve these app-facing flows while backend ownership replaces screenalytics"
+  last_updated: 2026-04-03
+  current_phase: "phase 4 screentime operator cutover recorded"
+  next_action: "preserve the admin screentime surface while Phase 5 removes the remaining Screenalytics runtime dependency"
   detail: self
 ```
 
@@ -23,8 +23,9 @@ handoff:
 
 ## Blockers
 - None for the audit.
-- Follow-on work: the DeepFace reset still needs backend changes so these app routes no longer depend on the separate `screenalytics` service.
+- Follow-on work: Phase 5 still needs to remove the remaining rollback-only Screenalytics dependency behind the app proxy surface.
 
 ## Recent Activity
 - 2026-04-02: Confirmed raw Postgres runtime stays canonical and server-side Supabase auth is active.
 - 2026-04-02: Updated app env/docs and captured the app-visible parity surface for the reset.
+- 2026-04-03: Phase 4 screentime operator cutover landed in `TRR-APP`; the admin screentime page now renders backend review-summary state, reviewed totals, and supplementary internal-reference publication messaging.

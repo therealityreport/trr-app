@@ -9,6 +9,9 @@ export interface ShowCastRouteState {
   hasImageFilter: CastHasImageFilter;
   seasonFilters: number[];
   filters: string[];
+  exactEpisodeCount: number | null;
+  minEpisodeCount: number | null;
+  maxEpisodeCount: number | null;
 }
 
 export interface SeasonCastRouteState {
@@ -27,6 +30,9 @@ const SHOW_CAST_DEFAULTS: ShowCastRouteState = {
   hasImageFilter: "all",
   seasonFilters: [],
   filters: [],
+  exactEpisodeCount: null,
+  minEpisodeCount: null,
+  maxEpisodeCount: null,
 };
 
 const SEASON_CAST_DEFAULTS: SeasonCastRouteState = {
@@ -67,6 +73,12 @@ const parseSortOrder = (value: string | null): CastSortOrder =>
 const parseHasImageFilter = (value: string | null): CastHasImageFilter =>
   value === "yes" || value === "no" || value === "all" ? value : "all";
 
+const parsePositiveInt = (value: string | null): number | null => {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 const writeCsv = (values: string[]): string => values.join(",");
 
 const setOrDelete = (searchParams: URLSearchParams, key: string, value: string | null): void => {
@@ -87,6 +99,9 @@ export const parseShowCastRouteState = (searchParams: URLSearchParams): ShowCast
     hasImageFilter: parseHasImageFilter(searchParams.get("cast_img")),
     seasonFilters: parseNumberCsv(searchParams.get("cast_seasons")),
     filters: canonicalFilters.length > 0 ? canonicalFilters : legacyFilters,
+    exactEpisodeCount: parsePositiveInt(searchParams.get("cast_episode_exact")),
+    minEpisodeCount: parsePositiveInt(searchParams.get("cast_episode_min")),
+    maxEpisodeCount: parsePositiveInt(searchParams.get("cast_episode_max")),
   };
 };
 
@@ -125,6 +140,27 @@ export const writeShowCastRouteState = (
     state.seasonFilters.length > 0 ? writeCsv([...state.seasonFilters].sort((a, b) => a - b).map(String)) : null
   );
   setOrDelete(next, "cast_filters", state.filters.length > 0 ? writeCsv(state.filters) : null);
+  setOrDelete(
+    next,
+    "cast_episode_exact",
+    typeof state.exactEpisodeCount === "number" && state.exactEpisodeCount > 0
+      ? String(state.exactEpisodeCount)
+      : null
+  );
+  setOrDelete(
+    next,
+    "cast_episode_min",
+    typeof state.minEpisodeCount === "number" && state.minEpisodeCount > 0
+      ? String(state.minEpisodeCount)
+      : null
+  );
+  setOrDelete(
+    next,
+    "cast_episode_max",
+    typeof state.maxEpisodeCount === "number" && state.maxEpisodeCount > 0
+      ? String(state.maxEpisodeCount)
+      : null
+  );
   return next;
 };
 

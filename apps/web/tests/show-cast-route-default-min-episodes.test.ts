@@ -118,6 +118,31 @@ describe("show cast route proxy parity", () => {
     );
   });
 
+  it("forwards links eligibility mode when requested", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        cast: [],
+        archive_footage_cast: [],
+        cast_source: "imdb_show_membership",
+        eligibility_warning: null,
+        pagination: { limit: 500, offset: 0, count: 0 },
+      },
+      durationMs: 5,
+    });
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/show-1/cast?limit=500&roster_mode=imdb_show_membership&eligibility_mode=links",
+    );
+    const response = await GET(request, { params: Promise.resolve({ showId: "show-1" }) });
+
+    expect(response.status).toBe(200);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/00000000-0000-0000-0000-000000000001/cast?limit=500&offset=0&roster_mode=imdb_show_membership&photo_fallback=none&eligibility_mode=links",
+      expect.objectContaining({ routeName: "show-cast" }),
+    );
+  });
+
   it("returns 404 when show slug or id cannot be resolved", async () => {
     resolveAdminShowIdMock.mockResolvedValue(null);
 

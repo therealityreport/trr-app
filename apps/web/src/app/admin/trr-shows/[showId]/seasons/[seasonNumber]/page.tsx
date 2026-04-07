@@ -4517,6 +4517,9 @@ export default function SeasonDetailPage() {
         hasImageFilter: castHasImageFilter,
         seasonFilters: Number.isFinite(seasonNumber) ? [seasonNumber] : [],
         filters: roleAndCreditFilters,
+        exactEpisodeCount: null,
+        minEpisodeCount: null,
+        maxEpisodeCount: null,
       });
       castQuery.set("cast_person", personId);
       castQuery.set("cast_open_role_editor", "1");

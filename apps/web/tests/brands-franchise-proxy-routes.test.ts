@@ -3,10 +3,12 @@ import { NextRequest } from "next/server";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
 import { BRANDS_SHOWS_FRANCHISES_CACHE_NAMESPACE } from "@/lib/server/trr-api/brands-route-cache";
 
-const { requireAdminMock, getBackendApiUrlMock, fetchAdminBackendJsonMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, fetchAdminBackendJsonMock, getInternalAdminBearerTokenMock } =
+  vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -47,6 +49,10 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
     ),
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 import { GET as getShowsFranchises } from "@/app/api/admin/trr-api/brands/shows-franchises/route";
 import { GET as getFranchiseRules } from "@/app/api/admin/trr-api/brands/franchise-rules/route";
 import { PUT as putFranchiseRule } from "@/app/api/admin/trr-api/brands/franchise-rules/[franchiseKey]/route";
@@ -62,7 +68,8 @@ describe("brands proxy routes", () => {
     requireAdminMock.mockResolvedValue({ uid: "admin-1" });
     getBackendApiUrlMock.mockImplementation((path: string) => `https://backend.example.com/api/v1${path}`);
     process.env.BRANDS_SHOWS_FRANCHISES_ENABLED = "true";
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
+    getInternalAdminBearerTokenMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReturnValue("test-admin-token");
     invalidateRouteResponseCache(BRANDS_SHOWS_FRANCHISES_CACHE_NAMESPACE);
   });
 
@@ -162,7 +169,7 @@ describe("brands proxy routes", () => {
       expect.objectContaining({
         method: "PUT",
         headers: expect.objectContaining({
-          Authorization: "Bearer service-role-secret",
+          Authorization: "Bearer test-admin-token",
           "Content-Type": "application/json",
         }),
       }),
@@ -197,7 +204,7 @@ describe("brands proxy routes", () => {
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer service-role-secret",
+          Authorization: "Bearer test-admin-token",
           "Content-Type": "application/json",
         }),
       }),

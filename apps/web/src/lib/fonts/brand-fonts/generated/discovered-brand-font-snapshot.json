@@ -1,7 +1,7 @@
 {
   "schemaVersion": "2026-03-23.v2",
-  "inputHash": "cf742cb0bba31a68ffd0f12278388e0707d43f559df67da12489d97a97cd6383",
-  "generatedAt": "2026-03-24T16:55:39.191Z",
+  "inputHash": "c45ecbc23cb64a3c5fec83441ce4d572ed588b5ffa513fd2081f881f369888df",
+  "generatedAt": "2026-04-07T00:43:46.447Z",
   "scoringConfigVersion": "2026-03-23.score.v3",
   "data": [
     {
@@ -159,56 +159,12 @@
       "anchor": "typography"
     },
     {
-      "id": "brand-nyt-games:jsx-label:504",
-      "brandId": "brand-nyt-games",
-      "brandLabel": "NYT Games",
-      "kind": "jsx-label",
-      "text": "Hamburg Serial Bold",
-      "normalizedText": "hamburg serial bold",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-      "line": 504,
-      "anchor": "typography"
-    },
-    {
-      "id": "brand-nyt-games:jsx-label:562",
-      "brandId": "brand-nyt-games",
-      "brandLabel": "NYT Games",
-      "kind": "jsx-label",
-      "text": "Stymie Bold",
-      "normalizedText": "stymie bold",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-      "line": 562,
-      "anchor": "typography"
-    },
-    {
-      "id": "brand-nyt-games:jsx-label:620",
-      "brandId": "brand-nyt-games",
-      "brandLabel": "NYT Games",
-      "kind": "jsx-label",
-      "text": "Hamburg Serial Regular",
-      "normalizedText": "hamburg serial regular",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-      "line": 620,
-      "anchor": "typography"
-    },
-    {
-      "id": "brand-nyt-games:jsx-label:667",
-      "brandId": "brand-nyt-games",
-      "brandLabel": "NYT Games",
-      "kind": "jsx-label",
-      "text": "Hamburg Serial Black",
-      "normalizedText": "hamburg serial black",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandNYTGamesSection.tsx",
-      "line": 667,
-      "anchor": "typography"
-    },
-    {
       "id": "brand-nyt-games:canonical:mapping-line:9",
       "brandId": "brand-nyt-games:canonical",
       "brandLabel": "NYT Games Canonical",
       "kind": "mapping-line",
-      "text": "* nyt-franklin → Hamburg Serial (var(--dd-font-ui))",
-      "normalizedText": " nytfranklin hamburg serial varddfontui",
+      "text": "* nyt-franklin → NYTFranklin (R2 CDN, loaded via /hosted-fonts.css)",
+      "normalizedText": " nytfranklin nytfranklin r2 cdn loaded via hostedfontscss",
       "sourcePath": "src/components/admin/design-docs/sections/games/game-palettes.ts",
       "line": 9
     },
@@ -217,8 +173,8 @@
       "brandId": "brand-nyt-games:canonical",
       "brandLabel": "NYT Games Canonical",
       "kind": "mapping-line",
-      "text": "* nyt-karnakcondensed → Cheltenham (var(--dd-font-headline))",
-      "normalizedText": " nytkarnakcondensed cheltenham varddfontheadline",
+      "text": "* nyt-karnakcondensed → NYTKarnak_Condensed (R2 CDN, loaded via /hosted-fonts.css)",
+      "normalizedText": " nytkarnakcondensed nytkarnak condensed r2 cdn loaded via hostedfontscss",
       "sourcePath": "src/components/admin/design-docs/sections/games/game-palettes.ts",
       "line": 10
     },
@@ -227,8 +183,8 @@
       "brandId": "brand-nyt-games:canonical",
       "brandLabel": "NYT Games Canonical",
       "kind": "mapping-line",
-      "text": "* nyt-karnak → Gloucester (var(--dd-font-serif))",
-      "normalizedText": " nytkarnak gloucester varddfontserif",
+      "text": "* nyt-karnak → KarnakPro-Book (R2 CDN, loaded via /hosted-fonts.css)",
+      "normalizedText": " nytkarnak karnakprobook r2 cdn loaded via hostedfontscss",
       "sourcePath": "src/components/admin/design-docs/sections/games/game-palettes.ts",
       "line": 11
     },
@@ -237,8 +193,8 @@
       "brandId": "brand-nyt-games:canonical",
       "brandLabel": "NYT Games Canonical",
       "kind": "mapping-line",
-      "text": "* nyt-stymie → \"Stymie\" (var(--dd-font-slab))",
-      "normalizedText": " nytstymie stymie varddfontslab",
+      "text": "* nyt-stymie → Stymie (R2 CDN, same family)",
+      "normalizedText": " nytstymie stymie r2 cdn same family",
       "sourcePath": "src/components/admin/design-docs/sections/games/game-palettes.ts",
       "line": 12
     },
@@ -247,8 +203,8 @@
       "brandId": "brand-nyt-games:canonical",
       "brandLabel": "NYT Games Canonical",
       "kind": "mapping-line",
-      "text": "* nyt-cheltenham → \"Cheltenham\" (var(--dd-font-headline))",
-      "normalizedText": " nytcheltenham cheltenham varddfontheadline",
+      "text": "* nyt-cheltenham → NYTKarnak_Condensed (closest match — condensed display serif)",
+      "normalizedText": " nytcheltenham nytkarnak condensed closest match condensed display serif",
       "sourcePath": "src/components/admin/design-docs/sections/games/game-palettes.ts",
       "line": 13
     },
@@ -257,100 +213,10 @@
       "brandId": "brand-nyt-games:canonical",
       "brandLabel": "NYT Games Canonical",
       "kind": "mapping-line",
-      "text": "* Clear Sans (Wordle) → \"Hamburg Serial\" (var(--dd-font-ui)) [closest match]",
-      "normalizedText": " clear sans wordle hamburg serial varddfontui closest match",
+      "text": "* Clear Sans (Wordle) → system fallback chain (not hosted; --nytg-font-wordle)",
+      "normalizedText": " clear sans wordle system fallback chain not hosted nytgfontwordle",
       "sourcePath": "src/components/admin/design-docs/sections/games/game-palettes.ts",
       "line": 14
-    },
-    {
-      "id": "brand-nyt-games:connections:mapping-line:258",
-      "brandId": "brand-nyt-games:connections",
-      "brandLabel": "NYT Games Connections",
-      "kind": "mapping-line",
-      "text": "nyt-karnakcondensed → Rude Slab · 32px / 700",
-      "normalizedText": "nytkarnakcondensed rude slab 32px 700",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameConnections.tsx",
-      "line": 258
-    },
-    {
-      "id": "brand-nyt-games:connections:mapping-line:273",
-      "brandId": "brand-nyt-games:connections",
-      "brandLabel": "NYT Games Connections",
-      "kind": "mapping-line",
-      "text": "nyt-franklin → Franklin Gothic · 16px / 400",
-      "normalizedText": "nytfranklin franklin gothic 16px 400",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameConnections.tsx",
-      "line": 273
-    },
-    {
-      "id": "brand-nyt-games:spelling-bee:mapping-line:286",
-      "brandId": "brand-nyt-games:spelling-bee",
-      "brandLabel": "NYT Games Spelling Bee",
-      "kind": "mapping-line",
-      "text": "nyt-karnakcondensed → Rude Slab · 40px / 700",
-      "normalizedText": "nytkarnakcondensed rude slab 40px 700",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameSpellingBee.tsx",
-      "line": 286
-    },
-    {
-      "id": "brand-nyt-games:spelling-bee:mapping-line:301",
-      "brandId": "brand-nyt-games:spelling-bee",
-      "brandLabel": "NYT Games Spelling Bee",
-      "kind": "mapping-line",
-      "text": "nyt-franklin → Franklin Gothic · 16px / 400",
-      "normalizedText": "nytfranklin franklin gothic 16px 400",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameSpellingBee.tsx",
-      "line": 301
-    },
-    {
-      "id": "brand-nyt-games:tiles:mapping-line:296",
-      "brandId": "brand-nyt-games:tiles",
-      "brandLabel": "NYT Games Tiles",
-      "kind": "mapping-line",
-      "text": "nyt-karnakcondensed → Rude Slab · 32px / 700",
-      "normalizedText": "nytkarnakcondensed rude slab 32px 700",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameTiles.tsx",
-      "line": 296
-    },
-    {
-      "id": "brand-nyt-games:tiles:mapping-line:311",
-      "brandId": "brand-nyt-games:tiles",
-      "brandLabel": "NYT Games Tiles",
-      "kind": "mapping-line",
-      "text": "nyt-franklin → Franklin Gothic · 16px / 400",
-      "normalizedText": "nytfranklin franklin gothic 16px 400",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameTiles.tsx",
-      "line": 311
-    },
-    {
-      "id": "brand-nyt-games:wordle:mapping-line:307",
-      "brandId": "brand-nyt-games:wordle",
-      "brandLabel": "NYT Games Wordle",
-      "kind": "mapping-line",
-      "text": "nyt-karnakcondensed → Rude Slab · 50px / 700",
-      "normalizedText": "nytkarnakcondensed rude slab 50px 700",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameWordle.tsx",
-      "line": 307
-    },
-    {
-      "id": "brand-nyt-games:wordle:mapping-line:322",
-      "brandId": "brand-nyt-games:wordle",
-      "brandLabel": "NYT Games Wordle",
-      "kind": "mapping-line",
-      "text": "nyt-karnak → Stymie · 38px / 400",
-      "normalizedText": "nytkarnak stymie 38px 400",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameWordle.tsx",
-      "line": 322
-    },
-    {
-      "id": "brand-nyt-games:wordle:mapping-line:337",
-      "brandId": "brand-nyt-games:wordle",
-      "brandLabel": "NYT Games Wordle",
-      "kind": "mapping-line",
-      "text": "Clear Sans → Hamburg Serial · 16px / 400 · body font",
-      "normalizedText": "clear sans hamburg serial 16px 400 body font",
-      "sourcePath": "src/components/admin/design-docs/sections/games/GameWordle.tsx",
-      "line": 337
     },
     {
       "id": "brand-nyt-magazine:jsx-label:136",
@@ -683,69 +549,36 @@
       "anchor": "typography"
     },
     {
-      "id": "brand-the-athletic:specimen-meta:644",
+      "id": "brand-the-athletic:specimen-meta:136",
       "brandId": "brand-the-athletic",
       "brandLabel": "The Athletic",
       "kind": "specimen-meta",
-      "text": "Headlines: Cheltenham Bold | 32px | white",
-      "normalizedText": "headlines cheltenham bold 32px white",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-      "line": 644,
+      "text": "nyt-cheltenham: 400 (h1) / 700 (h2 section heads) / 500 (h3 sub-sections)",
+      "normalizedText": "nytcheltenham 400 h1 700 h2 section heads 500 h3 subsections",
+      "sourcePath": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
+      "line": 136,
       "anchor": "typography"
     },
     {
-      "id": "brand-the-athletic:specimen-meta:661",
+      "id": "brand-the-athletic:specimen-meta:230",
       "brandId": "brand-the-athletic",
       "brandLabel": "The Athletic",
       "kind": "specimen-meta",
-      "text": "Section Titles: Franklin Gothic Bold | 22px | uppercase | 0.08em tracking",
-      "normalizedText": "section titles franklin gothic bold 22px uppercase 008em tracking",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-      "line": 661,
+      "text": "nyt-franklin: 300-700 | UI chrome, nav, pills, byline, Datawrapper, storyline, ads",
+      "normalizedText": "nytfranklin 300700 ui chrome nav pills byline datawrapper storyline ads",
+      "sourcePath": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
+      "line": 230,
       "anchor": "typography"
     },
     {
-      "id": "brand-the-athletic:specimen-meta:680",
+      "id": "brand-the-athletic:specimen-meta:299",
       "brandId": "brand-the-athletic",
       "brandLabel": "The Athletic",
       "kind": "specimen-meta",
-      "text": "Body: Gloucester Regular | 17px | 1.7 line-height | #E0E0E0",
-      "normalizedText": "body gloucester regular 17px 17 lineheight e0e0e0",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-      "line": 680,
-      "anchor": "typography"
-    },
-    {
-      "id": "brand-the-athletic:specimen-meta:730",
-      "brandId": "brand-the-athletic",
-      "brandLabel": "The Athletic",
-      "kind": "specimen-meta",
-      "text": "Stat Numbers: Franklin Gothic Bold | 36px | tabular-nums | white",
-      "normalizedText": "stat numbers franklin gothic bold 36px tabularnums white",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-      "line": 730,
-      "anchor": "typography"
-    },
-    {
-      "id": "brand-the-athletic:specimen-meta:744",
-      "brandId": "brand-the-athletic",
-      "brandLabel": "The Athletic",
-      "kind": "specimen-meta",
-      "text": "Metadata: Franklin Gothic | 12px | #888888",
-      "normalizedText": "metadata franklin gothic 12px 888888",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-      "line": 744,
-      "anchor": "typography"
-    },
-    {
-      "id": "brand-the-athletic:specimen-meta:769",
-      "brandId": "brand-the-athletic",
-      "brandLabel": "The Athletic",
-      "kind": "specimen-meta",
-      "text": "Live Indicator: Franklin Gothic Bold | 11px | uppercase | red bg",
-      "normalizedText": "live indicator franklin gothic bold 11px uppercase red bg",
-      "sourcePath": "src/components/admin/design-docs/sections/BrandTheAthleticSection.tsx",
-      "line": 769,
+      "text": "RegularSlab: 400 / 18px / Nav bar league labels — wordmark-style slab serif",
+      "normalizedText": "regularslab 400 18px nav bar league labels wordmarkstyle slab serif",
+      "sourcePath": "src/components/admin/design-docs/sections/brand-athletic/BrandAthleticTypography.tsx",
+      "line": 299,
       "anchor": "typography"
     },
     {

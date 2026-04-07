@@ -88,6 +88,16 @@ const COMPONENT_TYPE_DESCRIPTIONS: Record<string, string> = {
   "byline": "Author name, timestamp, and social sharing pills",
   "author-bio":
     "End-of-article author biography with headshot and bio text",
+  "sharetools-bar":
+    "Tier 2 facsimile of NYT action chrome with share, save, gift, and more buttons",
+  "body-copy":
+    "Inline article paragraph block with Franklin body text and source-preserved anchor links",
+  "tariff-rate-arrow-chart":
+    "Custom tariff-rate comparison chart for top import partners with delta bars and source credits",
+  "tariff-rate-table":
+    "Expandable tariff-rate table covering countries with $1B+ in U.S. imports",
+  "reporting-credit":
+    "Small Franklin reporting note placed before the author bio",
 };
 
 function buildComponentCatalog(): ComponentEntry[] {

@@ -46,6 +46,9 @@ type VideoAssetPayload = {
   promo_subtype?: string | null;
   is_publishable?: boolean;
   publish_block_reason?: string | null;
+  publication_mode?: string | null;
+  is_canonical_publication?: boolean;
+  supports_reference_publication?: boolean;
 };
 
 type RunPayload = {
@@ -67,6 +70,9 @@ type RunPayload = {
   source_import_type?: string | null;
   is_publishable?: boolean;
   publish_block_reason?: string | null;
+  publication_mode?: string | null;
+  is_canonical_publication?: boolean;
+  supports_reference_publication?: boolean;
   effective_runtime_seconds?: number | null;
   error_message?: string | null;
   completed_at?: string | null;
@@ -101,6 +107,8 @@ type PublishVersionEntry = {
   is_current: boolean;
   published_at?: string | null;
   published_by?: string | null;
+  publication_mode?: string | null;
+  is_canonical_publication?: boolean;
 };
 
 type ProgressPayload = {
@@ -292,6 +300,24 @@ type ExcludedSectionEntry = {
   detection_source: string;
 };
 
+type ReviewSummaryPayload = {
+  run_id: string;
+  publication_mode?: string | null;
+  is_canonical_publication?: boolean;
+  raw_leaderboard: LeaderboardEntry[];
+  reviewed_leaderboard: LeaderboardEntry[];
+  reviewed_totals_source?: string | null;
+  excluded_section_count: number;
+  excluded_overlap_ms: number;
+  decision_counts?: {
+    suggestion_decisions?: number;
+    unknown_review_state?: number;
+  };
+  rerun_required_for_identity_changes?: boolean;
+  decision_effect_summary?: string | null;
+  current_publish_version?: PublishVersionEntry | null;
+};
+
 const breadcrumbs = buildAdminSectionBreadcrumb("Cast Screen Time", "/admin/cast-screentime");
 const ownerScopeOptions: OwnerScope[] = ["season", "show", "episode"];
 const videoClassFilters: VideoClassFilter[] = ["all", "episode", "trailer", "extras"];
@@ -326,6 +352,12 @@ function parseVideoClassFilter(value: string | null): VideoClassFilter | null {
 function formatDurationMs(value: number): string {
   if (!Number.isFinite(value)) return "n/a";
   return `${(value / 1000).toFixed(value >= 1000 ? 2 : 3)}s`;
+}
+
+function formatScreenTimeSeconds(value: number | string | null | undefined): string {
+  const numericValue = typeof value === "string" ? Number(value) : value;
+  if (numericValue == null || !Number.isFinite(numericValue)) return "n/a";
+  return `${numericValue.toFixed(3)}s`;
 }
 
 function resolveMediaType(item?: { media_type?: string | null; video_class?: string | null; promo_subtype?: string | null } | null): VideoClass {
@@ -443,6 +475,7 @@ export default function CastScreentimePageClient() {
   const [segments, setSegments] = useState<SegmentEntry[]>([]);
   const [evidence, setEvidence] = useState<EvidenceEntry[]>([]);
   const [excludedSections, setExcludedSections] = useState<ExcludedSectionEntry[]>([]);
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummaryPayload | null>(null);
   const [shots, setShots] = useState<ShotEntry[]>([]);
   const [scenes, setScenes] = useState<SceneEntry[]>([]);
   const [titleCardCandidates, setTitleCardCandidates] = useState<TitleCardCandidateEntry[]>([]);
@@ -478,6 +511,7 @@ export default function CastScreentimePageClient() {
     setSegments([]);
     setEvidence([]);
     setExcludedSections([]);
+    setReviewSummary(null);
     setShots([]);
     setScenes([]);
     setTitleCardCandidates([]);
@@ -682,12 +716,13 @@ export default function CastScreentimePageClient() {
         return payload.payload ?? null;
       };
 
-      const [runResponse, leaderboardResponse, segmentsResponse, evidenceResponse, excludedResponse] = await Promise.all([
+      const [runResponse, leaderboardResponse, segmentsResponse, evidenceResponse, excludedResponse, reviewSummaryResponse] = await Promise.all([
         fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}`),
         fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}/leaderboard`),
         fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}/segments`),
         fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}/evidence`),
         fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}/excluded-sections`),
+        fetchAdminWithAuth(`/api/admin/trr-api/cast-screentime/runs/${runId}/review-summary`),
       ]);
 
       const runPayload = await parseResponse<RunPayload>(runResponse);
@@ -695,6 +730,7 @@ export default function CastScreentimePageClient() {
       const segmentsPayload = await parseResponse<{ segments: SegmentEntry[] }>(segmentsResponse);
       const evidencePayload = await parseResponse<{ evidence: EvidenceEntry[] }>(evidenceResponse);
       const excludedPayload = await parseResponse<{ excluded_sections: ExcludedSectionEntry[] }>(excludedResponse);
+      const reviewSummaryPayload = await parseResponse<ReviewSummaryPayload>(reviewSummaryResponse);
       setRun(runPayload);
       if (runPayload.owner_scope) {
         setDecisionScope(runPayload.owner_scope);
@@ -703,6 +739,7 @@ export default function CastScreentimePageClient() {
       setSegments(Array.isArray(segmentsPayload.segments) ? segmentsPayload.segments : []);
       setEvidence(Array.isArray(evidencePayload.evidence) ? evidencePayload.evidence : []);
       setExcludedSections(Array.isArray(excludedPayload.excluded_sections) ? excludedPayload.excluded_sections : []);
+      setReviewSummary(reviewSummaryPayload);
       const [
         shotsPayload,
         scenesPayload,
@@ -951,9 +988,18 @@ export default function CastScreentimePageClient() {
     return null;
   }
 
-  const currentPublishVersion = run ? publishHistory.find((entry) => entry.run_id === run.id) ?? null : null;
-  const canPublishCurrentRun =
-    resolveMediaType(run) === "episode" && run?.status === "success" && (run?.review_status || "draft") === "approved";
+  const publicationMode = run?.publication_mode || reviewSummary?.publication_mode || (resolveMediaType(run) === "episode" ? "canonical_episode" : "supplementary_reference");
+  const isCanonicalPublication = publicationMode === "canonical_episode";
+  const currentPublishVersion =
+    (run ? publishHistory.find((entry) => entry.run_id === run.id) ?? null : null) || reviewSummary?.current_publish_version || null;
+  const canPublishCurrentRun = Boolean(run?.status === "success" && (run?.review_status || "draft") === "approved");
+  const publishButtonLabel = currentPublishVersion?.is_current
+    ? isCanonicalPublication
+      ? `Published (v${currentPublishVersion.version_number})`
+      : `Published Internal Reference (v${currentPublishVersion.version_number})`
+    : isCanonicalPublication
+      ? "Publish Canonical Version"
+      : "Publish Internal Reference";
   const availableReviewTransitions = getAllowedReviewTransitions(run);
   const canonicalRuns = showRuns.filter((item) => resolveMediaType(item) === "episode");
   const independentRuns = showRuns.filter((item) => resolveMediaType(item) !== "episode");
@@ -1046,7 +1092,7 @@ export default function CastScreentimePageClient() {
             <Badge tone="neutral">
               Default owner linkage: {videoClass === "episode" ? "episode required" : ownerScope}
             </Badge>
-            {videoClass === "episode" ? <Badge tone="emerald">Publishable lane</Badge> : <Badge tone="amber">Standalone analysis only</Badge>}
+            {videoClass === "episode" ? <Badge tone="emerald">Publishable lane</Badge> : <Badge tone="amber">Internal-reference lane</Badge>}
           </div>
           {error ? <p className="mt-4 text-sm text-red-600">{error}</p> : null}
         </section>
@@ -1078,7 +1124,7 @@ export default function CastScreentimePageClient() {
               <span className="text-xs text-neutral-500">
                 {videoClass === "episode"
                   ? "Episode uploads stay eligible for canonical publish after approval."
-                  : "Trailer and extras uploads stay reviewable but standalone."}
+                  : "Trailer and extras uploads stay reviewable and can publish as internal references."}
               </span>
             </div>
           </div>
@@ -1372,11 +1418,7 @@ export default function CastScreentimePageClient() {
                 disabled={publishingRun}
                 className="rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
               >
-                {publishingRun
-                  ? "Publishing…"
-                  : currentPublishVersion?.is_current
-                    ? `Published (v${currentPublishVersion.version_number})`
-                    : "Publish Canonical Version"}
+                {publishingRun ? "Publishing…" : publishButtonLabel}
               </button>
             ) : null}
             {run
@@ -1397,12 +1439,20 @@ export default function CastScreentimePageClient() {
 
         <section className="grid gap-6 xl:grid-cols-4">
           <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
-            <h2 className="text-base font-semibold text-neutral-900">Publish History</h2>
+            <h2 className="text-base font-semibold text-neutral-900">
+              {isCanonicalPublication ? "Canonical publication" : "Supplementary reference publication"}
+            </h2>
             <p className="mt-1 text-sm text-neutral-600">
-              Canonical publish versions exist only for episode assets. Trailers and extras remain independent reports.
+              {isCanonicalPublication
+                ? "Episode assets publish into canonical episode, season, and show rollups."
+                : "Trailer and extras assets publish as internal references without changing canonical episode, season, or show rollups."}
             </p>
             {publishHistory.length === 0 ? (
-              <p className="mt-3 text-sm text-neutral-500">No canonical publish history exists for the current asset.</p>
+              <p className="mt-3 text-sm text-neutral-500">
+                {isCanonicalPublication
+                  ? "No canonical publish history exists for the current asset."
+                  : "No supplementary internal-reference publish history exists for the current asset."}
+              </p>
             ) : (
               <div className="mt-3 space-y-2">
                 {publishHistory.map((entry) => (
@@ -1483,6 +1533,57 @@ export default function CastScreentimePageClient() {
               </div>
             )}
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-neutral-900">Reviewed Totals</h2>
+              <p className="mt-1 text-sm text-neutral-600">
+                Derived from immutable retained segments plus excluded-section overlays. These are the totals used for publication snapshots.
+              </p>
+            </div>
+            {reviewSummary ? (
+              <div className="flex flex-wrap gap-2">
+                <Badge tone={isCanonicalPublication ? "sky" : "amber"}>
+                  {isCanonicalPublication ? "Canonical episode publication" : "Supplementary reference publication"}
+                </Badge>
+                <Badge tone="neutral">Excluded sections {reviewSummary.excluded_section_count}</Badge>
+                <Badge tone="neutral">Overlap {formatDurationMs(reviewSummary.excluded_overlap_ms)}</Badge>
+              </div>
+            ) : null}
+          </div>
+          {reviewSummary?.decision_effect_summary ? (
+            <p className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+              {reviewSummary.decision_effect_summary}
+            </p>
+          ) : null}
+          {reviewSummary?.reviewed_leaderboard?.length ? (
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="text-neutral-500">
+                  <tr>
+                    <th className="pb-2 pr-4">Person</th>
+                    <th className="pb-2 pr-4">Reviewed Time</th>
+                    <th className="pb-2 pr-4">Frames</th>
+                    <th className="pb-2">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reviewSummary.reviewed_leaderboard.map((entry) => (
+                    <tr key={`reviewed:${entry.person_id}`} className="border-t border-neutral-200">
+                      <td className="py-2 pr-4">{entry.display_name || entry.person_id}</td>
+                      <td className="py-2 pr-4">{formatScreenTimeSeconds(entry.screen_time_seconds)}</td>
+                      <td className="py-2 pr-4">{entry.frame_count}</td>
+                      <td className="py-2">{entry.confidence_avg ?? "n/a"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-neutral-500">No reviewed totals are available for this run yet.</p>
+          )}
         </section>
 
         <section className="grid gap-6 xl:grid-cols-2">
@@ -1678,7 +1779,7 @@ export default function CastScreentimePageClient() {
                   {leaderboard.map((entry) => (
                     <tr key={entry.person_id} className="border-t border-neutral-200">
                       <td className="py-2 pr-4">{entry.display_name || entry.person_id}</td>
-                      <td className="py-2 pr-4">{entry.screen_time_seconds}</td>
+                      <td className="py-2 pr-4">{formatScreenTimeSeconds(entry.screen_time_seconds)}</td>
                       <td className="py-2 pr-4">{entry.frame_count}</td>
                       <td className="py-2">{entry.confidence_avg ?? "n/a"}</td>
                     </tr>

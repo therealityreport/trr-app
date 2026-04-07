@@ -173,6 +173,7 @@ import {
   getAutoResumableAdminOperationSession,
   getOrCreateAdminFlowKey,
   markAdminOperationSessionStatus,
+  upsertAdminOperationSession,
 } from "@/lib/admin/operation-session";
 import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
@@ -207,7 +208,10 @@ import {
   type OverviewWatchAvailabilityRow,
 } from "@/lib/admin/show-page/overview-display";
 import {
+  buildLinkDiscoveryProgressSummary,
+  type LinkDiscoveryProgressSummary,
 } from "@/lib/admin/show-page/link-discovery-progress";
+import { pickPreferredPersonLinkFeaturedImage } from "@/lib/admin/show-page/person-link-images";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
 // Types
@@ -347,6 +351,13 @@ const normalizeErrorMessage = (value: unknown): string | null => {
   return null;
 };
 
+const parsePositiveIntegerInputValue = (value: string): number | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 
 interface TrrCastMember {
   id: string;
@@ -368,6 +379,8 @@ interface TrrCastMember {
   latest_season?: number | null;
   seasons_appeared?: number[] | null;
 }
+
+type ShowCastEligibilityMode = "default" | "links";
 
 type EntityLinkType = "show" | "season" | "person";
 type EntityLinkGroup = "official" | "social" | "knowledge" | "cast_announcements" | "other";
@@ -745,6 +758,7 @@ type PersonApprovedLinkPill = {
 type PersonLinkCoverageCard = {
   personId: string;
   personName: string;
+  avatarUrl: string | null;
   seasons: number[];
   approvedLinkCount: number;
   approvedLinks: PersonApprovedLinkPill[];
@@ -1141,6 +1155,169 @@ const buildCreditsPipelineRequestBody = (): string =>
 const buildCreditsPipelineFlowScope = (showId: string): string => {
   const body = buildCreditsPipelineRequestBody();
   return `POST:/api/admin/trr-api/shows/${showId}/refresh/stream:${String(body.length)}`;
+};
+
+const LINK_DISCOVERY_REQUEST_BODY = JSON.stringify({ include_seasons: true, include_people: true });
+
+const LINK_DISCOVERY_STAGE_LABELS: Record<string, string> = {
+  starting: "Initializing",
+  show_discovery_started: "Show Links",
+  show_discovery_completed: "Show Links",
+  season_discovery_started: "Season Links",
+  season_discovery_completed: "Season Links",
+  people_discovery_started: "Cast Links",
+  people_discovery_completed: "Cast Links",
+  upsert_started: "Saving Links",
+  upsert_completed: "Saving Links",
+  social_url_repair_completed: "Normalizing Social URLs",
+  cleanup_completed: "Cleanup",
+  completed: "Complete",
+  run_timeout: "Timeout",
+};
+
+const buildLinksDiscoveryFlowScope = (showId: string): string =>
+  `POST:/api/admin/trr-api/shows/${showId}/links/discover/stream:${String(LINK_DISCOVERY_REQUEST_BODY.length)}`;
+
+const buildLinksDiscoveryTargetPath = (showId: string): string =>
+  `/api/admin/trr-api/shows/${showId}/links/discover/stream`;
+
+const shouldPreferLocalAdminExecution = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.trim().toLowerCase();
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".localhost");
+};
+
+const readTrimmedToken = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const shortenAdminToken = (value: string | null | undefined): string | null => {
+  const normalized = readTrimmedToken(value);
+  return normalized ? normalized.slice(0, 8) : null;
+};
+
+const formatLinksDiscoveryKickoffMessage = (
+  event: "operation" | "dispatched_to_modal",
+  kickoffHandle: ReturnType<typeof normalizeKickoffHandle>
+): string => {
+  const metaParts: string[] = [];
+  if (kickoffHandle.executionOwner) {
+    metaParts.push(kickoffHandle.executionOwner === "remote_worker" ? "remote worker" : kickoffHandle.executionOwner);
+  }
+  if (kickoffHandle.executionBackendCanonical) {
+    metaParts.push(kickoffHandle.executionBackendCanonical);
+  }
+  if (kickoffHandle.executionModeCanonical) {
+    metaParts.push(`mode ${kickoffHandle.executionModeCanonical}`);
+  }
+  if (kickoffHandle.operationId) {
+    metaParts.push(`op ${kickoffHandle.operationId.slice(0, 8)}`);
+  }
+  const metaSuffix = metaParts.length > 0 ? ` (${metaParts.join(" · ")})` : "";
+  const operationStatus =
+    canonicalizeOperationStatus(
+      kickoffHandle.rawStatus,
+      event === "dispatched_to_modal" ? "running" : "queued"
+    ) || (event === "dispatched_to_modal" ? "running" : "queued");
+  if (kickoffHandle.rawStatus === "attached") {
+    return `Attached to Links refresh${metaSuffix}.`;
+  }
+  if (operationStatus === "running") {
+    return `Links refresh running${metaSuffix}.`;
+  }
+  return `Links refresh ${operationStatus}${metaSuffix}.`;
+};
+
+const buildLinksDiscoveryCompletionNotice = (payload: Record<string, unknown>): string => {
+  const discoveredRaw = payload.discovered;
+  const discovered =
+    typeof discoveredRaw === "number"
+      ? discoveredRaw
+      : Number.parseInt(String(discoveredRaw ?? "0"), 10);
+  const result =
+    payload.result && typeof payload.result === "object" && !Array.isArray(payload.result)
+      ? (payload.result as Record<string, unknown>)
+      : null;
+  const statusCounts =
+    payload.status_counts && typeof payload.status_counts === "object" && !Array.isArray(payload.status_counts)
+      ? (payload.status_counts as Record<string, unknown>)
+      : result?.status_counts && typeof result.status_counts === "object" && !Array.isArray(result.status_counts)
+        ? (result.status_counts as Record<string, unknown>)
+        : null;
+  const approvedAddedRaw = statusCounts?.approved_added;
+  const approvedAdded =
+    typeof approvedAddedRaw === "number"
+      ? approvedAddedRaw
+      : Number.parseInt(String(approvedAddedRaw ?? "0"), 10);
+  const timedOut = payload.timed_out === true || result?.timed_out === true;
+  const parts = [
+    Number.isFinite(discovered) && discovered > 0 ? `${discovered} discovered` : null,
+    Number.isFinite(approvedAdded) && approvedAdded > 0 ? `${approvedAdded} approved` : null,
+  ].filter((part): part is string => Boolean(part));
+  const suffix = parts.length > 0 ? ` ${parts.join(" · ")}.` : "";
+  return timedOut
+    ? `Links refresh timed out with partial progress.${suffix}`
+    : `Links refresh complete.${suffix}`;
+};
+
+type LinkDiscoverySourceCount = { key: string; label: string; count: number };
+
+const normalizeLinkDiscoverySourceKey = (value: string): string => {
+  const normalized = value.trim().toLowerCase().replace(/[\s.-]+/g, "_");
+  if (normalized === "bravo" || normalized === "bravotv_com") return "bravotv";
+  return normalized;
+};
+
+const formatLinkDiscoverySourceLabel = (value: string): string => {
+  const normalized = normalizeLinkDiscoverySourceKey(value);
+  if (normalized === "bravotv") return "BravoTV";
+  if (normalized === "tmdb") return "TMDb";
+  if (normalized === "wikidata") return "Wikidata";
+  if (normalized === "wikipedia") return "Wikipedia";
+  if (normalized === "imdb") return "IMDb";
+  if (normalized === "instagram") return "Instagram";
+  if (normalized === "facebook") return "Facebook";
+  if (normalized === "twitter") return "X";
+  if (normalized === "youtube") return "YouTube";
+  if (normalized === "tiktok") return "TikTok";
+  if (normalized === "fandom") return "Fandom";
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+};
+
+const readLinkDiscoverySourceCounts = (value: unknown): LinkDiscoverySourceCount[] => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const counts = value as Record<string, unknown>;
+  return Object.entries(counts)
+    .map(([rawKey, rawCount]) => {
+      const count = parseProgressNumber(rawCount);
+      if (count === null || count <= 0) return null;
+      const key = normalizeLinkDiscoverySourceKey(rawKey);
+      return {
+        key,
+        label: formatLinkDiscoverySourceLabel(key),
+        count,
+      };
+    })
+    .filter((entry): entry is LinkDiscoverySourceCount => Boolean(entry))
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.label.localeCompare(b.label);
+    });
+};
+
+const formatIsoAgeLabel = (value: string | null | undefined): string | null => {
+  const trimmed = readTrimmedToken(value);
+  if (!trimmed) return null;
+  const timestamp = Date.parse(trimmed);
+  if (!Number.isFinite(timestamp)) return null;
+  const diffSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  return `${diffSeconds}s ago`;
 };
 
 const isCastRefreshPhaseId = (value: unknown): value is CastRefreshPhaseId =>
@@ -2372,8 +2549,11 @@ export default function TrrShowDetailPage() {
   const [show, setShow] = useState<TrrShow | null>(null);
   const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
+  const [linksEligibleCast, setLinksEligibleCast] = useState<TrrCastMember[]>([]);
   const [castLoadedOnce, setCastLoadedOnce] = useState(false);
   const [castLoading, setCastLoading] = useState(false);
+  const [linksEligibleCastLoading, setLinksEligibleCastLoading] = useState(false);
+  const [linksEligibleCastLoadedOnce, setLinksEligibleCastLoadedOnce] = useState(false);
   const [castLoadError, setCastLoadError] = useState<string | null>(null);
   const [castLoadWarning, setCastLoadWarning] = useState<string | null>(null);
   const [castPhotoEnriching, setCastPhotoEnriching] = useState(false);
@@ -2559,6 +2739,19 @@ export default function TrrShowDetailPage() {
   const [linksLoadTimedOut, setLinksLoadTimedOut] = useState(false);
   const [linksNotice, setLinksNotice] = useState<string | null>(null);
   const [linksRefreshing, setLinksRefreshing] = useState(false);
+  const [linksRefreshModalOpen, setLinksRefreshModalOpen] = useState(false);
+  const [linksRefreshSummary, setLinksRefreshSummary] = useState<LinkDiscoveryProgressSummary | null>(null);
+  const [linksRefreshLatestPayload, setLinksRefreshLatestPayload] = useState<Record<string, unknown> | null>(null);
+  const [linksRefreshRunId, setLinksRefreshRunId] = useState<string | null>(null);
+  const [linksRefreshOperationId, setLinksRefreshOperationId] = useState<string | null>(null);
+  const [linksRefreshExecutionOwner, setLinksRefreshExecutionOwner] = useState<string | null>(null);
+  const [linksRefreshExecutionBackend, setLinksRefreshExecutionBackend] = useState<string | null>(null);
+  const [linksRefreshExecutionMode, setLinksRefreshExecutionMode] = useState<string | null>(null);
+  const [linksRefreshStatus, setLinksRefreshStatus] = useState<CanonicalOperationStatus | null>(null);
+  const [linksRefreshCompletionNotice, setLinksRefreshCompletionNotice] = useState<string | null>(null);
+  const [linksRefreshResult, setLinksRefreshResult] = useState<Record<string, unknown> | null>(null);
+  const [linksRefreshCancelling, setLinksRefreshCancelling] = useState(false);
+  const linksRefreshResumeOperationRef = useRef<string | null>(null);
   const [redditCommunities, setRedditCommunities] = useState<ShowRedditCommunity[]>([]);
   const [redditLoading, setRedditLoading] = useState(false);
   const [redditError, setRedditError] = useState<string | null>(null);
@@ -2606,6 +2799,9 @@ export default function TrrShowDetailPage() {
   const [castSeasonFilters, setCastSeasonFilters] = useState<number[]>([]);
   const [castRoleAndCreditFilters, setCastRoleAndCreditFilters] = useState<string[]>([]);
   const [castHasImageFilter, setCastHasImageFilter] = useState<"all" | "yes" | "no">("all");
+  const [castExactEpisodeCount, setCastExactEpisodeCount] = useState<number | null>(null);
+  const [castMinEpisodeCount, setCastMinEpisodeCount] = useState<number | null>(null);
+  const [castMaxEpisodeCount, setCastMaxEpisodeCount] = useState<number | null>(null);
   const [castSearchQuery, setCastSearchQuery] = useState("");
   const [castSearchQueryDebounced, setCastSearchQueryDebounced] = useState("");
   const [castRenderLimit, setCastRenderLimit] = useState(CAST_INCREMENTAL_INITIAL_LIMIT);
@@ -2854,6 +3050,12 @@ export default function TrrShowDetailPage() {
   }, [castLoadedOnce]);
 
   useEffect(() => {
+    setLinksEligibleCast([]);
+    setLinksEligibleCastLoadedOnce(false);
+    setLinksEligibleCastLoading(false);
+  }, [showId]);
+
+  useEffect(() => {
     setActiveTab(showRouteState.tab);
     if (showRouteState.tab === "assets") {
       setAssetsView(showRouteState.assetsSubTab);
@@ -2864,6 +3066,9 @@ export default function TrrShowDetailPage() {
     setCastSortBy(showCastRouteState.sortBy);
     setCastSortOrder(showCastRouteState.sortOrder);
     setCastHasImageFilter(showCastRouteState.hasImageFilter);
+    setCastExactEpisodeCount(showCastRouteState.exactEpisodeCount);
+    setCastMinEpisodeCount(showCastRouteState.minEpisodeCount);
+    setCastMaxEpisodeCount(showCastRouteState.maxEpisodeCount);
     setCastSeasonFilters((prev) =>
       areNumberArraysEqual(prev, showCastRouteState.seasonFilters)
         ? prev
@@ -2876,7 +3081,10 @@ export default function TrrShowDetailPage() {
   }, [
     showCastRouteState.hasImageFilter,
     showCastRouteState.filters,
+    showCastRouteState.exactEpisodeCount,
     showCastRouteState.searchQuery,
+    showCastRouteState.maxEpisodeCount,
+    showCastRouteState.minEpisodeCount,
     showCastRouteState.seasonFilters,
     showCastRouteState.sortBy,
     showCastRouteState.sortOrder,
@@ -3012,6 +3220,9 @@ export default function TrrShowDetailPage() {
       hasImageFilter: castHasImageFilter,
       seasonFilters: castSeasonFilters,
       filters: castRoleAndCreditFilters,
+      exactEpisodeCount: castExactEpisodeCount,
+      minEpisodeCount: castMinEpisodeCount,
+      maxEpisodeCount: castMaxEpisodeCount,
     });
     const nextUrl = buildShowAdminUrl({
       showSlug: showSlugForRouting,
@@ -3024,6 +3235,9 @@ export default function TrrShowDetailPage() {
   }, [
     activeTab,
     castHasImageFilter,
+    castExactEpisodeCount,
+    castMaxEpisodeCount,
+    castMinEpisodeCount,
     castRoleAndCreditFilters,
     castSearchQueryDebounced,
     castSeasonFilters,
@@ -4811,6 +5025,63 @@ export default function TrrShowDetailPage() {
     [activeTab, getAuthHeaders, isCurrentShowId, showId]
   );
 
+  const fetchLinksEligibleCast = useCallback(async (): Promise<TrrCastMember[]> => {
+    const requestShowId = showId;
+    if (!requestShowId) return [];
+
+    const linksRosterRequest: {
+      rosterMode: ShowCastRosterMode;
+      includePhotos: boolean;
+      eligibilityMode: ShowCastEligibilityMode;
+    } = {
+      rosterMode: "imdb_show_membership",
+      includePhotos: false,
+      eligibilityMode: "links",
+    };
+
+    setLinksEligibleCastLoading(true);
+    try {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams();
+      params.set("limit", "500");
+      params.set("roster_mode", linksRosterRequest.rosterMode);
+      params.set("include_photos", linksRosterRequest.includePhotos ? "true" : "false");
+      if (linksRosterRequest.eligibilityMode === "links") {
+        params.set("eligibility_mode", "links");
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${requestShowId}/cast?${params.toString()}`,
+        {
+          headers,
+          cache: "no-store",
+        },
+        SHOW_CAST_LOAD_TIMEOUT_MS
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        cast?: unknown;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to load links-eligible cast roster");
+      }
+      const nextCast = Array.isArray(data.cast) ? (data.cast as TrrCastMember[]) : [];
+      if (!isCurrentShowId(requestShowId)) return [];
+      setLinksEligibleCast(nextCast);
+      setLinksEligibleCastLoadedOnce(true);
+      return nextCast;
+    } catch (error) {
+      if (!isCurrentShowId(requestShowId)) return [];
+      console.warn("Failed to fetch links-eligible cast:", error);
+      setLinksEligibleCast([]);
+      setLinksEligibleCastLoadedOnce(true);
+      return [];
+    } finally {
+      if (isCurrentShowId(requestShowId)) {
+        setLinksEligibleCastLoading(false);
+      }
+    }
+  }, [getAuthHeaders, isCurrentShowId, showId]);
+
   const fetchShowCredits = useCallback(async () => {
     if (!showId) return;
     setShowCreditsLoading(true);
@@ -4924,44 +5195,222 @@ export default function TrrShowDetailPage() {
     }
   }, [getAuthHeaders, showId]);
 
-  const refreshShowLinks = useCallback(async () => {
+  const refreshShowLinks = useCallback(async ({ resumeOnly = false }: { resumeOnly?: boolean } = {}) => {
     if (!showId) return;
+    const targetPath = buildLinksDiscoveryTargetPath(showId);
+    const flowScope = buildLinksDiscoveryFlowScope(showId);
+    const flowKey = getOrCreateAdminFlowKey(flowScope);
+    const resumableSession = getAutoResumableAdminOperationSession(flowScope);
+    const hasResumableOperation =
+      resumableSession?.status === "active" &&
+      typeof resumableSession.operationId === "string" &&
+      resumableSession.operationId.trim().length > 0;
+    if (resumeOnly && !hasResumableOperation) {
+      return;
+    }
+    if (!resumeOnly && linksRefreshing) {
+      setLinksRefreshModalOpen(true);
+      return;
+    }
+
+    const persistSession = (patch: {
+      status?: "active" | "completed" | "failed" | "cancelled";
+      operationId?: string | null;
+      runId?: string | null;
+      canonicalStatus?: string | null;
+      executionOwner?: string | null;
+      executionBackendCanonical?: string | null;
+      executionModeCanonical?: string | null;
+      lastEventSeq?: number;
+      latestPhase?: string | null;
+    }): void => {
+      upsertAdminOperationSession(flowScope, {
+        flowKey,
+        input: targetPath,
+        method: "POST",
+        ...patch,
+      });
+    };
+
+    setLinksRefreshModalOpen(true);
     setLinksRefreshing(true);
+    setLinksRefreshCancelling(false);
     setLinksError(null);
     setLinksLoadTimedOut(false);
-    setLinksNotice("Refreshing links...");
+    if (!resumeOnly) {
+      setLinksRefreshSummary(null);
+      setLinksRefreshLatestPayload(null);
+      setLinksRefreshCompletionNotice(null);
+      setLinksRefreshResult(null);
+      setLinksRefreshRunId(null);
+      setLinksRefreshOperationId(null);
+      setLinksRefreshExecutionOwner(null);
+      setLinksRefreshExecutionBackend(null);
+      setLinksRefreshExecutionMode(null);
+      setLinksRefreshStatus("queued");
+      setLinksNotice("Starting links discovery...");
+    } else {
+      setLinksRefreshStatus("running");
+      if (resumableSession?.runId) {
+        setLinksRefreshRunId(resumableSession.runId);
+      }
+      if (resumableSession?.operationId) {
+        setLinksRefreshOperationId(resumableSession.operationId);
+        const reconnectMessage = `Reconnected to Links refresh from this tab (op ${resumableSession.operationId.slice(0, 8)}).`;
+        setLinksNotice(reconnectMessage);
+      }
+      if (resumableSession?.executionOwner) {
+        setLinksRefreshExecutionOwner(resumableSession.executionOwner);
+      }
+      if (resumableSession?.executionBackendCanonical) {
+        setLinksRefreshExecutionBackend(resumableSession.executionBackendCanonical);
+      }
+      if (resumableSession?.executionModeCanonical) {
+        setLinksRefreshExecutionMode(resumableSession.executionModeCanonical);
+      }
+    }
+
     try {
       const headers = await getAuthHeaders();
       let sawComplete = false;
-      await adminStream(`/api/admin/trr-api/shows/${showId}/links/discover/stream`, {
+      await adminStream(targetPath, {
         method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ include_seasons: true, include_people: true }),
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+          ...(shouldPreferLocalAdminExecution() ? { "x-trr-prefer-local-execution": "1" } : {}),
+        },
+        body: LINK_DISCOVERY_REQUEST_BODY,
         timeoutMs: 12 * 60 * 1000,
         onEvent: async ({ event, payload }) => {
-          if (event === "progress" && payload && typeof payload === "object") {
-            const message =
-              typeof (payload as { message?: unknown }).message === "string"
-                ? String((payload as { message?: unknown }).message)
-                : "Refreshing links...";
-            setLinksNotice(message);
+          const payloadRecord =
+            payload && typeof payload === "object" && !Array.isArray(payload)
+              ? (payload as Record<string, unknown>)
+              : null;
+          const progressRunId = readTrimmedToken(payloadRecord?.run_id);
+          const progressOperationId = readTrimmedToken(payloadRecord?.operation_id);
+          const eventSeqRaw = payloadRecord?.event_seq;
+          const eventSeq =
+            typeof eventSeqRaw === "number"
+              ? eventSeqRaw
+              : Number.parseInt(String(eventSeqRaw ?? "0"), 10);
+          const currentStage = readTrimmedToken(payloadRecord?.current_stage) ?? readTrimmedToken(payloadRecord?.stage);
+
+          if (progressRunId) {
+            setLinksRefreshRunId(progressRunId);
+            persistSession({ runId: progressRunId });
+          }
+          if (progressOperationId) {
+            setLinksRefreshOperationId(progressOperationId);
+            persistSession({ operationId: progressOperationId });
+          }
+          if (Number.isFinite(eventSeq) && eventSeq > 0) {
+            persistSession({ lastEventSeq: eventSeq });
+          }
+          if (currentStage) {
+            persistSession({ latestPhase: currentStage });
+          }
+
+          if ((event === "operation" || event === "dispatched_to_modal") && payloadRecord) {
+            const kickoffHandle = normalizeKickoffHandle(payloadRecord);
+            const kickoffMessage = formatLinksDiscoveryKickoffMessage(event, kickoffHandle);
+            const canonicalStatus = kickoffHandle.canonicalStatus;
+            if (kickoffHandle.operationId) {
+              setLinksRefreshOperationId(kickoffHandle.operationId);
+            }
+            if (kickoffHandle.runId) {
+              setLinksRefreshRunId(kickoffHandle.runId);
+            }
+            setLinksRefreshExecutionOwner(kickoffHandle.executionOwner ?? null);
+            setLinksRefreshExecutionBackend(kickoffHandle.executionBackendCanonical ?? null);
+            setLinksRefreshExecutionMode(kickoffHandle.executionModeCanonical ?? null);
+            setLinksRefreshStatus(canonicalStatus);
+            setLinksNotice(kickoffMessage);
+            persistSession({
+              ...(kickoffHandle.operationId ? { operationId: kickoffHandle.operationId } : {}),
+              ...(kickoffHandle.runId ? { runId: kickoffHandle.runId } : {}),
+              canonicalStatus,
+              executionOwner: kickoffHandle.executionOwner ?? null,
+              executionBackendCanonical: kickoffHandle.executionBackendCanonical ?? null,
+              executionModeCanonical: kickoffHandle.executionModeCanonical ?? null,
+              status:
+                canonicalStatus === "completed"
+                  ? "completed"
+                  : canonicalStatus === "failed"
+                    ? "failed"
+                    : canonicalStatus === "cancelled"
+                      ? "cancelled"
+                      : "active",
+            });
             return;
           }
+
+          if (event === "progress" && payloadRecord) {
+            const summary = buildLinkDiscoveryProgressSummary(payloadRecord, LINK_DISCOVERY_STAGE_LABELS);
+            setLinksRefreshSummary(summary);
+            setLinksRefreshLatestPayload(payloadRecord);
+            setLinksRefreshStatus("running");
+            setLinksNotice(summary.headline);
+            persistSession({ canonicalStatus: "running", status: "active" });
+            return;
+          }
+
           if (event === "error") {
             const detail =
-              payload && typeof payload === "object"
-                ? (payload as { error?: unknown; detail?: unknown })
+              payloadRecord && typeof payloadRecord === "object"
+                ? payloadRecord
                 : null;
+            const errorStatus = canonicalizeOperationStatus(detail?.status, "failed");
             const errorMessage =
               typeof detail?.detail === "string" && detail.detail
                 ? detail.detail
                 : typeof detail?.error === "string" && detail.error
                   ? detail.error
                   : "Failed to refresh links";
+            setLinksRefreshCancelling(false);
+            setLinksRefreshStatus(errorStatus);
+            persistSession({
+              canonicalStatus: errorStatus,
+              status: errorStatus === "cancelled" ? "cancelled" : "failed",
+            });
             throw new Error(errorMessage);
           }
-          if (event === "complete") {
+
+          if (event === "complete" && payloadRecord) {
             sawComplete = true;
+            setLinksRefreshCancelling(false);
+            setLinksRefreshSummary(buildLinkDiscoveryProgressSummary(payloadRecord, LINK_DISCOVERY_STAGE_LABELS));
+            const completionStatus = canonicalizeOperationStatus(
+              payloadRecord.status,
+              payloadRecord.timed_out === true ? "failed" : "completed"
+            );
+            const completionNotice = buildLinksDiscoveryCompletionNotice(payloadRecord);
+            setLinksRefreshLatestPayload(payloadRecord);
+            setLinksRefreshResult(
+              payloadRecord.result && typeof payloadRecord.result === "object" && !Array.isArray(payloadRecord.result)
+                ? (payloadRecord.result as Record<string, unknown>)
+                : payloadRecord
+            );
+            setLinksRefreshCompletionNotice(completionNotice);
+            setLinksRefreshStatus(completionStatus);
+            setLinksNotice(completionNotice);
+            if (payloadRecord.result && typeof payloadRecord.result === "object" && !Array.isArray(payloadRecord.result)) {
+              const resultRecord = payloadRecord.result as Record<string, unknown>;
+              const resultRunId = readTrimmedToken(resultRecord.run_id);
+              if (resultRunId) {
+                setLinksRefreshRunId(resultRunId);
+                persistSession({ runId: resultRunId });
+              }
+            }
+            persistSession({
+              canonicalStatus: completionStatus,
+              status:
+                completionStatus === "completed"
+                  ? "completed"
+                  : completionStatus === "cancelled"
+                    ? "cancelled"
+                    : "failed",
+            });
           }
         },
       });
@@ -4969,17 +5418,111 @@ export default function TrrShowDetailPage() {
         throw new Error("Links refresh ended before completion.");
       }
       await Promise.all([fetchShowLinks(), fetchSeasons()]);
-      setLinksNotice("Link refresh complete.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to refresh links";
       const isTimeout = /timed out|timeout|aborted/i.test(message);
+      setLinksRefreshCancelling(false);
       setLinksLoadTimedOut(isTimeout);
       setLinksError(message);
       setLinksNotice(null);
+      if (!linksRefreshCompletionNotice) {
+        setLinksRefreshCompletionNotice(null);
+      }
     } finally {
       setLinksRefreshing(false);
     }
-  }, [fetchSeasons, fetchShowLinks, getAuthHeaders, showId]);
+  }, [
+    fetchSeasons,
+    fetchShowLinks,
+    getAuthHeaders,
+    linksRefreshCompletionNotice,
+    linksRefreshing,
+    setLinksRefreshCancelling,
+    showId,
+  ]);
+
+  const cancelShowLinksRefresh = useCallback(async () => {
+    if (!showId) return;
+    const flowScope = buildLinksDiscoveryFlowScope(showId);
+    const activeSession = getAutoResumableAdminOperationSession(flowScope);
+    const operationId =
+      activeSession?.operationId?.trim() ?? linksRefreshOperationId?.trim() ?? "";
+    if (!operationId) return;
+
+    setLinksRefreshCancelling(true);
+    setLinksError(null);
+    setLinksNotice(`Requesting cancellation for Links run ${operationId.slice(0, 8)}...`);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/operations/${operationId}/cancel`,
+        {
+          method: "POST",
+          cache: "no-store",
+          headers,
+        },
+        { allowDevAdminBypass: true },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        operation?: { status?: string | null };
+        cancelled_operation_ids?: string[];
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      }
+      const cancelledOperationIds = Array.isArray(payload.cancelled_operation_ids)
+        ? payload.cancelled_operation_ids.filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0,
+          )
+        : [];
+      const resultingStatus = canonicalizeOperationStatus(payload.operation?.status, "running");
+      if (resultingStatus === "cancelled") {
+        markAdminOperationSessionStatus(flowScope, "cancelled");
+      }
+      const notice =
+        resultingStatus === "cancelled"
+          ? cancelledOperationIds.length > 1
+            ? `Cancelled ${cancelledOperationIds.length} related Links jobs.`
+            : `Links run ${operationId.slice(0, 8)} cancelled.`
+          : cancelledOperationIds.length > 1
+            ? `Cancellation requested for ${cancelledOperationIds.length} related Links jobs.`
+            : `Cancellation requested for Links run ${operationId.slice(0, 8)}.`;
+      setLinksRefreshStatus(resultingStatus);
+      setLinksNotice(
+        resultingStatus === "cancelled" ? notice : `${notice} Waiting for the worker to stop...`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to cancel Links run";
+      setLinksError(message);
+    } finally {
+      setLinksRefreshCancelling(false);
+    }
+  }, [getAuthHeaders, linksRefreshOperationId, showId]);
+
+  useEffect(() => {
+    if (!showId || activeTab !== "settings") {
+      linksRefreshResumeOperationRef.current = null;
+      return;
+    }
+    const flowScope = buildLinksDiscoveryFlowScope(showId);
+    const activeSession = getAutoResumableAdminOperationSession(flowScope);
+    const activeOperationId = activeSession?.operationId?.trim() ?? "";
+    if (!activeOperationId) {
+      linksRefreshResumeOperationRef.current = null;
+      return;
+    }
+    if (linksRefreshing) {
+      linksRefreshResumeOperationRef.current = activeOperationId;
+      return;
+    }
+    if (linksRefreshResumeOperationRef.current === activeOperationId) {
+      return;
+    }
+    linksRefreshResumeOperationRef.current = activeOperationId;
+    void refreshShowLinks({ resumeOnly: true });
+  }, [activeTab, linksRefreshing, refreshShowLinks, showId]);
 
   const syncShowScopedBrandLogos = useCallback(async () => {
     if (!showId) return;
@@ -7432,6 +7975,11 @@ export default function TrrShowDetailPage() {
   }, [activeTab, fetchShowLinks, hasAccess, showId]);
 
   useEffect(() => {
+    if (!hasAccess || !showId || activeTab !== "settings") return;
+    void fetchLinksEligibleCast();
+  }, [activeTab, fetchLinksEligibleCast, hasAccess, showId]);
+
+  useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "settings" && activeTab !== "details")) {
       return;
     }
@@ -7932,6 +8480,19 @@ export default function TrrShowDetailPage() {
       }
       if (castHasImageFilter === "yes" && !member.merged_photo_url) return false;
       if (castHasImageFilter === "no" && member.merged_photo_url) return false;
+      const episodeCount =
+        typeof member.total_episodes === "number" && Number.isFinite(member.total_episodes)
+          ? member.total_episodes
+          : null;
+      if (typeof castExactEpisodeCount === "number" && episodeCount !== castExactEpisodeCount) {
+        return false;
+      }
+      if (typeof castMinEpisodeCount === "number" && (episodeCount === null || episodeCount < castMinEpisodeCount)) {
+        return false;
+      }
+      if (typeof castMaxEpisodeCount === "number" && (episodeCount === null || episodeCount > castMaxEpisodeCount)) {
+        return false;
+      }
       return true;
     });
 
@@ -7955,6 +8516,9 @@ export default function TrrShowDetailPage() {
   }, [
     castDisplayBaseMembers,
     castHasImageFilter,
+    castExactEpisodeCount,
+    castMaxEpisodeCount,
+    castMinEpisodeCount,
     castRoleAndCreditFilters,
     castRoleMembers.length,
     castRoleMemberByPersonId,
@@ -8277,12 +8841,23 @@ export default function TrrShowDetailPage() {
     [overviewNetworks, redditCommunities, show?.name]
   );
 
+  const linksEligiblePersonIds = useMemo(
+    () =>
+      new Set(
+        linksEligibleCast
+          .map((member) => String(member.person_id || "").trim())
+          .filter((personId) => personId.length > 0)
+      ),
+    [linksEligibleCast]
+  );
+
   const castMemberLinkCoverageCards = useMemo<PersonLinkCoverageCard[]>(() => {
     const personLinks = showLinks.filter((link) => link.entity_type === "person");
     if (personLinks.length === 0) return [];
+    if (linksEligibleCastLoadedOnce && linksEligibleCast.length === 0) return [];
 
     const rosterNameById = new Map<string, string>();
-    for (const member of cast) {
+    for (const member of linksEligibleCastLoadedOnce ? linksEligibleCast : cast) {
       const name = String(member.full_name || member.cast_member_name || "").trim();
       if (member.person_id && name && !rosterNameById.has(member.person_id)) {
         rosterNameById.set(member.person_id, name);
@@ -8303,6 +8878,7 @@ export default function TrrShowDetailPage() {
 
     const cards: PersonLinkCoverageCard[] = [];
     for (const [personId, links] of linksByPerson.entries()) {
+      if (linksEligiblePersonIds.size > 0 && !linksEligiblePersonIds.has(personId)) continue;
       const personName = resolveCastMemberNameFromLinks(links, rosterNameById.get(personId));
 
       const linksBySource = new Map<PersonLinkSourceKey, EntityLink[]>();
@@ -8387,6 +8963,7 @@ export default function TrrShowDetailPage() {
       cards.push({
         personId,
         personName,
+        avatarUrl: pickPreferredPersonLinkFeaturedImage(links),
         seasons: [...seasonSet].sort((a, b) => a - b),
         approvedLinkCount: approvedLinks.length,
         approvedLinks,
@@ -8401,7 +8978,7 @@ export default function TrrShowDetailPage() {
       return a.personName.localeCompare(b.personName);
     });
     return cards;
-  }, [cast, showIsBravo, showLinks]);
+  }, [cast, linksEligibleCast, linksEligibleCastLoadedOnce, linksEligiblePersonIds, showIsBravo, showLinks]);
 
   const showGalleryAllowedSectionSet = useMemo(
     () => new Set<AssetSectionKey>(SHOW_GALLERY_ALLOWED_SECTIONS),
@@ -11590,6 +12167,30 @@ export default function TrrShowDetailPage() {
       featuredShowLogoAssetId &&
       featuredShowLogoAssetId === assetLightbox.asset.id
   );
+  const linksRefreshValidatedSourceCounts = useMemo(() => {
+    return readLinkDiscoverySourceCounts(
+      linksRefreshLatestPayload?.validated_live_counts_by_source ?? linksRefreshResult?.validated_live_counts_by_source
+    );
+  }, [linksRefreshLatestPayload, linksRefreshResult]);
+  const linksRefreshDeletedSourceCounts = useMemo(() => {
+    return readLinkDiscoverySourceCounts(
+      linksRefreshLatestPayload?.cleanup_deleted_by_source ?? linksRefreshResult?.cleanup_deleted_by_source
+    );
+  }, [linksRefreshLatestPayload, linksRefreshResult]);
+  const linksRefreshLastUpdateLabel = useMemo(() => {
+    const payloadTimestamp =
+      typeof linksRefreshLatestPayload?.timestamp === "string" ? linksRefreshLatestPayload.timestamp : null;
+    return formatIsoAgeLabel(payloadTimestamp);
+  }, [linksRefreshLatestPayload]);
+  const linksRefreshLastStageChangeLabel = useMemo(() => {
+    const stageTransition =
+      typeof linksRefreshLatestPayload?.last_stage_transition_at === "string"
+        ? linksRefreshLatestPayload.last_stage_transition_at
+        : typeof linksRefreshResult?.last_stage_transition_at === "string"
+          ? linksRefreshResult.last_stage_transition_at
+          : null;
+    return formatIsoAgeLabel(stageTransition);
+  }, [linksRefreshLatestPayload, linksRefreshResult]);
 
   if (checking) {
     return (
@@ -11732,6 +12333,12 @@ export default function TrrShowDetailPage() {
       : "Refreshing..."
     : "Refresh Credits";
   const castRefreshCancelButtonLabel = castRefreshCanceling ? "Cancelling..." : "Cancel Run";
+  const linksRefreshStalled = linksRefreshSummary?.stalled === true;
+  const linksRefreshStalledReason = linksRefreshSummary?.stalledReason ?? null;
+  const canCancelLinksRefresh =
+    Boolean(linksRefreshOperationId) &&
+    (linksRefreshing || linksRefreshStatus === "queued" || linksRefreshStatus === "running");
+  const linksRefreshCancelButtonLabel = linksRefreshCancelling ? "Cancelling..." : "Cancel job";
   const autoGeneratedBravoUrl = inferBravoShowUrl(show?.name) || syncBravoUrl.trim() || "";
 
   const pipelineSteps = buildPipelineRows(REFRESH_LOG_TOPIC_DEFINITIONS, refreshLogTopicGroups);
@@ -13001,6 +13608,9 @@ export default function TrrShowDetailPage() {
                       setCastSeasonFilters([]);
                       setCastRoleAndCreditFilters([]);
                       setCastHasImageFilter("all");
+                      setCastExactEpisodeCount(null);
+                      setCastMinEpisodeCount(null);
+                      setCastMaxEpisodeCount(null);
                       setCastSortBy("episodes");
                       setCastSortOrder("desc");
                       setCastSearchQuery("");
@@ -13009,6 +13619,50 @@ export default function TrrShowDetailPage() {
                   >
                     Clear Filters
                   </button>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Episode Exact
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={castExactEpisodeCount ?? ""}
+                      onChange={(event) =>
+                        setCastExactEpisodeCount(parsePositiveIntegerInputValue(event.target.value))
+                      }
+                      placeholder="Any"
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Episode Min
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={castMinEpisodeCount ?? ""}
+                      onChange={(event) =>
+                        setCastMinEpisodeCount(parsePositiveIntegerInputValue(event.target.value))
+                      }
+                      placeholder="Any"
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Episode Max
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={castMaxEpisodeCount ?? ""}
+                      onChange={(event) =>
+                        setCastMaxEpisodeCount(parsePositiveIntegerInputValue(event.target.value))
+                      }
+                      placeholder="Any"
+                      className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm font-medium normal-case tracking-normal text-zinc-700"
+                    />
+                  </label>
                 </div>
                 <div className="mt-3 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -13989,7 +14643,11 @@ export default function TrrShowDetailPage() {
                             <p className="text-xs text-zinc-500">{castMemberPagesSection.description}</p>
                           </div>
                           {castMemberLinkCoverageCards.length === 0 ? (
-                            <p className="text-sm text-zinc-500">No cast-member links in this category yet.</p>
+                            linksEligibleCastLoading && !linksEligibleCastLoadedOnce ? (
+                              <p className="text-sm text-zinc-500">Loading eligible cast roster...</p>
+                            ) : (
+                              <p className="text-sm text-zinc-500">No cast-member links in this category yet.</p>
+                            )
                           ) : (
                             <div className="space-y-3">
                               {castMemberLinkCoverageCards.map((card) => (
@@ -13998,7 +14656,23 @@ export default function TrrShowDetailPage() {
                                   className="rounded-lg border border-zinc-200 bg-white p-3"
                                 >
                                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                    <p className="text-sm font-semibold text-zinc-900">{card.personName}</p>
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      {card.avatarUrl ? (
+                                        <Image
+                                          src={card.avatarUrl}
+                                          alt={card.personName}
+                                          width={32}
+                                          height={32}
+                                          className="h-8 w-8 rounded-full border border-zinc-200 object-cover"
+                                          unoptimized
+                                        />
+                                      ) : (
+                                        <div className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 text-[10px] font-semibold uppercase text-zinc-500">
+                                          {card.personName.slice(0, 1) || "?"}
+                                        </div>
+                                      )}
+                                      <p className="truncate text-sm font-semibold text-zinc-900">{card.personName}</p>
+                                    </div>
                                     <div className="flex flex-wrap items-center gap-1">
                                       <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
                                         {card.approvedLinkCount} approved
@@ -14819,6 +15493,255 @@ export default function TrrShowDetailPage() {
             }}
           />
         )}
+
+        <AdminModal
+          isOpen={linksRefreshModalOpen}
+          onClose={() => setLinksRefreshModalOpen(false)}
+          closeLabel="Close links discovery progress"
+          ariaLabel="Links discovery progress"
+          panelClassName="max-h-[90vh] max-w-3xl overflow-y-auto"
+          preserveScrollPosition={true}
+        >
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-zinc-900">Links Discovery</h3>
+              <p className="text-sm text-zinc-500">
+                Remote worker-backed refresh for show, season, and cast member pages.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {canCancelLinksRefresh && (
+                <button
+                  type="button"
+                  onClick={() => void cancelShowLinksRefresh()}
+                  disabled={linksRefreshCancelling}
+                  className="rounded-md border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                >
+                  {linksRefreshCancelButtonLabel}
+                </button>
+              )}
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                  linksRefreshStatus === "completed"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : linksRefreshStatus === "failed" || linksRefreshStatus === "cancelled"
+                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : linksRefreshStatus === "running"
+                        ? "border-blue-200 bg-blue-50 text-blue-700"
+                        : "border-zinc-200 bg-zinc-50 text-zinc-600"
+                }`}
+              >
+                {linksRefreshStatus ?? "queued"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setLinksRefreshModalOpen(false)}
+                className="rounded-md border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+
+          {(linksError || linksNotice || linksRefreshCompletionNotice) && (
+            <p className={`mb-4 text-sm ${linksError ? "text-red-600" : "text-zinc-600"}`}>
+              {linksError || linksRefreshCompletionNotice || linksNotice}
+            </p>
+          )}
+
+          <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Run ID</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-900">
+                {linksRefreshRunId ? `Run ${shortenAdminToken(linksRefreshRunId)}` : "Pending"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Operation ID</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-900">
+                {linksRefreshOperationId ? `Op ${shortenAdminToken(linksRefreshOperationId)}` : "Pending"}
+              </p>
+            </div>
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Execution</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-900">
+                {linksRefreshExecutionOwner === "remote_worker"
+                  ? "remote worker"
+                  : linksRefreshExecutionOwner || "Awaiting worker"}
+              </p>
+              {(linksRefreshExecutionBackend || linksRefreshExecutionMode) && (
+                <p className="mt-1 text-xs text-zinc-500">
+                  {[linksRefreshExecutionBackend, linksRefreshExecutionMode ? `mode ${linksRefreshExecutionMode}` : null]
+                    .filter((value): value is string => Boolean(value))
+                    .join(" · ")}
+                </p>
+              )}
+            </div>
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Status</p>
+              <p className="mt-1 text-sm font-semibold text-zinc-900">
+                {linksRefreshSummary?.stageLabel || "Discovery"}
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                {linksRefreshSummary?.elapsedLabel || "Waiting for stream updates"}
+              </p>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">Progress</p>
+            {linksRefreshSummary ? (
+              <div className="mt-3 space-y-3">
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-900">{linksRefreshSummary.headline}</p>
+                      {linksRefreshSummary.detail && (
+                        <p className="mt-1 text-sm text-zinc-600">{linksRefreshSummary.detail}</p>
+                      )}
+                    </div>
+                    <div className="text-right text-xs text-zinc-500">
+                      {linksRefreshSummary.stageElapsedLabel && <p>{linksRefreshSummary.stageElapsedLabel}</p>}
+                      {linksRefreshSummary.elapsedLabel && <p>{linksRefreshSummary.elapsedLabel}</p>}
+                    </div>
+                  </div>
+                  {(linksRefreshSummary.targetSummary ||
+                    linksRefreshSummary.stageProgressLabel ||
+                    linksRefreshSummary.currentTargetLabel ||
+                    linksRefreshSummary.budgetLabel) && (
+                    <div className="mt-3 space-y-1 text-sm text-zinc-600">
+                      {linksRefreshSummary.targetSummary && <p>{linksRefreshSummary.targetSummary}</p>}
+                      {linksRefreshSummary.stageProgressLabel && <p>{linksRefreshSummary.stageProgressLabel}</p>}
+                      {linksRefreshSummary.currentTargetLabel && (
+                        <p>
+                          Checking: <span className="font-semibold text-zinc-900">{linksRefreshSummary.currentTargetLabel}</span>
+                        </p>
+                      )}
+                      {linksRefreshSummary.budgetLabel && <p className="text-amber-700">{linksRefreshSummary.budgetLabel}</p>}
+                    </div>
+                  )}
+                  {linksRefreshSummary.metrics.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {linksRefreshSummary.metrics.map((metric) => (
+                        <span
+                          key={`${metric.label}:${metric.value}`}
+                          className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700"
+                        >
+                          {metric.label}: {metric.value}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {Boolean(linksRefreshLatestPayload?.timeout) && typeof linksRefreshLatestPayload?.timeout === "object" && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    {typeof (linksRefreshLatestPayload.timeout as Record<string, unknown>).detail === "string"
+                      ? String((linksRefreshLatestPayload.timeout as Record<string, unknown>).detail)
+                      : "Discovery reported a timeout condition."}
+                  </div>
+                )}
+
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Worker Monitor</p>
+                    <div className="mt-2 space-y-1 text-sm text-zinc-700">
+                      <p>
+                        Worker health:{" "}
+                        <span className={linksRefreshStalled ? "font-semibold text-amber-700" : "font-semibold text-emerald-700"}>
+                          {linksRefreshStalled ? "Stalled" : "Healthy"}
+                        </span>
+                      </p>
+                      {linksRefreshLastUpdateLabel && <p>Last stream update: {linksRefreshLastUpdateLabel}</p>}
+                      {linksRefreshLastStageChangeLabel && <p>Last stage change: {linksRefreshLastStageChangeLabel}</p>}
+                      {linksRefreshStalledReason && (
+                        <p className="text-amber-700">
+                          Reason: <span className="font-semibold">{linksRefreshStalledReason}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {(linksRefreshValidatedSourceCounts.length > 0 || linksRefreshDeletedSourceCounts.length > 0) && (
+                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                        Correct / Live by Source
+                      </p>
+                      {linksRefreshValidatedSourceCounts.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {linksRefreshValidatedSourceCounts.map((entry) => (
+                            <span
+                              key={`links-live-source-${entry.key}`}
+                              className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
+                            >
+                              {entry.label}: {entry.count}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-sm text-zinc-500">No validated live source counts reported yet.</p>
+                      )}
+                      {linksRefreshDeletedSourceCounts.length > 0 && (
+                        <div className="mt-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                            Invalid Deleted
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {linksRefreshDeletedSourceCounts.map((entry) => (
+                              <span
+                                key={`links-deleted-source-${entry.key}`}
+                                className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700"
+                              >
+                                {entry.label}: {entry.count}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {linksRefreshResult && (
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500">Result</p>
+                    <p className="mt-1 text-sm text-zinc-700">
+                      {linksRefreshCompletionNotice || "Links discovery finished."}
+                    </p>
+                    {linksRefreshValidatedSourceCounts.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {linksRefreshValidatedSourceCounts.map((entry) => (
+                          <span
+                            key={`links-result-live-source-${entry.key}`}
+                            className="rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-emerald-700"
+                          >
+                            {entry.label}: {entry.count} live
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {linksRefreshDeletedSourceCounts.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {linksRefreshDeletedSourceCounts.map((entry) => (
+                          <span
+                            key={`links-result-deleted-source-${entry.key}`}
+                            className="rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-700"
+                          >
+                            {entry.label}: {entry.count} invalid deleted
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-zinc-500">
+                {linksRefreshing ? "Waiting for worker progress..." : "Start a links refresh to see live updates here."}
+              </p>
+            )}
+          </section>
+        </AdminModal>
 
         <AdminModal
           isOpen={refreshLogOpen}

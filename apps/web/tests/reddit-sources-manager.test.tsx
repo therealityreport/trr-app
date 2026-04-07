@@ -3012,7 +3012,7 @@ describe("RedditSourcesManager", () => {
     expect(
       await screen.findAllByText("Reddit refresh remote-worker ownership is enforced and Modal dispatch is not ready."),
     ).toHaveLength(2);
-    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(false);
+    expect(cardHasPendingRefresh("Pre-Season")).toBe(false);
   });
 
   it("shows live comments-stage counters from backend run diagnostics", async () => {

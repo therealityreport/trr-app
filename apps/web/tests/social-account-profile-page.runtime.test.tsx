@@ -73,6 +73,8 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "Content-Type": "application/json" },
   });
 
+const formatLocalDateTime = (value: string): string => new Date(value).toLocaleString();
+
 const baseSummary = {
   platform: "instagram",
   account_handle: "bravotv",
@@ -147,7 +149,7 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Backfill Posts runs the full-history catalog job. Sync Newer fetches only posts published after the latest stored post. Resume Tail continues from where the last backfill stopped. Sync Recent runs the same pipeline, limited to the last day.",
+        "All four actions use the same shared-profile catalog pipeline with different scopes. Backfill Posts covers full history or a bounded repair window. Sync Recent runs a recent canary window. Sync Newer repairs the head gap above the newest stored post. Resume Tail replays the saved frontier toward the oldest posts.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Catalog Posts")).toBeInTheDocument();
@@ -381,7 +383,12 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/catalog/resume-tail")) {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
-        return jsonResponse({ run_id: "catalog-run-tail-12345678", status: "queued" });
+        return jsonResponse({
+          run_id: "catalog-run-tail-12345678",
+          status: "queued",
+          catalog_action: "resume_tail",
+          catalog_action_scope: "frontier_resume",
+        });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -479,7 +486,12 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/catalog/sync-newer")) {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
-        return jsonResponse({ run_id: "catalog-run-head-12345678", status: "queued" });
+        return jsonResponse({
+          run_id: "catalog-run-head-12345678",
+          status: "queued",
+          catalog_action: "sync_newer",
+          catalog_action_scope: "head_gap",
+        });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -1659,6 +1671,257 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getAllByText(/waiting for a Modal worker claim/i).length).toBeGreaterThan(0);
   });
 
+  it("shows background classification instead of a queued rerun when fetch is already complete", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "instagram",
+          account_handle: "bravotv",
+          profile_url: "https://www.instagram.com/bravotv/",
+          catalog_recent_runs: [
+            {
+              run_id: "run-classify-1",
+              status: "queued",
+              created_at: "2026-04-02T23:18:10.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-classify-1/progress")) {
+        return jsonResponse({
+          run_id: "run-classify-1",
+          run_status: "queued",
+          source_scope: "bravo",
+          created_at: "2026-04-02T23:18:10.000Z",
+          scrape_complete: true,
+          classify_incomplete: true,
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 33,
+              saved_count: 33,
+            },
+            shared_account_posts: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 1,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 66,
+              saved_count: 66,
+            },
+            post_classify: {
+              jobs_total: 2,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 2,
+              jobs_running: 0,
+              jobs_waiting: 2,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          post_progress: {
+            completed_posts: 66,
+            matched_posts: 66,
+            total_posts: 16619,
+          },
+          worker_runtime: {
+            runner_strategy: "newest_first_frontier",
+            partition_strategy: "newest_first_frontier",
+            frontier_strategy: "newest_first_frontier",
+            runner_count: 1,
+            scheduler_lanes: ["A"],
+            active_workers_now: 0,
+            worker_ids_sample: [],
+          },
+          frontier: {
+            status: "retrying",
+            pages_scanned: 2,
+            posts_checked: 66,
+            posts_saved: 66,
+            expected_total_posts: 16619,
+            transport: "public",
+            retry_count: 2,
+            exhausted: false,
+          },
+          discovery: {
+            partition_count: 1,
+            completed_count: 1,
+            running_count: 0,
+            queued_count: 0,
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 0,
+            modal_pending_jobs: 2,
+            modal_running_unclaimed_jobs: 0,
+            retrying_dispatch_jobs: 0,
+            stale_dispatch_failed_jobs: 0,
+            latest_dispatch_requested_at: "2026-04-02T23:28:35.000Z",
+            remote_invocation_checked_at: "2026-04-02T23:46:22.000Z",
+            max_stale_dispatch_retries: 3,
+          },
+          summary: {
+            total_jobs: 4,
+            completed_jobs: 1,
+            failed_jobs: 1,
+            active_jobs: 2,
+            items_found_total: 99,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 66, total_pages: 3 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Classifying posts")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Classifying")).toBeInTheDocument();
+    expect(screen.getByText(/Run run-clas · Classifying/i)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/2 classify jobs from this run are already dispatched to Modal and waiting for capacity/i)
+        .length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/Run run-clas · Queued/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Run run-clas is Queued/i)).not.toBeInTheDocument();
+  });
+
+  it("renders catalog operational alerts from the backend progress payload", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [{ run_id: "run-alerts-1", status: "running", created_at: "2026-04-02T23:18:10.000Z" }],
+        });
+      }
+      if (url.includes("/catalog/runs/run-alerts-1/progress")) {
+        return jsonResponse({
+          run_id: "run-alerts-1",
+          run_status: "running",
+          run_state: "classifying",
+          source_scope: "bravo",
+          scrape_complete: true,
+          classify_incomplete: true,
+          alerts: [
+            {
+              code: "runtime_version_drift",
+              severity: "warning",
+              message: "This run was observed on more than one worker runtime version.",
+            },
+            {
+              code: "classify_backlog_after_scrape",
+              severity: "warning",
+              message: "Scrape finished, but classification still has queued backlog.",
+            },
+          ],
+          stages: {
+            post_classify: {
+              jobs_total: 2,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 2,
+              jobs_running: 0,
+              jobs_waiting: 2,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          dispatch_health: {
+            queued_unclaimed_jobs: 0,
+            modal_pending_jobs: 0,
+            modal_running_unclaimed_jobs: 0,
+            retrying_dispatch_jobs: 0,
+            stale_dispatch_failed_jobs: 0,
+          },
+          summary: {
+            total_jobs: 2,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 2,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Runtime Version Drift")).toBeInTheDocument();
+    });
+    expect(screen.getByText("This run was observed on more than one worker runtime version.")).toBeInTheDocument();
+    expect(screen.getByText("Classify Backlog After Scrape")).toBeInTheDocument();
+    expect(screen.getByText("Scrape finished, but classification still has queued backlog.")).toBeInTheDocument();
+  });
+
+  it("uses shared-profile network metadata in the header and source status", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          network_name: "Bravo",
+          source_status: [
+            {
+              id: "shared-source-1",
+              source_scope: "bravo",
+              network_name: "Bravo",
+              profile_kind: "network_streaming",
+              assignment_mode: "multi_show_match",
+              metadata: {},
+              last_scrape_status: "completed",
+              last_scrape_at: "2026-04-02T23:18:10.000Z",
+            },
+          ],
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Instagram · Bravo · @bravotv" })).toBeInTheDocument();
+    });
+    expect(screen.getByText("Source Status")).toBeInTheDocument();
+    expect(screen.getAllByText("Bravo").length).toBeGreaterThan(0);
+    expect(screen.getByText(/network streaming · multi show match · bravo/i)).toBeInTheDocument();
+  });
+
   it("shows a dispatch-blocked banner with the configured Modal target when dispatch resolution fails", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -2577,7 +2840,9 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText("The Real Housewives of Salt Lake City")).not.toBeInTheDocument();
   });
 
-  it("renders summary hashtags on the Instagram stats tab without loading full hashtag history", async () => {
+  it("loads authoritative all-time hashtags on the Instagram stats tab from the hashtags endpoint", async () => {
+    let resolveHashtagsResponse: ((value: Response) => void) | null = null;
+
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -2595,7 +2860,9 @@ describe("SocialAccountProfilePage", () => {
         });
       }
       if (url.includes("/hashtags")) {
-        throw new Error(`Stats tab should not load full hashtags: ${url}`);
+        return await new Promise<Response>((resolve) => {
+          resolveHashtagsResponse = resolve;
+        });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -2603,16 +2870,37 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("#summaryonly")).toBeInTheDocument();
+      expect(screen.getByText("Loading hashtags…")).toBeInTheDocument();
     });
+
+    await act(async () => {
+      resolveHashtagsResponse?.(
+        jsonResponse({
+          items: [
+            {
+              hashtag: "alltime",
+              display_hashtag: "#alltime",
+              usage_count: 88,
+              first_seen_at: "2026-01-01T12:00:00.000Z",
+              latest_seen_at: "2026-03-20T14:00:29.000Z",
+            },
+          ],
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("#alltime")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("#summaryonly")).not.toBeInTheDocument();
     expect(
       mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
-        String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/hashtags"),
+        String(input) === "/api/admin/trr-api/social/profiles/instagram/bravotv/hashtags",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("keeps stats-tab hashtags summary-backed when operators change the window selector", async () => {
+  it("updates stats-tab hashtags when operators change the window selector", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -2629,8 +2917,44 @@ describe("SocialAccountProfilePage", () => {
           ],
         });
       }
+      if (url.includes("/hashtags?window=30d")) {
+        return jsonResponse({
+          items: [
+            {
+              hashtag: "monthonly",
+              display_hashtag: "#monthonly",
+              usage_count: 12,
+              first_seen_at: "2026-03-01T12:00:00.000Z",
+              latest_seen_at: "2026-03-20T14:00:29.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/hashtags?window=7d")) {
+        return jsonResponse({
+          items: [
+            {
+              hashtag: "weekonly",
+              display_hashtag: "#weekonly",
+              usage_count: 5,
+              first_seen_at: "2026-03-27T12:00:00.000Z",
+              latest_seen_at: "2026-04-02T14:00:29.000Z",
+            },
+          ],
+        });
+      }
       if (url.includes("/hashtags")) {
-        throw new Error(`Stats tab should not request hashtag windows: ${url}`);
+        return jsonResponse({
+          items: [
+            {
+              hashtag: "alltime",
+              display_hashtag: "#alltime",
+              usage_count: 88,
+              first_seen_at: "2026-01-01T12:00:00.000Z",
+              latest_seen_at: "2026-03-20T14:00:29.000Z",
+            },
+          ],
+        });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -2638,7 +2962,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("#summaryonly")).toBeInTheDocument();
+      expect(screen.getByText("#alltime")).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByRole("combobox", { name: "Window" }), {
@@ -2646,13 +2970,67 @@ describe("SocialAccountProfilePage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("#summaryonly")).toBeInTheDocument();
+      expect(screen.getByText("#monthonly")).toBeInTheDocument();
     });
+    expect(screen.queryByText("#summaryonly")).not.toBeInTheDocument();
     expect(
       mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
         String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/hashtags?window=30d"),
       ),
-    ).toBe(false);
+    ).toBe(true);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Window" }), {
+      target: { value: "7d" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("#weekonly")).toBeInTheDocument();
+    });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/hashtags?window=7d"),
+      ),
+    ).toBe(true);
+  });
+
+  it("shows stats-tab hashtag request errors instead of falling back to the summary preview", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          top_hashtags: [
+            {
+              hashtag: "summaryonly",
+              display_hashtag: "#summaryonly",
+              usage_count: 44,
+              first_seen_at: "2026-02-23T23:00:26.000Z",
+              latest_seen_at: "2026-03-20T14:00:29.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/hashtags")) {
+        return jsonResponse(
+          {
+            error: "Local TRR-Backend is saturated. Showing last successful data while retrying.",
+            code: "BACKEND_SATURATED",
+            retryable: true,
+            upstream_status: 503,
+            upstream_detail_code: "DATABASE_SERVICE_UNAVAILABLE",
+          },
+          503,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Hashtag data is retryable while the backend is busy.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("#summaryonly")).not.toBeInTheDocument();
   });
 
   it("preserves cached all-time hashtags when a later retry for that window is retryably saturated", async () => {
@@ -2938,7 +3316,7 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(screen.getAllByText("16,474").length).toBeGreaterThan(0);
     });
-    expect(screen.getByText("3/20/2026, 10:06:43 AM")).toBeInTheDocument();
+    expect(screen.getByText(formatLocalDateTime("2026-03-20T14:06:43.000Z"))).toBeInTheDocument();
   });
 
   it("falls back to the account total when inspecting a terminal run with no catalog denominator", async () => {
@@ -3538,7 +3916,11 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Unknown Hashtags")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("3 uses · First seen 3/10/2026, 8:00:00 AM · Last seen 3/17/2026, 8:00:00 AM")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `3 uses · First seen ${formatLocalDateTime("2026-03-10T12:00:00.000Z")} · Last seen ${formatLocalDateTime("2026-03-17T12:00:00.000Z")}`,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Show for #RHOP")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
 

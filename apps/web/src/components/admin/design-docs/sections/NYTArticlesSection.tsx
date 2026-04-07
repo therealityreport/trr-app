@@ -3,7 +3,8 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
-import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_ARTICLES } from "@/lib/admin/design-docs-config";
+import { ArticleListFeaturedImage } from "./ArticleListFeaturedImage";
 
 export default function NYTArticlesSection() {
   return (
@@ -33,7 +34,7 @@ export default function NYTArticlesSection() {
       </p>
 
       {/* Article cards */}
-      {ARTICLES.map((article) => (
+      {NYT_ARTICLES.map((article) => (
         <div key={article.id} style={{
           marginBottom: 32,
           border: "1px solid var(--dd-paper-grey)",
@@ -100,6 +101,8 @@ export default function NYTArticlesSection() {
               By {article.authors.join(", ")}
             </div>
           </div>
+
+          <ArticleListFeaturedImage article={article} />
 
           {/* Tools & Tech Stack */}
           <div style={{ padding: "16px 28px", borderBottom: "1px solid var(--dd-paper-grey)" }}>
@@ -202,52 +205,54 @@ export default function NYTArticlesSection() {
           </div>
 
           {/* Quote Sections / Status Badges */}
-          <div style={{ padding: "16px 28px", borderBottom: "1px solid var(--dd-paper-grey)" }}>
-            <div style={{
-              fontFamily: "var(--dd-font-sans)",
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: "uppercase" as const,
-              letterSpacing: "0.06em",
-              color: "var(--dd-ink-faint)",
-              marginBottom: 10,
-            }}>
-              Promise Tracker Sections
-            </div>
-            <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
-              {article.quoteSections.map((qs, i) => (
-                <div key={i} style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "6px 0",
-                  borderBottom: i < article.quoteSections.length - 1 ? "1px solid var(--dd-paper-grey)" : "none",
-                }}>
-                  <span style={{
-                    fontFamily: '"nyt-franklin", var(--dd-font-ui), arial, sans-serif',
-                    fontSize: 14,
-                    fontWeight: 300,
-                    color: "var(--dd-ink-black)",
+          {article.quoteSections.length > 0 && (
+            <div style={{ padding: "16px 28px", borderBottom: "1px solid var(--dd-paper-grey)" }}>
+              <div style={{
+                fontFamily: "var(--dd-font-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.06em",
+                color: "var(--dd-ink-faint)",
+                marginBottom: 10,
+              }}>
+                Promise Tracker Sections
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" as const, gap: 6 }}>
+                {article.quoteSections.map((qs, i) => (
+                  <div key={i} style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "6px 0",
+                    borderBottom: i < article.quoteSections.length - 1 ? "1px solid var(--dd-paper-grey)" : "none",
                   }}>
-                    {qs.section}
-                  </span>
-                  <span style={{
-                    fontFamily: '"nyt-franklin", var(--dd-font-ui), arial, sans-serif',
-                    fontWeight: 600,
-                    fontSize: 9,
-                    letterSpacing: "0.05em",
-                    color: "#fff",
-                    background: qs.badgeColor,
-                    padding: "3px 8px",
-                    borderRadius: 2,
-                    textTransform: "uppercase" as const,
-                  }}>
-                    {qs.badge}
-                  </span>
-                </div>
-              ))}
+                    <span style={{
+                      fontFamily: '"nyt-franklin", var(--dd-font-ui), arial, sans-serif',
+                      fontSize: 14,
+                      fontWeight: 300,
+                      color: "var(--dd-ink-black)",
+                    }}>
+                      {qs.section}
+                    </span>
+                    <span style={{
+                      fontFamily: '"nyt-franklin", var(--dd-font-ui), arial, sans-serif',
+                      fontWeight: 600,
+                      fontSize: 9,
+                      letterSpacing: "0.05em",
+                      color: "#fff",
+                      background: qs.badgeColor,
+                      padding: "3px 8px",
+                      borderRadius: 2,
+                      textTransform: "uppercase" as const,
+                    }}>
+                      {qs.badge}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Fonts Used */}
           <div style={{ padding: "16px 28px", borderBottom: "1px solid var(--dd-paper-grey)" }}>

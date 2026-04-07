@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/media-assets/[assetId]/variants/route";
@@ -27,13 +32,14 @@ describe("media asset variants proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
 
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/media-assets/asset-1/variants",
     );
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
   });
 
   it("forwards POST with auth headers", async () => {
@@ -59,7 +65,7 @@ describe("media asset variants proxy route", () => {
     const options = fetchMock.mock.calls[0][1] as RequestInit;
     expect(options.method).toBe("POST");
     expect(options.headers).toMatchObject({
-      Authorization: "Bearer service-role-secret",
+      Authorization: "Bearer internal-admin-token",
       "Content-Type": "application/json",
     });
     expect(options.body).toBe(JSON.stringify({ force: true }));
