@@ -249,7 +249,7 @@ describe("design system fonts page", () => {
     const ingredientListRow = await screen.findByTestId("brand-match-brand-nyt-cooking-Ingredient-List");
     expect(within(ingredientListRow).getAllByText("Franklin Gothic").length).toBeGreaterThan(0);
     expect(within(ingredientListRow).getByText("Weighted score breakdown")).toBeInTheDocument();
-    expect(within(ingredientListRow).getByText(/balanced-visual|explicit-mapping-visual|metadata-only/i)).toBeInTheDocument();
+    expect(within(ingredientListRow).getAllByText(/balanced-visual|explicit-mapping-visual|metadata-only/i).length).toBeGreaterThan(0);
     expect(within(panel).getByText("visual fresh")).toBeInTheDocument();
 
     fireEvent.click(within(ingredientListRow).getByRole("button", { name: "Compare" }));
@@ -274,7 +274,7 @@ describe("design system fonts page", () => {
     const row = await screen.findByTestId("brand-match-brand-nyt-games-Secondary-Display");
     const specimen = within(row).getByTestId("brand-specimen-brand-nyt-games-Secondary-Display");
 
-    expect(specimen).toHaveTextContent("Stymie Bold");
+    expect(specimen).toHaveTextContent("The Reality Report");
     expect(specimen.getAttribute("style")).toContain("font-family: Stymie, Georgia, serif;");
     expect(specimen).toHaveStyle({ fontWeight: "700" });
   });

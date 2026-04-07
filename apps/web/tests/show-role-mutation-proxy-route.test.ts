@@ -3,10 +3,11 @@ import { NextRequest } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, getBackendApiUrlMock, resolveAdminShowIdMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, resolveAdminShowIdMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   resolveAdminShowIdMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -15,6 +16,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 vi.mock("@/lib/server/admin/resolve-show-id", () => ({
@@ -29,10 +34,12 @@ describe("show role mutation proxy routes", () => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
     resolveAdminShowIdMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
 
     requireAdminMock.mockResolvedValue({ uid: "admin-test-user" });
     resolveAdminShowIdMock.mockResolvedValue("00000000-0000-0000-0000-000000000001");
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 

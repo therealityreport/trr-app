@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock, fetchMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, fetchMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   fetchMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -15,6 +16,10 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 import { POST as PreviewPOST } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/preview/route";
 import { POST as CommitPOST } from "@/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/commit/route";
 
@@ -23,9 +28,11 @@ describe("season fandom import proxy routes", () => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
     fetchMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockImplementation((path: string) => `http://backend/api/v1${path}`);
     vi.stubGlobal("fetch", fetchMock);
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
   });
 

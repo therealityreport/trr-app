@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 const { readGettyPrefetchPayloadMock } = vi.hoisted(() => ({
@@ -18,6 +19,10 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 vi.mock("@/lib/server/admin/getty-local-scrape", () => ({
   readGettyPrefetchPayload: readGettyPrefetchPayloadMock,
 }));
@@ -29,10 +34,12 @@ describe("person Getty enrichment proxy route", () => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
     readGettyPrefetchPayloadMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/person/person-1/refresh-images/getty-enrichment"
     );
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 
