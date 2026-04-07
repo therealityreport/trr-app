@@ -731,6 +731,9 @@ type RefreshLogEntry = {
   stageKey?: string | null;
   topic?: RefreshLogTopicKey | null;
   provider?: string | null;
+  subOperationId?: string | null;
+  executionOwner?: string | null;
+  parentOperationId?: string | null;
 };
 
 type RoleRenameDraft = {
@@ -3615,6 +3618,9 @@ export default function TrrShowDetailPage() {
       stageKey?: string | null;
       topic?: string | null;
       provider?: string | null;
+      subOperationId?: string | null;
+      executionOwner?: string | null;
+      parentOperationId?: string | null;
     }) => {
       const normalizedMessage = normalizeRefreshLogMessage(entry.message);
       if (!normalizedMessage) return;
@@ -3638,6 +3644,9 @@ export default function TrrShowDetailPage() {
             message: normalizedMessage,
           }),
           provider: typeof entry.provider === "string" && entry.provider.trim() ? entry.provider.trim() : null,
+          subOperationId: typeof entry.subOperationId === "string" && entry.subOperationId.trim() ? entry.subOperationId.trim() : null,
+          executionOwner: typeof entry.executionOwner === "string" && entry.executionOwner.trim() ? entry.executionOwner.trim() : null,
+          parentOperationId: typeof entry.parentOperationId === "string" && entry.parentOperationId.trim() ? entry.parentOperationId.trim() : null,
         };
         const previous = prev[prev.length - 1];
         if (
@@ -3692,12 +3701,19 @@ export default function TrrShowDetailPage() {
           : entries.length > 0
             ? "active"
             : "pending";
+      // Surface per-target execution metadata from the latest entry for pipeline rows
+      const subOperationId = latest?.subOperationId ?? undefined;
+      const executionOwner = latest?.executionOwner ?? undefined;
+      const parentOperationId = latest?.parentOperationId ?? undefined;
       return {
         topic,
         entries,
         entriesForView: [...entries].reverse(),
         latest,
         status,
+        subOperationId,
+        executionOwner,
+        parentOperationId,
       };
     });
   }, [refreshLogEntries]);
@@ -10965,6 +10981,33 @@ export default function TrrShowDetailPage() {
     ]
   );
 
+  const retryRefreshTarget = useCallback(
+    async (target: string, parentOperationId: string) => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/refresh/target/${target}/retry`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ parent_operation_id: parentOperationId }),
+          },
+          30_000
+        );
+        if (!res.ok) {
+          const err = await res.text();
+          setRefreshAllError(`Retry failed: ${err}`);
+          return;
+        }
+        // Trigger a notice so the user sees feedback while the retry starts
+        setRefreshAllNotice(`Retrying ${target}...`);
+      } catch (e) {
+        setRefreshAllError(`Retry failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [getAuthHeaders, showId]
+  );
+
   const refreshAllShowData = useCallback(async () => {
     if (!showId) return;
     if (refreshingShowAll) return;
@@ -11112,6 +11155,9 @@ export default function TrrShowDetailPage() {
               const topicRaw = payloadObject.topic;
               const providerRaw = payloadObject.provider;
               const skipReasonRaw = payloadObject.skip_reason;
+              const subOperationId = typeof payloadObject.sub_operation_id === "string" ? payloadObject.sub_operation_id : undefined;
+              const executionOwner = typeof payloadObject.execution_owner === "string" ? payloadObject.execution_owner : undefined;
+              const refreshTarget = typeof payloadObject.refresh_target === "string" ? payloadObject.refresh_target : undefined;
               const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
               const progressMessage = buildProgressMessage(
                 stageLabel,
@@ -11133,8 +11179,11 @@ export default function TrrShowDetailPage() {
                 current,
                 total: FULL_SHOW_REFRESH_TOTAL_PHASES,
                 stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
-                topic: typeof topicRaw === "string" ? normalizeRefreshLogTopic(topicRaw) : null,
+                topic: typeof topicRaw === "string" ? normalizeRefreshLogTopic(topicRaw) : (typeof refreshTarget === "string" ? normalizeRefreshLogTopic(refreshTarget) : null),
                 provider: typeof providerRaw === "string" ? providerRaw : null,
+                subOperationId: subOperationId ?? null,
+                executionOwner: executionOwner ?? null,
+                parentOperationId: subOperationId ? (typeof payloadObject.parent_operation_id === "string" ? payloadObject.parent_operation_id : null) : null,
               });
               return;
             }
@@ -16024,6 +16073,11 @@ export default function TrrShowDetailPage() {
                           <div className="min-w-0">
                             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-700">
                               {step.topic.label}
+                              {step.executionOwner && (
+                                <span className="text-xs text-zinc-500 ml-1">
+                                  ({step.executionOwner === "remote_worker" ? "Modal" : step.executionOwner})
+                                </span>
+                              )}
                             </p>
                             <p className="truncate text-[11px] text-zinc-500">{step.topic.description}</p>
                             <p className="truncate text-[11px] text-zinc-600">
@@ -16034,6 +16088,14 @@ export default function TrrShowDetailPage() {
                             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusPillClass}`}>
                               {statusText}
                             </span>
+                            {step.status === "failed" && step.parentOperationId && (
+                              <button
+                                className="text-xs text-blue-500 hover:text-blue-700 ml-2"
+                                onClick={() => retryRefreshTarget(step.topic.key, step.parentOperationId!)}
+                              >
+                                Retry
+                              </button>
+                            )}
                             {step.latest && (
                               <p className="mt-1 text-[10px] text-zinc-400">
                                 {new Date(step.latest.at).toLocaleTimeString()}
