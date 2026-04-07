@@ -31,6 +31,7 @@ import {
   type SocialSyncSessionProgressSnapshot,
   type SocialSyncSessionStreamPayload,
 } from "@/lib/admin/social-sync-session";
+import { useSharedSseResource } from "@/lib/admin/shared-live-resource";
 import { logAdminPageReadDiagnostic, measurePayloadBytes } from "@/lib/admin/page-read-diagnostics";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
@@ -4291,14 +4292,44 @@ export default function SeasonSocialAnalyticsSection({
     showId,
   ]);
 
+  const activeSyncSessionStream = useSharedSseResource<SocialSyncSessionStreamPayload>({
+    key: `season-social-sync:${showId}:${seasonNumber}:${seasonId}:${activeSyncSessionId ?? "idle"}`,
+    shouldRun: Boolean(activeSyncSessionId && runningIngest),
+    reconnectIntervalMs: 5_000,
+    connect: async ({ signal, publish }) => {
+      const headers = await getAuthHeaders();
+      await consumeSocialSyncSessionStream({
+        url: `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/sync-sessions/${activeSyncSessionId}/stream?season_id=${encodeURIComponent(seasonId)}`,
+        headers,
+        signal,
+        onOpen: () => {
+          publish({ connected: true, error: null });
+        },
+        onMessage: async (event) => {
+          publish({
+            data: event,
+            error: null,
+            connected: true,
+            lastSuccessAtMs: Date.now(),
+          });
+        },
+      });
+    },
+  });
+
   useEffect(() => {
     if (!activeSyncSessionId || !runningIngest) {
       setActiveSyncSessionStreamConnected(false);
       return;
     }
-    let cancelled = false;
-    const abortController = new AbortController();
+    setActiveSyncSessionStreamConnected(activeSyncSessionStream.connected);
+  }, [activeSyncSessionId, activeSyncSessionStream.connected, runningIngest]);
 
+  useEffect(() => {
+    const event = activeSyncSessionStream.data;
+    if (!activeSyncSessionId || !runningIngest || !event) {
+      return;
+    }
     const refreshLiveData = async (
       payload: SocialSyncSessionProgressSnapshot,
       event: SocialSyncSessionStreamPayload,
@@ -4323,94 +4354,79 @@ export default function SeasonSocialAnalyticsSection({
       await Promise.allSettled(refreshTasks);
     };
 
-    const consume = async () => {
-      try {
-        const headers = await getAuthHeaders();
-        await consumeSocialSyncSessionStream({
-          url: `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/sync-sessions/${activeSyncSessionId}/stream?season_id=${encodeURIComponent(seasonId)}`,
-          headers,
-          signal: abortController.signal,
-          onOpen: () => {
-            if (cancelled) return;
-            setActiveSyncSessionStreamConnected(true);
-            setError(null);
-          },
-          onMessage: async (event) => {
-            if (cancelled) return;
-            const payload = event.sync_session;
-            setActiveSyncSession(payload);
-            const snapshot = payload.completeness_snapshot ?? {};
-            if (snapshot.comments_coverage && typeof snapshot.comments_coverage === "object") {
-              setSyncCommentsCoveragePreview(snapshot.comments_coverage as unknown as CommentsCoverageResponse);
-            }
-            if (snapshot.asset_coverage && typeof snapshot.asset_coverage === "object") {
-              setSyncMirrorCoveragePreview(snapshot.asset_coverage as unknown as MirrorCoverageResponse);
-            }
-            const nextRunId =
-              (typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0
-                ? payload.current_run_id
-                : typeof payload.current_run?.id === "string" && payload.current_run.id.trim().length > 0
-                  ? payload.current_run.id
-                  : null) ?? null;
-            if (nextRunId && nextRunId !== activeRunId) {
-              setActiveRunId(nextRunId);
-              setSelectedRunId(nextRunId);
-              setJobs([]);
-              await fetchJobs(nextRunId);
-              await fetchRuns({ runId: nextRunId, limit: 1 });
-              await fetchRunSummaries();
-            }
-            void refreshLiveData(payload, event);
-            const sessionStatus = String(payload.status || "").toLowerCase();
-            const passLabel = String(payload.current_pass_kind || "sync").replaceAll("_", " ");
-            if (sessionStatus === "completed") {
-              setIngestMessage(
-                `Sync complete · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel}.`,
-              );
-              setRunningIngest(false);
-              setActiveSyncSessionId(null);
-              setActiveSyncSessionStreamConnected(false);
-              return;
-            }
-            if (sessionStatus === "failed" || sessionStatus === "cancelled") {
-              setIngestMessage(
-                sessionStatus === "cancelled" ? "Sync cancelled." : `Sync failed during ${passLabel}.`,
-              );
-              setRunningIngest(false);
-              setActiveSyncSessionId(null);
-              setActiveSyncSessionStreamConnected(false);
-              return;
-            }
-            setIngestMessage(
-              `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel}.`,
-            );
-          },
-        });
-      } catch (err) {
-        if (cancelled || abortController.signal.aborted) return;
-        setActiveSyncSessionStreamConnected(false);
-        setError(err instanceof Error ? err.message : "Failed to stream sync session");
+    const payload = event.sync_session;
+    setError(null);
+    setActiveSyncSession(payload);
+    const snapshot = payload.completeness_snapshot ?? {};
+    if (snapshot.comments_coverage && typeof snapshot.comments_coverage === "object") {
+      setSyncCommentsCoveragePreview(snapshot.comments_coverage as unknown as CommentsCoverageResponse);
+    }
+    if (snapshot.asset_coverage && typeof snapshot.asset_coverage === "object") {
+      setSyncMirrorCoveragePreview(snapshot.asset_coverage as unknown as MirrorCoverageResponse);
+    }
+    const nextRunId =
+      (typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0
+        ? payload.current_run_id
+        : typeof payload.current_run?.id === "string" && payload.current_run.id.trim().length > 0
+          ? payload.current_run.id
+          : null) ?? null;
+
+    const applyStreamEvent = async () => {
+      if (nextRunId && nextRunId !== activeRunId) {
+        setActiveRunId(nextRunId);
+        setSelectedRunId(nextRunId);
+        setJobs([]);
+        await fetchJobs(nextRunId);
+        await fetchRuns({ runId: nextRunId, limit: 1 });
+        await fetchRunSummaries();
       }
+      void refreshLiveData(payload, event);
+      const sessionStatus = String(payload.status || "").toLowerCase();
+      const passLabel = String(payload.current_pass_kind || "sync").replaceAll("_", " ");
+      if (sessionStatus === "completed") {
+        setIngestMessage(
+          `Sync complete · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel}.`,
+        );
+        setRunningIngest(false);
+        setActiveSyncSessionId(null);
+        setActiveSyncSessionStreamConnected(false);
+        return;
+      }
+      if (sessionStatus === "failed" || sessionStatus === "cancelled") {
+        setIngestMessage(
+          sessionStatus === "cancelled" ? "Sync cancelled." : `Sync failed during ${passLabel}.`,
+        );
+        setRunningIngest(false);
+        setActiveSyncSessionId(null);
+        setActiveSyncSessionStreamConnected(false);
+        return;
+      }
+      setIngestMessage(
+        `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)}/3 · ${passLabel}.`,
+      );
     };
 
-    void consume();
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
+    void applyStreamEvent();
   }, [
     activeRunId,
     activeSyncSessionId,
+    activeSyncSessionStream.data,
     fetchAnalytics,
     fetchJobs,
     fetchRunSummaries,
     fetchRuns,
-    getAuthHeaders,
     runningIngest,
     seasonId,
     seasonNumber,
     showId,
   ]);
+
+  useEffect(() => {
+    if (!activeSyncSessionId || !runningIngest) return;
+    if (activeSyncSessionStream.connected || !activeSyncSessionStream.error) return;
+    setActiveSyncSessionStreamConnected(false);
+    setError(activeSyncSessionStream.error);
+  }, [activeSyncSessionId, activeSyncSessionStream.connected, activeSyncSessionStream.error, runningIngest]);
 
   useEffect(() => {
     if (!primaryBootstrapReady) return;

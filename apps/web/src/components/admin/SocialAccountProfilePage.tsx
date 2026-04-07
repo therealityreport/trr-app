@@ -13,8 +13,8 @@ import {
   type SocialAccountCatalogGapAnalysisStatusResponse,
   type SocialAccountCatalogFreshness,
   type CatalogBackfillRequest,
+  type CatalogRepairAuthRequest,
   type CatalogReviewResolveRequest,
-  type CatalogResumeTailRequest,
   type CatalogSyncNewerRequest,
   type CatalogSyncRecentRequest,
   type SocialAccountCatalogPost,
@@ -33,6 +33,7 @@ import {
   type SocialAccountProfileTab,
   type SocialPlatformSlug,
   type SocialAccountProfileCollaboratorTagAggregate,
+  type SocialProfileCookieHealth,
   SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS,
   SOCIAL_ACCOUNT_PLATFORM_LABELS,
   SOCIAL_ACCOUNT_PROFILE_TAB_LABELS,
@@ -204,6 +205,12 @@ const formatDateTime = (value?: string | null): string => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+};
+
+const formatDiagnosticToken = (value?: string | null): string => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  return normalized.replace(/_/g, " ");
 };
 
 const formatModalTargetLabel = (progress?: SocialAccountCatalogRunProgressSnapshot | null): string | null => {
@@ -476,9 +483,16 @@ const getCatalogRunDisplayStatusLabel = (
   value?: string | null,
   progress?: SocialAccountCatalogRunProgressSnapshot | null,
 ): string => {
+  const normalizedStatus = String(value || "").trim().toLowerCase();
+  if (normalizedStatus === "cancelled" || normalizedStatus === "failed" || normalizedStatus === "completed") {
+    return formatRunStatusLabel(value);
+  }
+  const operationalState = String(progress?.operational_state || "").trim().toLowerCase();
+  if (operationalState === "blocked_auth") return "Auth Blocked";
   const runState = String(progress?.run_state || "").trim().toLowerCase();
   if (runState === "discovering") return "Discovering";
   if (runState === "fetching") return "Fetching";
+  if (runState === "recovering") return "Recovering";
   if (runState === "classifying") return "Classifying";
   if (progress?.scrape_complete && progress?.classify_incomplete) {
     return "Classifying";
@@ -512,6 +526,12 @@ const formatRunStageLabel = (
 const formatHandleLabel = (value?: string | null): string => {
   const normalized = String(value || "").trim().replace(/^@+/, "");
   return normalized ? `@${normalized}` : "@unknown";
+};
+
+const formatRecoveryReasonLabel = (value?: string | null): string => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "unknown";
+  return normalized.replaceAll("_", " ");
 };
 
 const formatCatalogStageActivitySummary = (
@@ -569,6 +589,7 @@ const shortRunId = (value?: string | null): string => {
 
 const getCatalogRunStatusTone = (value?: string | null): string => {
   const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "blocked_auth") return "border-red-200 bg-red-50 text-red-700";
   if (normalized === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (normalized === "failed") return "border-red-200 bg-red-50 text-red-700";
   if (normalized === "cancelled") return "border-amber-200 bg-amber-50 text-amber-700";
@@ -621,6 +642,19 @@ const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot
   const staleDispatchFailedJobs = Number(progress?.dispatch_health?.stale_dispatch_failed_jobs ?? 0);
   const runStatus = normalizeCatalogRunStatus(progress?.run_status);
   const runState = normalizeCatalogRunState(progress?.run_state);
+  const recovery = progress?.recovery;
+  const recoveryStatus = String(recovery?.status || "").trim().toLowerCase();
+  const recoveryReason = String(recovery?.reason || "").trim().toLowerCase();
+  const recoveryStage = String(recovery?.stage || "").trim().toLowerCase();
+  if (runStatus === "cancelled") {
+    return "Run cancelled";
+  }
+  if (runStatus === "failed") {
+    return "Run failed";
+  }
+  if (runStatus === "completed" && !progress?.classify_incomplete) {
+    return "Catalog fetch complete";
+  }
   if (staleDispatchFailedJobs > 0) {
     return "Remote dispatch failed";
   }
@@ -629,6 +663,20 @@ const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot
   }
   if (retryingDispatchJobs > 0) {
     return "Retrying remote dispatch";
+  }
+  if (runState === "recovering") {
+    if (recoveryReason === "no_authenticated_modal_workers" || recoveryStatus === "blocked") {
+      return "Waiting for authenticated Modal worker";
+    }
+    if (recoveryReason === "initial_empty_page") {
+      return "Instagram blocked first-page fetch";
+    }
+    if (recoveryStatus === "fallback_enqueued" || recoveryStage === "shared_account_posts") {
+      return "Falling back to direct catalog fetch";
+    }
+    if (recoveryStage === "shared_account_discovery") {
+      return "Recovering history partitions";
+    }
   }
   if (runState === "discovering") {
     return "Bootstrapping history";
@@ -875,7 +923,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogFilter, setCatalogFilter] = useState<"all" | "assigned" | "unassigned" | "ambiguous" | "needs_review">("all");
   const [catalogActionMessage, setCatalogActionMessage] = useState<string | null>(null);
-  const [runningCatalogAction, setRunningCatalogAction] = useState<"backfill" | "sync_recent" | "sync_newer" | "resume_tail" | null>(null);
+  const [runningCatalogAction, setRunningCatalogAction] = useState<"backfill" | "repair_auth" | "sync_recent" | "sync_newer" | null>(null);
   const [reviewQueue, setReviewQueue] = useState<SocialAccountCatalogReviewItem[]>([]);
   const [reviewQueueLoading, setReviewQueueLoading] = useState(false);
   const [reviewQueueError, setReviewQueueError] = useState<string | null>(null);
@@ -927,6 +975,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }
     >
   >(new Map());
+  // Cookie preflight state
+  const COOKIE_REQUIRED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = ["tiktok", "twitter", "facebook", "threads"];
+  const platformRequiresCookies = COOKIE_REQUIRED_PLATFORMS.includes(platform);
+  const [cookieHealth, setCookieHealth] = useState<SocialProfileCookieHealth | null>(null);
+  const [cookieHealthLoading, setCookieHealthLoading] = useState(false);
+  const [cookieHealthError, setCookieHealthError] = useState<string | null>(null);
+  const [cookieRefreshing, setCookieRefreshing] = useState(false);
+  const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
+
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
   const hasSummary = summary !== null;
   const shouldDeferSecondaryCatalogReads =
@@ -1500,7 +1557,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const latestCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
     const runs = summary?.catalog_recent_runs ?? [];
-    return runs[0] ?? null;
+    // Prefer completed runs, then any non-terminal run. A lone cancelled run is
+    // still surfaced automatically so operator-initiated stops remain obvious.
+    const normalize = (s: string | undefined | null) => String(s || "").trim().toLowerCase();
+    const completed = runs.find((r) => normalize(r.status) === "completed");
+    if (completed) return completed;
+    const nonTerminal = runs.find((r) => !TERMINAL_CATALOG_RUN_STATUSES.has(normalize(r.status)));
+    if (nonTerminal) return nonTerminal;
+    if (runs.length === 1 && normalize(runs[0]?.status) === "cancelled") {
+      return runs[0] ?? null;
+    }
+    return null;
   }, [summary?.catalog_recent_runs]);
 
   const latestCatalogRunStatus = useMemo(() => normalizeCatalogRunStatus(latestCatalogRun?.status), [latestCatalogRun?.status]);
@@ -1968,15 +2035,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return selectedCatalogRunId || activeCatalogRunId || latestCatalogRunId || null;
   }, [activeCatalogRunId, latestCatalogRunId, selectedCatalogRunId]);
 
-  const backgroundCatalogRunStatus = useMemo(() => {
-    if (!backgroundCatalogRunId || catalogRunProgress?.run_id !== backgroundCatalogRunId) return "";
-    return String(catalogRunProgress?.run_status || "").trim().toLowerCase();
-  }, [backgroundCatalogRunId, catalogRunProgress?.run_id, catalogRunProgress?.run_status]);
-
-  const backgroundCatalogRunIsActive = useMemo(() => {
-    return ACTIVE_CATALOG_RUN_STATUSES.has(backgroundCatalogRunStatus);
-  }, [backgroundCatalogRunStatus]);
-
   const displayedCatalogRunSummary = useMemo<SocialAccountCatalogRun | null>(() => {
     const runs = summary?.catalog_recent_runs ?? [];
     if (selectedCatalogRunId) {
@@ -1985,14 +2043,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (activeCatalogRunId) {
       return runs.find((run) => run.run_id === activeCatalogRunId) ?? null;
     }
-    if (backgroundCatalogRunIsActive && backgroundCatalogRunId) {
+    if (backgroundCatalogRunId) {
       return runs.find((run) => run.run_id === backgroundCatalogRunId) ?? null;
     }
     return null;
   }, [
     activeCatalogRunId,
     backgroundCatalogRunId,
-    backgroundCatalogRunIsActive,
     selectedCatalogRunId,
     summary?.catalog_recent_runs,
   ]);
@@ -2001,10 +2058,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return (
       selectedCatalogRunId ||
       activeCatalogRunId ||
-      (backgroundCatalogRunIsActive ? backgroundCatalogRunId : null) ||
+      backgroundCatalogRunId ||
       null
     );
-  }, [activeCatalogRunId, backgroundCatalogRunId, backgroundCatalogRunIsActive, selectedCatalogRunId]);
+  }, [activeCatalogRunId, backgroundCatalogRunId, selectedCatalogRunId]);
 
   const displayedCatalogRunStatus = useMemo(() => {
     const selectedRunId = displayedCatalogRunId?.trim() ?? "";
@@ -2059,8 +2116,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     runningCatalogAction !== null || activeCatalogRunBlocksActions || cancellableCatalogRunIsActive;
 
   const catalogPhaseLabel = useMemo(() => {
-    return getCatalogPhaseLabel(catalogRunProgress);
-  }, [catalogRunProgress]);
+    const progressLabel = getCatalogPhaseLabel(catalogRunProgress);
+    if (progressLabel) {
+      return progressLabel;
+    }
+    if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() === "blocked_auth") {
+      return "Instagram auth blocked";
+    }
+    if (displayedCatalogRunStatus === "cancelled") {
+      return "Run cancelled";
+    }
+    if (displayedCatalogRunStatus === "failed") {
+      return "Run failed";
+    }
+    if (displayedCatalogRunStatus === "completed") {
+      return "Catalog fetch complete";
+    }
+    return null;
+  }, [catalogRunProgress, displayedCatalogRunStatus]);
 
   const catalogDispatchStatusMessage = useMemo(() => {
     return getCatalogDispatchStatusMessage(catalogRunProgress);
@@ -2071,6 +2144,32 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const displayedCatalogRunStatusLabel = useMemo(() => {
     return getCatalogRunDisplayStatusLabel(displayedCatalogRunStatus, catalogRunProgress);
   }, [catalogRunProgress, displayedCatalogRunStatus]);
+  const catalogBlockedAuthPresentation = useMemo(() => {
+    if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() !== "blocked_auth") {
+      return null;
+    }
+    const repairStatus = String(catalogRunProgress?.repair_status || "").trim().toLowerCase();
+    const resumeStage = String(catalogRunProgress?.resume_stage || "").trim().toLowerCase();
+    const repairReason = String(catalogRunProgress?.repairable_reason || "").trim().replaceAll("_", " ");
+    const repairCommand = String(catalogRunProgress?.repair_environment?.repair_command || "").trim();
+    const canRepair = catalogRunProgress?.repair_action === "repair_instagram_auth";
+    const resumeLabel =
+      resumeStage === "posts" ? "Auth repaired, resuming from saved frontier." : "Auth repaired, restarting discovery.";
+    return {
+      canRepair,
+      repairStatus,
+      repairReason,
+      repairCommand,
+      detail:
+        repairStatus === "running" ?
+          "Repairing auth. A local headed Chrome window will open for confirmation."
+        : repairStatus === "succeeded" || catalogRunProgress?.auto_resume_pending ?
+          resumeLabel
+        : canRepair ?
+          "Instagram blocked this catalog run before history fetch could continue. A local headed Chrome window will open for confirmation."
+        : "Instagram blocked this catalog run before history fetch could continue.",
+    };
+  }, [catalogRunProgress]);
 
   const catalogGapAnalysisPresentation = useMemo(() => {
     if (!catalogGapAnalysis) return null;
@@ -2080,7 +2179,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         tone: "border-amber-200 bg-amber-50 text-amber-900",
         title: "Catalog backfill stopped before the historical tail completed",
         detail: catalogGapAnalysis.has_resumable_frontier
-          ? "Use Resume Tail to continue from the saved frontier instead of starting another full-history backfill."
+          ? "Use Backfill Posts to resume the saved frontier automatically before continuing the full-history crawl."
           : "Older posts are missing from the catalog and no saved frontier is available.",
         sampleIds,
       };
@@ -2360,7 +2459,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const catalogPostProgress = useMemo(() => {
     const payload = catalogRunProgress?.post_progress ?? {};
     const rawCompleted = Number(payload.completed_posts ?? 0);
-    const completed = rawCompleted > 0 ? rawCompleted : Number(catalogProgressSummary.items ?? 0);
+    const discoveryScraped = Number(catalogRunProgress?.stages?.shared_account_discovery?.scraped_count ?? 0);
+    const fetchScraped = Number(catalogRunProgress?.stages?.shared_account_posts?.scraped_count ?? 0);
+    const hasFetchStageTelemetry =
+      Boolean(catalogRunProgress?.stages?.shared_account_discovery) ||
+      Boolean(catalogRunProgress?.stages?.shared_account_posts);
+    const completed =
+      rawCompleted > 0
+        ? rawCompleted
+        : Math.max(
+            discoveryScraped,
+            fetchScraped,
+            hasFetchStageTelemetry ? 0 : Number(catalogProgressSummary.items ?? 0),
+          );
     const matched = Number(payload.matched_posts ?? 0);
     const fallbackTotal = Number(summary?.live_total_posts ?? summary?.total_posts ?? 0);
     const total = Number(payload.total_posts ?? 0) || fallbackTotal;
@@ -2377,6 +2488,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogProgressSummary.items,
     catalogProgressSummary.pct,
     catalogRunProgress?.post_progress,
+    catalogRunProgress?.stages?.shared_account_discovery,
+    catalogRunProgress?.stages?.shared_account_posts,
     summary?.live_total_posts,
     summary?.total_posts,
   ]);
@@ -2399,6 +2512,56 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogRunProgress?.completion_gap_reason,
     catalogRunProgress?.discovery?.completed_count,
     displayedCatalogRunStatus,
+  ]);
+
+  const catalogRunDiagnostics = catalogRunProgress?.run_diagnostics;
+
+  const catalogRuntimeMessage = useMemo(() => {
+    const executionBackend = String(catalogRunDiagnostics?.effective_execution_backend || "").trim();
+    const declaredRunner = String(catalogRunDiagnostics?.declared_runner_strategy || "").trim();
+    const effectiveRunner = String(catalogRunDiagnostics?.effective_runner_strategy || "").trim();
+    const strategyMismatch = Boolean(catalogRunDiagnostics?.strategy_mismatch);
+    const parts: string[] = [];
+    if (executionBackend) {
+      parts.push(`Executor ${executionBackend}`);
+    }
+    if (strategyMismatch && declaredRunner && effectiveRunner) {
+      parts.push(`Strategy drift ${formatDiagnosticToken(declaredRunner)} -> ${formatDiagnosticToken(effectiveRunner)}`);
+    } else if (effectiveRunner) {
+      parts.push(`Strategy ${formatDiagnosticToken(effectiveRunner)}`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }, [
+    catalogRunDiagnostics,
+  ]);
+
+  const catalogStopMessage = useMemo(() => {
+    const frontierStopReason = String(catalogRunDiagnostics?.frontier_stop_reason || "").trim().toLowerCase();
+    if (
+      frontierStopReason === "catalog_oldest_stored_post_not_reached" &&
+      catalogRunDiagnostics?.oldest_posted_at_seen &&
+      catalogRunDiagnostics?.catalog_oldest_post_at
+    ) {
+      return `Runner stopped at ${formatDateTime(catalogRunDiagnostics.oldest_posted_at_seen)} even though the earliest saved catalog post is ${formatDateTime(catalogRunDiagnostics.catalog_oldest_post_at)}. This backfill did not reach the full history yet.`;
+    }
+    const lastErrorMessage = String(catalogRunProgress?.last_error_message || catalogRunDiagnostics?.last_error_message || "").trim();
+    if (lastErrorMessage) {
+      return lastErrorMessage;
+    }
+    const cancelReason = String(catalogRunProgress?.cancel_reason || catalogRunDiagnostics?.cancel_reason || "").trim();
+    if (cancelReason) {
+      return `Run cancel reason: ${formatDiagnosticToken(cancelReason)}.`;
+    }
+    const lastErrorCode = String(catalogRunProgress?.last_error_code || catalogRunDiagnostics?.last_error_code || "").trim();
+    if (lastErrorCode) {
+      return `Run error code: ${formatDiagnosticToken(lastErrorCode)}.`;
+    }
+    return null;
+  }, [
+    catalogRunProgress?.cancel_reason,
+    catalogRunProgress?.last_error_code,
+    catalogRunProgress?.last_error_message,
+    catalogRunDiagnostics,
   ]);
 
   const catalogScrapeCompletionMessage = useMemo(() => {
@@ -2665,11 +2828,89 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
   };
 
+  // --- Cookie preflight: fetch health on load for cookie-dependent platforms ---
+  const fetchCookieHealth = useCallback(
+    async (force = false) => {
+      if (!platformRequiresCookies || !user) return;
+      setCookieHealthLoading(true);
+      setCookieHealthError(null);
+      try {
+        const qs = force ? "?force=true" : "";
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/cookies/health${qs}`,
+          { method: "GET" },
+          { preferredUser: user },
+        );
+        if (!response.ok) throw new Error("Failed to check cookie health");
+        const data = (await response.json()) as SocialProfileCookieHealth;
+        setCookieHealth(data);
+      } catch (error) {
+        setCookieHealthError(error instanceof Error ? error.message : "Cookie health check failed");
+      } finally {
+        setCookieHealthLoading(false);
+      }
+    },
+    [platformRequiresCookies, user, platform, handle, fetchAdminWithAuth],
+  );
+
+  useEffect(() => {
+    if (platformRequiresCookies && user && !cookieHealth && !cookieHealthLoading) {
+      void fetchCookieHealth();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platformRequiresCookies, user]);
+
+  const handleCookieRefresh = async () => {
+    if (!user) return;
+    setCookieRefreshing(true);
+    setCookieRefreshMessage("Opening browser… Log in to " + SOCIAL_ACCOUNT_PLATFORM_LABELS[platform] + " in the browser window.");
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/cookies/refresh`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ headless: false, timeout_seconds: 180 }),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        success?: boolean;
+        healthy?: boolean;
+        reason?: string;
+        warning_message?: string;
+        detail?: { message?: string };
+      };
+      if (!response.ok) {
+        throw new Error(data.detail?.message || data.reason || "Cookie refresh failed");
+      }
+      if (data.success) {
+        setCookieRefreshMessage("Cookies refreshed successfully.");
+        void fetchCookieHealth(true);
+      } else {
+        setCookieRefreshMessage(`Refresh completed but cookies may still be invalid: ${data.reason || "unknown"}`);
+        void fetchCookieHealth(true);
+      }
+    } catch (error) {
+      setCookieRefreshMessage(error instanceof Error ? error.message : "Cookie refresh failed");
+    } finally {
+      setCookieRefreshing(false);
+    }
+  };
+
   const runCatalogAction = async (
-    action: "backfill" | "sync_recent" | "sync_newer" | "resume_tail",
-    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest | CatalogResumeTailRequest,
+    action: "backfill" | "sync_recent" | "sync_newer",
+    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
   ) => {
     if (!user) return;
+    // Gate: block if cookies are explicitly unhealthy (don't block on unknown/error state)
+    if (platformRequiresCookies && cookieHealth?.healthy === false) {
+      setCatalogActionMessage(
+        `Cannot start ${action === "backfill" ? "backfill" : action === "sync_newer" ? "sync newer" : "sync recent"}: ` +
+          `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} cookies are expired. Please refresh cookies first.`,
+      );
+      return;
+    }
     setRunningCatalogAction(action);
     setCatalogActionMessage(null);
     setCatalogFreshness(null);
@@ -2680,7 +2921,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       const actionSlug =
         action === "backfill" ? "backfill"
         : action === "sync_newer" ? "sync-newer"
-        : action === "resume_tail" ? "resume-tail"
         : "sync-recent";
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/${actionSlug}`,
@@ -2707,7 +2947,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             `Failed to ${
               action === "backfill" ? "start backfill"
               : action === "sync_newer" ? "sync newer posts"
-              : action === "resume_tail" ? "resume tail backfill"
               : "sync recent catalog content"
             }`,
         );
@@ -2723,8 +2962,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           ? `Post backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
           : action === "sync_newer"
           ? `Sync newer posts queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
-          : action === "resume_tail"
-          ? `Resume tail queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
           : `Recent sync queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`,
       );
       await refreshSummary().catch(() => {});
@@ -2735,9 +2972,58 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           : `Failed to ${
             action === "backfill" ? "start backfill"
             : action === "sync_newer" ? "sync newer posts"
-            : action === "resume_tail" ? "resume tail backfill"
             : "sync recent catalog content"
           }`,
+      );
+    } finally {
+      setRunningCatalogAction(null);
+    }
+  };
+
+  const runCatalogRepairAuth = async (runId: string, requestBody: CatalogRepairAuthRequest = {}) => {
+    const normalizedRunId = runId.trim();
+    if (!user || !normalizedRunId) return;
+    setRunningCatalogAction("repair_auth");
+    setCatalogActionMessage(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(normalizedRunId)}/repair-auth`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        detail?: { message?: string };
+        repair_status?: string;
+        resume_stage?: string | null;
+      };
+      if (!response.ok) {
+        throw new Error(
+          data.error || data.message || data.detail?.message || "Failed to repair Instagram auth for this catalog run",
+        );
+      }
+      setCatalogActionMessage("Repairing auth… A local headed Chrome window will open for confirmation.");
+      setCatalogRunProgress((current) =>
+        current && current.run_id === normalizedRunId ?
+          {
+            ...current,
+            operational_state: "blocked_auth",
+            repair_action: "repair_instagram_auth",
+            repair_status: (data.repair_status as SocialAccountCatalogRunProgressSnapshot["repair_status"]) || "running",
+            resume_stage:
+              (data.resume_stage as SocialAccountCatalogRunProgressSnapshot["resume_stage"]) || current.resume_stage,
+          }
+        : current,
+      );
+      await refreshSummary().catch(() => {});
+    } catch (error) {
+      setCatalogActionMessage(
+        error instanceof Error ? error.message : "Failed to repair Instagram auth for this catalog run",
       );
     } finally {
       setRunningCatalogAction(null);
@@ -2926,6 +3212,22 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       >
                         {runningCatalogAction === "backfill" ? "Queueing Backfill…" : "Backfill Posts"}
                       </button>
+                      {platform === "instagram" ? (
+                        <button
+                          type="button"
+                          title="Copy direct backfill command for terminal"
+                          onClick={() => {
+                            const cmd = `cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/instagram/direct_catalog_backfill.py --account ${handle}`;
+                            void navigator.clipboard.writeText(cmd);
+                          }}
+                          className="inline-flex items-center rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                            <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z" />
+                            <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.44A1.5 1.5 0 0 0 8.378 6H4.5Z" />
+                          </svg>
+                        </button>
+                      ) : null}
                       {platform !== "instagram" ? (
                         <button
                           type="button"
@@ -2938,20 +3240,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           className="inline-flex rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
-                        </button>
-                      ) : null}
-                      {catalogFreshness?.has_resumable_frontier ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void runCatalogAction("resume_tail", {
-                              source_scope: activeCatalogSourceScope,
-                            })
-                          }
-                          disabled={catalogActionsBlocked}
-                          className="inline-flex rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {runningCatalogAction === "resume_tail" ? "Queueing…" : "Resume Tail"}
                         </button>
                       ) : null}
                       {cancellableCatalogRunId && cancellableCatalogRunIsActive ? (
@@ -2985,11 +3273,73 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 {supportsCatalog ? (
                   <p className="mt-2 text-xs text-zinc-500">
                     {platform === "instagram"
-                      ? "Backfill Posts scans the full catalog and updates saved posts. Resume Tail continues from the saved older frontier when a resumable cursor exists. Run Gap Analysis before using targeted repairs like Sync Newer."
+                      ? "Backfill Posts scans the full catalog and updates saved posts. If a saved older frontier exists, Backfill Posts resumes it automatically before continuing full-history fetches. Run Gap Analysis before using targeted repairs like Sync Newer."
                       : "Backfill Posts runs the full-history catalog job. Sync Recent runs the same pipeline, limited to the last day."}
                   </p>
                 ) : null}
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
+                {/* Cookie preflight card for cookie-dependent platforms */}
+                {supportsCatalog && platformRequiresCookies ? (
+                  <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
+                    {cookieHealthLoading ? (
+                      <>
+                        <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-zinc-400" />
+                        <span className="text-xs text-zinc-500">Checking cookies…</span>
+                      </>
+                    ) : cookieHealthError ? (
+                      <>
+                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
+                        <span className="text-xs text-zinc-500">Cookie check failed</span>
+                        <button
+                          type="button"
+                          onClick={() => void fetchCookieHealth(true)}
+                          className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                        >
+                          Retry
+                        </button>
+                      </>
+                    ) : cookieHealth?.healthy === true ? (
+                      <>
+                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                        <span className="text-xs text-zinc-600">
+                          Cookies healthy
+                          {cookieHealth.source_kind && cookieHealth.source_path
+                            ? ` (${cookieHealth.source_path.split("/").pop()})`
+                            : ""}
+                        </span>
+                      </>
+                    ) : cookieHealth?.healthy === false ? (
+                      <>
+                        <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
+                        <span className="text-xs text-zinc-600">
+                          Cookies expired{cookieHealth.reason ? ` — ${cookieHealth.reason}` : ""}
+                        </span>
+                        {cookieHealth.refresh_available ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleCookieRefresh()}
+                            disabled={cookieRefreshing}
+                            className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {cookieRefreshing ? "Refreshing…" : "Refresh Cookies"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-zinc-400" title="Cookie refresh requires local dev server">
+                            Refresh unavailable (requires local dev)
+                          </span>
+                        )}
+                      </>
+                    ) : null}
+                    {cookieRefreshMessage ? (
+                      <span className="text-xs text-zinc-500">{cookieRefreshMessage}</span>
+                    ) : null}
+                    {cookieHealth?.warning_message ? (
+                      <span className="text-xs text-amber-600" title={cookieHealth.warning_message}>
+                        ⚠ {cookieHealth.warning_code === "env_json_source_refresh_writes_file" ? "env var source" : "warning"}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
                 {supportsCatalog && platform === "instagram" ? (
                   <div className="mt-3 space-y-2">
                     {catalogDiagnosticsVisible ? (
@@ -3044,20 +3394,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             Recommended repair window: {formatDateTime(catalogGapAnalysis.repair_window_start)} to{" "}
                             {formatDateTime(catalogGapAnalysis.repair_window_end)}
                           </p>
-                        ) : null}
-                        {catalogGapAnalysis.recommended_action === "resume_tail" ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                            void runCatalogAction("resume_tail", {
-                              source_scope: activeCatalogSourceScope,
-                            })
-                          }
-                            disabled={catalogActionsBlocked}
-                            className="mt-3 inline-flex rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {runningCatalogAction === "resume_tail" ? "Queueing…" : "Resume Tail Now"}
-                          </button>
                         ) : null}
                         {catalogGapAnalysis.recommended_action === "sync_newer" ? (
                           <button
@@ -3282,6 +3618,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     >
                       {displayedCatalogRunStatusLabel}
                     </span>
+                    {(displayedCatalogRunStatus === "failed" || displayedCatalogRunStatus === "cancelled") &&
+                      displayedCatalogRunId && (
+                        <button
+                          type="button"
+                          onClick={() => void dismissCatalogRun(displayedCatalogRunId)}
+                          disabled={dismissingCatalogRunId === displayedCatalogRunId}
+                          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {dismissingCatalogRunId === displayedCatalogRunId ? "Dismissing…" : "Dismiss"}
+                        </button>
+                      )}
                   </div>
                   <p className="mt-1 text-sm text-zinc-500">
                     Run {shortRunId(displayedCatalogRunId)} · {displayedCatalogRunStatusLabel}
@@ -3314,12 +3661,39 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       ))}
                     </div>
                   ) : null}
+                  {catalogBlockedAuthPresentation ? (
+                    <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-900">
+                      <p className="font-semibold">Instagram Auth Blocked</p>
+                      <p className="mt-1">{catalogBlockedAuthPresentation.detail}</p>
+                      {catalogBlockedAuthPresentation.repairReason ? (
+                        <p className="mt-2 text-xs text-red-800">
+                          Repair reason: {catalogBlockedAuthPresentation.repairReason}
+                        </p>
+                      ) : null}
+                      {catalogBlockedAuthPresentation.canRepair ? (
+                        <button
+                          type="button"
+                          onClick={() => void runCatalogRepairAuth(displayedCatalogRunId)}
+                          disabled={catalogActionsBlocked}
+                          className="mt-3 inline-flex rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {runningCatalogAction === "repair_auth" ? "Repairing auth…" : "Repair Instagram Auth"}
+                        </button>
+                      ) : catalogBlockedAuthPresentation.repairCommand ? (
+                        <p className="mt-3 text-xs text-red-800">
+                          Run <code>{catalogBlockedAuthPresentation.repairCommand}</code> from the local TRR-Backend host.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {catalogScrapeCompletionMessage ? (
                     <p className="mt-2 text-sm text-emerald-700">{catalogScrapeCompletionMessage}</p>
                   ) : null}
                   {catalogTerminalCoverageMessage ? (
                     <p className="mt-2 text-sm text-amber-700">{catalogTerminalCoverageMessage}</p>
                   ) : null}
+                  {catalogStopMessage ? <p className="mt-2 text-sm text-zinc-700">{catalogStopMessage}</p> : null}
+                  {catalogRuntimeMessage ? <p className="mt-2 text-xs text-zinc-500">{catalogRuntimeMessage}</p> : null}
                 </div>
                 <div className="min-w-[190px] rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Overall Progress</p>
@@ -3425,6 +3799,58 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 </div>
               ) : !catalogRunProgressLoading ? (
                 <p className="mt-4 text-sm text-zinc-500">Waiting for the job to report stage-level progress…</p>
+              ) : null}
+
+              {catalogRunProgress?.recovery ? (
+                <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                  <h3 className="text-sm font-semibold text-zinc-900">Recovery</h3>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <p className="text-sm text-zinc-700">
+                      reason: {formatRecoveryReasonLabel(catalogRunProgress.recovery.reason)}
+                    </p>
+                    {catalogRunProgress.recovery.stage ? (
+                      <p className="text-sm text-zinc-700">
+                        stage:{" "}
+                        {formatRunStageLabel(catalogRunProgress.recovery.stage, {
+                          frontierMode,
+                          singleRunnerFallback: true,
+                        }).toLowerCase()}
+                      </p>
+                    ) : null}
+                    {catalogRunProgress.recovery.transport ? (
+                      <p className="text-sm text-zinc-700">transport: {catalogRunProgress.recovery.transport}</p>
+                    ) : null}
+                    {catalogRunProgress.recovery.execution_backend ? (
+                      <p className="text-sm text-zinc-700">
+                        backend: {catalogRunProgress.recovery.execution_backend}
+                      </p>
+                    ) : null}
+                    {typeof catalogRunProgress.recovery.attempt_count === "number" &&
+                    catalogRunProgress.recovery.attempt_count > 0 ? (
+                      <p className="text-sm text-zinc-700">attempt {catalogRunProgress.recovery.attempt_count}</p>
+                    ) : null}
+                    {typeof catalogRunProgress.recovery.waited_seconds === "number" &&
+                    catalogRunProgress.recovery.waited_seconds > 0 ? (
+                      <p className="text-sm text-zinc-700">
+                        waiting: {formatInteger(catalogRunProgress.recovery.waited_seconds)}s
+                      </p>
+                    ) : null}
+                    {catalogRunProgress.recovery.next_stage ? (
+                      <p className="text-sm text-zinc-700">
+                        next:{" "}
+                        {formatRunStageLabel(catalogRunProgress.recovery.next_stage, {
+                          frontierMode,
+                          singleRunnerFallback: true,
+                        }).toLowerCase()}
+                      </p>
+                    ) : null}
+                    {typeof catalogRunProgress.recovery.recovery_depth === "number" ? (
+                      <p className="text-sm text-zinc-700">
+                        depth: {formatInteger(catalogRunProgress.recovery.recovery_depth)}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
               ) : null}
 
               {catalogLogs.length > 0 ? (
@@ -3825,7 +4251,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                     run.status,
                                   )}`}
                                 >
-                                  {formatRunStatusLabel(run.status)}
+                                  Status {formatRunStatusLabel(run.status)}
                                 </span>
                                 <span className="text-xs font-semibold text-zinc-500">Run {shortRunId(run.run_id)}</span>
                               </div>

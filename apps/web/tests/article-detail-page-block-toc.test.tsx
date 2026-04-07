@@ -9,6 +9,14 @@ describe("Article detail page block table of contents", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open table of contents" }));
 
     expect(screen.getByRole("dialog", { name: "Page table of contents" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Site Header Shell" })).toHaveAttribute(
+      "href",
+      "#site-header-shell",
+    );
+    expect(screen.getByRole("link", { name: "Tariffs and Trade" })).toHaveAttribute(
+      "href",
+      "#tariffs-and-trade",
+    );
     expect(screen.getByRole("link", { name: "Header" })).toHaveAttribute("href", "#header");
     expect(screen.getByRole("link", { name: "Byline" })).toHaveAttribute("href", "#byline");
     expect(screen.getByRole("link", { name: "Share Tools" })).toHaveAttribute("href", "#share-tools");
@@ -32,8 +40,17 @@ describe("Article detail page block table of contents", () => {
     expect(screen.getByRole("link", { name: "Author Bio" })).toHaveAttribute("href", "#author-bio");
 
     expect(
+      screen.getByRole("heading", { level: 2, name: "Site Header Shell" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Tariffs and Trade" }),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("heading", { level: 2, name: "Header" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("nyt-storyline-title"),
+    ).toHaveTextContent("Tariffs and Trade");
     expect(
       screen.getByRole("heading", { level: 2, name: "Byline" }),
     ).toBeInTheDocument();

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  normalizeBrandStreamingServices,
   pickPrimaryBrandTarget,
   resolveBrandProfileTargets,
   toFriendlyBrandSlug,
@@ -81,5 +82,20 @@ describe("brand profile utilities", () => {
     ]);
 
     expect(primary?.id).toBe("network:bravo");
+  });
+
+  it("canonicalizes and dedupes streaming service aliases for brand profiles", () => {
+    expect(
+      normalizeBrandStreamingServices([
+        "Peacock Premium",
+        "Peacock Premium Plus",
+        "Apple TV Store",
+        "Amazon Video",
+        "Amazon Prime Video",
+        "Netflix",
+        "netflix",
+        "  ",
+      ]),
+    ).toEqual(["Apple TV", "Netflix", "Peacock", "Prime Video"]);
   });
 });

@@ -105,6 +105,50 @@ describe("TRR show route parity", () => {
     });
   });
 
+  it("does not keep show detail responses in the in-memory route cache when caching is disabled", async () => {
+    vi.resetModules();
+    process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        show: {
+          id: "7782652f-783a-488b-8860-41b97de32e75",
+          name: "The Real Housewives of Salt Lake City",
+          slug: "the-real-housewives-of-salt-lake-city",
+          canonical_slug: "the-real-housewives-of-salt-lake-city",
+          watch_provider_regions: [
+            {
+              region: "US",
+              stream: ["Peacock Premium"],
+              free: ["Bravo TV"],
+              buy_rent: ["Amazon Video", "Apple TV Store"],
+            },
+          ],
+        },
+      },
+      durationMs: 4,
+    });
+    const { GET: freshGetShowByIdRoute } = await import("@/app/api/admin/trr-api/shows/[showId]/route");
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/trr-api/shows/7782652f-783a-488b-8860-41b97de32e75",
+    );
+    const first = await freshGetShowByIdRoute(
+      request,
+      { params: Promise.resolve({ showId: "7782652f-783a-488b-8860-41b97de32e75" }) },
+    );
+    const second = await freshGetShowByIdRoute(
+      request,
+      { params: Promise.resolve({ showId: "7782652f-783a-488b-8860-41b97de32e75" }) },
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(first.headers.get("x-trr-cache")).not.toBe("hit");
+    expect(second.headers.get("x-trr-cache")).not.toBe("hit");
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps show resolve-slug parity", async () => {
     resolveShowSlugMock.mockResolvedValueOnce({
       show_id: "show-1",

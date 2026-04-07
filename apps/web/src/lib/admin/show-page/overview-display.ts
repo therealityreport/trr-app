@@ -19,6 +19,14 @@ type OverviewShowLike = {
         buy?: string[] | null;
       }>
     | null;
+  watch_provider_regions?:
+    | Array<{
+        region?: string | null;
+        stream?: string[] | null;
+        free?: string[] | null;
+        buy_rent?: string[] | null;
+      }>
+    | null;
 };
 
 export type OverviewSeasonLike = {
@@ -59,8 +67,21 @@ type OverviewRedditCommunityLike = {
 export type OverviewWatchAvailabilityRow = {
   regionCode: "US" | "GB" | "CA" | "AU";
   regionLabel: string;
+  included: string[];
+  buyRent: string[];
+};
+
+export type OverviewWatchProviderRegionRow = {
+  regionCode: string;
+  regionLabel: string;
   stream: string[];
-  buy: string[];
+  free: string[];
+  buyRent: string[];
+};
+
+export type OverviewWatchProviderRegionOption = {
+  regionCode: string;
+  regionLabel: string;
 };
 
 export type OverviewRedditGroupKey = "SHOW" | "FRANCHISE" | "NETWORK";
@@ -135,6 +156,25 @@ const coverageSourceOrder = (kind: string): number => {
   return 10;
 };
 
+const WATCH_PROVIDER_REGION_LABELS: Record<string, string> = {
+  US: "United States",
+  GB: "United Kingdom",
+  CA: "Canada",
+  AU: "Australia",
+};
+
+const watchProviderRegionSortKey = (regionCode: string): [number, string] => {
+  if (regionCode === "US") return [0, regionCode];
+  if (regionCode === "GB") return [1, regionCode];
+  if (regionCode === "CA") return [2, regionCode];
+  if (regionCode === "AU") return [3, regionCode];
+  return [99, regionCode];
+};
+
+const normalizeWatchProviderBucket = (values: string[]): string[] => dedupeStrings(values).sort((a, b) => a.localeCompare(b));
+
+const buildRegionLabel = (regionCode: string): string => WATCH_PROVIDER_REGION_LABELS[regionCode] ?? regionCode;
+
 export const buildOverviewAlternativeNamesText = (show: OverviewShowLike | null | undefined): string => {
   if (!show) return "";
   const preferred = dedupeStrings(normalizeStringArray(show.overview_alternative_names));
@@ -185,17 +225,95 @@ export const buildOverviewWatchAvailability = (
     .map((row) => {
       const regionCode = String(row?.region || "").trim().toUpperCase() as OverviewWatchAvailabilityRow["regionCode"];
       if (!(regionCode in labels)) return null;
-      const stream = dedupeStrings(normalizeStringArray(row?.stream));
-      const buy = dedupeStrings(normalizeStringArray(row?.buy));
-      if (stream.length === 0 && buy.length === 0) return null;
+      const included = dedupeStrings(normalizeStringArray(row?.stream)).sort((a, b) => a.localeCompare(b));
+      const includedKeys = new Set(included.map((provider) => provider.toLowerCase()));
+      const buyRent = dedupeStrings(normalizeStringArray(row?.buy))
+        .filter((provider) => !includedKeys.has(provider.toLowerCase()))
+        .sort((a, b) => a.localeCompare(b));
+      if (included.length === 0 && buyRent.length === 0) return null;
       return {
         regionCode,
         regionLabel: labels[regionCode],
-        stream,
-        buy,
+        included,
+        buyRent,
       };
     })
     .filter((row): row is OverviewWatchAvailabilityRow => row !== null);
+};
+
+export const buildOverviewWatchProviderRegions = (
+  show: OverviewShowLike | null | undefined
+): OverviewWatchProviderRegionRow[] => {
+  const rawRows = Array.isArray(show?.watch_provider_regions) ? show.watch_provider_regions : [];
+  if (rawRows.length === 0) {
+    return buildOverviewWatchAvailability(show).map((row) => ({
+      regionCode: row.regionCode,
+      regionLabel: row.regionLabel,
+      stream: row.included,
+      free: [],
+      buyRent: row.buyRent,
+    }));
+  }
+
+  return rawRows
+    .map((row) => {
+      const regionCode = String(row?.region || "").trim().toUpperCase();
+      if (!regionCode) return null;
+      const stream = normalizeWatchProviderBucket(normalizeStringArray(row?.stream));
+      const free = normalizeWatchProviderBucket(normalizeStringArray(row?.free));
+      const buyRent = normalizeWatchProviderBucket(normalizeStringArray(row?.buy_rent));
+      if (stream.length === 0 && free.length === 0 && buyRent.length === 0) return null;
+      return {
+        regionCode,
+        regionLabel: buildRegionLabel(regionCode),
+        stream,
+        free,
+        buyRent,
+      };
+    })
+    .filter((row): row is OverviewWatchProviderRegionRow => row !== null)
+    .sort((a, b) => {
+      const [aPriority, aCode] = watchProviderRegionSortKey(a.regionCode);
+      const [bPriority, bCode] = watchProviderRegionSortKey(b.regionCode);
+      const priorityDiff = aPriority - bPriority;
+      if (priorityDiff !== 0) return priorityDiff;
+      return aCode.localeCompare(bCode);
+    });
+};
+
+export const buildOverviewWatchProviderRegionOptions = (
+  show: OverviewShowLike | null | undefined
+): OverviewWatchProviderRegionOption[] =>
+  buildOverviewWatchProviderRegions(show).map((row) => ({
+    regionCode: row.regionCode,
+    regionLabel: row.regionLabel,
+  }));
+
+export const resolveDefaultOverviewWatchProviderRegion = (
+  regions: OverviewWatchProviderRegionRow[]
+): string | null => {
+  if (regions.length === 0) return null;
+  return regions.find((row) => row.regionCode === "US")?.regionCode ?? regions[0]?.regionCode ?? null;
+};
+
+export const resolveOverviewWatchProviderRegion = ({
+  regions,
+  selectedRegionCode,
+}: {
+  regions: OverviewWatchProviderRegionRow[];
+  selectedRegionCode: string | null | undefined;
+}): OverviewWatchProviderRegionRow | null => {
+  if (regions.length === 0) return null;
+  const normalizedSelected = String(selectedRegionCode || "").trim().toUpperCase();
+  if (!normalizedSelected) return regions[0] ?? null;
+  return regions.find((row) => row.regionCode === normalizedSelected) ?? regions[0] ?? null;
+};
+
+export const buildOverviewWatchProviderFallback = (
+  show: OverviewShowLike | null | undefined
+): string[] => {
+  const providers = getOverviewStreamingProviders(show);
+  return normalizeWatchProviderBucket(providers);
 };
 
 export const buildOverviewRedditGroups = ({

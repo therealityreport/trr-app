@@ -348,7 +348,9 @@ export default function SocialGrowthSection({ personId, instagramHandle }: Socia
     setError(null);
     try {
       const res = await fetchAdminWithAuth(
-        `/api/admin/trr-api/people/${personId}/social-growth?handle=${encodeURIComponent(instagramHandle)}`
+        `/api/admin/trr-api/people/${personId}/social-growth?handle=${encodeURIComponent(instagramHandle)}`,
+        undefined,
+        { allowDevAdminBypass: true }
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -375,7 +377,8 @@ export default function SocialGrowthSection({ personId, instagramHandle }: Socia
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ handle: instagramHandle }),
-        }
+        },
+        { allowDevAdminBypass: true }
       );
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));

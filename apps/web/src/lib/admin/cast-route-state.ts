@@ -1,6 +1,8 @@
 export type CastSortBy = "episodes" | "season" | "name";
 export type CastSortOrder = "desc" | "asc";
 export type CastHasImageFilter = "all" | "yes" | "no";
+export type ShowCastViewMode = "gallery" | "list";
+export type ShowCastGalleryColumns = 4 | 5 | 6;
 
 export interface ShowCastRouteState {
   searchQuery: string;
@@ -12,6 +14,8 @@ export interface ShowCastRouteState {
   exactEpisodeCount: number | null;
   minEpisodeCount: number | null;
   maxEpisodeCount: number | null;
+  viewMode: ShowCastViewMode;
+  galleryColumns: ShowCastGalleryColumns;
 }
 
 export interface SeasonCastRouteState {
@@ -33,6 +37,8 @@ const SHOW_CAST_DEFAULTS: ShowCastRouteState = {
   exactEpisodeCount: null,
   minEpisodeCount: null,
   maxEpisodeCount: null,
+  viewMode: "gallery",
+  galleryColumns: 4,
 };
 
 const SEASON_CAST_DEFAULTS: SeasonCastRouteState = {
@@ -73,6 +79,14 @@ const parseSortOrder = (value: string | null): CastSortOrder =>
 const parseHasImageFilter = (value: string | null): CastHasImageFilter =>
   value === "yes" || value === "no" || value === "all" ? value : "all";
 
+const parseShowCastViewMode = (value: string | null): ShowCastViewMode =>
+  value === "list" || value === "gallery" ? value : "gallery";
+
+const parseShowCastGalleryColumns = (value: string | null): ShowCastGalleryColumns => {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return parsed === 5 || parsed === 6 ? parsed : 4;
+};
+
 const parsePositiveInt = (value: string | null): number | null => {
   if (!value) return null;
   const parsed = Number.parseInt(value, 10);
@@ -102,6 +116,8 @@ export const parseShowCastRouteState = (searchParams: URLSearchParams): ShowCast
     exactEpisodeCount: parsePositiveInt(searchParams.get("cast_episode_exact")),
     minEpisodeCount: parsePositiveInt(searchParams.get("cast_episode_min")),
     maxEpisodeCount: parsePositiveInt(searchParams.get("cast_episode_max")),
+    viewMode: parseShowCastViewMode(searchParams.get("cast_view")),
+    galleryColumns: parseShowCastGalleryColumns(searchParams.get("cast_cols")),
   };
 };
 
@@ -160,6 +176,16 @@ export const writeShowCastRouteState = (
     typeof state.maxEpisodeCount === "number" && state.maxEpisodeCount > 0
       ? String(state.maxEpisodeCount)
       : null
+  );
+  setOrDelete(
+    next,
+    "cast_view",
+    state.viewMode !== SHOW_CAST_DEFAULTS.viewMode ? state.viewMode : null
+  );
+  setOrDelete(
+    next,
+    "cast_cols",
+    state.galleryColumns !== SHOW_CAST_DEFAULTS.galleryColumns ? String(state.galleryColumns) : null
   );
   return next;
 };

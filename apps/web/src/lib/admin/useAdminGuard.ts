@@ -17,8 +17,8 @@ function buildUserKey(user: User | null): string | null {
 
 const DEV_ADMIN_BYPASS_USER = {
   uid: "dev-admin-bypass",
-  email: "dev-admin-bypass@localhost",
-  displayName: "Dev Admin Bypass",
+  email: "codex@thereality.report",
+  displayName: "Codex Admin Bypass",
 } as User;
 
 function getAdminAuthReadyTimeoutMs(): number {

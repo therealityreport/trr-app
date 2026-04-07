@@ -2,9 +2,6 @@ import "server-only";
 
 import { createHmac } from "node:crypto";
 
-const INTERNAL_ADMIN_ISSUER = process.env.TRR_INTERNAL_ADMIN_JWT_ISSUER?.trim() || "trr-app-internal";
-const INTERNAL_ADMIN_AUDIENCE =
-  process.env.TRR_INTERNAL_ADMIN_JWT_AUDIENCE?.trim() || "trr-backend-internal-admin";
 const INTERNAL_ADMIN_SUBJECT = "trr-app-internal-admin";
 const INTERNAL_ADMIN_SCOPE = "internal_admin";
 const DEFAULT_INTERNAL_ADMIN_TTL_SECONDS = 120;
@@ -20,14 +17,20 @@ const getSigningSecret = (): string | null => {
   return secret && secret.length > 0 ? secret : null;
 };
 
+const getInternalAdminIssuer = (): string =>
+  process.env.TRR_INTERNAL_ADMIN_JWT_ISSUER?.trim() || "trr-app-internal";
+
+const getInternalAdminAudience = (): string =>
+  process.env.TRR_INTERNAL_ADMIN_JWT_AUDIENCE?.trim() || "trr-backend-internal-admin";
+
 export const peekInternalAdminBearerToken = (): string | null => {
   const secret = getSigningSecret();
   if (!secret) return null;
 
   const now = Math.floor(Date.now() / 1000);
   const payload = {
-    iss: INTERNAL_ADMIN_ISSUER,
-    aud: INTERNAL_ADMIN_AUDIENCE,
+    iss: getInternalAdminIssuer(),
+    aud: getInternalAdminAudience(),
     sub: INTERNAL_ADMIN_SUBJECT,
     scope: INTERNAL_ADMIN_SCOPE,
     iat: now,
@@ -60,6 +63,8 @@ export const buildInternalAdminHeaders = (
 ): Headers => {
   const token = getInternalAdminBearerToken();
   const headers = new Headers(extraHeaders);
+  headers.delete("X-TRR-Internal-Admin-Secret");
+  headers.delete("X-Internal-Admin-Secret");
   headers.set("Authorization", `Bearer ${token}`);
   return headers;
 };

@@ -6,10 +6,15 @@ import {
   buildOverviewAlternativeNamesText,
   buildOverviewRedditGroups,
   buildOverviewWatchAvailability,
+  buildOverviewWatchProviderFallback,
+  buildOverviewWatchProviderRegionOptions,
+  buildOverviewWatchProviderRegions,
   buildSeasonCoverageRows,
   getOverviewJustwatchUrl,
   getOverviewNetworks,
   getOverviewStreamingProviders,
+  resolveDefaultOverviewWatchProviderRegion,
+  resolveOverviewWatchProviderRegion,
 } from "@/lib/admin/show-page/overview-display";
 
 describe("show overview display helpers", () => {
@@ -47,7 +52,7 @@ describe("show overview display helpers", () => {
     ).toBe("https://www.themoviedb.org/tv/110381-the-real-housewives-of-salt-lake-city/watch?locale=US");
   });
 
-  it("groups regional watch availability into stream and buy buckets", () => {
+  it("groups regional watch availability into included and buy-rent buckets", () => {
     expect(
       buildOverviewWatchAvailability({
         overview_watch_availability: [
@@ -60,16 +65,134 @@ describe("show overview display helpers", () => {
       {
         regionCode: "US",
         regionLabel: "United States",
-        stream: ["Peacock", "Hayu"],
-        buy: ["Apple TV", "Prime Video"],
+        included: ["Hayu", "Peacock"],
+        buyRent: ["Apple TV", "Prime Video"],
       },
       {
         regionCode: "GB",
         regionLabel: "United Kingdom",
-        stream: ["Hayu"],
-        buy: [],
+        included: ["Hayu"],
+        buyRent: [],
       },
     ]);
+  });
+
+  it("dedupes providers across included and buy-rent buckets in favor of included", () => {
+    expect(
+      buildOverviewWatchAvailability({
+        overview_watch_availability: [
+          {
+            region: "US",
+            stream: ["Hayu", "Peacock", "hayu"],
+            buy: ["Apple TV", "Hayu", "Amazon Prime Video"],
+          },
+        ],
+      })
+    ).toEqual([
+      {
+        regionCode: "US",
+        regionLabel: "United States",
+        included: ["Hayu", "Peacock"],
+        buyRent: ["Amazon Prime Video", "Apple TV"],
+      },
+    ]);
+  });
+
+  it("builds all-region watch provider rows with priority ordering and preserves stream-free overlap", () => {
+    expect(
+      buildOverviewWatchProviderRegions({
+        watch_provider_regions: [
+          {
+            region: "de",
+            stream: ["RTL+", "Joyn"],
+            free: [],
+            buy_rent: ["Apple TV", "Amazon Video"],
+          },
+          {
+            region: "us",
+            stream: ["Peacock", "Hayu", "Peacock"],
+            free: ["Bravo TV", "Hayu"],
+            buy_rent: ["Apple TV", "Prime Video", "Prime Video"],
+          },
+          {
+            region: "au",
+            stream: ["BINGE"],
+            free: ["9Now"],
+            buy_rent: ["Apple TV Store"],
+          },
+        ],
+      })
+    ).toEqual([
+      {
+        regionCode: "US",
+        regionLabel: "United States",
+        stream: ["Hayu", "Peacock"],
+        free: ["Bravo TV", "Hayu"],
+        buyRent: ["Apple TV", "Prime Video"],
+      },
+      {
+        regionCode: "AU",
+        regionLabel: "Australia",
+        stream: ["BINGE"],
+        free: ["9Now"],
+        buyRent: ["Apple TV Store"],
+      },
+      {
+        regionCode: "DE",
+        regionLabel: "DE",
+        stream: ["Joyn", "RTL+"],
+        free: [],
+        buyRent: ["Amazon Video", "Apple TV"],
+      },
+    ]);
+  });
+
+  it("builds region options and defaults selection to US when present", () => {
+    const show = {
+      watch_provider_regions: [
+        { region: "DE", stream: ["RTL+"], free: [], buy_rent: ["Apple TV"] },
+        { region: "US", stream: ["Peacock"], free: ["Bravo TV"], buy_rent: ["Apple TV"] },
+      ],
+    };
+
+    expect(buildOverviewWatchProviderRegionOptions(show)).toEqual([
+      { regionCode: "US", regionLabel: "United States" },
+      { regionCode: "DE", regionLabel: "DE" },
+    ]);
+    expect(resolveDefaultOverviewWatchProviderRegion(buildOverviewWatchProviderRegions(show))).toBe("US");
+  });
+
+  it("falls back to the first available region when US is missing", () => {
+    const regions = buildOverviewWatchProviderRegions({
+      watch_provider_regions: [
+        { region: "NZ", stream: ["ThreeNow"], free: [], buy_rent: [] },
+        { region: "DE", stream: ["RTL+"], free: [], buy_rent: ["Apple TV"] },
+      ],
+    });
+
+    expect(resolveDefaultOverviewWatchProviderRegion(regions)).toBe("DE");
+    expect(
+      resolveOverviewWatchProviderRegion({
+        regions,
+        selectedRegionCode: "missing",
+      })
+    ).toEqual({
+      regionCode: "DE",
+      regionLabel: "DE",
+      stream: ["RTL+"],
+      free: [],
+      buyRent: ["Apple TV"],
+    });
+  });
+
+  it("builds one uncategorized fallback provider list from flat provider arrays", () => {
+    expect(
+      buildOverviewWatchProviderFallback({
+        streaming_providers: ["Peacock Premium", "Netflix"],
+        watch_providers: ["Apple TV Store", "netflix"],
+        overview_streaming_providers: ["Netflix", "Apple TV Store", "Peacock"],
+      })
+    ).toEqual(["Apple TV Store", "Netflix", "Peacock"]);
   });
 
   it("groups Reddit communities by show, franchise, and network relevance", () => {

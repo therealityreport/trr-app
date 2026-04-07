@@ -42,6 +42,7 @@ import {
   type SocialSyncRetryKind,
   type SocialSyncSessionStreamPayload,
 } from "@/lib/admin/social-sync-session";
+import { useSharedSseResource } from "@/lib/admin/shared-live-resource";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 import {
   pickFirstNonVideoUrl,
@@ -6517,14 +6518,44 @@ export default function WeekDetailPage() {
     void fetchManualAttachRunCandidates();
   }, [fetchManualAttachRunCandidates, hasValidNumericPathParams, isAdmin, syncingComments]);
 
+  const syncSessionStream = useSharedSseResource<SocialSyncSessionStreamPayload>({
+    key: `week-social-sync:${showIdForApi}:${seasonNumber}:${resolvedSeasonId ?? "season"}:${syncSessionId ?? "idle"}`,
+    shouldRun: Boolean(syncSessionId && syncingComments),
+    reconnectIntervalMs: 5_000,
+    connect: async ({ signal, publish }) => {
+      const headers = await getSyncRunRequestHeaders();
+      await consumeSocialSyncSessionStream({
+        url: `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/sync-sessions/${syncSessionId}/stream${resolvedSeasonId ? `?season_id=${encodeURIComponent(resolvedSeasonId)}` : ""}`,
+        headers,
+        signal,
+        onOpen: () => {
+          publish({ connected: true, error: null });
+        },
+        onMessage: async (event) => {
+          publish({
+            data: event,
+            error: null,
+            connected: true,
+            lastSuccessAtMs: Date.now(),
+          });
+        },
+      });
+    },
+  });
+
   useEffect(() => {
     if (!syncSessionId || !syncingComments) {
       setSyncSessionStreamConnected(false);
       return;
     }
-    let cancelled = false;
-    const abortController = new AbortController();
+    setSyncSessionStreamConnected(syncSessionStream.connected);
+  }, [syncSessionId, syncSessionStream.connected, syncingComments]);
 
+  useEffect(() => {
+    const event = syncSessionStream.data;
+    if (!syncSessionId || !syncingComments || !event) {
+      return;
+    }
     const refreshLiveWeekData = async () => {
       const now = Date.now();
       if (now - syncSessionLastRefreshAtRef.current < 2_500) return;
@@ -6540,119 +6571,96 @@ export default function WeekDetailPage() {
       ]);
     };
 
-    const consume = async () => {
-      try {
-        const headers = await getSyncRunRequestHeaders();
-        await consumeSocialSyncSessionStream({
-          url: `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/sync-sessions/${syncSessionId}/stream${resolvedSeasonId ? `?season_id=${encodeURIComponent(resolvedSeasonId)}` : ""}`,
-          headers,
-          signal: abortController.signal,
-          onOpen: () => {
-            if (cancelled) return;
-            setSyncSessionStreamConnected(true);
-            setSyncPollError(null);
-          },
-          onMessage: async (event: SocialSyncSessionStreamPayload) => {
-            if (cancelled) return;
-            const payload = event.sync_session;
-            setSyncSessionProgress(payload);
-            setSyncPass(Math.max(1, Number(payload.pass_sequence ?? 1) || 1));
-            const snapshot = payload.completeness_snapshot ?? {};
-            if (snapshot.comments_coverage && typeof snapshot.comments_coverage === "object") {
-              setSyncCoveragePreview(snapshot.comments_coverage as unknown as CommentsCoverageResponse);
-            }
-            if (snapshot.asset_coverage && typeof snapshot.asset_coverage === "object") {
-              setSyncMirrorCoveragePreview(snapshot.asset_coverage as unknown as MirrorCoverageResponse);
-            }
-            if (event.run_progress && typeof event.run_progress === "object") {
-              setSyncRunProgress(event.run_progress as unknown as RunProgressSnapshot);
-              setSyncLastSuccessAt(new Date());
-            }
-            const nextRunId =
-              (typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0
-                ? payload.current_run_id
-                : typeof payload.current_run?.id === "string" && payload.current_run.id.trim().length > 0
-                  ? payload.current_run.id
-                  : null) ?? null;
-            if (nextRunId && nextRunId !== syncRunId) {
-              setSyncRunId(nextRunId);
-              setSyncRun(null);
-              setSyncJobs([]);
-              setSyncRunProgress(null);
-              void fetchSyncProgress(nextRunId, {
-                preserveLastGoodJobsIfEmpty: true,
-                preserveLastGoodRunIfMissing: true,
-              }).catch(() => undefined);
-            } else {
-              void refreshLiveWeekData();
-            }
-            const sessionStatus = String(payload.status || "").toLowerCase();
-            const passLabel = payload.current_pass_kind
-              ? payload.current_pass_kind.replaceAll("_", " ")
-              : "sync";
-            const dateLabel =
-              payload.date_start && payload.date_end ? `${payload.date_start} to ${payload.date_end}` : "selected window";
-            if (sessionStatus === "completed") {
-              const completeness = payload.completeness_snapshot ?? {};
-              const coverage = completeness.comments_coverage as CommentsCoverageResponse | undefined;
-              const assets = completeness.asset_coverage as MirrorCoverageResponse | undefined;
-              const coverageLabel = coverage
-                ? formatCoverageLabel(
-                    Number(coverage.total_saved_comments ?? 0),
-                    Number(coverage.total_reported_comments ?? 0),
-                  )
-                : "n/a";
-              const mirrorLabel = assets
-                ? formatMirrorCoverageLabel(
-                    Number(assets.posts_scanned ?? 0) - Number(assets.needs_mirror_count ?? 0),
-                    Number(assets.posts_scanned ?? 0),
-                  )
-                : "n/a";
-              setSyncMessage(
-                `Sync complete for ${dateLabel} · coverage ${coverageLabel}${
-                  SOCIAL_FULL_SYNC_MIRROR_ENABLED ? ` · mirror ${mirrorLabel}` : ""
-                }.`,
-              );
-              setSyncingComments(false);
-              setSyncSessionStreamConnected(false);
-              void fetchData({ sortFieldValue: sortField, sortDirValue: sortDir });
-              return;
-            }
-            if (sessionStatus === "failed" || sessionStatus === "cancelled") {
-              setSyncMessage(
-                sessionStatus === "cancelled"
-                  ? `Sync cancelled for ${dateLabel}.`
-                  : `Sync failed during ${passLabel} for ${dateLabel}.`,
-              );
-              setSyncingComments(false);
-              setSyncSessionStreamConnected(false);
-              return;
-            }
-            const waitingForFollowUp = sessionStatus === "pass_evaluating" && !nextRunId;
-            setSyncMessage(
-              waitingForFollowUp
-                ? `Waiting for sync session follow-up · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`
-                : `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`,
-            );
-          },
-        });
-      } catch (err) {
-        if (cancelled || abortController.signal.aborted) return;
-        setSyncSessionStreamConnected(false);
-        setSyncPollError(err instanceof Error ? err.message : "Failed to stream sync session");
+    const payload = event.sync_session;
+    setSyncPollError(null);
+    setSyncSessionProgress(payload);
+    setSyncPass(Math.max(1, Number(payload.pass_sequence ?? 1) || 1));
+    const snapshot = payload.completeness_snapshot ?? {};
+    if (snapshot.comments_coverage && typeof snapshot.comments_coverage === "object") {
+      setSyncCoveragePreview(snapshot.comments_coverage as unknown as CommentsCoverageResponse);
+    }
+    if (snapshot.asset_coverage && typeof snapshot.asset_coverage === "object") {
+      setSyncMirrorCoveragePreview(snapshot.asset_coverage as unknown as MirrorCoverageResponse);
+    }
+    if (event.run_progress && typeof event.run_progress === "object") {
+      setSyncRunProgress(event.run_progress as unknown as RunProgressSnapshot);
+      setSyncLastSuccessAt(new Date());
+    }
+    const nextRunId =
+      (typeof payload.current_run_id === "string" && payload.current_run_id.trim().length > 0
+        ? payload.current_run_id
+        : typeof payload.current_run?.id === "string" && payload.current_run.id.trim().length > 0
+          ? payload.current_run.id
+          : null) ?? null;
+
+    const applyStreamEvent = async () => {
+      if (nextRunId && nextRunId !== syncRunId) {
+        setSyncRunId(nextRunId);
+        setSyncRun(null);
+        setSyncJobs([]);
+        setSyncRunProgress(null);
+        void fetchSyncProgress(nextRunId, {
+          preserveLastGoodJobsIfEmpty: true,
+          preserveLastGoodRunIfMissing: true,
+        }).catch(() => undefined);
+      } else {
+        void refreshLiveWeekData();
       }
+      const sessionStatus = String(payload.status || "").toLowerCase();
+      const passLabel = payload.current_pass_kind
+        ? payload.current_pass_kind.replaceAll("_", " ")
+        : "sync";
+      const dateLabel =
+        payload.date_start && payload.date_end ? `${payload.date_start} to ${payload.date_end}` : "selected window";
+      if (sessionStatus === "completed") {
+        const completeness = payload.completeness_snapshot ?? {};
+        const coverage = completeness.comments_coverage as CommentsCoverageResponse | undefined;
+        const assets = completeness.asset_coverage as MirrorCoverageResponse | undefined;
+        const coverageLabel = coverage
+          ? formatCoverageLabel(
+              Number(coverage.total_saved_comments ?? 0),
+              Number(coverage.total_reported_comments ?? 0),
+            )
+          : "n/a";
+        const mirrorLabel = assets
+          ? formatMirrorCoverageLabel(
+              Number(assets.posts_scanned ?? 0) - Number(assets.needs_mirror_count ?? 0),
+              Number(assets.posts_scanned ?? 0),
+            )
+          : "n/a";
+        setSyncMessage(
+          `Sync complete for ${dateLabel} · coverage ${coverageLabel}${
+            SOCIAL_FULL_SYNC_MIRROR_ENABLED ? ` · mirror ${mirrorLabel}` : ""
+          }.`,
+        );
+        setSyncingComments(false);
+        setSyncSessionStreamConnected(false);
+        void fetchData({ sortFieldValue: sortField, sortDirValue: sortDir });
+        return;
+      }
+      if (sessionStatus === "failed" || sessionStatus === "cancelled") {
+        setSyncMessage(
+          sessionStatus === "cancelled"
+            ? `Sync cancelled for ${dateLabel}.`
+            : `Sync failed during ${passLabel} for ${dateLabel}.`,
+        );
+        setSyncingComments(false);
+        setSyncSessionStreamConnected(false);
+        return;
+      }
+      const waitingForFollowUp = sessionStatus === "pass_evaluating" && !nextRunId;
+      setSyncMessage(
+        waitingForFollowUp
+          ? `Waiting for sync session follow-up · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`
+          : `Sync session running · pass ${Math.max(1, Number(payload.pass_sequence ?? 1) || 1)} · ${passLabel} · ${dateLabel}.`,
+      );
     };
 
-    void consume();
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
+    void applyStreamEvent();
   }, [
     fetchData,
     fetchSyncProgress,
     fetchSyncWeekLiveHealth,
-    getSyncRunRequestHeaders,
     resolvedSeasonId,
     seasonNumber,
     showIdForApi,
@@ -6660,9 +6668,17 @@ export default function WeekDetailPage() {
     sortField,
     syncRunId,
     syncSessionId,
+    syncSessionStream.data,
     syncingComments,
     platformFilter,
   ]);
+
+  useEffect(() => {
+    if (!syncSessionId || !syncingComments) return;
+    if (syncSessionStream.connected || !syncSessionStream.error) return;
+    setSyncSessionStreamConnected(false);
+    setSyncPollError(syncSessionStream.error);
+  }, [syncSessionId, syncSessionStream.connected, syncSessionStream.error, syncingComments]);
 
   useEffect(() => {
     if (!syncSessionId || !syncingComments) return;

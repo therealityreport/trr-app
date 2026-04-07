@@ -4520,6 +4520,8 @@ export default function SeasonDetailPage() {
         exactEpisodeCount: null,
         minEpisodeCount: null,
         maxEpisodeCount: null,
+        viewMode: "gallery",
+        galleryColumns: 4,
       });
       castQuery.set("cast_person", personId);
       castQuery.set("cast_open_role_editor", "1");

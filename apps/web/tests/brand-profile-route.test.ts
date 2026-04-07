@@ -34,6 +34,7 @@ const makePayload = (overrides?: Record<string, unknown>) => ({
     shows: 1,
     assets: 2,
   },
+  streaming_services: [],
   targets: [
       {
         id: "social:instagram.com",
@@ -144,6 +145,7 @@ describe("brand profile route", () => {
     expect(response.headers.get("x-trr-upstream-ms")).toBeTruthy();
     expect(payload.display_name).toBe("Bravo");
     expect(payload.categories).toEqual(["network"]);
+    expect(payload.streaming_services).toEqual([]);
   });
 
   it("returns an exact publication or social profile payload", async () => {

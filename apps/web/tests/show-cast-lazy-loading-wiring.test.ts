@@ -5,8 +5,10 @@ import path from "node:path";
 describe("show detail cast lazy-loading wiring", () => {
   const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
   const castRouteStatePath = path.resolve(__dirname, "../src/lib/admin/cast-route-state.ts");
+  const creditsViewsPath = path.resolve(__dirname, "../src/components/admin/show-tabs/ShowCreditsViews.tsx");
   const contents = fs.readFileSync(filePath, "utf8");
   const castRouteStateContents = fs.readFileSync(castRouteStatePath, "utf8");
+  const creditsViewsContents = fs.readFileSync(creditsViewsPath, "utf8");
 
   it("keeps initial page load Promise.all free of fetchCast", () => {
     expect(contents).toMatch(/await Promise\.allSettled\(\[fetchSeasons\(\), checkCoverage\(\)\]\)/);
@@ -91,14 +93,16 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(castRouteStateContents).toMatch(/cast_episode_exact/);
     expect(castRouteStateContents).toMatch(/cast_episode_min/);
     expect(castRouteStateContents).toMatch(/cast_episode_max/);
+    expect(castRouteStateContents).toMatch(/cast_view/);
+    expect(castRouteStateContents).toMatch(/cast_cols/);
     expect(contents).toMatch(/Search Name/);
   });
 
-  it("disables per-card cast actions while cast jobs are running", () => {
+  it("keeps cast job state tracking even after removing per-card credits actions", () => {
     expect(contents).toMatch(/const castAnyJobRunning =/);
     expect(contents).toMatch(/const hasPersonRefreshInFlight = Object\.keys\(refreshingPersonIds\)\.length > 0/);
-    expect(contents).toMatch(/disabled=\{castAnyJobRunning \|\| Boolean\(refreshingPersonIds\[member\.person_id\]\)\}/);
-    expect(contents).toMatch(/title=\{castAnyJobRunning \? \"Cast sync in progress\" : undefined\}/);
+    expect(contents).not.toMatch(/Refresh Person/);
+    expect(contents).not.toMatch(/Edit Roles/);
   });
 
   it("tracks and renders failed cast members with retry-failed control", () => {
@@ -125,9 +129,10 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/personRefreshAbortControllersRef/);
   });
 
-  it("uses valid interactive structure for cast cards by separating link and action buttons", () => {
-    expect(contents).toMatch(/<div\s+key=\{member\.id\}/);
-    expect(contents).toMatch(/className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"/);
+  it("renders cast members through the dedicated credits view components", () => {
+    expect(contents).toMatch(/const renderShowCreditsCastMember =/);
+    expect(contents).toMatch(/ShowCreditsCastMembers/);
+    expect(contents).toMatch(/ShowCreditsCastViewControls/);
     expect(contents).not.toMatch(/event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*handleRefreshCastMember/s);
   });
 
@@ -157,6 +162,19 @@ describe("show detail cast lazy-loading wiring", () => {
     expect(contents).toMatch(/setCast\(creditsCastRoster\);/);
     expect(contents).toMatch(/const creditsRoster = activeTab === "cast" \? showCreditsCastRosterRef\.current : \[\];/);
     expect(contents).toMatch(/nextCast = mergeMissingPhotoFields\(creditsRoster, nextCast\);/);
+  });
+
+  it("renders the credits header and cast view controls without per-card edit actions", () => {
+    expect(contents).toMatch(/<h3 className="text-xl font-bold text-zinc-900">\s*Credits\s*<\/h3>/);
+    expect(contents).not.toMatch(/The Real Housewives of Salt Lake City/);
+    expect(contents).toMatch(/ShowCreditsCastViewControls/);
+    expect(contents).toMatch(/ShowCreditsCastMembers/);
+    expect(contents).toMatch(/ShowCreditsCrewSections/);
+    expect(contents).not.toMatch(/Refresh Person/);
+    expect(contents).not.toMatch(/Edit Roles/);
+    expect(creditsViewsContents).toMatch(/<th[^>]*>\s*Name\s*<\/th>/);
+    expect(creditsViewsContents).toMatch(/<th[^>]*>\s*Role\s*<\/th>/);
+    expect(creditsViewsContents).toMatch(/<th[^>]*>\s*Episodes\s*<\/th>/);
   });
 
   it("defers cast search filtering work and waits for role data before deep-link editor open", () => {

@@ -181,8 +181,10 @@ import {
   markAdminOperationSessionStatus,
   upsertAdminOperationSession,
 } from "@/lib/admin/operation-session";
-import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
+import { useShowCoverage } from "@/lib/admin/show-page/use-show-coverage";
+import { useShowDetailsController } from "@/lib/admin/show-page/use-show-details-controller";
+import { useShowIdentityLoad } from "@/lib/admin/show-page/use-show-identity-load";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
   buildHostFaviconUrl,
@@ -197,9 +199,6 @@ import {
   resolveShowPageDisplayTitle,
 } from "@/lib/admin/show-page/link-display";
 import {
-  buildCanonicalShowAlternativeNames,
-  deriveShowDetailsAlternativeNames,
-  deriveShowDetailsNickname,
   deriveShowDetailsSlugPreview,
 } from "@/lib/admin/show-page/details-form";
 import {
@@ -1987,79 +1986,6 @@ const withSnapshotAgeSuffix = (warning: string | null, timestampMs: number | nul
   return `${warning} Last successful snapshot: ${formatSnapshotAgeLabel(timestampMs)}.`;
 };
 
-const isTransientNotAuthenticatedError = (error: unknown): boolean =>
-  error instanceof Error && error.message.toLowerCase().includes("not authenticated");
-
-const parseAltNamesText = (value: string): string[] => {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of value.split(/\r?\n|,/)) {
-    const trimmed = raw.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(trimmed);
-  }
-  return out;
-};
-
-const toDelimitedEditorText = (value: string[] | null | undefined): string =>
-  Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim().length > 0).join("\n") : "";
-
-const readShowExternalId = (
-  show: { external_ids?: Record<string, unknown> | null; imdb_id?: string | null; tmdb_id?: number | null } | null,
-  key: string,
-): string => {
-  if (!show) return "";
-  if (key === "imdb_id") return typeof show.imdb_id === "string" ? show.imdb_id : "";
-  if (key === "tmdb_id") return typeof show.tmdb_id === "number" ? String(show.tmdb_id) : "";
-  const value = show.external_ids && typeof show.external_ids === "object" ? show.external_ids[key] : null;
-  if (value === null || value === undefined) return "";
-  return String(value);
-};
-
-const buildShowDetailsFormValue = (show: TrrShow | null) => {
-  if (!show) {
-    return {
-      displayName: "",
-      nickname: "",
-      altNamesText: "",
-      description: "",
-      premiereDate: "",
-      imdbId: "",
-      tmdbId: "",
-      tvdbId: "",
-      wikidataId: "",
-      tvRageId: "",
-      genresText: "",
-      networksText: "",
-      streamingProvidersText: "",
-      tagsText: "",
-    };
-  }
-
-  return {
-    displayName: show.name ?? "",
-    nickname: deriveShowDetailsNickname(show),
-    altNamesText: deriveShowDetailsAlternativeNames(show).join("\n"),
-    description: show.description ?? "",
-    premiereDate: show.premiere_date ?? "",
-    imdbId: readShowExternalId(show, "imdb_id"),
-    tmdbId: readShowExternalId(show, "tmdb_id"),
-    tvdbId: readShowExternalId(show, "tvdb_id"),
-    wikidataId: readShowExternalId(show, "wikidata_id"),
-    tvRageId: readShowExternalId(show, "tv_rage_id"),
-    genresText: toDelimitedEditorText(show.genres),
-    networksText: toDelimitedEditorText(show.networks),
-    streamingProvidersText: toDelimitedEditorText(
-      (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
-        (Array.isArray(show.watch_providers) ? show.watch_providers : []),
-    ),
-    tagsText: toDelimitedEditorText(show.tags),
-  };
-};
-
 const inferBravoShowUrl = (showName: string | null | undefined): string | null => {
   if (typeof showName !== "string") return null;
   const slug = showName
@@ -2604,20 +2530,37 @@ export default function TrrShowDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showRouteParam = params.showId as string;
-  const {
-    setResolvedShowId,
-    slugResolutionLoading,
-    setSlugResolutionLoading,
-    slugResolutionError,
-    setSlugResolutionError,
-    showId,
-    isCurrentShowId,
-  } = useShowCore<TrrShow, TrrSeason>(showRouteParam);
   const { user, checking, hasAccess } = useAdminGuard();
   useAdminOperationUnloadGuard();
+  const getAuthHeaders = useCallback(async () => {
+    return getClientAuthHeaders({ allowDevAdminBypass: true });
+  }, []);
+  const {
+    slugResolutionLoading,
+    slugResolutionError,
+    showId,
+    isCurrentShowId,
+    show,
+    setShow,
+    seasons,
+    seasonEpisodeSummaries,
+    setSeasonEpisodeSummaries,
+    seasonSummariesLoading,
+    setSeasonSummariesLoading,
+    socialDependencyError,
+    loading,
+    error,
+    fetchShow,
+    fetchSeasons,
+    loadShowIdentity,
+  } = useShowIdentityLoad<TrrShow, TrrSeason>({
+    checking,
+    hasAccess,
+    showRouteParam,
+    getAuthHeaders,
+    buildSeasonEpisodeSummaryMap,
+  });
 
-  const [show, setShow] = useState<TrrShow | null>(null);
-  const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
   const [linksEligibleCast, setLinksEligibleCast] = useState<TrrCastMember[]>([]);
   const [castLoadedOnce, setCastLoadedOnce] = useState(false);
@@ -2730,48 +2673,7 @@ export default function TrrShowDetailPage() {
   const syncBravoPreviewRunRef = useRef(0);
   const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
   const hasAutoOpenedSeasonRef = useRef(false);
-  const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<Record<string, SeasonEpisodeSummary>>({});
-  const [seasonSummariesLoading, setSeasonSummariesLoading] = useState(false);
-  const [socialDependencyError, setSocialDependencyError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [detailsForm, setDetailsForm] = useState<{
-    displayName: string;
-    nickname: string;
-    altNamesText: string;
-    description: string;
-    premiereDate: string;
-    imdbId: string;
-    tmdbId: string;
-    tvdbId: string;
-    wikidataId: string;
-    tvRageId: string;
-    genresText: string;
-    networksText: string;
-    streamingProvidersText: string;
-    tagsText: string;
-  }>({
-    displayName: "",
-    nickname: "",
-    altNamesText: "",
-    description: "",
-    premiereDate: "",
-    imdbId: "",
-    tmdbId: "",
-    tvdbId: "",
-    wikidataId: "",
-    tvRageId: "",
-    genresText: "",
-    networksText: "",
-    streamingProvidersText: "",
-    tagsText: "",
-  });
-  const [detailsSaving, setDetailsSaving] = useState(false);
-  const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
-  const [detailsEditing, setDetailsEditing] = useState(false);
   const [selectedAvailabilityRegionCode, setSelectedAvailabilityRegionCode] = useState<string>("");
-  const detailsBaseline = useMemo(() => buildShowDetailsFormValue(show), [show]);
   const overviewAlternativeNamesText = useMemo(() => buildOverviewAlternativeNamesText(show), [show]);
   const overviewNetworks = useMemo(() => getOverviewNetworks(show), [show]);
   const watchProviderRegions = useMemo<OverviewWatchProviderRegionRow[]>(
@@ -2807,30 +2709,25 @@ export default function TrrShowDetailPage() {
       return defaultRegion ?? "";
     });
   }, [watchProviderRegions]);
-  const hasUnsavedDetailsChanges = useMemo(() => {
-    if (!detailsEditing) return false;
-    return (
-      detailsForm.displayName.trim() !== detailsBaseline.displayName.trim() ||
-      detailsForm.nickname.trim() !== detailsBaseline.nickname.trim() ||
-      detailsForm.description.trim() !== detailsBaseline.description.trim() ||
-      detailsForm.premiereDate.trim() !== detailsBaseline.premiereDate.trim() ||
-      detailsForm.imdbId.trim() !== detailsBaseline.imdbId.trim() ||
-      detailsForm.tmdbId.trim() !== detailsBaseline.tmdbId.trim() ||
-      detailsForm.tvdbId.trim() !== detailsBaseline.tvdbId.trim() ||
-      detailsForm.wikidataId.trim() !== detailsBaseline.wikidataId.trim() ||
-      detailsForm.tvRageId.trim() !== detailsBaseline.tvRageId.trim() ||
-      parseAltNamesText(detailsForm.genresText).join("\n") !==
-        parseAltNamesText(detailsBaseline.genresText).join("\n") ||
-      parseAltNamesText(detailsForm.networksText).join("\n") !==
-        parseAltNamesText(detailsBaseline.networksText).join("\n") ||
-      parseAltNamesText(detailsForm.streamingProvidersText).join("\n") !==
-        parseAltNamesText(detailsBaseline.streamingProvidersText).join("\n") ||
-      parseAltNamesText(detailsForm.tagsText).join("\n") !==
-        parseAltNamesText(detailsBaseline.tagsText).join("\n") ||
-      parseAltNamesText(detailsForm.altNamesText).join("\n") !==
-        parseAltNamesText(detailsBaseline.altNamesText).join("\n")
-    );
-  }, [detailsBaseline, detailsEditing, detailsForm]);
+  const {
+    detailsForm,
+    detailsBaseline,
+    setDetailsForm,
+    detailsSaving,
+    detailsNotice,
+    detailsError,
+    detailsEditing,
+    setDetailsEditing,
+    hasUnsavedDetailsChanges,
+    startDetailsEdit,
+    cancelDetailsEdit,
+    saveShowDetails,
+  } = useShowDetailsController<TrrShow>({
+    show,
+    showId,
+    getAuthHeaders,
+    onShowUpdated: setShow,
+  });
 
   const [showLinks, setShowLinks] = useState<EntityLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
@@ -3019,9 +2916,19 @@ export default function TrrShowDetailPage() {
   const assetTriggerRef = useRef<HTMLElement | null>(null);
 
   // Covered shows state
-  const [isCovered, setIsCovered] = useState(false);
-  const [coverageLoading, setCoverageLoading] = useState(false);
-  const [coverageError, setCoverageError] = useState<string | null>(null);
+  const {
+    isCovered,
+    coverageLoading,
+    coverageError,
+    checkCoverage,
+    addToCoveredShows,
+    removeFromCoveredShows,
+  } = useShowCoverage({
+    showId,
+    showName: show?.name,
+    getAuthHeaders,
+    isCurrentShowId,
+  });
 
   // Refresh show sync state (uses TRR-Backend scripts, proxied via Next API routes)
   const [refreshingTargets, setRefreshingTargets] = useState<Record<ShowRefreshTarget, boolean>>({
@@ -3432,93 +3339,6 @@ export default function TrrShowDetailPage() {
     },
     [router, searchParams, showSlugForRouting]
   );
-
-  // Helper to get auth headers
-  const getAuthHeaders = useCallback(async () => {
-    return getClientAuthHeaders({ allowDevAdminBypass: true });
-  }, []);
-
-  useEffect(() => {
-    if (checking || !hasAccess) return;
-    const raw = typeof showRouteParam === "string" ? showRouteParam.trim() : "";
-    if (!raw) {
-      setResolvedShowId(null);
-      setSlugResolutionLoading(false);
-      setSlugResolutionError("Missing show identifier.");
-      return;
-    }
-    if (looksLikeUuid(raw)) {
-      setResolvedShowId(raw);
-      setSlugResolutionLoading(false);
-      setSlugResolutionError(null);
-      return;
-    }
-
-    let cancelled = false;
-    const resolveSlug = async () => {
-      setSlugResolutionLoading(true);
-      setSlugResolutionError(null);
-      try {
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-          try {
-            const headers = await getAuthHeaders();
-            const response = await fetchWithTimeout(
-              `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
-              { headers, cache: "no-store" },
-              SHOW_CORE_LOAD_TIMEOUT_MS
-            );
-            const data = (await response.json().catch(() => ({}))) as {
-              error?: string;
-              resolved?: { show_id?: string | null };
-            };
-            if (!response.ok) {
-              throw new Error(data.error || "Failed to resolve show slug");
-            }
-            const nextShowId =
-              typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
-                ? data.resolved.show_id
-                : null;
-            if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
-            if (cancelled) return;
-            setResolvedShowId(nextShowId);
-            return;
-          } catch (err) {
-            if (cancelled) return;
-            if (isTransientNotAuthenticatedError(err) && attempt < 3) {
-              await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 250));
-              continue;
-            }
-            setResolvedShowId(null);
-            setSlugResolutionError(
-              err instanceof Error ? err.message : "Could not resolve show URL slug."
-            );
-            return;
-          }
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setResolvedShowId(null);
-        setSlugResolutionError(
-          err instanceof Error ? err.message : "Could not resolve show URL slug."
-        );
-      } finally {
-        if (!cancelled) setSlugResolutionLoading(false);
-      }
-    };
-
-    void resolveSlug();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    checking,
-    getAuthHeaders,
-    hasAccess,
-    setResolvedShowId,
-    setSlugResolutionError,
-    setSlugResolutionLoading,
-    showRouteParam,
-  ]);
 
   useEffect(() => {
     if (showRouteState.tab !== "social" || socialAnalyticsView !== "bravo") return;
@@ -4628,34 +4448,6 @@ export default function TrrShowDetailPage() {
     [appendRefreshLog, reprocessPersonImages]
   );
 
-  // Fetch show details
-  const fetchShow = useCallback(async () => {
-    const requestShowId = showId;
-    if (!requestShowId) return;
-    try {
-      const headers = await getAuthHeaders();
-      const data = await adminGetJson<{ show?: TrrShow }>(
-        `/api/admin/trr-api/shows/${requestShowId}`,
-        {
-          headers,
-          timeoutMs: SHOW_CORE_LOAD_TIMEOUT_MS,
-        }
-      );
-      if (!isCurrentShowId(requestShowId)) return;
-      setShow(data.show ?? null);
-      setError(null);
-    } catch (err) {
-      if (!isCurrentShowId(requestShowId)) return;
-      const message =
-        err instanceof AdminRequestError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Failed to load show";
-      setError(message);
-    }
-  }, [getAuthHeaders, isCurrentShowId, showId]);
-
   const setFeaturedShowImage = useCallback(
     async (kind: "poster" | "backdrop", showImageId: string | null) => {
       if (!showId) return;
@@ -4687,127 +4479,6 @@ export default function TrrShowDetailPage() {
     },
     [getAuthHeaders, showId]
   );
-
-  const saveShowDetails = useCallback(async () => {
-    if (!show) return;
-    const displayName = detailsForm.displayName.trim();
-    if (!displayName) {
-      setDetailsError("Display Name is required.");
-      return;
-    }
-
-    const nickname = detailsForm.nickname.trim();
-    const canonicalNickname = deriveShowDetailsSlugPreview(nickname);
-    if (!canonicalNickname) {
-      setDetailsError("Nickname must produce a valid slug.");
-      return;
-    }
-    const altNames = parseAltNamesText(detailsForm.altNamesText);
-    const genres = parseAltNamesText(detailsForm.genresText);
-    const networks = parseAltNamesText(detailsForm.networksText);
-    const streamingProviders = parseAltNamesText(detailsForm.streamingProvidersText);
-    const tags = parseAltNamesText(detailsForm.tagsText);
-    const allAltNames = buildCanonicalShowAlternativeNames({
-      displayName,
-      nickname,
-      alternativeNames: altNames,
-    });
-
-    setDetailsSaving(true);
-    setDetailsError(null);
-    setDetailsNotice(null);
-    try {
-      const headers = await getAuthHeaders();
-      const response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showId}`,
-        {
-          method: "PUT",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: displayName,
-            nickname: canonicalNickname,
-            alternative_names: allAltNames,
-            description: detailsForm.description.trim() || "",
-            premiere_date: detailsForm.premiereDate || "",
-            imdb_id: detailsForm.imdbId.trim() || "",
-            tmdb_id: detailsForm.tmdbId.trim() || "",
-            tvdb_id: detailsForm.tvdbId.trim() || "",
-            wikidata_id: detailsForm.wikidataId.trim() || "",
-            tv_rage_id: detailsForm.tvRageId.trim() || "",
-            genres,
-            networks,
-            streaming_providers: streamingProviders,
-            tags,
-          }),
-        },
-        SETTINGS_MUTATION_TIMEOUT_MS
-      );
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message =
-          (data as { error?: string }).error ||
-          `Failed to save show details (HTTP ${response.status})`;
-        throw new Error(message);
-      }
-      const nextShow = (data as { show?: TrrShow }).show ?? null;
-      if (nextShow) {
-        setShow(nextShow);
-      }
-      setDetailsNotice("Show details saved.");
-      setDetailsEditing(false);
-    } catch (err) {
-      setDetailsError(err instanceof Error ? err.message : "Failed to save show details");
-    } finally {
-      setDetailsSaving(false);
-    }
-  }, [detailsForm, getAuthHeaders, show, showId]);
-
-  useEffect(() => {
-    if (!show) return;
-    setDetailsForm(buildShowDetailsFormValue(show));
-  }, [show]);
-
-  const startDetailsEdit = useCallback(() => {
-    setDetailsNotice(null);
-    setDetailsError(null);
-    setDetailsEditing(true);
-  }, []);
-
-  const cancelDetailsEdit = useCallback(() => {
-    if (show) {
-      setDetailsForm(buildShowDetailsFormValue(show));
-    }
-    setDetailsNotice(null);
-    setDetailsError(null);
-    setDetailsEditing(false);
-  }, [show]);
-
-  // Fetch seasons
-  const fetchSeasons = useCallback(async () => {
-    const requestShowId = showId;
-    if (!requestShowId) return;
-    try {
-      const headers = await getAuthHeaders();
-      const data = await adminGetJson<{ seasons?: TrrSeason[] }>(
-        `/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50&include_episode_signal=true`,
-        {
-          headers,
-          timeoutMs: SHOW_CORE_LOAD_TIMEOUT_MS,
-        }
-      );
-      const nextSeasons = Array.isArray(data.seasons) ? data.seasons : [];
-      if (!isCurrentShowId(requestShowId)) return;
-      setSeasons(nextSeasons);
-      setSeasonEpisodeSummaries(buildSeasonEpisodeSummaryMap(nextSeasons));
-      setSeasonSummariesLoading(false);
-      setSocialDependencyError(null);
-    } catch (err) {
-      if (!isCurrentShowId(requestShowId)) return;
-      const message = err instanceof Error ? err.message : "Failed to fetch seasons";
-      console.warn("Failed to fetch seasons:", message);
-      setSocialDependencyError(message);
-    }
-  }, [getAuthHeaders, isCurrentShowId, showId]);
 
   const fetchSeasonEpisodeSummaries = useCallback(
     async (seasonList: TrrSeason[]) => {
@@ -7995,75 +7666,6 @@ export default function TrrShowDetailPage() {
   const syncBravoModeSummaryLabel =
     syncBravoRunMode === "cast-only" ? "Cast Info only" : "Sync All Info";
 
-  // Check if show is covered
-  const checkCoverage = useCallback(async () => {
-    const requestShowId = showId;
-    if (!requestShowId) return;
-    try {
-      const headers = await getAuthHeaders();
-      await adminGetJson(
-        `/api/admin/covered-shows/${requestShowId}`,
-        {
-          headers,
-          timeoutMs: SHOW_CORE_LOAD_TIMEOUT_MS,
-        }
-      );
-      if (!isCurrentShowId(requestShowId)) return;
-      setIsCovered(true);
-      setCoverageError(null);
-    } catch {
-      if (!isCurrentShowId(requestShowId)) return;
-      setIsCovered(false);
-    }
-  }, [getAuthHeaders, isCurrentShowId, showId]);
-
-  // Add show to covered shows
-  const addToCoveredShows = async () => {
-    if (!show || !showId) return;
-    setCoverageLoading(true);
-    setCoverageError(null);
-    try {
-      const headers = await getAuthHeaders();
-      await adminMutation<{ error?: string }>(
-        "/api/admin/covered-shows",
-        {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ trr_show_id: showId, show_name: show.name }),
-          timeoutMs: COVERAGE_MUTATION_TIMEOUT_MS,
-        },
-      );
-      setIsCovered(true);
-    } catch (err) {
-      setCoverageError(err instanceof Error ? err.message : "Failed to add show visibility");
-    } finally {
-      setCoverageLoading(false);
-    }
-  };
-
-  // Remove show from covered shows
-  const removeFromCoveredShows = async () => {
-    if (!showId) return;
-    setCoverageLoading(true);
-    setCoverageError(null);
-    try {
-      const headers = await getAuthHeaders();
-      await adminMutation<{ error?: string }>(
-        `/api/admin/covered-shows/${showId}`,
-        {
-          method: "DELETE",
-          headers,
-          timeoutMs: COVERAGE_MUTATION_TIMEOUT_MS,
-        },
-      );
-      setIsCovered(false);
-    } catch (err) {
-      setCoverageError(err instanceof Error ? err.message : "Failed to remove show visibility");
-    } finally {
-      setCoverageLoading(false);
-    }
-  };
-
   // Initial load
   useEffect(() => {
     if (!hasAccess) return;
@@ -8072,22 +7674,14 @@ export default function TrrShowDetailPage() {
     const loadData = async () => {
       const requestShowId = showId;
       if (!isCurrentShowId(requestShowId)) return;
-      setLoading(true);
-      try {
-        await fetchShow();
-        // Keep initial render fast: load core show data first.
-        await Promise.allSettled([fetchSeasons(), checkCoverage()]);
-      } finally {
-        if (!isCurrentShowId(requestShowId)) return;
-        setLoading(false);
-      }
+      await loadShowIdentity([checkCoverage]);
       if (!isCurrentShowId(requestShowId)) return;
       // Bravo data can be slow/unavailable and should not block page load.
       void loadBravoData();
     };
 
     void loadData();
-  }, [hasAccess, showId, fetchShow, fetchSeasons, checkCoverage, isCurrentShowId, loadBravoData]);
+  }, [checkCoverage, hasAccess, isCurrentShowId, loadBravoData, loadShowIdentity, showId]);
 
   useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "settings" && activeTab !== "details" && activeTab !== "cast")) {

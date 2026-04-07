@@ -44,6 +44,7 @@ import FilterCardTracker from "./FilterCardTracker";
 import InteractiveTariffTable from "./InteractiveTariffTable";
 import InteractiveTariffRateArrowChart from "./InteractiveTariffRateArrowChart";
 import InteractiveTariffRateTable from "./InteractiveTariffRateTable";
+import NytInteractiveShell, { NytStorylineRail } from "./NytInteractiveShell";
 import { NFL_FREE_AGENTS_2026 } from "./free-agent-data";
 import type { BarChartData } from "./InteractiveBarChart";
 import type { LineChartData } from "./InteractiveLineChart";
@@ -364,6 +365,8 @@ function prettifyBlockType(type: string) {
 
 function getArticleBlockBaseLabel(block: ContentBlock) {
   switch (block.type) {
+    case "site-header-shell":
+      return block.title;
     case "header":
       return "Header";
     case "byline":
@@ -1054,6 +1057,14 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             },
           ]
         : [];
+  const siteHeaderShellBlock = contentBlocks.find(
+    (block): block is Extract<ContentBlock, { type: "site-header-shell" }> =>
+      block.type === "site-header-shell",
+  );
+  const storylineBlock = contentBlocks.find(
+    (block): block is Extract<ContentBlock, { type: "storyline" }> =>
+      block.type === "storyline",
+  );
   const sectionForType = (type: ContentBlock["type"]) =>
     blockSections.find((entry) => entry.type === type);
 
@@ -1248,6 +1259,25 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         </div>
       </div>
 
+      {siteHeaderShellBlock ? (
+        <ArticleBlockSection
+          id={sectionForType("site-header-shell")?.id ?? "site-header-shell"}
+          label={sectionForType("site-header-shell")?.label ?? siteHeaderShellBlock.title}
+          showHeading={showBlockStructure}
+        >
+          <BlockAnnotation
+            type="site-header-shell"
+            css={[
+              "vi-interactive shell facsimile with masthead spacer, sticky NYT chrome, desktop navigation overlay, search panel, and right-docked account drawer",
+              "Dialogs are local design-doc interactions only; no NYT identity, search, or CMS backends are called",
+            ]}
+            show={showCss}
+          >
+            <NytInteractiveShell block={siteHeaderShellBlock} />
+          </BlockAnnotation>
+        </ArticleBlockSection>
+      ) : null}
+
       {isTrumpTariffsImports ? (
         <ArticleBlockSection
           id={sectionForType("storyline")?.id ?? "storyline"}
@@ -1420,6 +1450,25 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 </ul>
               </nav>
             </div>
+          </BlockAnnotation>
+        </ArticleBlockSection>
+      ) : null}
+
+      {!isTrumpTariffsImports && siteHeaderShellBlock && storylineBlock ? (
+        <ArticleBlockSection
+          id={sectionForType("storyline")?.id ?? "storyline"}
+          label={sectionForType("storyline")?.label ?? storylineBlock.title}
+          showHeading={showBlockStructure}
+        >
+          <BlockAnnotation
+            type="storyline"
+            css={[
+              "css-1gwp8pp storyline rail with NYT T-logo, 15px Franklin title, and 14px/500 link labels",
+              "Border-bottom #DFDFDF, horizontal scroll on smaller widths, white background",
+            ]}
+            show={showCss}
+          >
+            <NytStorylineRail block={storylineBlock} />
           </BlockAnnotation>
         </ArticleBlockSection>
       ) : null}
@@ -1818,7 +1867,11 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         return contentBlocks.map((block: ContentBlock, bi: number) => {
           const section = blockSections[bi];
           /* header, byline, author-bio are already rendered by existing code — skip */
-          if (block.type === "header" || block.type === "byline") {
+          if (
+            block.type === "site-header-shell" ||
+            block.type === "header" ||
+            block.type === "byline"
+          ) {
             return null;
           }
 
@@ -1826,6 +1879,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             isTrumpTariffsImports &&
             (block.type === "storyline" || block.type === "sharetools-bar")
           ) {
+            return null;
+          }
+
+          if (siteHeaderShellBlock && block.type === "storyline") {
             return null;
           }
 

@@ -46,6 +46,14 @@ export interface TrrShow {
         buy: string[];
       }>
     | null;
+  watch_provider_regions?:
+    | Array<{
+        region: string;
+        stream: string[];
+        free: string[];
+        buy_rent: string[];
+      }>
+    | null;
   show_total_seasons: number | null;
   show_total_episodes: number | null;
   description: string | null;
@@ -230,6 +238,35 @@ const normalizeOverviewWatchAvailability = (
     );
 };
 
+const normalizeWatchProviderRegions = (
+  value: unknown,
+): NonNullable<TrrShow["watch_provider_regions"]> => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as Record<string, unknown>;
+      const region = String(row.region || "").trim().toUpperCase();
+      if (!region) return null;
+      return {
+        region,
+        stream: normalizeStringArray(row.stream),
+        free: normalizeStringArray(row.free),
+        buy_rent: normalizeStringArray(row.buy_rent),
+      };
+    })
+    .filter(
+      (
+        item,
+      ): item is {
+        region: string;
+        stream: string[];
+        free: string[];
+        buy_rent: string[];
+      } => item !== null,
+    );
+};
+
 const normalizeTrrShowRow = (row: TrrShow): TrrShow => ({
   ...row,
   alternative_names: normalizeStringArray(row.alternative_names),
@@ -240,6 +277,7 @@ const normalizeTrrShowRow = (row: TrrShow): TrrShow => ({
   streaming_providers: normalizeStringArray(row.streaming_providers),
   overview_streaming_providers: normalizeStringArray(row.overview_streaming_providers),
   overview_watch_availability: normalizeOverviewWatchAvailability(row.overview_watch_availability),
+  watch_provider_regions: normalizeWatchProviderRegions(row.watch_provider_regions),
   watch_providers: normalizeStringArray(row.watch_providers),
   tags: normalizeStringArray(row.tags),
 });

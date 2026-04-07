@@ -56,7 +56,6 @@ import SocialGrowthSection from "@/components/admin/social-growth-section";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
 import {
   PersonExternalIdsEditor,
-  type PersonExternalIdDraft,
 } from "@/components/admin/PersonExternalIdsEditor";
 import {
   type FandomDynamicSection,
@@ -126,10 +125,21 @@ import {
   normalizeContentTypeToken,
 } from "@/lib/media/content-type";
 import {
-  PERSON_EXTERNAL_ID_SOURCES,
-  type PersonExternalIdRecord,
-  type PersonExternalIdSource,
-} from "@/lib/admin/person-external-ids";
+  formatCanonicalSourceLabel,
+} from "@/lib/admin/person-page/settings";
+import {
+  usePersonProfileController,
+} from "@/lib/admin/person-page/use-person-profile-controller";
+import {
+  usePersonProfileLoad,
+} from "@/lib/admin/person-page/use-person-profile-load";
+import {
+  usePersonSettingsController,
+} from "@/lib/admin/person-page/use-person-settings-controller";
+import {
+  type CanonicalSourceOrder,
+  type TrrPerson,
+} from "@/lib/admin/person-page/types";
 import {
   applyFacebankSeedUpdateToLightbox,
   applyFacebankSeedUpdateToPhotos,
@@ -180,34 +190,12 @@ function readGettySummaryNumber(
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-// Types
-interface TrrPerson {
-  id: string;
-  full_name: string;
-  known_for: string | null;
-  external_ids: Record<string, unknown>;
-  // Canonical multi-source fields (jsonb, keyed by source like imdb/tmdb/fandom/manual)
-  birthday?: Record<string, unknown>;
-  gender?: Record<string, unknown>;
-  biography?: Record<string, unknown>;
-  place_of_birth?: Record<string, unknown>;
-  homepage?: Record<string, unknown>;
-  profile_image_url?: Record<string, unknown>;
-  alternative_names?: Record<string, string[]> | string[];
-  created_at: string;
-  updated_at: string;
-}
-
 type MultiSourceField = Record<string, unknown> | null | undefined;
 type ResolvedField = {
   value: string | null;
   source: string | null;
   sources: Array<{ source: string; value: string }>;
 };
-
-const DEFAULT_CANONICAL_SOURCE_ORDER = ["imdb", "tmdb", "fandom", "manual"] as const;
-type CanonicalSource = (typeof DEFAULT_CANONICAL_SOURCE_ORDER)[number];
-type CanonicalSourceOrder = CanonicalSource[];
 type BackendGetImagesSource = "getty" | "nbcumv" | "bravotv" | "imdb" | "tmdb";
 type GetImagesSourceSelection = "all" | "getty" | "getty_nbcumv" | "imdb" | "tmdb";
 type PersonPipelineOperationType = "admin_person_refresh_images" | "admin_person_reprocess_images";
@@ -244,33 +232,6 @@ const readRouteParamValue = (value: unknown): string | null => {
     return first.length > 0 ? first : null;
   }
   return null;
-};
-
-const isCanonicalSource = (value: string): value is CanonicalSource =>
-  (DEFAULT_CANONICAL_SOURCE_ORDER as readonly string[]).includes(value);
-
-const normalizeCanonicalSourceOrder = (value: unknown): CanonicalSourceOrder => {
-  if (!Array.isArray(value)) {
-    return [...DEFAULT_CANONICAL_SOURCE_ORDER];
-  }
-
-  const collected: CanonicalSourceOrder = [];
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const normalized = entry.trim().toLowerCase();
-    if (!isCanonicalSource(normalized)) continue;
-    if (!collected.includes(normalized)) {
-      collected.push(normalized);
-    }
-  }
-
-  for (const source of DEFAULT_CANONICAL_SOURCE_ORDER) {
-    if (!collected.includes(source)) {
-      collected.push(source);
-    }
-  }
-
-  return collected;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -418,15 +379,6 @@ const scorePersonPipelineOperationCandidate = (entry: AdminOperationHealthEntry)
   return score;
 };
 
-const readCanonicalSourceOrderFromExternalIds = (
-  externalIds: Record<string, unknown> | null | undefined
-): CanonicalSourceOrder => {
-  if (!externalIds || typeof externalIds !== "object") {
-    return [...DEFAULT_CANONICAL_SOURCE_ORDER];
-  }
-  return normalizeCanonicalSourceOrder(externalIds.canonical_profile_source_order);
-};
-
 const GET_IMAGES_SOURCE_OPTIONS: Array<{
   value: GetImagesSourceSelection;
   label: string;
@@ -499,15 +451,6 @@ const getImagesSelectionLabel = (selection: GetImagesSourceSelection): string =>
 const getImagesSelectionDetail = (selection: GetImagesSourceSelection): string => {
   return GET_IMAGES_SOURCE_OPTIONS.find((option) => option.value === selection)?.description ?? "Runs Getty, IMDb, and TMDb.";
 };
-
-const formatCanonicalSourceLabel = (source: CanonicalSource): string =>
-  source === "tmdb"
-    ? "TMDB"
-    : source === "imdb"
-      ? "IMDb"
-      : source === "fandom"
-        ? "Fandom"
-        : "Manual";
 
 function LinkOutIcon() {
   return (
@@ -884,41 +827,6 @@ const formatEpisodeCode = (
   const episode =
     episodeNumber === null ? "?" : String(episodeNumber).padStart(2, "0");
   return `S${season}E${episode}`;
-};
-
-const createEmptyExternalIdDraft = (): PersonExternalIdDraft => ({
-  source_id: PERSON_EXTERNAL_ID_SOURCES[0],
-  external_id: "",
-});
-
-const buildExternalIdDraftsFromRecords = (
-  records: PersonExternalIdRecord[]
-): PersonExternalIdDraft[] =>
-  records.map((record) => ({
-    source_id: record.source_id,
-    external_id: record.external_id,
-  }));
-
-const buildExternalIdRecordsFromPerson = (
-  person: TrrPerson | null | undefined
-): PersonExternalIdRecord[] => {
-  if (!person) return [];
-  const externalIds = (person.external_ids ?? {}) as Record<string, unknown>;
-  const records: PersonExternalIdRecord[] = [];
-  for (const source of PERSON_EXTERNAL_ID_SOURCES) {
-    const rawValue = externalIds[source] ?? externalIds[`${source}_id`];
-    if (rawValue === null || rawValue === undefined || rawValue === "") continue;
-    records.push({
-      id: null,
-      source_id: source,
-              external_id: String(rawValue),
-              is_primary: true,
-      valid_from: null,
-      valid_to: null,
-      observed_at: null,
-    });
-  }
-  return records;
 };
 
 const formatCreditsGroupSummary = (group: PersonCreditsByShow): string => {
@@ -3499,16 +3407,6 @@ export default function PersonProfilePage() {
     [pathname, searchParams]
   );
 
-  const [person, setPerson] = useState<TrrPerson | null>(null);
-  const [canonicalSourceOrder, setCanonicalSourceOrder] = useState<CanonicalSourceOrder>([
-    ...DEFAULT_CANONICAL_SOURCE_ORDER,
-  ]);
-  const [initialCanonicalSourceOrder, setInitialCanonicalSourceOrder] = useState<CanonicalSourceOrder>([
-    ...DEFAULT_CANONICAL_SOURCE_ORDER,
-  ]);
-  const [canonicalSourceOrderSaving, setCanonicalSourceOrderSaving] = useState(false);
-  const [canonicalSourceOrderError, setCanonicalSourceOrderError] = useState<string | null>(null);
-  const [canonicalSourceOrderNotice, setCanonicalSourceOrderNotice] = useState<string | null>(null);
   const [photos, setPhotos] = useState<TrrPersonPhoto[]>([]);
   const [photosSavedTotal, setPhotosSavedTotal] = useState<number | null>(0);
   const [photosSavedTotalStatus, setPhotosSavedTotalStatus] = useState<"exact" | "deferred">("exact");
@@ -3528,11 +3426,6 @@ export default function PersonProfilePage() {
   const [creditsLoading, setCreditsLoading] = useState(false);
   const [showScopedCredits, setShowScopedCredits] = useState<PersonCreditShowScope | null>(null);
   const [creditsByShow, setCreditsByShow] = useState<PersonCreditsByShow[]>([]);
-  const [externalIdDrafts, setExternalIdDrafts] = useState<PersonExternalIdDraft[]>([]);
-  const [externalIdsLoading, setExternalIdsLoading] = useState(false);
-  const [externalIdsSaving, setExternalIdsSaving] = useState(false);
-  const [externalIdsError, setExternalIdsError] = useState<string | null>(null);
-  const [externalIdsNotice, setExternalIdsNotice] = useState<string | null>(null);
   const [fandomData, setFandomData] = useState<TrrCastFandom[]>([]);
   const [fandomError, setFandomError] = useState<string | null>(null);
   const [fandomLoaded, setFandomLoaded] = useState(false);
@@ -4500,6 +4393,30 @@ export default function PersonProfilePage() {
     });
   }, []);
 
+  const getAuthHeaders = useCallback(
+    async () =>
+      getClientAuthHeaders({
+        preferredUser: user,
+        allowDevAdminBypass: true,
+      }),
+    [user],
+  );
+
+  const fetchWithAuth = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) =>
+      fetchAdminWithAuth(input, init, {
+        preferredUser: user,
+        allowDevAdminBypass: true,
+      }),
+    [user],
+  );
+
+  const { person, setPerson, fetchPerson } = usePersonProfileController({
+    personId,
+    getAuthHeaders,
+    onError: setError,
+  });
+
   const personSlugForRouting = useMemo(() => {
     if (resolvedPersonSlugParam && resolvedPersonSlugParam.trim().length > 0) {
       return resolvedPersonSlugParam;
@@ -4627,11 +4544,6 @@ export default function PersonProfilePage() {
   const [selectedEventSubcategoryKey, setSelectedEventSubcategoryKey] = useState<string>("all");
   const [selectedEventBucketKey, setSelectedEventBucketKey] = useState<string>("all");
   const [seasonPremiereMap, setSeasonPremiereMap] = useState<Record<number, string>>({});
-  const canonicalSourceOrderDirty = useMemo(
-    () => canonicalSourceOrder.join("|") !== initialCanonicalSourceOrder.join("|"),
-    [canonicalSourceOrder, initialCanonicalSourceOrder]
-  );
-
   useEffect(() => {
     if (!showIdParam) {
       setGalleryShowFilter("all");
@@ -5339,25 +5251,6 @@ export default function PersonProfilePage() {
     setPhotosVisibleCount(PERSON_GALLERY_VISIBLE_INCREMENT);
   }, [galleryShowFilter, selectedOtherShowKey, selectedEventBucketKey, advancedFilters]);
 
-  // Helper to get auth headers
-  const getAuthHeaders = useCallback(
-    async () =>
-      getClientAuthHeaders({
-        preferredUser: user,
-        allowDevAdminBypass: true,
-      }),
-    [user],
-  );
-
-  const fetchWithAuth = useCallback(
-    (input: RequestInfo | URL, init?: RequestInit) =>
-      fetchAdminWithAuth(input, init, {
-        preferredUser: user,
-        allowDevAdminBypass: true,
-      }),
-    [user],
-  );
-
   const flushSecondaryReadQueue = useCallback(() => {
     while (
       secondaryReadsInFlightRef.current < PERSON_SECONDARY_READ_CONCURRENCY &&
@@ -5387,6 +5280,43 @@ export default function PersonProfilePage() {
       }),
     [flushSecondaryReadQueue],
   );
+
+  const {
+    externalIdDrafts,
+    externalIdsLoading,
+    externalIdsSaving,
+    externalIdsError,
+    externalIdsNotice,
+    fetchExternalIds,
+    saveExternalIds,
+    handleChangeExternalIdDraft,
+    handleAddExternalIdDraft,
+    handleRemoveExternalIdDraft,
+    canonicalSourceOrder,
+    canonicalSourceOrderDirty,
+    canonicalSourceOrderSaving,
+    canonicalSourceOrderError,
+    canonicalSourceOrderNotice,
+    moveCanonicalSource,
+    resetCanonicalSourceOrder,
+    saveCanonicalSourceOrder,
+  } = usePersonSettingsController({
+    personId,
+    person,
+    setPerson,
+    fetchPerson: () => fetchPerson(),
+    getAuthHeaders,
+    hasAccess,
+    settingsTabActive: activeTab === "settings",
+    runSecondaryRead,
+  });
+
+  usePersonProfileLoad({
+    hasAccess,
+    personId,
+    fetchPerson,
+    setLoading,
+  });
 
   const fetchBestActivePersonPipelineOperation = useCallback(
     async (operationTypes?: readonly PersonPipelineOperationType[]) => {
@@ -5619,226 +5549,6 @@ export default function PersonProfilePage() {
       cancelled = true;
     };
   }, [fetchWithAuth, showIdForApi, hasAccess]);
-
-  // Fetch person details
-  const fetchPerson = useCallback(async (options?: { signal?: AbortSignal }) => {
-    if (!personId) return null;
-    const signal = options?.signal;
-    if (signal?.aborted) return null;
-    try {
-      const headers = await getAuthHeaders();
-      if (signal?.aborted) return null;
-      const data = await adminGetJson<{ person?: TrrPerson | null }>(`/api/admin/trr-api/people/${personId}?request_role=primary`, {
-        headers,
-        externalSignal: signal,
-        requestRole: "primary",
-        dedupeKey: `person:${personId}:detail`,
-      });
-      if (signal?.aborted) return null;
-      setPerson(data.person ?? null);
-      const nextSourceOrder = readCanonicalSourceOrderFromExternalIds(
-        data.person?.external_ids as Record<string, unknown> | null | undefined
-      );
-      setCanonicalSourceOrder(nextSourceOrder);
-      setInitialCanonicalSourceOrder(nextSourceOrder);
-      setCanonicalSourceOrderError(null);
-      setCanonicalSourceOrderNotice(null);
-      return (data.person as TrrPerson) ?? null;
-    } catch (err) {
-      if (signal?.aborted || isAbortError(err)) return;
-      setError(err instanceof Error ? err.message : "Failed to load person");
-      return null;
-    }
-  }, [personId, getAuthHeaders]);
-
-  const fetchExternalIds = useCallback(async (options?: { signal?: AbortSignal; fallbackPerson?: TrrPerson | null }) => {
-    if (!personId) return;
-    const signal = options?.signal;
-    const fallbackPerson = options?.fallbackPerson ?? null;
-    if (signal?.aborted) return;
-    try {
-      setExternalIdsLoading(true);
-      const headers = await getAuthHeaders();
-      const response = await fetch(
-        `/api/admin/trr-api/people/${personId}/external-ids`,
-        { headers, signal }
-      );
-      const data = (await response.json().catch(() => ({}))) as {
-        external_ids?: PersonExternalIdRecord[];
-        error?: string;
-      };
-      if (signal?.aborted) return;
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to fetch external IDs");
-      }
-      const records =
-        Array.isArray(data.external_ids) && data.external_ids.length > 0
-          ? data.external_ids
-          : buildExternalIdRecordsFromPerson(fallbackPerson);
-      setExternalIdDrafts(
-        records.length > 0 ? buildExternalIdDraftsFromRecords(records) : []
-      );
-      setExternalIdsError(null);
-    } catch (err) {
-      if (signal?.aborted || isAbortError(err)) return;
-      const fallbackRecords = buildExternalIdRecordsFromPerson(fallbackPerson);
-      setExternalIdDrafts(
-        fallbackRecords.length > 0 ? buildExternalIdDraftsFromRecords(fallbackRecords) : []
-      );
-      setExternalIdsError(err instanceof Error ? err.message : "Failed to load external IDs");
-    } finally {
-      setExternalIdsLoading(false);
-    }
-  }, [getAuthHeaders, personId]);
-
-  const saveExternalIds = useCallback(async () => {
-    if (!personId) return;
-    try {
-      setExternalIdsSaving(true);
-      setExternalIdsError(null);
-      setExternalIdsNotice(null);
-      const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/people/${personId}/external-ids`, {
-        method: "PUT",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          external_ids: externalIdDrafts
-            .map((draft) => ({
-              source_id: draft.source_id,
-              external_id: draft.external_id,
-            }))
-            .filter((draft) => draft.external_id.trim().length > 0),
-        }),
-      });
-      const data = (await response.json().catch(() => ({}))) as {
-        external_ids?: PersonExternalIdRecord[];
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to save external IDs");
-      }
-      const nextRecords = Array.isArray(data.external_ids) ? data.external_ids : [];
-      setExternalIdDrafts(
-        nextRecords.length > 0 ? buildExternalIdDraftsFromRecords(nextRecords) : []
-      );
-      await fetchPerson();
-      setExternalIdsNotice("Saved external IDs.");
-    } catch (err) {
-      setExternalIdsError(err instanceof Error ? err.message : "Failed to save external IDs");
-    } finally {
-      setExternalIdsSaving(false);
-    }
-  }, [externalIdDrafts, fetchPerson, getAuthHeaders, personId]);
-
-  const moveCanonicalSource = useCallback(
-    (source: CanonicalSource, direction: "up" | "down") => {
-      setCanonicalSourceOrder((prev) => {
-        const index = prev.indexOf(source);
-        if (index < 0) return prev;
-        const targetIndex = direction === "up" ? index - 1 : index + 1;
-        if (targetIndex < 0 || targetIndex >= prev.length) return prev;
-        const next = [...prev];
-        const [item] = next.splice(index, 1);
-        next.splice(targetIndex, 0, item);
-        return next;
-      });
-      setCanonicalSourceOrderError(null);
-      setCanonicalSourceOrderNotice(null);
-    },
-    []
-  );
-
-  const resetCanonicalSourceOrder = useCallback(() => {
-    setCanonicalSourceOrder([...initialCanonicalSourceOrder]);
-    setCanonicalSourceOrderError(null);
-    setCanonicalSourceOrderNotice(null);
-  }, [initialCanonicalSourceOrder]);
-
-  const saveCanonicalSourceOrder = useCallback(async () => {
-    if (!personId) return;
-    if (!canonicalSourceOrderDirty || canonicalSourceOrderSaving) {
-      return;
-    }
-    try {
-      setCanonicalSourceOrderSaving(true);
-      setCanonicalSourceOrderError(null);
-      setCanonicalSourceOrderNotice(null);
-      const headers = await getAuthHeaders();
-      const response = await fetch(`/api/admin/trr-api/people/${personId}`, {
-        method: "PATCH",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          canonicalProfileSourceOrder: canonicalSourceOrder,
-        }),
-      });
-      const data = (await response.json().catch(() => ({}))) as {
-        person?: TrrPerson;
-        error?: string;
-      };
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to update canonical source order");
-      }
-      if (data.person) {
-        setPerson(data.person);
-        const persistedSourceOrder = readCanonicalSourceOrderFromExternalIds(
-          data.person.external_ids as Record<string, unknown> | null | undefined
-        );
-        setCanonicalSourceOrder(persistedSourceOrder);
-        setInitialCanonicalSourceOrder(persistedSourceOrder);
-      } else {
-        setInitialCanonicalSourceOrder([...canonicalSourceOrder]);
-      }
-      setCanonicalSourceOrderNotice("Saved source order.");
-    } catch (err) {
-      setCanonicalSourceOrderError(
-        err instanceof Error ? err.message : "Failed to update source order"
-      );
-    } finally {
-      setCanonicalSourceOrderSaving(false);
-    }
-  }, [
-    canonicalSourceOrder,
-    canonicalSourceOrderDirty,
-    canonicalSourceOrderSaving,
-    getAuthHeaders,
-    personId,
-  ]);
-
-  const handleChangeExternalIdDraft = useCallback(
-    (index: number, field: keyof PersonExternalIdDraft, value: string) => {
-      setExternalIdDrafts((prev) =>
-        prev.map((draft, draftIndex) =>
-          draftIndex === index
-            ? {
-                ...draft,
-                [field]: field === "source_id" ? (value as PersonExternalIdSource) : value,
-              }
-            : draft
-        )
-      );
-      setExternalIdsError(null);
-      setExternalIdsNotice(null);
-    },
-    []
-  );
-
-  const handleAddExternalIdDraft = useCallback(() => {
-    setExternalIdDrafts((prev) => [...prev, createEmptyExternalIdDraft()]);
-    setExternalIdsError(null);
-    setExternalIdsNotice(null);
-  }, []);
-
-  const handleRemoveExternalIdDraft = useCallback((index: number) => {
-    setExternalIdDrafts((prev) => prev.filter((_, draftIndex) => draftIndex !== index));
-    setExternalIdsError(null);
-    setExternalIdsNotice(null);
-  }, []);
 
   // Fetch photos
   const fetchPhotos = useCallback(async (options?: {
@@ -10150,17 +9860,7 @@ export default function PersonProfilePage() {
     const { signal } = controller;
 
     const loadData = async () => {
-      setLoading(true);
-      let personLoaded = false;
       try {
-        const fetchedPerson = await fetchPerson({ signal });
-        if (signal.aborted) return;
-        if (fetchedPerson) {
-          personLoaded = true;
-          if (!cancelled) {
-            setLoading(false);
-          }
-        }
         await fetchPhotos({ signal, includeTotalCount: false, requestRole: "primary" });
         if (signal.aborted) return;
         if (!cancelled) {
@@ -10177,9 +9877,6 @@ export default function PersonProfilePage() {
         if (!cancelled && !signal.aborted) {
           setPrimaryGalleryReady(true);
         }
-        if (!cancelled && !personLoaded) {
-          setLoading(false);
-        }
       }
     };
 
@@ -10189,19 +9886,7 @@ export default function PersonProfilePage() {
       controller.abort();
       secondaryReadQueueRef.current = [];
     };
-  }, [hasAccess, fetchCoverPhoto, fetchPerson, fetchPhotos, personId, runSecondaryRead]);
-
-  useEffect(() => {
-    if (activeTab !== "settings") return;
-    if (!hasAccess || !personId || externalIdsLoading || externalIdDrafts.length > 0) return;
-    const controller = new AbortController();
-    void runSecondaryRead(async () => {
-      await fetchExternalIds({ signal: controller.signal, fallbackPerson: person });
-    });
-    return () => {
-      controller.abort();
-    };
-  }, [activeTab, externalIdDrafts.length, externalIdsLoading, fetchExternalIds, hasAccess, person, personId, runSecondaryRead]);
+  }, [hasAccess, fetchCoverPhoto, fetchPhotos, personId, runSecondaryRead]);
 
   useEffect(() => {
     if (activeTab !== "credits") return;

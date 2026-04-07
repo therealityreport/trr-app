@@ -9,7 +9,7 @@ import {
 describe("cast route state", () => {
   it("reads canonical show keys and round-trips using canonical writers", () => {
     const initial = new URLSearchParams(
-      "tab=cast&cast_q=Lisa&cast_sort=name&cast_order=asc&cast_img=yes&cast_seasons=1,6&cast_filters=role:friend,credit:Crew&cast_episode_exact=2&cast_episode_min=1&cast_episode_max=8"
+      "tab=cast&cast_q=Lisa&cast_sort=name&cast_order=asc&cast_img=yes&cast_seasons=1,6&cast_filters=role:friend,credit:Crew&cast_episode_exact=2&cast_episode_min=1&cast_episode_max=8&cast_view=list&cast_cols=6"
     );
     const parsed = parseShowCastRouteState(initial);
     expect(parsed.searchQuery).toBe("Lisa");
@@ -21,6 +21,8 @@ describe("cast route state", () => {
     expect(parsed.exactEpisodeCount).toBe(2);
     expect(parsed.minEpisodeCount).toBe(1);
     expect(parsed.maxEpisodeCount).toBe(8);
+    expect(parsed.viewMode).toBe("list");
+    expect(parsed.galleryColumns).toBe(6);
 
     const written = writeShowCastRouteState(new URLSearchParams(initial.toString()), parsed);
     expect(written.get("cast_q")).toBe("Lisa");
@@ -32,6 +34,8 @@ describe("cast route state", () => {
     expect(written.get("cast_episode_exact")).toBe("2");
     expect(written.get("cast_episode_min")).toBe("1");
     expect(written.get("cast_episode_max")).toBe("8");
+    expect(written.get("cast_view")).toBe("list");
+    expect(written.get("cast_cols")).toBe("6");
     expect(written.get("cast_roles")).toBeNull();
   });
 
@@ -79,6 +83,8 @@ describe("cast route state", () => {
       exactEpisodeCount: null,
       minEpisodeCount: null,
       maxEpisodeCount: null,
+      viewMode: "gallery",
+      galleryColumns: 4,
     });
     expect(showWritten.get("cast_q")).toBeNull();
     expect(showWritten.get("cast_sort")).toBeNull();
@@ -89,5 +95,14 @@ describe("cast route state", () => {
     expect(showWritten.get("cast_episode_exact")).toBeNull();
     expect(showWritten.get("cast_episode_min")).toBeNull();
     expect(showWritten.get("cast_episode_max")).toBeNull();
+    expect(showWritten.get("cast_view")).toBeNull();
+    expect(showWritten.get("cast_cols")).toBeNull();
+  });
+
+  it("falls back to gallery mode with 4 columns for invalid or missing values", () => {
+    const parsed = parseShowCastRouteState(new URLSearchParams("cast_view=weird&cast_cols=9"));
+
+    expect(parsed.viewMode).toBe("gallery");
+    expect(parsed.galleryColumns).toBe(4);
   });
 });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { usePathname } from "next/navigation";
 import AdminModal from "@/components/admin/AdminModal";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { useAdminLiveStatus } from "@/lib/admin/admin-live-status";
 
 type WorkerEntry = {
   worker_id: string;
@@ -351,7 +352,7 @@ function healthState(data: HealthDotStatus | null, error: string | null): Health
 function healthDotColor(state: HealthState): string {
   switch (state) {
     case "healthy":
-      return "bg-[#7A0307]";
+      return "bg-emerald-500";
     case "degraded":
       return "bg-black";
     case "down":
@@ -1394,7 +1395,7 @@ function useSharedHealthDot(options: { isOpen: boolean; isSocialRoute: boolean }
   };
 }
 
-function useQueueStatusModal(options: { isOpen: boolean }) {
+export function useQueueStatusModal(options: { isOpen: boolean }) {
   const [data, setData] = useState<QueueStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
@@ -1485,7 +1486,7 @@ function useQueueStatusModal(options: { isOpen: boolean }) {
   };
 }
 
-function useAdminOperationsHealthModal(options: { isOpen: boolean }) {
+export function useAdminOperationsHealthModal(options: { isOpen: boolean }) {
   const [data, setData] = useState<AdminOperationsHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
@@ -2286,8 +2287,10 @@ export function HealthIndicator({
 }) {
   const pathname = usePathname() ?? "";
   const socialRoute = useMemo(() => isSocialAdminPath(pathname), [pathname]);
-  const { data, error } = useSharedHealthDot({ isOpen: false, isSocialRoute: socialRoute });
-  const state = healthState(data, error);
+  const healthDot = useSharedHealthDot({ isOpen: false, isSocialRoute: socialRoute });
+  const liveStatus = useAdminLiveStatus({ shouldRun: socialRoute });
+  const statusData = (liveStatus.data?.health_dot as HealthDotStatus | null | undefined) ?? healthDot.data;
+  const state = healthState(statusData, liveStatus.error ?? healthDot.error);
 
   return (
     <button
@@ -2301,7 +2304,7 @@ export function HealthIndicator({
     >
       <span className={`relative inline-block h-2.5 w-2.5 rounded-full ${healthDotColor(state)}`}>
         {state === "healthy" && (
-          <span className="absolute inset-0 animate-ping rounded-full bg-[#7A0307] opacity-30" />
+          <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-30" />
         )}
       </span>
       <span className="hidden text-xs font-medium text-black/65 group-hover:inline">{healthLabel(state)}</span>
@@ -2314,8 +2317,25 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const socialRoute = useMemo(() => isSocialAdminPath(pathname), [pathname]);
 
   const healthDot = useSharedHealthDot({ isOpen, isSocialRoute: socialRoute });
-  const queueStatus = useQueueStatusModal({ isOpen });
-  const adminOperations = useAdminOperationsHealthModal({ isOpen });
+  const liveStatus = useAdminLiveStatus({ shouldRun: isOpen || socialRoute });
+  const queueStatus = useMemo(
+    () => ({
+      data: (liveStatus.data?.queue_status as QueueStatus | null | undefined) ?? null,
+      error: liveStatus.error,
+      lastFetched: liveStatus.lastFetched,
+      refetch: liveStatus.refetch,
+    }),
+    [liveStatus.data, liveStatus.error, liveStatus.lastFetched, liveStatus.refetch],
+  );
+  const adminOperations = useMemo(
+    () => ({
+      data: (liveStatus.data?.admin_operations as AdminOperationsHealth | null | undefined) ?? null,
+      error: liveStatus.error,
+      lastFetched: liveStatus.lastFetched,
+      refetch: liveStatus.refetch,
+    }),
+    [liveStatus.data, liveStatus.error, liveStatus.lastFetched, liveStatus.refetch],
+  );
   const [cancelingJobIds, setCancelingJobIds] = useState<Set<string>>(new Set());
   const [cancelingBlockedJobIds, setCancelingBlockedJobIds] = useState<Set<string>>(new Set());
   const [dismissingFailureIds, setDismissingFailureIds] = useState<Set<string>>(new Set());
@@ -2338,7 +2358,9 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const [debugResult, setDebugResult] = useState<DebugJobResult | null>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
 
-  const statusData: HealthDotStatus | null = queueStatus.data
+  const statusData: HealthDotStatus | null = liveStatus.data?.health_dot
+    ? (liveStatus.data.health_dot as HealthDotStatus)
+    : queueStatus.data
     ? {
         queue_enabled: queueStatus.data.queue_enabled,
         workers: {
@@ -2351,8 +2373,9 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       }
     : healthDot.data;
 
-  const state = healthState(statusData, queueStatus.error ?? healthDot.error);
-  const lastFetched = adminOperations.lastFetched ?? queueStatus.lastFetched ?? healthDot.lastFetched;
+  const state = healthState(statusData, liveStatus.error ?? queueStatus.error ?? healthDot.error);
+  const lastFetched =
+    liveStatus.lastFetched ?? adminOperations.lastFetched ?? queueStatus.lastFetched ?? healthDot.lastFetched;
   const modalState = useMemo(
     () => {
       const socialState = queueStatus.data ? modalQueueHealthState(queueStatus.data) : state;

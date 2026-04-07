@@ -147,9 +147,10 @@ describe("SocialAccountProfilePage", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Sync Recent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume Tail" })).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "Backfill Posts scans the full catalog and updates saved posts. Resume Tail continues from the saved older frontier when a resumable cursor exists. Run Gap Analysis before using targeted repairs like Sync Newer.",
+        "Backfill Posts scans the full catalog and updates saved posts. If a saved older frontier exists, Backfill Posts resumes it automatically before continuing full-history fetches. Run Gap Analysis before using targeted repairs like Sync Newer.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Catalog Posts")).toBeInTheDocument();
@@ -308,7 +309,7 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("shows tail-gap guidance and queues resume tail from the integrity banner", async () => {
+  it("shows tail-gap guidance and queues backfill posts from the integrity banner", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -374,20 +375,22 @@ describe("SocialAccountProfilePage", () => {
             sample_missing_source_ids: ["old-post-1"],
             has_resumable_frontier: true,
             needs_recent_sync: false,
-            recommended_action: "resume_tail",
+            recommended_action: "backfill_posts",
             latest_catalog_run_status: "completed",
             active_run_status: null,
           },
         });
       }
-      if (url.includes("/catalog/resume-tail")) {
+      if (url.includes("/catalog/backfill")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
+        expect(init?.body).toBe(JSON.stringify({ backfill_scope: "full_history" }));
         return jsonResponse({
           run_id: "catalog-run-tail-12345678",
           status: "queued",
-          catalog_action: "resume_tail",
-          catalog_action_scope: "frontier_resume",
+          catalog_action: "backfill",
+          catalog_action_scope: "full_history",
+          backfill_mode: "resume_frontier",
+          resumed_from_cursor: true,
         });
       }
       throw new Error(`Unhandled request: ${url}`);
@@ -401,13 +404,13 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Resume Tail Now" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts Now" })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Resume Tail Now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts Now" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Resume tail queued (catalog-).")).toBeInTheDocument();
+      expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
     });
   });
 
@@ -1803,9 +1806,188 @@ describe("SocialAccountProfilePage", () => {
       screen.getAllByText(/2 classify jobs from this run are already dispatched to Modal and waiting for capacity/i)
         .length,
     ).toBeGreaterThan(0);
-    expect(screen.queryByText(/Run run-clas · Queued/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Run run-clas is Queued/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Run run-clas · Queued/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Run run-clas is Queued/i)).not.toBeInTheDocument();
+});
+
+it("shows recovering catalog state details when the backend is waiting on a recovery handoff", async () => {
+  mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/summary")) {
+      return jsonResponse({
+        ...baseSummary,
+        catalog_recent_runs: [
+          {
+            run_id: "run-recov-1",
+            status: "queued",
+            created_at: "2026-04-07T09:48:03.000Z",
+          },
+        ],
+      });
+    }
+    if (url.includes("/catalog/runs/run-recov-1/progress")) {
+      return jsonResponse({
+        run_id: "run-recov-1",
+        run_status: "queued",
+        run_state: "recovering",
+        source_scope: "bravo",
+        created_at: "2026-04-07T09:48:03.000Z",
+        stages: {
+          shared_account_discovery: {
+            jobs_total: 2,
+            jobs_completed: 1,
+            jobs_failed: 0,
+            jobs_active: 1,
+            jobs_running: 0,
+            jobs_waiting: 1,
+            scraped_count: 120,
+            saved_count: 0,
+          },
+        },
+        per_handle: [
+          {
+            platform: "instagram",
+            account_handle: "bravotv",
+            stage: "shared_account_discovery",
+            jobs_total: 2,
+            jobs_completed: 1,
+            jobs_failed: 0,
+            jobs_active: 1,
+            jobs_running: 0,
+            jobs_waiting: 1,
+            scraped_count: 120,
+            saved_count: 0,
+            has_started: true,
+            next_stage: "shared_account_posts",
+          },
+        ],
+        recent_log: [],
+        recovery: {
+          status: "queued",
+          reason: "initial_empty_page",
+          stage: "shared_account_discovery",
+          job_id: "job-recovery-1",
+          recovery_depth: 1,
+          waited_seconds: 95,
+          attempt_count: 1,
+          next_stage: "shared_account_posts",
+          transport: "authenticated",
+          execution_backend: "modal",
+        },
+        alerts: [
+          {
+            code: "instagram_modal_empty_page",
+            severity: "error",
+            message: "Instagram returned no posts on the first page from a Modal worker.",
+          },
+        ],
+        summary: {
+          total_jobs: 2,
+          completed_jobs: 1,
+          failed_jobs: 0,
+          active_jobs: 1,
+          items_found_total: 0,
+        },
+      });
+    }
+    if (url.includes("/catalog/posts")) {
+      return jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+      });
+    }
+    if (url.includes("/catalog/review-queue")) {
+      return jsonResponse({ items: [] });
+    }
+    throw new Error(`Unhandled request: ${url}`);
   });
+
+  render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+  await waitFor(() => {
+    expect(screen.getByText("Recovering")).toBeInTheDocument();
+  });
+  expect(screen.getByText("Instagram blocked first-page fetch")).toBeInTheDocument();
+  expect(screen.getByText("Recovery")).toBeInTheDocument();
+  expect(screen.getByText(/reason: initial empty page/i)).toBeInTheDocument();
+  expect(screen.getByText(/transport: authenticated/i)).toBeInTheDocument();
+  expect(screen.getByText(/attempt 1/i)).toBeInTheDocument();
+  expect(screen.getByText(/next: catalog fetch/i)).toBeInTheDocument();
+});
+
+it("prefers terminal cancelled status labels over stale recovering state", async () => {
+  mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/summary")) {
+      return jsonResponse({
+        ...baseSummary,
+        catalog_recent_runs: [
+          {
+            run_id: "run-cancelled-1",
+            status: "cancelled",
+            created_at: "2026-04-07T09:48:03.000Z",
+          },
+        ],
+      });
+    }
+    if (url.includes("/catalog/runs/run-cancelled-1/progress")) {
+      return jsonResponse({
+        run_id: "run-cancelled-1",
+        run_status: "cancelled",
+        run_state: "recovering",
+        source_scope: "bravo",
+        created_at: "2026-04-07T09:48:03.000Z",
+        stages: {
+          shared_account_discovery: {
+            jobs_total: 2,
+            jobs_completed: 1,
+            jobs_failed: 0,
+            jobs_active: 1,
+            jobs_running: 0,
+            jobs_waiting: 1,
+            scraped_count: 120,
+            saved_count: 0,
+          },
+        },
+        per_handle: [],
+        recent_log: [],
+        recovery: {
+          status: "queued",
+          reason: "no_partitions_discovered",
+          stage: "shared_account_discovery",
+          job_id: "job-recovery-1",
+          recovery_depth: 1,
+        },
+        summary: {
+          total_jobs: 2,
+          completed_jobs: 1,
+          failed_jobs: 0,
+          active_jobs: 1,
+          items_found_total: 0,
+        },
+      });
+    }
+    if (url.includes("/catalog/posts")) {
+      return jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+      });
+    }
+    if (url.includes("/catalog/review-queue")) {
+      return jsonResponse({ items: [] });
+    }
+    throw new Error(`Unhandled request: ${url}`);
+  });
+
+  render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+  await waitFor(() => {
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+  });
+  expect(screen.getByText(/Run run-canc · Cancelled/i)).toBeInTheDocument();
+  expect(screen.queryByText(/^Recovering$/)).not.toBeInTheDocument();
+  expect(screen.getByText("Run cancelled")).toBeInTheDocument();
+});
 
   it("renders catalog operational alerts from the backend progress payload", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
@@ -3398,6 +3580,191 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("does not treat classify-only items_found_total as posts checked for a failed discovery run", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 16668,
+          live_total_posts: 16668,
+          catalog_recent_runs: [
+            {
+              run_id: "run-discovery-classify-mismatch",
+              status: "failed",
+              created_at: "2026-04-07T13:36:41.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-discovery-classify-mismatch/progress")) {
+        return jsonResponse({
+          run_id: "run-discovery-classify-mismatch",
+          run_status: "failed",
+          source_scope: "bravo",
+          created_at: "2026-04-07T13:36:41.000Z",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+            post_classify: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 86,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          discovery: {
+            status: "completed",
+            partition_strategy: "cursor_breakpoints",
+            partition_count: 0,
+            discovered_count: 0,
+            queued_count: 0,
+            running_count: 0,
+            completed_count: 1,
+            failed_count: 0,
+            cancelled_count: 0,
+          },
+          post_progress: {
+            completed_posts: 0,
+            matched_posts: 0,
+            total_posts: 16668,
+          },
+          summary: {
+            total_jobs: 2,
+            completed_jobs: 2,
+            failed_jobs: 0,
+            active_jobs: 0,
+            items_found_total: 86,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("0 / 16,668 posts checked")).toBeInTheDocument();
+      expect(screen.getByText("0 matched")).toBeInTheDocument();
+    });
+  });
+
+  it("renders blocked-auth repair controls and starts the repair flow", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 16668,
+          live_total_posts: 16668,
+          catalog_recent_runs: [
+            {
+              run_id: "run-blocked-auth-1",
+              status: "failed",
+              created_at: "2026-04-07T13:36:41.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-blocked-auth-1/progress")) {
+        return jsonResponse({
+          run_id: "run-blocked-auth-1",
+          run_status: "failed",
+          run_state: "failed",
+          operational_state: "blocked_auth",
+          repair_action: "repair_instagram_auth",
+          repair_status: "idle",
+          repairable_reason: "discovery_empty_first_page",
+          resume_stage: "discovery",
+          auto_resume_pending: false,
+          repair_environment: {
+            supported: true,
+            repair_command: "python scripts/modal/repair_instagram_auth.py --json",
+          },
+          source_scope: "bravo",
+          created_at: "2026-04-07T13:36:41.000Z",
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          post_progress: {
+            completed_posts: 0,
+            matched_posts: 0,
+            total_posts: 16668,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 1,
+            failed_jobs: 0,
+            active_jobs: 0,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/catalog/runs/run-blocked-auth-1/repair-auth")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          run_id: "run-blocked-auth-1",
+          repair_status: "running",
+          operational_state: "blocked_auth",
+          resume_stage: "discovery",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Repair Instagram Auth" })).toBeInTheDocument();
+      expect(
+        screen.getByText(/local headed chrome window will open for confirmation/i),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Repair Instagram Auth" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/repairing auth/i)).toBeInTheDocument();
+    });
+  });
+
   it("uses the newest inspected catalog run from the summary when discovery outranks an older failed posts run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -3824,7 +4191,7 @@ describe("SocialAccountProfilePage", () => {
             sample_missing_source_ids: ["POST-20", "POST-19"],
             has_resumable_frontier: true,
             needs_recent_sync: false,
-            recommended_action: "resume_tail",
+            recommended_action: "backfill_posts",
             repair_window_start: null,
             repair_window_end: null,
             catalog_oldest_post_at: "2026-03-01T12:00:00Z",
@@ -3845,7 +4212,7 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Resume Tail Now" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Backfill Posts Now" })).toBeInTheDocument();
     });
     expect(
       mocks.fetchAdminWithAuth.mock.calls.filter(([input]) => String(input).includes("/catalog/gap-analysis/run")).length,

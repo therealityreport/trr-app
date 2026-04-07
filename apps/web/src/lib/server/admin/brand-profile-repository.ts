@@ -15,6 +15,7 @@ import {
   type BrandProfileTarget,
   type BrandProfileTargetType,
   type BrandProfileWikipediaShowUrl,
+  normalizeBrandStreamingServices,
   pickPrimaryBrandTarget,
   resolveBrandProfileTargets,
   toFriendlyBrandSlug,
@@ -30,7 +31,7 @@ import {
   type NetworkStreamingDetail,
 } from "@/lib/server/admin/networks-streaming-repository";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { getShowById } from "@/lib/server/trr-api/trr-shows-repository";
+import { getShowById, type TrrShow } from "@/lib/server/trr-api/trr-shows-repository";
 import { peekInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
 
 type GenericTargetType = Extract<
@@ -677,6 +678,33 @@ const buildGenericAssets = (
     updated_at: row.updated_at ?? null,
   }));
 
+const extractStreamingServicesFromShow = (show: TrrShow | null): string[] => {
+  if (!show) return [];
+
+  const regionalRows = Array.isArray(show.watch_provider_regions) ? show.watch_provider_regions : [];
+  if (regionalRows.length > 0) {
+    return regionalRows.flatMap((row) => [
+      ...(Array.isArray(row.stream) ? row.stream : []),
+      ...(Array.isArray(row.buy_rent) ? row.buy_rent : []),
+    ]);
+  }
+
+  const overviewProviders = Array.isArray(show.overview_streaming_providers) ? show.overview_streaming_providers : [];
+  if (overviewProviders.length > 0) {
+    return overviewProviders;
+  }
+
+  return [
+    ...(Array.isArray(show.streaming_providers) ? show.streaming_providers : []),
+    ...(Array.isArray(show.watch_providers) ? show.watch_providers : []),
+  ];
+};
+
+const loadBrandStreamingServices = async (shows: readonly BrandProfileShow[]): Promise<string[]> => {
+  const hydratedShows = await Promise.all(shows.map(async (show) => getShowById(show.id)));
+  return normalizeBrandStreamingServices(hydratedShows.flatMap((show) => extractStreamingServicesFromShow(show)));
+};
+
 const buildNetworkTarget = async (
   seed: Extract<ExactMatchSeed, { kind: "network" }>,
 ): Promise<{
@@ -975,6 +1003,7 @@ export async function getBrandProfileBySlug(
     }
     return left.id.localeCompare(right.id);
   });
+  const streamingServices = await loadBrandStreamingServices(shows);
   const socialProfiles = await loadBrandSocialProfiles(targets, shows);
 
   return {
@@ -990,6 +1019,7 @@ export async function getBrandProfileBySlug(
     targets,
     shows,
     assets,
+    streaming_services: streamingServices,
     social_profiles: socialProfiles,
   };
 }

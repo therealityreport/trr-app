@@ -382,7 +382,7 @@ describe("SystemHealthModal polling", () => {
   });
 
   it("uses health-dot polling for header indicator", async () => {
-    render(<HealthIndicator onClick={() => undefined} />);
+    const { container } = render(<HealthIndicator onClick={() => undefined} />);
 
     await waitFor(() => {
       expect(
@@ -396,6 +396,8 @@ describe("SystemHealthModal polling", () => {
         String(input).includes("/api/admin/trr-api/social/ingest/queue-status"),
       ),
     ).toBe(false);
+    expect(screen.getByLabelText("System health: Healthy")).toBeInTheDocument();
+    expect(container.querySelector(".bg-emerald-500")).toBeTruthy();
   });
 
   it("backs off repeated health-dot polling after a stable status in dev", async () => {
