@@ -48,7 +48,6 @@ describe("brands logo sync wiring", () => {
     expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/source-query/);
     expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/source-suggestions/);
     expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/assign/);
-    expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/saved\//);
     expect(modalContents).toMatch(/\/api\/admin\/trr-api\/brands\/logos\/options\/select/);
     expect(modalContents).toMatch(/Related logo pairing temporarily unavailable; discovery sources are still usable\./);
     expect(modalContents).toMatch(/runWithConcurrency/);

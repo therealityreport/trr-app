@@ -15,9 +15,9 @@ describe("cast incremental render wiring", () => {
     expect(showContents).toMatch(/CAST_INCREMENTAL_INITIAL_LIMIT = 48/);
     expect(showContents).toMatch(/CAST_INCREMENTAL_BATCH_SIZE = 48/);
     expect(showContents).toMatch(/visibleCastGalleryMembers = useMemo/);
-    expect(showContents).toMatch(/visibleCrewGalleryMembers = useMemo/);
+    expect(showContents).toMatch(/crewDisplaySections = useMemo/);
     expect(showContents).toMatch(/renderedCastCount = visibleCastGalleryMembers\.length/);
-    expect(showContents).toMatch(/renderedCrewCount = visibleCrewGalleryMembers\.length/);
+    expect(showContents).toMatch(/renderedCrewCount = crewDisplaySections\.reduce/);
     expect(showContents).toMatch(/renderedVisibleCount = renderedCastCount \+ renderedCrewCount/);
     expect(showContents).toMatch(/requestIdleCallback/);
     expect(showContents).toMatch(/Rendering \$\{rendered\.toLocaleString\(\)\}\/\$\{total\.toLocaleString\(\)\}/);
@@ -29,9 +29,9 @@ describe("cast incremental render wiring", () => {
     expect(seasonContents).toMatch(/SEASON_CAST_INCREMENTAL_INITIAL_LIMIT = 48/);
     expect(seasonContents).toMatch(/SEASON_CAST_INCREMENTAL_BATCH_SIZE = 48/);
     expect(seasonContents).toMatch(/visibleCastSeasonMembers = useMemo/);
-    expect(seasonContents).toMatch(/visibleCrewSeasonMembers = useMemo/);
+    expect(seasonContents).toMatch(/crewDisplaySections = useMemo/);
     expect(seasonContents).toMatch(/renderedCastCount = visibleCastSeasonMembers\.length/);
-    expect(seasonContents).toMatch(/renderedCrewCount = visibleCrewSeasonMembers\.length/);
+    expect(seasonContents).toMatch(/renderedCrewCount = crewDisplaySections\.reduce/);
     expect(seasonContents).toMatch(/renderedVisibleCount = renderedCastCount \+ renderedCrewCount/);
     expect(seasonContents).toMatch(/requestIdleCallback/);
     expect(seasonContents).toMatch(/Rendering \$\{rendered\.toLocaleString\(\)\}\/\$\{total\.toLocaleString\(\)\}/);

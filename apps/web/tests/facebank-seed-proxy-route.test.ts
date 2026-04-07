@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -12,6 +13,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 import { PATCH } from "@/app/api/admin/trr-api/people/[personId]/gallery/[linkId]/facebank-seed/route";
@@ -27,12 +32,12 @@ describe("facebank seed proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
 
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
-    process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET = "shared-internal-secret";
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue("https://backend.example.com/api/v1/admin/person/person-1/gallery/link-1/facebank-seed");
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
   });
 
   it("forwards PATCH with service role + internal secret headers", async () => {
@@ -62,15 +67,16 @@ describe("facebank seed proxy route", () => {
     const options = fetchMock.mock.calls[0][1] as RequestInit;
     expect(options.method).toBe("PATCH");
     expect(options.headers).toMatchObject({
-      Authorization: "Bearer service-role-secret",
-      "X-TRR-Internal-Admin-Secret": "shared-internal-secret",
+      Authorization: "Bearer internal-admin-token",
       "Content-Type": "application/json",
     });
     expect(options.body).toBe(JSON.stringify({ facebank_seed: true }));
   });
 
   it("returns 500 when internal secret is missing", async () => {
-    delete process.env.TRR_INTERNAL_ADMIN_SHARED_SECRET;
+    getInternalAdminBearerTokenMock.mockImplementation(() => {
+      throw new Error("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
+    });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -80,7 +86,7 @@ describe("facebank seed proxy route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(500);
-    expect(payload.error).toBe("Internal backend auth secret not configured");
+    expect(payload.error).toBe("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

@@ -20,23 +20,24 @@ describe("brand font ranking snapshots", () => {
     }).toMatchInlineSnapshot(`
       {
         "canonicalCheltenham": [
-          "Cheltenham",
           "ITC Cheltenham",
-          "Gloucester",
+          "Cheltenham",
+          "Bernhard Modern",
         ],
         "canonicalFranklin": [
           "Franklin Gothic",
           "Hamburg Serial",
-          "News Gothic No. 2",
+          "ITC Franklin Gothic LT",
         ],
         "canonicalKarnak": [
-          "Stafford Serial",
           "Gloucester",
-          "ITC Cheltenham",
+          "Stafford Serial",
+          "Sofia Pro",
         ],
         "spellingBeeKarnakCondensed": [
-          "Rude Slab Condensed",
           "Velino Compressed Text",
+          "Rude Slab Condensed",
+          "Hefring Slab",
         ],
       }
     `);

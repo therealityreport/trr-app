@@ -2050,7 +2050,7 @@ export const ARTICLES = [
     title: "How Much Will Trump\u2019s Tariffs Cost U.S. Importers?",
     url: "https://www.nytimes.com/interactive/2025/04/03/business/economy/trump-tariffs-us-imports.html",
     authors: ["Lazaro Gamio"],
-    date: "Updated April 9, 2025",
+    date: "2025-04-09",
     section: "Business/Economy",
     type: "interactive" as const,
     description: "It will cost an extra nearly $900 billion in tariffs to bring shoes, TVs and all other imports into the United States, a new analysis of trade data shows.",

@@ -174,6 +174,10 @@ function getInteractiveBlockCount(contentBlocks: readonly ContentBlock[]) {
     "birdkit-table-interactive",
     "datawrapper-table",
     "datawrapper-chart",
+    "filter-card-tracker",
+    "tariff-rate-arrow-chart",
+    "tariff-rate-table",
+    "tariff-country-table",
   ]);
 
   return contentBlocks.filter((block) => interactiveTypes.has(block.type)).length;
@@ -300,7 +304,7 @@ export async function auditGeneratedConfigIntegrity({
     }
 
     if (
-      article.fonts?.some((font, index) => stableJson(font.usedIn) === stableJson(peer.fonts?.[index]?.usedIn)) &&
+      article.fonts?.every((font, index) => stableJson(font.usedIn) === stableJson(peer.fonts?.[index]?.usedIn)) &&
       article.fonts?.length === peer.fonts?.length
     ) {
       uniquenessIssues.push(`font usage for ${article.id} matches ${peer.id} too closely; re-check extracted typography`);

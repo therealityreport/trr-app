@@ -23,7 +23,7 @@ describe("season assets route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
   });
 
   it("proxies default paginated mode to the backend and preserves pagination fields", async () => {

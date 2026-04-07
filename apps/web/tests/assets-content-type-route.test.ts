@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -14,19 +15,24 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 import { POST } from "@/app/api/admin/trr-api/assets/content-type/route";
 
 describe("assets content-type proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
 
-    process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/assets/content-type",
     );
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
   });
 
   it("forwards content-type update payload to backend", async () => {
@@ -63,7 +69,9 @@ describe("assets content-type proxy route", () => {
   });
 
   it("returns 500 when backend auth is missing", async () => {
-    delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
+    getInternalAdminBearerTokenMock.mockImplementation(() => {
+      throw new Error("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
+    });
 
     const request = new NextRequest("http://localhost/api/admin/trr-api/assets/content-type", {
       method: "POST",
@@ -78,6 +86,6 @@ describe("assets content-type proxy route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(500);
-    expect(payload.error).toBe("Backend auth not configured");
+    expect(payload.error).toBe("TRR_INTERNAL_ADMIN_SHARED_SECRET is not configured");
   });
 });

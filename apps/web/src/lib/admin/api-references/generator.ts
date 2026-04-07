@@ -174,7 +174,9 @@ function toAppPath(relativePath: string): string {
 
 function normalizeDynamicSegmentToken(raw: string): string {
   const trimmed = raw.trim();
-  const match = trimmed.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+  // Handle function-wrapped expressions like encodeURIComponent(eventId)
+  const unwrapped = trimmed.replace(/\)$/, "");
+  const match = unwrapped.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
   const candidate = match?.[1] ?? "param";
   return candidate.replace(/^[A-Z]/, (letter) => letter.toLowerCase());
 }

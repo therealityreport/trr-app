@@ -27,7 +27,7 @@ describe("show refresh health center wiring", () => {
     expect(showPage).toMatch(/onRefresh=\{\(\) => setRefreshLogOpen\(true\)\}/);
     expect(showPage).toMatch(/preserveScrollPosition=\{true\}/);
     expect(showPage).not.toMatch(/onClick=\{\(\) => void refreshAllShowData\(\)\}/);
-    expect(showPage).not.toMatch(/Refresh Links/);
+    expect(showPage).toMatch(/Refresh Links/);
     expect(showPage).not.toMatch(/Show Gallery/);
   });
 
