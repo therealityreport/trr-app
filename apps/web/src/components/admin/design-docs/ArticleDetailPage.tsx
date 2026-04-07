@@ -355,7 +355,7 @@ function slugifyArticleBlockLabel(label: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function prettifyBlockType(type: ContentBlock["type"]) {
+function prettifyBlockType(type: string) {
   return type
     .split("-")
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
