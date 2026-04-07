@@ -4,10 +4,11 @@ import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, getBackendApiUrlMock, resolveAdminShowIdMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, resolveAdminShowIdMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   resolveAdminShowIdMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -16,6 +17,10 @@ vi.mock("@/lib/server/auth", () => ({
 
 vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
+}));
+
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
 }));
 
 vi.mock("@/lib/server/admin/resolve-show-id", () => ({
@@ -29,6 +34,7 @@ describe("show cast-role-members proxy route", () => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
     resolveAdminShowIdMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     vi.restoreAllMocks();
     invalidateRouteResponseCache("admin-show-cast-role-members");
 
@@ -37,6 +43,7 @@ describe("show cast-role-members proxy route", () => {
     getBackendApiUrlMock.mockReturnValue(
       "https://backend.example.com/api/v1/admin/shows/00000000-0000-0000-0000-000000000001/cast-role-members"
     );
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role-secret";
   });
 

@@ -241,7 +241,7 @@ describe("Design docs article surfaces", () => {
       color: "rgb(54, 54, 54)",
       textDecoration: "underline",
     });
-    const updatedDate = screen.getByText("Updated April 9, 2025");
+    const updatedDate = screen.getByText("April 9, 2025");
     expect(updatedDate).toHaveStyle({
       fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
       fontSize: "13px",

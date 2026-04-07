@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, getBackendApiUrlMock, fetchMock } = vi.hoisted(() => ({
+const { requireAdminMock, getBackendApiUrlMock, fetchMock, getInternalAdminBearerTokenMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getBackendApiUrlMock: vi.fn(),
   fetchMock: vi.fn(),
+  getInternalAdminBearerTokenMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -15,6 +16,10 @@ vi.mock("@/lib/server/trr-api/backend", () => ({
   getBackendApiUrl: getBackendApiUrlMock,
 }));
 
+vi.mock("@/lib/server/trr-api/internal-admin-auth", () => ({
+  getInternalAdminBearerToken: getInternalAdminBearerTokenMock,
+}));
+
 import { GET } from "@/app/api/admin/trr-api/people/[personId]/fandom/route";
 
 describe("person fandom proxy route", () => {
@@ -22,9 +27,11 @@ describe("person fandom proxy route", () => {
     requireAdminMock.mockReset();
     getBackendApiUrlMock.mockReset();
     fetchMock.mockReset();
+    getInternalAdminBearerTokenMock.mockReset();
     requireAdminMock.mockResolvedValue(undefined);
     getBackendApiUrlMock.mockReturnValue("http://backend/api/v1/admin/person/person-1/fandom");
     vi.stubGlobal("fetch", fetchMock);
+    getInternalAdminBearerTokenMock.mockReturnValue("internal-admin-token");
     process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY = "service-role";
     delete process.env.TRR_BACKEND_SERVICE_TOKEN;
     process.env.NODE_ENV = "test";
