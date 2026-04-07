@@ -2104,8 +2104,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (catalogGapAnalysis.gap_type === "source_total_drift") {
       return {
         tone: "border-zinc-300 bg-zinc-100 text-zinc-800",
-        title: "Live profile totals are ahead of stored catalog evidence",
-        detail: "This mismatch is currently explained by source-total drift rather than confirmed missing stored posts.",
+        title: "Catalog totals drift without a confirmed gap direction",
+        detail: "Totals show the catalog trails the live profile, but diagnostics could not yet prove whether the missing posts are newer, older, or interior gaps.",
         sampleIds,
       };
     }
@@ -2163,6 +2163,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     supportsCatalog,
   ]);
 
+  const catalogHasCountDrift = Boolean((catalogFreshness?.delta_posts ?? 0) > 0);
+
   const catalogFreshnessStatusCopy = useMemo(() => {
     if (catalogFreshnessLoading) {
       return {
@@ -2178,11 +2180,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
     if (catalogFreshness && catalogFreshness.eligible) {
       return {
-        tone: catalogFreshness.needs_recent_sync ? "text-amber-800" : "text-emerald-800",
-        text: catalogFreshness.needs_recent_sync
-          ? `${formatInteger(catalogFreshness.delta_posts)} newer post${
+        tone: catalogHasCountDrift ? "text-amber-800" : "text-emerald-800",
+        text: catalogHasCountDrift
+          ? `Catalog totals trail the live profile by ${formatInteger(catalogFreshness.delta_posts)} post${
               catalogFreshness.delta_posts === 1 ? "" : "s"
-            } detected. Stored ${formatInteger(catalogFreshness.stored_total_posts)} posts${
+            }. Stored ${formatInteger(catalogFreshness.stored_total_posts)} posts${
               catalogFreshness.live_total_posts_current !== null &&
               catalogFreshness.live_total_posts_current !== undefined
                 ? `; live profile shows ${formatInteger(catalogFreshness.live_total_posts_current)}`
@@ -2197,7 +2199,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       };
     }
     return null;
-  }, [catalogFreshness, catalogFreshnessError, catalogFreshnessLoading]);
+  }, [catalogFreshness, catalogFreshnessError, catalogFreshnessLoading, catalogHasCountDrift]);
 
   const catalogGapAnalysisStatusCopy = useMemo(() => {
     if (!catalogCountsMismatch) {
@@ -2924,30 +2926,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       >
                         {runningCatalogAction === "backfill" ? "Queueing Backfill…" : "Backfill Posts"}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void runCatalogAction("sync_recent", {
-                            lookback_days: 1,
-                          })
-                        }
-                        disabled={catalogActionsBlocked}
-                        className="inline-flex rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
-                      </button>
-                      {catalogFreshness?.needs_recent_sync && catalogFreshness?.catalog_newest_post_at ? (
+                      {platform !== "instagram" ? (
                         <button
                           type="button"
                           onClick={() =>
-                            void runCatalogAction("sync_newer", {
-                              source_scope: activeCatalogSourceScope,
+                            void runCatalogAction("sync_recent", {
+                              lookback_days: 1,
                             })
                           }
                           disabled={catalogActionsBlocked}
-                          className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {runningCatalogAction === "sync_newer" ? "Queueing…" : "Sync Newer Posts"}
+                          {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
                         </button>
                       ) : null}
                       {catalogFreshness?.has_resumable_frontier ? (
@@ -2994,7 +2984,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 </div>
                 {supportsCatalog ? (
                   <p className="mt-2 text-xs text-zinc-500">
-                    All four actions use the same shared-profile catalog pipeline with different scopes. Backfill Posts covers full history or a bounded repair window. Sync Recent runs a recent canary window. Sync Newer repairs the head gap above the newest stored post. Resume Tail replays the saved frontier toward the oldest posts.
+                    {platform === "instagram"
+                      ? "Backfill Posts scans the full catalog and updates saved posts. Resume Tail continues from the saved older frontier when a resumable cursor exists. Run Gap Analysis before using targeted repairs like Sync Newer."
+                      : "Backfill Posts runs the full-history catalog job. Sync Recent runs the same pipeline, limited to the last day."}
                   </p>
                 ) : null}
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
@@ -3097,6 +3089,20 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             className="mt-3 inline-flex rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {runningCatalogAction === "backfill" ? "Queueing…" : "Repair Missing Window"}
+                          </button>
+                        ) : null}
+                        {catalogGapAnalysis.recommended_action === "backfill_posts" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void runCatalogAction("backfill", {
+                                backfill_scope: "full_history",
+                              })
+                            }
+                            disabled={catalogActionsBlocked}
+                            className="mt-3 inline-flex rounded-lg border border-zinc-400 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {runningCatalogAction === "backfill" ? "Queueing…" : "Backfill Posts Now"}
                           </button>
                         ) : null}
                       </div>

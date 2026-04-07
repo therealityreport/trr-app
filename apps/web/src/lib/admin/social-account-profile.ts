@@ -225,6 +225,7 @@ export type SocialAccountCatalogFreshness = {
   stored_total_posts: number;
   live_total_posts_current?: number | null;
   delta_posts: number;
+  has_newer_posts?: boolean;
   needs_recent_sync: boolean;
   latest_catalog_run_status?: string | null;
   active_run_status?: string | null;
@@ -248,6 +249,7 @@ export type SocialAccountCatalogGapAnalysis = {
   missing_newest_post_at?: string | null;
   sample_missing_source_ids: string[];
   has_resumable_frontier?: boolean;
+  has_newer_posts?: boolean;
   needs_recent_sync?: boolean;
   recommended_action:
     | "backfill_posts"

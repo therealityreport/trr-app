@@ -32,6 +32,7 @@ describe("social account catalog freshness proxy route", () => {
       live_total_posts_current: 14,
       stored_total_posts: 12,
       delta_posts: 2,
+      has_newer_posts: true,
       needs_recent_sync: true,
       checked_at: "2026-03-20T12:30:00.000Z",
     });

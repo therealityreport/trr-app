@@ -146,10 +146,10 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sync Recent" })).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "All four actions use the same shared-profile catalog pipeline with different scopes. Backfill Posts covers full history or a bounded repair window. Sync Recent runs a recent canary window. Sync Newer repairs the head gap above the newest stored post. Resume Tail replays the saved frontier toward the oldest posts.",
+        "Backfill Posts scans the full catalog and updates saved posts. Resume Tail continues from the saved older frontier when a resumable cursor exists. Run Gap Analysis before using targeted repairs like Sync Newer.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Catalog Posts")).toBeInTheDocument();
@@ -1222,7 +1222,7 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
     });
 
-    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Sync Recent" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel Run" })).toBeInTheDocument();
     expect(screen.getByText(/Run run-acti is Retrying\./i)).toBeInTheDocument();
     expect(screen.getByText(/Start buttons unlock after it finishes or you cancel it\./i)).toBeInTheDocument();
@@ -1365,7 +1365,7 @@ describe("SocialAccountProfilePage", () => {
       ).toBe(true);
     });
     expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Sync Recent" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Sync Recent" })).not.toBeInTheDocument();
   });
 
   it("cancels the true active run even when an older run is being inspected", async () => {
@@ -3606,7 +3606,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("2 newer posts detected. Stored 12 posts; live profile shows 14.")).toBeInTheDocument();
+      expect(screen.getByText("Catalog totals trail the live profile by 2 posts. Stored 12 posts; live profile shows 14.")).toBeInTheDocument();
     });
     expect(screen.getByRole("heading", { name: "Catalog Diagnostics" })).toBeInTheDocument();
   });
@@ -3659,6 +3659,104 @@ describe("SocialAccountProfilePage", () => {
     expect(
       mocks.fetchAdminWithAuth.mock.calls.some(([input]) => String(input).includes("/catalog/gap-analysis")),
     ).toBe(false);
+  });
+
+  it("offers a full backfill when gap analysis finds only unclassified total drift", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 20,
+          live_total_posts: 20,
+          catalog_total_posts: 12,
+          live_catalog_total_posts: 12,
+          catalog_recent_runs: [
+            {
+              run_id: "run-gap-drift-1",
+              status: "completed",
+              created_at: "2026-03-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/freshness")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          eligible: true,
+          live_total_posts_current: 20,
+          stored_total_posts: 12,
+          delta_posts: 8,
+          needs_recent_sync: true,
+          checked_at: "2026-03-20T12:30:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "queued",
+          operation_id: "gap-op-drift-1",
+          result: null,
+          stale: false,
+        });
+      }
+      if (url.includes("/catalog/gap-analysis")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-drift-1",
+          stale: false,
+          result: {
+            platform: "instagram",
+            account_handle: "bravotv",
+            gap_type: "source_total_drift",
+            catalog_posts: 12,
+            materialized_posts: 20,
+            expected_total_posts: 20,
+            live_total_posts_current: 20,
+            missing_from_catalog_count: 8,
+            sample_missing_source_ids: [],
+            has_resumable_frontier: false,
+            needs_recent_sync: true,
+            recommended_action: "backfill_posts",
+            latest_catalog_run_status: "completed",
+            active_run_status: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ backfill_scope: "full_history" }));
+        return jsonResponse({
+          run_id: "catalog-run-drift-12345678",
+          status: "queued",
+          catalog_action: "backfill",
+          catalog_action_scope: "full_history",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run Gap Analysis" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts Now" })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts Now" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
+    });
   });
 
   it("runs gap analysis only after an explicit stats-tab trigger", async () => {
