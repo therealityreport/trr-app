@@ -21,7 +21,7 @@ if (!globalThis.__trrAdminRouteInFlight) {
 }
 
 export const DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS = 10_000;
-const isCacheDisabled = (): boolean => /^(1|true)$/i.test(process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED ?? "");
+const CACHE_DISABLED = /^(1|true)$/i.test(process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED ?? "");
 
 const makeStoreKey = (namespace: string, key: string): string => `${namespace}:${key}`;
 
@@ -74,7 +74,7 @@ export const buildUserScopedRouteCacheKey = (
 };
 
 export function getRouteResponseCache<T>(namespace: string, key: string): T | null {
-  if (isCacheDisabled()) return null;
+  if (CACHE_DISABLED) return null;
   const entry = CACHE.get(makeStoreKey(namespace, key));
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
@@ -90,7 +90,7 @@ export function setRouteResponseCache<T>(
   value: T,
   ttlMs = DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS
 ): void {
-  if (isCacheDisabled()) return;
+  if (CACHE_DISABLED) return;
   CACHE.set(makeStoreKey(namespace, key), {
     expiresAt: Date.now() + normalizeTtlMs(ttlMs),
     value,
@@ -103,7 +103,7 @@ export async function getOrCreateRouteResponsePromise<T>(
   key: string,
   factory: () => Promise<T>
 ): Promise<T> {
-  if (isCacheDisabled()) {
+  if (CACHE_DISABLED) {
     return factory();
   }
 
@@ -125,7 +125,7 @@ export async function getOrCreateRouteResponsePromise<T>(
 }
 
 export function invalidateRouteResponseCache(namespace: string, keyPrefix?: string): void {
-  if (isCacheDisabled()) return;
+  if (CACHE_DISABLED) return;
   const namespacePrefix = `${namespace}:`;
   const prefix = keyPrefix ? `${namespacePrefix}${keyPrefix}` : namespacePrefix;
   for (const key of CACHE.keys()) {
