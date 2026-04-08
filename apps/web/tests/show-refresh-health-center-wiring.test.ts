@@ -40,6 +40,7 @@ describe("show refresh health center wiring", () => {
 
   it("runs gallery media after unified refresh with fast gallery-only settings", () => {
     expect(showPage).toMatch(/void refreshAllShowData\(\);/);
+    expect(showPage).toMatch(/loadBravoData\(\{ force: true \}\),\s*loadUnifiedNews\(\{ force: true \}\)/);
     expect(showPage).toMatch(/return refreshShow\("photos", \{/);
     expect(showPage).toMatch(/photoMode: "fast"/);
     expect(showPage).toMatch(/skipCastPhotos: true/);

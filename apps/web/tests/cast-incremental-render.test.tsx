@@ -14,9 +14,9 @@ describe("cast incremental render wiring", () => {
   it("limits show cast render and appends in batches", () => {
     expect(showContents).toMatch(/CAST_INCREMENTAL_INITIAL_LIMIT = 48/);
     expect(showContents).toMatch(/CAST_INCREMENTAL_BATCH_SIZE = 48/);
-    expect(showContents).toMatch(/visibleCastGalleryMembers = useMemo/);
+    expect(showContents).toMatch(/visibleCastMembers = useMemo/);
     expect(showContents).toMatch(/crewDisplaySections = useMemo/);
-    expect(showContents).toMatch(/renderedCastCount = visibleCastGalleryMembers\.length/);
+    expect(showContents).toMatch(/renderedCastCount = visibleCastMembers\.length/);
     expect(showContents).toMatch(/renderedCrewCount = crewDisplaySections\.reduce/);
     expect(showContents).toMatch(/renderedVisibleCount = renderedCastCount \+ renderedCrewCount/);
     expect(showContents).toMatch(/requestIdleCallback/);

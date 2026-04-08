@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
+import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -44,15 +44,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const serviceRoleKey = getInternalAdminBearerToken();
-    if (!serviceRoleKey) {
-      return NextResponse.json({ error: "Backend auth not configured" }, { status: 502 });
+    let headers: Headers;
+    try {
+      headers = buildInternalAdminHeaders();
+    } catch {
+      return NextResponse.json(
+        { error: "Backend auth not configured" },
+        { status: 502 }
+      );
     }
 
     const upstream = await fetch(backendUrl, {
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
+      headers,
     });
 
     const data = await upstream.json().catch(() => ({ error: "Invalid response from backend" }));

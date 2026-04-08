@@ -4,8 +4,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-07T01:09:45.816Z",
-  "sourceCommitSha": "f37028b286aeb6f3e6b519ac0e8cf4961f7cc4bf",
+  "generatedAt": "2026-04-07T01:23:44.820Z",
+  "sourceCommitSha": "a9ba1d7d959b106dbf0e11daf3961b5cceb5bb43",
   "overrideDigest": "db240684665979b1f5001ee6a725aaa8e2f358915451f21036188bbac9fdbf3c",
   "nodes": [
     {
@@ -4809,18 +4809,18 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "polls": false,
       "pollCadenceMs": null,
       "automatic": false,
-      "loadsLargeDatasets": true,
-      "usesPagination": true,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
       "returnsWideRowsOrBlobsOrRawJson": false,
-      "fansOutQueries": true,
+      "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
         "list",
         "detail"
       ],
       "staticOnly": true,
-      "payloadRisk": "high",
-      "fanoutRisk": "high"
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
     },
     {
       "id": "page:/admin/social/bravo-content",
@@ -8437,6 +8437,37 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "staticOnly": false,
       "payloadRisk": "high",
       "fanoutRisk": "high"
+    },
+    {
+      "id": "route:GET:/api/admin/social/landing",
+      "kind": "api_route",
+      "title": "GET /api/admin/social/landing",
+      "pathPattern": "/api/admin/social/landing",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/social/landing/route.ts",
+      "sourceLocator": {
+        "line": 7,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
     },
     {
       "id": "route:GET:/api/admin/surveys",
@@ -18338,7 +18369,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 7882,
+        "line": 7920,
         "matchedText": "`/api/admin/covered-shows/${requestShowId}`"
       },
       "provenance": "static_scan",
@@ -18356,7 +18387,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3925,
+        "line": 3963,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images`"
       },
       "provenance": "static_scan",
@@ -18374,7 +18405,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3839,
+        "line": 3877,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -18392,7 +18423,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3636,
+        "line": 3674,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-profile/stream`"
       },
       "provenance": "static_scan",
@@ -18410,7 +18441,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 4009,
+        "line": 4047,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -18428,7 +18459,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 10031,
+        "line": 10069,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`"
       },
       "provenance": "static_scan",
@@ -18446,7 +18477,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 6997,
+        "line": 7035,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/import-bravo/preview/stream`"
       },
       "provenance": "static_scan",
@@ -18464,7 +18495,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 10963,
+        "line": 11002,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",
@@ -21032,6 +21063,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/shows/by-trr-show/[trrShowId]",
         "route:GET:/api/admin/shows/palette-library",
         "route:GET:/api/admin/social-posts/[postId]",
+        "route:GET:/api/admin/social/landing",
         "route:GET:/api/admin/surveys",
         "route:GET:/api/admin/surveys/[surveyKey]",
         "route:GET:/api/admin/surveys/[surveyKey]/cast",
@@ -21624,11 +21656,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 517,
+      "totalNodes": 518,
       "totalEdges": 188,
       "nodesByKind": {
         "ui_surface": 57,
-        "api_route": 345,
+        "api_route": 346,
         "backend_endpoint": 109,
         "repository_surface": 2,
         "polling_loop": 4

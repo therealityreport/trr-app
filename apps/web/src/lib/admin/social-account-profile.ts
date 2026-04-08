@@ -196,9 +196,13 @@ export type SocialAccountOperationalAlert = {
   threshold_seconds?: number;
   waited_seconds?: number;
   retry_count?: number;
+  attempt_count?: number;
   lease_owner?: string | null;
   frontier_status?: string | null;
   error_code?: string | null;
+  stage?: string | null;
+  transport?: string | null;
+  execution_backend?: string | null;
 };
 
 export type SocialAccountCatalogVerification = {
@@ -255,7 +259,6 @@ export type SocialAccountCatalogGapAnalysis = {
     | "backfill_posts"
     | "bounded_window_backfill"
     | "none"
-    | "resume_tail"
     | "sync_newer"
     | "wait_for_active_run";
   repair_window_start?: string | null;
@@ -294,7 +297,23 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   season_id?: string | null;
   run_id: string;
   run_status: string;
-  run_state?: "discovering" | "fetching" | "classifying" | "completed" | "failed" | "cancelled";
+  operational_state?:
+    | "blocked_auth"
+    | "discovering"
+    | "fetching"
+    | "recovering"
+    | "classifying"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  run_state?:
+    | "discovering"
+    | "fetching"
+    | "recovering"
+    | "classifying"
+    | "completed"
+    | "failed"
+    | "cancelled";
   source_scope: string;
   network_name?: string | null;
   profile_kind?: string | null;
@@ -345,6 +364,22 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     runtime_versions_observed?: Array<Record<string, unknown>>;
     runtime_version_drift?: boolean;
   };
+  cancel_reason?: string | null;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+  repair_action?: "repair_instagram_auth" | null;
+  repair_status?: "idle" | "running" | "failed" | "succeeded" | null;
+  repairable_reason?: string | null;
+  auto_resume_pending?: boolean;
+  resume_stage?: "discovery" | "posts" | null;
+  repair_environment?: {
+    supported?: boolean;
+    execution_mode?: string | null;
+    execution_owner?: string | null;
+    modal_environment?: string | null;
+    unsupported_reason?: string | null;
+    repair_command?: string | null;
+  } | null;
   partition_strategy?: string | null;
   discovery?: {
     status?: string | null;
@@ -369,7 +404,29 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     lease_owner?: string | null;
     retry_count?: number;
     exhausted?: boolean;
+    stop_reason?: string | null;
+    catalog_oldest_post_at?: string | null;
+    oldest_posted_at_seen?: string | null;
+    newest_posted_at_seen?: string | null;
     updated_at?: string | null;
+  };
+  recovery?: {
+    status?: "queued" | "running" | "completed" | "fallback_enqueued" | "blocked" | "failed" | "idle" | null;
+    reason?:
+      | "no_partitions_discovered"
+      | "catalog_incomplete"
+      | "initial_empty_page"
+      | "no_authenticated_modal_workers"
+      | null;
+    stage?: string | null;
+    job_id?: string | null;
+    recovery_depth?: number;
+    queued_since?: string | null;
+    waited_seconds?: number;
+    attempt_count?: number;
+    next_stage?: string | null;
+    transport?: string | null;
+    execution_backend?: string | null;
   };
   post_progress?: {
     completed_posts?: number;
@@ -382,6 +439,23 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   scrape_complete?: boolean;
   classify_incomplete?: boolean;
   alerts?: SocialAccountOperationalAlert[];
+  run_diagnostics?: {
+    cancel_reason?: string | null;
+    last_error_code?: string | null;
+    last_error_message?: string | null;
+    frontier_auth_reason?: string | null;
+    frontier_stop_reason?: string | null;
+    declared_runner_strategy?: string | null;
+    effective_runner_strategy?: string | null;
+    declared_partition_strategy?: string | null;
+    effective_partition_strategy?: string | null;
+    effective_execution_backend?: string | null;
+    catalog_oldest_post_at?: string | null;
+    oldest_posted_at_seen?: string | null;
+    newest_posted_at_seen?: string | null;
+    strategy_mismatch?: boolean;
+    runtime_version_drift?: boolean;
+  };
   dispatch_health?: SocialAccountCatalogRunDispatchHealth;
   summary?: SocialAccountCatalogRunProgressSummary;
   updated_at?: string | null;
@@ -416,8 +490,8 @@ export type CatalogSyncNewerRequest = {
   source_scope?: string;
 };
 
-export type CatalogResumeTailRequest = {
-  source_scope?: string;
+export type CatalogRepairAuthRequest = {
+  allow_inline_dev_fallback?: boolean;
 };
 
 export type CatalogReviewResolveRequest = {
@@ -508,4 +582,30 @@ export const SOCIAL_ACCOUNT_PLATFORM_LABELS: Record<SocialPlatformSlug, string> 
   youtube: "YouTube",
   facebook: "Facebook",
   threads: "Threads",
+};
+
+// ---------------------------------------------------------------------------
+// Cookie preflight types
+// ---------------------------------------------------------------------------
+
+export type SocialProfileCookieHealth = {
+  platform: string;
+  required: boolean;
+  healthy: boolean;
+  reason: string | null;
+  refresh_supported: boolean;
+  refresh_available: boolean;
+  source_kind: string;
+  source_path?: string;
+  refresh_target_path?: string;
+  warning_code?: string;
+  warning_message?: string;
+};
+
+export type SocialProfileCookieRefreshResult = {
+  success: boolean;
+  healthy: boolean;
+  reason: string | null;
+  warning_code?: string;
+  warning_message?: string;
 };

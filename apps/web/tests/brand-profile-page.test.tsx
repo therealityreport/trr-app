@@ -72,6 +72,7 @@ describe("brand profile page", () => {
           shows: 2,
           assets: 8,
         },
+        streaming_services: ["Apple TV", "Peacock", "Prime Video"],
         targets: [
           {
             id: "network:bravo",
@@ -192,6 +193,10 @@ describe("brand profile page", () => {
     const savedInfoSection = screen.getByRole("heading", { name: "Cleaned brand metadata" }).closest("section");
     expect(savedInfoSection).toBeTruthy();
     expect(within(savedInfoSection ?? document.body).getAllByRole("link")).toHaveLength(8);
+    expect(screen.getByRole("heading", { name: "STREAMING SERVICES" })).toBeInTheDocument();
+    expect(screen.getByText("Apple TV")).toBeInTheDocument();
+    expect(screen.getByText("Peacock")).toBeInTheDocument();
+    expect(screen.getByText("Prime Video")).toBeInTheDocument();
     expect(screen.getAllByText("Added Shows").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Brand Family").length).toBeGreaterThan(0);
 

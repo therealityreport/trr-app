@@ -205,18 +205,34 @@ export const shouldDedupeRefreshLogEntry = (
 
 export const buildPipelineRows = <TEntry>(
   definitions: RefreshLogTopicDefinition[],
-  groups: Array<{ topic: { key: RefreshLogTopicKey }; status: RefreshLogStatus; latest: TEntry | null }>
+  groups: Array<{
+    topic: { key: RefreshLogTopicKey };
+    status: RefreshLogStatus;
+    latest: TEntry | null;
+    subOperationId?: string;
+    executionOwner?: string;
+    parentOperationId?: string;
+  }>
 ) => {
   const statusByKey = new Map<RefreshLogTopicKey, RefreshLogStatus>();
   const latestByKey = new Map<RefreshLogTopicKey, TEntry | null>();
+  const subOperationIdByKey = new Map<RefreshLogTopicKey, string | undefined>();
+  const executionOwnerByKey = new Map<RefreshLogTopicKey, string | undefined>();
+  const parentOperationIdByKey = new Map<RefreshLogTopicKey, string | undefined>();
   for (const group of groups) {
     statusByKey.set(group.topic.key, group.status);
     latestByKey.set(group.topic.key, group.latest ?? null);
+    subOperationIdByKey.set(group.topic.key, group.subOperationId);
+    executionOwnerByKey.set(group.topic.key, group.executionOwner);
+    parentOperationIdByKey.set(group.topic.key, group.parentOperationId);
   }
 
   return definitions.map((topic) => ({
     topic,
     status: statusByKey.get(topic.key) ?? "pending",
     latest: latestByKey.get(topic.key) ?? null,
+    subOperationId: subOperationIdByKey.get(topic.key),
+    executionOwner: executionOwnerByKey.get(topic.key),
+    parentOperationId: parentOperationIdByKey.get(topic.key),
   }));
 };

@@ -620,6 +620,30 @@ export default function BrandProfilePage() {
                     </div>
                   </section>
 
+                  {payload.streaming_services.length > 0 ? (
+                    <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-zinc-500">Show Coverage</p>
+                          <h2 className="mt-3 text-2xl font-semibold text-zinc-900">STREAMING SERVICES</h2>
+                        </div>
+                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600">
+                          {payload.streaming_services.length} services
+                        </span>
+                      </div>
+                      <div className="mt-6 flex flex-wrap gap-2.5">
+                        {payload.streaming_services.map((service) => (
+                          <span
+                            key={service}
+                            className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-950"
+                          >
+                            {service}
+                          </span>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
                   <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>

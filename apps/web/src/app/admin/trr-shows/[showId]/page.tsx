@@ -36,6 +36,12 @@ import ShowBrandEditor from "@/components/admin/ShowBrandEditor";
 import ShowSurveysTab from "@/components/admin/show-tabs/ShowSurveysTab";
 import ShowOverviewTab from "@/components/admin/show-tabs/ShowOverviewTab";
 import {
+  ShowCreditsCastMembers,
+  ShowCreditsCastViewControls,
+  ShowCreditsCrewSections,
+  type ShowCreditsCrewSectionData,
+} from "@/components/admin/show-tabs/ShowCreditsViews";
+import {
   CastMatrixSyncPanel,
   type CastMatrixSyncResult,
 } from "@/components/admin/CastMatrixSyncPanel";
@@ -175,8 +181,10 @@ import {
   markAdminOperationSessionStatus,
   upsertAdminOperationSession,
 } from "@/lib/admin/operation-session";
-import { useShowCore } from "@/lib/admin/show-page/use-show-core";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
+import { useShowCoverage } from "@/lib/admin/show-page/use-show-coverage";
+import { useShowDetailsController } from "@/lib/admin/show-page/use-show-details-controller";
+import { useShowIdentityLoad } from "@/lib/admin/show-page/use-show-identity-load";
 import SocialPlatformTabIcon, { type SocialPlatformTabIconKey } from "@/components/admin/SocialPlatformTabIcon";
 import {
   buildHostFaviconUrl,
@@ -191,21 +199,21 @@ import {
   resolveShowPageDisplayTitle,
 } from "@/lib/admin/show-page/link-display";
 import {
-  buildCanonicalShowAlternativeNames,
-  deriveShowDetailsAlternativeNames,
-  deriveShowDetailsNickname,
   deriveShowDetailsSlugPreview,
 } from "@/lib/admin/show-page/details-form";
 import {
   buildOverviewAlternativeNamesText,
   buildOverviewRedditGroups,
-  buildOverviewWatchAvailability,
+  buildOverviewWatchProviderFallback,
+  buildOverviewWatchProviderRegionOptions,
+  buildOverviewWatchProviderRegions,
   buildSeasonCoverageRows,
   getOverviewNetworks,
-  getOverviewStreamingProviders,
   type OverviewRedditGroup,
   type OverviewSeasonCoverageLink,
-  type OverviewWatchAvailabilityRow,
+  type OverviewWatchProviderRegionRow,
+  resolveDefaultOverviewWatchProviderRegion,
+  resolveOverviewWatchProviderRegion,
 } from "@/lib/admin/show-page/overview-display";
 import {
   buildLinkDiscoveryProgressSummary,
@@ -232,6 +240,12 @@ interface TrrShow {
     region: "US" | "GB" | "CA" | "AU";
     stream: string[];
     buy: string[];
+  }> | null;
+  watch_provider_regions?: Array<{
+    region: string;
+    stream: string[];
+    free: string[];
+    buy_rent: string[];
   }> | null;
   show_total_seasons: number | null;
   show_total_episodes: number | null;
@@ -437,9 +451,16 @@ interface ShowCrewCreditRow {
   display_order: number | null;
 }
 
+interface ShowCrewGroupedRow {
+  person_id: string;
+  person_name: string | null;
+  role_lines: ShowCrewCreditRow[];
+}
+
 interface ShowCrewSection {
   title: string;
   rows: ShowCrewCreditRow[];
+  grouped_rows?: ShowCrewGroupedRow[];
 }
 
 interface ShowCreditsPayload {
@@ -504,6 +525,48 @@ const normalizeShowCreditsCastRoster = (value: unknown): TrrCastMember[] => {
       } as TrrCastMember;
     })
     .filter((row): row is TrrCastMember => row !== null);
+};
+
+const shouldHideShowCreditsRoleChip = (role: string): boolean => {
+  const normalized = role.trim().toLowerCase();
+  return (
+    normalized === "cast" ||
+    normalized === "self" ||
+    normalized.startsWith("self ") ||
+    normalized.startsWith("self-") ||
+    normalized.startsWith("self/")
+  );
+};
+
+const getMeaningfulShowCreditsRoles = (roles: string[] | null | undefined): string[] => {
+  if (!Array.isArray(roles)) return [];
+  return roles
+    .map((role) => role.trim())
+    .filter((role) => role.length > 0 && !shouldHideShowCreditsRoleChip(role));
+};
+
+const groupShowCrewRows = (rows: ShowCrewCreditRow[]): ShowCrewGroupedRow[] => {
+  const grouped = new Map<string, ShowCrewGroupedRow>();
+  const orderedKeys: string[] = [];
+
+  for (const row of rows) {
+    const personId = typeof row.person_id === "string" && row.person_id.trim() ? row.person_id.trim() : row.credit_id;
+    const existing = grouped.get(personId);
+    if (existing) {
+      existing.role_lines.push(row);
+      continue;
+    }
+    grouped.set(personId, {
+      person_id: personId,
+      person_name: row.person_name,
+      role_lines: [row],
+    });
+    orderedKeys.push(personId);
+  }
+
+  return orderedKeys
+    .map((key) => grouped.get(key))
+    .filter((row): row is ShowCrewGroupedRow => Boolean(row));
 };
 
 interface BravoPersonTag {
@@ -667,6 +730,9 @@ type RefreshLogEntry = {
   stageKey?: string | null;
   topic?: RefreshLogTopicKey | null;
   provider?: string | null;
+  subOperationId?: string | null;
+  executionOwner?: string | null;
+  parentOperationId?: string | null;
 };
 
 type RoleRenameDraft = {
@@ -1063,9 +1129,12 @@ const PERSON_REFRESH_STAGE_LABELS: Record<string, string> = {
   resizing: "Resizing",
 };
 
-const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
-const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
-const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
+// Aligned with Modal's 60-min worker timeout.
+// Idle: a step emitting zero events for 15 min is stuck.
+// Max: full 60 min plus 5-min grace for SSE drain.
+const SHOW_REFRESH_STREAM_IDLE_TIMEOUT_MS = 15 * 60 * 1000;   // 15 min idle
+const SHOW_REFRESH_STREAM_MAX_DURATION_MS = 65 * 60 * 1000;   // 65 min total
+const SHOW_REFRESH_FALLBACK_TIMEOUT_MS = 10 * 60 * 1000;      // 10 min fallback
 const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
@@ -1917,79 +1986,6 @@ const withSnapshotAgeSuffix = (warning: string | null, timestampMs: number | nul
   return `${warning} Last successful snapshot: ${formatSnapshotAgeLabel(timestampMs)}.`;
 };
 
-const isTransientNotAuthenticatedError = (error: unknown): boolean =>
-  error instanceof Error && error.message.toLowerCase().includes("not authenticated");
-
-const parseAltNamesText = (value: string): string[] => {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of value.split(/\r?\n|,/)) {
-    const trimmed = raw.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(trimmed);
-  }
-  return out;
-};
-
-const toDelimitedEditorText = (value: string[] | null | undefined): string =>
-  Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim().length > 0).join("\n") : "";
-
-const readShowExternalId = (
-  show: { external_ids?: Record<string, unknown> | null; imdb_id?: string | null; tmdb_id?: number | null } | null,
-  key: string,
-): string => {
-  if (!show) return "";
-  if (key === "imdb_id") return typeof show.imdb_id === "string" ? show.imdb_id : "";
-  if (key === "tmdb_id") return typeof show.tmdb_id === "number" ? String(show.tmdb_id) : "";
-  const value = show.external_ids && typeof show.external_ids === "object" ? show.external_ids[key] : null;
-  if (value === null || value === undefined) return "";
-  return String(value);
-};
-
-const buildShowDetailsFormValue = (show: TrrShow | null) => {
-  if (!show) {
-    return {
-      displayName: "",
-      nickname: "",
-      altNamesText: "",
-      description: "",
-      premiereDate: "",
-      imdbId: "",
-      tmdbId: "",
-      tvdbId: "",
-      wikidataId: "",
-      tvRageId: "",
-      genresText: "",
-      networksText: "",
-      streamingProvidersText: "",
-      tagsText: "",
-    };
-  }
-
-  return {
-    displayName: show.name ?? "",
-    nickname: deriveShowDetailsNickname(show),
-    altNamesText: deriveShowDetailsAlternativeNames(show).join("\n"),
-    description: show.description ?? "",
-    premiereDate: show.premiere_date ?? "",
-    imdbId: readShowExternalId(show, "imdb_id"),
-    tmdbId: readShowExternalId(show, "tmdb_id"),
-    tvdbId: readShowExternalId(show, "tvdb_id"),
-    wikidataId: readShowExternalId(show, "wikidata_id"),
-    tvRageId: readShowExternalId(show, "tv_rage_id"),
-    genresText: toDelimitedEditorText(show.genres),
-    networksText: toDelimitedEditorText(show.networks),
-    streamingProvidersText: toDelimitedEditorText(
-      (Array.isArray(show.streaming_providers) ? show.streaming_providers : null) ??
-        (Array.isArray(show.watch_providers) ? show.watch_providers : []),
-    ),
-    tagsText: toDelimitedEditorText(show.tags),
-  };
-};
-
 const inferBravoShowUrl = (showName: string | null | undefined): string | null => {
   if (typeof showName !== "string") return null;
   const slug = showName
@@ -2534,20 +2530,37 @@ export default function TrrShowDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showRouteParam = params.showId as string;
-  const {
-    setResolvedShowId,
-    slugResolutionLoading,
-    setSlugResolutionLoading,
-    slugResolutionError,
-    setSlugResolutionError,
-    showId,
-    isCurrentShowId,
-  } = useShowCore<TrrShow, TrrSeason>(showRouteParam);
   const { user, checking, hasAccess } = useAdminGuard();
   useAdminOperationUnloadGuard();
+  const getAuthHeaders = useCallback(async () => {
+    return getClientAuthHeaders({ allowDevAdminBypass: true });
+  }, []);
+  const {
+    slugResolutionLoading,
+    slugResolutionError,
+    showId,
+    isCurrentShowId,
+    show,
+    setShow,
+    seasons,
+    seasonEpisodeSummaries,
+    setSeasonEpisodeSummaries,
+    seasonSummariesLoading,
+    setSeasonSummariesLoading,
+    socialDependencyError,
+    loading,
+    error,
+    fetchShow,
+    fetchSeasons,
+    loadShowIdentity,
+  } = useShowIdentityLoad<TrrShow, TrrSeason>({
+    checking,
+    hasAccess,
+    showRouteParam,
+    getAuthHeaders,
+    buildSeasonEpisodeSummaryMap,
+  });
 
-  const [show, setShow] = useState<TrrShow | null>(null);
-  const [seasons, setSeasons] = useState<TrrSeason[]>([]);
   const [cast, setCast] = useState<TrrCastMember[]>([]);
   const [linksEligibleCast, setLinksEligibleCast] = useState<TrrCastMember[]>([]);
   const [castLoadedOnce, setCastLoadedOnce] = useState(false);
@@ -2660,78 +2673,61 @@ export default function TrrShowDetailPage() {
   const syncBravoPreviewRunRef = useRef(0);
   const [openSeasonId, setOpenSeasonId] = useState<string | null>(null);
   const hasAutoOpenedSeasonRef = useRef(false);
-  const [seasonEpisodeSummaries, setSeasonEpisodeSummaries] = useState<Record<string, SeasonEpisodeSummary>>({});
-  const [seasonSummariesLoading, setSeasonSummariesLoading] = useState(false);
-  const [socialDependencyError, setSocialDependencyError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [detailsForm, setDetailsForm] = useState<{
-    displayName: string;
-    nickname: string;
-    altNamesText: string;
-    description: string;
-    premiereDate: string;
-    imdbId: string;
-    tmdbId: string;
-    tvdbId: string;
-    wikidataId: string;
-    tvRageId: string;
-    genresText: string;
-    networksText: string;
-    streamingProvidersText: string;
-    tagsText: string;
-  }>({
-    displayName: "",
-    nickname: "",
-    altNamesText: "",
-    description: "",
-    premiereDate: "",
-    imdbId: "",
-    tmdbId: "",
-    tvdbId: "",
-    wikidataId: "",
-    tvRageId: "",
-    genresText: "",
-    networksText: "",
-    streamingProvidersText: "",
-    tagsText: "",
-  });
-  const [detailsSaving, setDetailsSaving] = useState(false);
-  const [detailsNotice, setDetailsNotice] = useState<string | null>(null);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
-  const [detailsEditing, setDetailsEditing] = useState(false);
-  const detailsBaseline = useMemo(() => buildShowDetailsFormValue(show), [show]);
+  const [selectedAvailabilityRegionCode, setSelectedAvailabilityRegionCode] = useState<string>("");
   const overviewAlternativeNamesText = useMemo(() => buildOverviewAlternativeNamesText(show), [show]);
   const overviewNetworks = useMemo(() => getOverviewNetworks(show), [show]);
-  const overviewStreamingProviders = useMemo(() => getOverviewStreamingProviders(show), [show]);
-  const overviewWatchAvailability = useMemo<OverviewWatchAvailabilityRow[]>(
-    () => buildOverviewWatchAvailability(show),
+  const watchProviderRegions = useMemo<OverviewWatchProviderRegionRow[]>(
+    () => buildOverviewWatchProviderRegions(show),
     [show]
   );
-  const hasUnsavedDetailsChanges = useMemo(() => {
-    if (!detailsEditing) return false;
-    return (
-      detailsForm.displayName.trim() !== detailsBaseline.displayName.trim() ||
-      detailsForm.nickname.trim() !== detailsBaseline.nickname.trim() ||
-      detailsForm.description.trim() !== detailsBaseline.description.trim() ||
-      detailsForm.premiereDate.trim() !== detailsBaseline.premiereDate.trim() ||
-      detailsForm.imdbId.trim() !== detailsBaseline.imdbId.trim() ||
-      detailsForm.tmdbId.trim() !== detailsBaseline.tmdbId.trim() ||
-      detailsForm.tvdbId.trim() !== detailsBaseline.tvdbId.trim() ||
-      detailsForm.wikidataId.trim() !== detailsBaseline.wikidataId.trim() ||
-      detailsForm.tvRageId.trim() !== detailsBaseline.tvRageId.trim() ||
-      parseAltNamesText(detailsForm.genresText).join("\n") !==
-        parseAltNamesText(detailsBaseline.genresText).join("\n") ||
-      parseAltNamesText(detailsForm.networksText).join("\n") !==
-        parseAltNamesText(detailsBaseline.networksText).join("\n") ||
-      parseAltNamesText(detailsForm.streamingProvidersText).join("\n") !==
-        parseAltNamesText(detailsBaseline.streamingProvidersText).join("\n") ||
-      parseAltNamesText(detailsForm.tagsText).join("\n") !==
-        parseAltNamesText(detailsBaseline.tagsText).join("\n") ||
-      parseAltNamesText(detailsForm.altNamesText).join("\n") !==
-        parseAltNamesText(detailsBaseline.altNamesText).join("\n")
-    );
-  }, [detailsBaseline, detailsEditing, detailsForm]);
+  const watchProviderRegionOptions = useMemo(
+    () => buildOverviewWatchProviderRegionOptions(show),
+    [show]
+  );
+  const fallbackWatchProviders = useMemo(
+    () => buildOverviewWatchProviderFallback(show),
+    [show]
+  );
+  const selectedAvailabilityRegion = useMemo(
+    () =>
+      resolveOverviewWatchProviderRegion({
+        regions: watchProviderRegions,
+        selectedRegionCode: selectedAvailabilityRegionCode,
+      }),
+    [selectedAvailabilityRegionCode, watchProviderRegions]
+  );
+  useEffect(() => {
+    const defaultRegion = resolveDefaultOverviewWatchProviderRegion(watchProviderRegions);
+    setSelectedAvailabilityRegionCode((current) => {
+      const normalizedCurrent = current.trim().toUpperCase();
+      if (
+        normalizedCurrent &&
+        watchProviderRegions.some((region) => region.regionCode === normalizedCurrent)
+      ) {
+        return normalizedCurrent;
+      }
+      return defaultRegion ?? "";
+    });
+  }, [watchProviderRegions]);
+  const {
+    detailsForm,
+    detailsBaseline,
+    setDetailsForm,
+    detailsSaving,
+    detailsNotice,
+    detailsError,
+    detailsEditing,
+    setDetailsEditing,
+    hasUnsavedDetailsChanges,
+    startDetailsEdit,
+    cancelDetailsEdit,
+    saveShowDetails,
+  } = useShowDetailsController<TrrShow>({
+    show,
+    showId,
+    getAuthHeaders,
+    onShowUpdated: setShow,
+  });
 
   const [showLinks, setShowLinks] = useState<EntityLink[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
@@ -2804,6 +2800,8 @@ export default function TrrShowDetailPage() {
   const [castMaxEpisodeCount, setCastMaxEpisodeCount] = useState<number | null>(null);
   const [castSearchQuery, setCastSearchQuery] = useState("");
   const [castSearchQueryDebounced, setCastSearchQueryDebounced] = useState("");
+  const [castViewMode, setCastViewMode] = useState<"gallery" | "list">("gallery");
+  const [castGalleryColumns, setCastGalleryColumns] = useState<4 | 5 | 6>(4);
   const [castRenderLimit, setCastRenderLimit] = useState(CAST_INCREMENTAL_INITIAL_LIMIT);
   const [crewRenderLimit, setCrewRenderLimit] = useState(CAST_INCREMENTAL_INITIAL_LIMIT);
   const castIncrementalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2918,9 +2916,19 @@ export default function TrrShowDetailPage() {
   const assetTriggerRef = useRef<HTMLElement | null>(null);
 
   // Covered shows state
-  const [isCovered, setIsCovered] = useState(false);
-  const [coverageLoading, setCoverageLoading] = useState(false);
-  const [coverageError, setCoverageError] = useState<string | null>(null);
+  const {
+    isCovered,
+    coverageLoading,
+    coverageError,
+    checkCoverage,
+    addToCoveredShows,
+    removeFromCoveredShows,
+  } = useShowCoverage({
+    showId,
+    showName: show?.name,
+    getAuthHeaders,
+    isCurrentShowId,
+  });
 
   // Refresh show sync state (uses TRR-Backend scripts, proxied via Next API routes)
   const [refreshingTargets, setRefreshingTargets] = useState<Record<ShowRefreshTarget, boolean>>({
@@ -3069,6 +3077,8 @@ export default function TrrShowDetailPage() {
     setCastExactEpisodeCount(showCastRouteState.exactEpisodeCount);
     setCastMinEpisodeCount(showCastRouteState.minEpisodeCount);
     setCastMaxEpisodeCount(showCastRouteState.maxEpisodeCount);
+    setCastViewMode(showCastRouteState.viewMode);
+    setCastGalleryColumns(showCastRouteState.galleryColumns);
     setCastSeasonFilters((prev) =>
       areNumberArraysEqual(prev, showCastRouteState.seasonFilters)
         ? prev
@@ -3082,12 +3092,14 @@ export default function TrrShowDetailPage() {
     showCastRouteState.hasImageFilter,
     showCastRouteState.filters,
     showCastRouteState.exactEpisodeCount,
+    showCastRouteState.galleryColumns,
     showCastRouteState.searchQuery,
     showCastRouteState.maxEpisodeCount,
     showCastRouteState.minEpisodeCount,
     showCastRouteState.seasonFilters,
     showCastRouteState.sortBy,
     showCastRouteState.sortOrder,
+    showCastRouteState.viewMode,
   ]);
 
   useEffect(() => {
@@ -3223,6 +3235,8 @@ export default function TrrShowDetailPage() {
       exactEpisodeCount: castExactEpisodeCount,
       minEpisodeCount: castMinEpisodeCount,
       maxEpisodeCount: castMaxEpisodeCount,
+      viewMode: castViewMode,
+      galleryColumns: castGalleryColumns,
     });
     const nextUrl = buildShowAdminUrl({
       showSlug: showSlugForRouting,
@@ -3236,6 +3250,7 @@ export default function TrrShowDetailPage() {
     activeTab,
     castHasImageFilter,
     castExactEpisodeCount,
+    castGalleryColumns,
     castMaxEpisodeCount,
     castMinEpisodeCount,
     castRoleAndCreditFilters,
@@ -3243,6 +3258,7 @@ export default function TrrShowDetailPage() {
     castSeasonFilters,
     castSortBy,
     castSortOrder,
+    castViewMode,
     pathname,
     router,
     searchParams,
@@ -3323,93 +3339,6 @@ export default function TrrShowDetailPage() {
     },
     [router, searchParams, showSlugForRouting]
   );
-
-  // Helper to get auth headers
-  const getAuthHeaders = useCallback(async () => {
-    return getClientAuthHeaders({ allowDevAdminBypass: true });
-  }, []);
-
-  useEffect(() => {
-    if (checking || !hasAccess) return;
-    const raw = typeof showRouteParam === "string" ? showRouteParam.trim() : "";
-    if (!raw) {
-      setResolvedShowId(null);
-      setSlugResolutionLoading(false);
-      setSlugResolutionError("Missing show identifier.");
-      return;
-    }
-    if (looksLikeUuid(raw)) {
-      setResolvedShowId(raw);
-      setSlugResolutionLoading(false);
-      setSlugResolutionError(null);
-      return;
-    }
-
-    let cancelled = false;
-    const resolveSlug = async () => {
-      setSlugResolutionLoading(true);
-      setSlugResolutionError(null);
-      try {
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-          try {
-            const headers = await getAuthHeaders();
-            const response = await fetchWithTimeout(
-              `/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`,
-              { headers, cache: "no-store" },
-              SHOW_CORE_LOAD_TIMEOUT_MS
-            );
-            const data = (await response.json().catch(() => ({}))) as {
-              error?: string;
-              resolved?: { show_id?: string | null };
-            };
-            if (!response.ok) {
-              throw new Error(data.error || "Failed to resolve show slug");
-            }
-            const nextShowId =
-              typeof data.resolved?.show_id === "string" && looksLikeUuid(data.resolved.show_id)
-                ? data.resolved.show_id
-                : null;
-            if (!nextShowId) throw new Error("Resolved show slug did not return a valid show id.");
-            if (cancelled) return;
-            setResolvedShowId(nextShowId);
-            return;
-          } catch (err) {
-            if (cancelled) return;
-            if (isTransientNotAuthenticatedError(err) && attempt < 3) {
-              await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 250));
-              continue;
-            }
-            setResolvedShowId(null);
-            setSlugResolutionError(
-              err instanceof Error ? err.message : "Could not resolve show URL slug."
-            );
-            return;
-          }
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setResolvedShowId(null);
-        setSlugResolutionError(
-          err instanceof Error ? err.message : "Could not resolve show URL slug."
-        );
-      } finally {
-        if (!cancelled) setSlugResolutionLoading(false);
-      }
-    };
-
-    void resolveSlug();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    checking,
-    getAuthHeaders,
-    hasAccess,
-    setResolvedShowId,
-    setSlugResolutionError,
-    setSlugResolutionLoading,
-    showRouteParam,
-  ]);
 
   useEffect(() => {
     if (showRouteState.tab !== "social" || socialAnalyticsView !== "bravo") return;
@@ -3509,6 +3438,9 @@ export default function TrrShowDetailPage() {
       stageKey?: string | null;
       topic?: string | null;
       provider?: string | null;
+      subOperationId?: string | null;
+      executionOwner?: string | null;
+      parentOperationId?: string | null;
     }) => {
       const normalizedMessage = normalizeRefreshLogMessage(entry.message);
       if (!normalizedMessage) return;
@@ -3532,6 +3464,9 @@ export default function TrrShowDetailPage() {
             message: normalizedMessage,
           }),
           provider: typeof entry.provider === "string" && entry.provider.trim() ? entry.provider.trim() : null,
+          subOperationId: typeof entry.subOperationId === "string" && entry.subOperationId.trim() ? entry.subOperationId.trim() : null,
+          executionOwner: typeof entry.executionOwner === "string" && entry.executionOwner.trim() ? entry.executionOwner.trim() : null,
+          parentOperationId: typeof entry.parentOperationId === "string" && entry.parentOperationId.trim() ? entry.parentOperationId.trim() : null,
         };
         const previous = prev[prev.length - 1];
         if (
@@ -3586,12 +3521,19 @@ export default function TrrShowDetailPage() {
           : entries.length > 0
             ? "active"
             : "pending";
+      // Surface per-target execution metadata from the latest entry for pipeline rows
+      const subOperationId = latest?.subOperationId ?? undefined;
+      const executionOwner = latest?.executionOwner ?? undefined;
+      const parentOperationId = latest?.parentOperationId ?? undefined;
       return {
         topic,
         entries,
         entriesForView: [...entries].reverse(),
         latest,
         status,
+        subOperationId,
+        executionOwner,
+        parentOperationId,
       };
     });
   }, [refreshLogEntries]);
@@ -4506,34 +4448,6 @@ export default function TrrShowDetailPage() {
     [appendRefreshLog, reprocessPersonImages]
   );
 
-  // Fetch show details
-  const fetchShow = useCallback(async () => {
-    const requestShowId = showId;
-    if (!requestShowId) return;
-    try {
-      const headers = await getAuthHeaders();
-      const data = await adminGetJson<{ show?: TrrShow }>(
-        `/api/admin/trr-api/shows/${requestShowId}`,
-        {
-          headers,
-          timeoutMs: SHOW_CORE_LOAD_TIMEOUT_MS,
-        }
-      );
-      if (!isCurrentShowId(requestShowId)) return;
-      setShow(data.show ?? null);
-      setError(null);
-    } catch (err) {
-      if (!isCurrentShowId(requestShowId)) return;
-      const message =
-        err instanceof AdminRequestError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Failed to load show";
-      setError(message);
-    }
-  }, [getAuthHeaders, isCurrentShowId, showId]);
-
   const setFeaturedShowImage = useCallback(
     async (kind: "poster" | "backdrop", showImageId: string | null) => {
       if (!showId) return;
@@ -4565,127 +4479,6 @@ export default function TrrShowDetailPage() {
     },
     [getAuthHeaders, showId]
   );
-
-  const saveShowDetails = useCallback(async () => {
-    if (!show) return;
-    const displayName = detailsForm.displayName.trim();
-    if (!displayName) {
-      setDetailsError("Display Name is required.");
-      return;
-    }
-
-    const nickname = detailsForm.nickname.trim();
-    const canonicalNickname = deriveShowDetailsSlugPreview(nickname);
-    if (!canonicalNickname) {
-      setDetailsError("Nickname must produce a valid slug.");
-      return;
-    }
-    const altNames = parseAltNamesText(detailsForm.altNamesText);
-    const genres = parseAltNamesText(detailsForm.genresText);
-    const networks = parseAltNamesText(detailsForm.networksText);
-    const streamingProviders = parseAltNamesText(detailsForm.streamingProvidersText);
-    const tags = parseAltNamesText(detailsForm.tagsText);
-    const allAltNames = buildCanonicalShowAlternativeNames({
-      displayName,
-      nickname,
-      alternativeNames: altNames,
-    });
-
-    setDetailsSaving(true);
-    setDetailsError(null);
-    setDetailsNotice(null);
-    try {
-      const headers = await getAuthHeaders();
-      const response = await fetchWithTimeout(
-        `/api/admin/trr-api/shows/${showId}`,
-        {
-          method: "PUT",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: displayName,
-            nickname: canonicalNickname,
-            alternative_names: allAltNames,
-            description: detailsForm.description.trim() || "",
-            premiere_date: detailsForm.premiereDate || "",
-            imdb_id: detailsForm.imdbId.trim() || "",
-            tmdb_id: detailsForm.tmdbId.trim() || "",
-            tvdb_id: detailsForm.tvdbId.trim() || "",
-            wikidata_id: detailsForm.wikidataId.trim() || "",
-            tv_rage_id: detailsForm.tvRageId.trim() || "",
-            genres,
-            networks,
-            streaming_providers: streamingProviders,
-            tags,
-          }),
-        },
-        SETTINGS_MUTATION_TIMEOUT_MS
-      );
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message =
-          (data as { error?: string }).error ||
-          `Failed to save show details (HTTP ${response.status})`;
-        throw new Error(message);
-      }
-      const nextShow = (data as { show?: TrrShow }).show ?? null;
-      if (nextShow) {
-        setShow(nextShow);
-      }
-      setDetailsNotice("Show details saved.");
-      setDetailsEditing(false);
-    } catch (err) {
-      setDetailsError(err instanceof Error ? err.message : "Failed to save show details");
-    } finally {
-      setDetailsSaving(false);
-    }
-  }, [detailsForm, getAuthHeaders, show, showId]);
-
-  useEffect(() => {
-    if (!show) return;
-    setDetailsForm(buildShowDetailsFormValue(show));
-  }, [show]);
-
-  const startDetailsEdit = useCallback(() => {
-    setDetailsNotice(null);
-    setDetailsError(null);
-    setDetailsEditing(true);
-  }, []);
-
-  const cancelDetailsEdit = useCallback(() => {
-    if (show) {
-      setDetailsForm(buildShowDetailsFormValue(show));
-    }
-    setDetailsNotice(null);
-    setDetailsError(null);
-    setDetailsEditing(false);
-  }, [show]);
-
-  // Fetch seasons
-  const fetchSeasons = useCallback(async () => {
-    const requestShowId = showId;
-    if (!requestShowId) return;
-    try {
-      const headers = await getAuthHeaders();
-      const data = await adminGetJson<{ seasons?: TrrSeason[] }>(
-        `/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50&include_episode_signal=true`,
-        {
-          headers,
-          timeoutMs: SHOW_CORE_LOAD_TIMEOUT_MS,
-        }
-      );
-      const nextSeasons = Array.isArray(data.seasons) ? data.seasons : [];
-      if (!isCurrentShowId(requestShowId)) return;
-      setSeasons(nextSeasons);
-      setSeasonEpisodeSummaries(buildSeasonEpisodeSummaryMap(nextSeasons));
-      setSeasonSummariesLoading(false);
-      setSocialDependencyError(null);
-    } catch (err) {
-      if (!isCurrentShowId(requestShowId)) return;
-      const message = err instanceof Error ? err.message : "Failed to fetch seasons";
-      console.warn("Failed to fetch seasons:", message);
-      setSocialDependencyError(message);
-    }
-  }, [getAuthHeaders, isCurrentShowId, showId]);
 
   const fetchSeasonEpisodeSummaries = useCallback(
     async (seasonList: TrrSeason[]) => {
@@ -7873,75 +7666,6 @@ export default function TrrShowDetailPage() {
   const syncBravoModeSummaryLabel =
     syncBravoRunMode === "cast-only" ? "Cast Info only" : "Sync All Info";
 
-  // Check if show is covered
-  const checkCoverage = useCallback(async () => {
-    const requestShowId = showId;
-    if (!requestShowId) return;
-    try {
-      const headers = await getAuthHeaders();
-      await adminGetJson(
-        `/api/admin/covered-shows/${requestShowId}`,
-        {
-          headers,
-          timeoutMs: SHOW_CORE_LOAD_TIMEOUT_MS,
-        }
-      );
-      if (!isCurrentShowId(requestShowId)) return;
-      setIsCovered(true);
-      setCoverageError(null);
-    } catch {
-      if (!isCurrentShowId(requestShowId)) return;
-      setIsCovered(false);
-    }
-  }, [getAuthHeaders, isCurrentShowId, showId]);
-
-  // Add show to covered shows
-  const addToCoveredShows = async () => {
-    if (!show || !showId) return;
-    setCoverageLoading(true);
-    setCoverageError(null);
-    try {
-      const headers = await getAuthHeaders();
-      await adminMutation<{ error?: string }>(
-        "/api/admin/covered-shows",
-        {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ trr_show_id: showId, show_name: show.name }),
-          timeoutMs: COVERAGE_MUTATION_TIMEOUT_MS,
-        },
-      );
-      setIsCovered(true);
-    } catch (err) {
-      setCoverageError(err instanceof Error ? err.message : "Failed to add show visibility");
-    } finally {
-      setCoverageLoading(false);
-    }
-  };
-
-  // Remove show from covered shows
-  const removeFromCoveredShows = async () => {
-    if (!showId) return;
-    setCoverageLoading(true);
-    setCoverageError(null);
-    try {
-      const headers = await getAuthHeaders();
-      await adminMutation<{ error?: string }>(
-        `/api/admin/covered-shows/${showId}`,
-        {
-          method: "DELETE",
-          headers,
-          timeoutMs: COVERAGE_MUTATION_TIMEOUT_MS,
-        },
-      );
-      setIsCovered(false);
-    } catch (err) {
-      setCoverageError(err instanceof Error ? err.message : "Failed to remove show visibility");
-    } finally {
-      setCoverageLoading(false);
-    }
-  };
-
   // Initial load
   useEffect(() => {
     if (!hasAccess) return;
@@ -7950,22 +7674,14 @@ export default function TrrShowDetailPage() {
     const loadData = async () => {
       const requestShowId = showId;
       if (!isCurrentShowId(requestShowId)) return;
-      setLoading(true);
-      try {
-        await fetchShow();
-        // Keep initial render fast: load core show data first.
-        await Promise.allSettled([fetchSeasons(), checkCoverage()]);
-      } finally {
-        if (!isCurrentShowId(requestShowId)) return;
-        setLoading(false);
-      }
+      await loadShowIdentity([checkCoverage]);
       if (!isCurrentShowId(requestShowId)) return;
       // Bravo data can be slow/unavailable and should not block page load.
       void loadBravoData();
     };
 
     void loadData();
-  }, [hasAccess, showId, fetchShow, fetchSeasons, checkCoverage, isCurrentShowId, loadBravoData]);
+  }, [checkCoverage, hasAccess, isCurrentShowId, loadBravoData, loadShowIdentity, showId]);
 
   useEffect(() => {
     if (!hasAccess || !showId || (activeTab !== "settings" && activeTab !== "details" && activeTab !== "cast")) {
@@ -8451,9 +8167,6 @@ export default function TrrShowDetailPage() {
         }
       }
       const hasScopedRoleOrSeasonMatch = castRoleMemberByPersonId.has(member.person_id);
-      if (castRoleMembersLoadedOnce && castRoleMembers.length > 0 && !hasScopedRoleOrSeasonMatch) {
-        return false;
-      }
       if (
         !shouldIncludeCastMemberForSeasonFilter({
           castSeasonFilters,
@@ -8533,19 +8246,39 @@ export default function TrrShowDetailPage() {
     () => castDisplayMembers,
     [castDisplayMembers]
   );
-  const crewDisplaySections = useMemo(() => {
+  const showCreditsCrewSections = useMemo<ShowCreditsCrewSectionData[]>(() => {
+    return showCrewSections.map((section) => {
+      const groupedRows =
+        Array.isArray(section.grouped_rows) && section.grouped_rows.length > 0
+          ? section.grouped_rows
+          : groupShowCrewRows(section.rows);
+
+      return {
+        title: section.title,
+        groupedRows: groupedRows.map((row) => ({
+          personId: row.person_id,
+          personName: row.person_name,
+          roleLines: row.role_lines.map((roleLine) => ({
+            creditId: roleLine.credit_id,
+            role: roleLine.role,
+            episodesLabel: roleLine.episodes_label,
+            yearsLabel: roleLine.years_label,
+          })),
+        })),
+      };
+    });
+  }, [showCrewSections]);
+  const crewDisplaySections = useMemo<ShowCreditsCrewSectionData[]>(() => {
     const query = castSearchQueryDeferred.trim();
-    if (!query) return showCrewSections;
-    return showCrewSections
+    if (!query) return showCreditsCrewSections;
+    return showCreditsCrewSections
       .map((section) => ({
         ...section,
-        rows: section.rows.filter((row) => {
+        groupedRows: section.groupedRows.filter((row) => {
           const haystack = [
-            row.person_name,
-            row.role,
-            row.episodes_label,
-            row.years_label,
+            row.personName,
             section.title,
+            ...row.roleLines.flatMap((roleLine) => [roleLine.role, roleLine.episodesLabel, roleLine.yearsLabel]),
           ]
             .filter(Boolean)
             .join(" ")
@@ -8553,32 +8286,39 @@ export default function TrrShowDetailPage() {
           return haystack.includes(query);
         }),
       }))
-      .filter((section) => section.rows.length > 0);
-  }, [castSearchQueryDeferred, showCrewSections]);
+      .filter((section) => section.groupedRows.length > 0);
+  }, [castSearchQueryDeferred, showCreditsCrewSections]);
+  const visibleCrewSections = useMemo<ShowCreditsCrewSectionData[]>(
+    () =>
+      crewDisplaySections
+        .map((section) => ({
+          ...section,
+          groupedRows: section.groupedRows.slice(0, crewRenderLimit),
+        }))
+        .filter((section) => section.groupedRows.length > 0),
+    [crewDisplaySections, crewRenderLimit]
+  );
   const castDisplayTotals = useMemo(() => {
-    const castTotal =
-      castRoleMembersLoadedOnce && castRoleMembers.length > 0
-        ? castDisplayBaseMembers.filter((member) => castRoleMemberByPersonId.has(member.person_id)).length
-        : castDisplayBaseMembers.length;
-    const crewTotal = showCrewSections.reduce((sum, section) => sum + section.rows.length, 0);
+    const castTotal = castDisplayBaseMembers.length;
+    const crewTotal = showCreditsCrewSections.reduce((sum, section) => sum + section.groupedRows.length, 0);
     return {
       cast: castTotal,
       crew: crewTotal,
       total: castTotal + crewTotal,
     };
-  }, [castDisplayBaseMembers, castRoleMemberByPersonId, castRoleMembers.length, castRoleMembersLoadedOnce, showCrewSections]);
-  const visibleCastGalleryMembers = useMemo(
+  }, [castDisplayBaseMembers, showCreditsCrewSections]);
+  const visibleCastMembers = useMemo(
     () => castGalleryMembers.slice(0, castRenderLimit),
     [castGalleryMembers, castRenderLimit]
   );
-  const renderedCastCount = visibleCastGalleryMembers.length;
+  const renderedCastCount = visibleCastMembers.length;
   const matchedCastCount = castGalleryMembers.length;
   const totalCastCount = castDisplayTotals.cast;
   const renderedCrewCount = crewDisplaySections.reduce(
-    (sum, section) => sum + Math.min(section.rows.length, crewRenderLimit),
+    (sum, section) => sum + Math.min(section.groupedRows.length, crewRenderLimit),
     0
   );
-  const matchedCrewCount = crewDisplaySections.reduce((sum, section) => sum + section.rows.length, 0);
+  const matchedCrewCount = crewDisplaySections.reduce((sum, section) => sum + section.groupedRows.length, 0);
   const totalCrewCount = castDisplayTotals.crew;
   const renderedVisibleCount = renderedCastCount + renderedCrewCount;
   const matchedVisibleCount = matchedCastCount + matchedCrewCount;
@@ -8586,7 +8326,7 @@ export default function TrrShowDetailPage() {
   const castRenderProgressLabel = useMemo(() => {
     const rendered =
       Math.min(castRenderLimit, castGalleryMembers.length) +
-      crewDisplaySections.reduce((sum, section) => sum + Math.min(section.rows.length, crewRenderLimit), 0);
+      crewDisplaySections.reduce((sum, section) => sum + Math.min(section.groupedRows.length, crewRenderLimit), 0);
     const total = castGalleryMembers.length + matchedCrewCount;
     if (total === 0 || rendered >= total) return null;
     return `Rendering ${rendered.toLocaleString()}/${total.toLocaleString()}`;
@@ -8609,7 +8349,7 @@ export default function TrrShowDetailPage() {
     if (activeTab !== "cast") return;
     if (
       castRenderLimit >= castGalleryMembers.length &&
-      crewDisplaySections.every((section) => crewRenderLimit >= section.rows.length)
+      crewDisplaySections.every((section) => crewRenderLimit >= section.groupedRows.length)
     ) {
       return;
     }
@@ -8622,7 +8362,7 @@ export default function TrrShowDetailPage() {
             : Math.min(prev + CAST_INCREMENTAL_BATCH_SIZE, castGalleryMembers.length)
         );
         setCrewRenderLimit((prev) =>
-          crewDisplaySections.every((section) => prev >= section.rows.length)
+          crewDisplaySections.every((section) => prev >= section.groupedRows.length)
             ? prev
             : prev + CAST_INCREMENTAL_BATCH_SIZE
         );
@@ -10835,6 +10575,33 @@ export default function TrrShowDetailPage() {
     ]
   );
 
+  const retryRefreshTarget = useCallback(
+    async (target: string, parentOperationId: string) => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetchWithTimeout(
+          `/api/admin/trr-api/shows/${showId}/refresh/target/${target}/retry`,
+          {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ parent_operation_id: parentOperationId }),
+          },
+          30_000
+        );
+        if (!res.ok) {
+          const err = await res.text();
+          setRefreshAllError(`Retry failed: ${err}`);
+          return;
+        }
+        // Trigger a notice so the user sees feedback while the retry starts
+        setRefreshAllNotice(`Retrying ${target}...`);
+      } catch (e) {
+        setRefreshAllError(`Retry failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [getAuthHeaders, showId]
+  );
+
   const refreshAllShowData = useCallback(async () => {
     if (!showId) return;
     if (refreshingShowAll) return;
@@ -10877,6 +10644,7 @@ export default function TrrShowDetailPage() {
           fetchSeasons(),
           fetchCast({ rosterMode: "imdb_show_membership", minEpisodes: 1 }),
           loadBravoData({ force: true }),
+          loadUnifiedNews({ force: true }),
           ensureDefaultRedditCommunity(),
         ]);
 
@@ -10981,6 +10749,9 @@ export default function TrrShowDetailPage() {
               const topicRaw = payloadObject.topic;
               const providerRaw = payloadObject.provider;
               const skipReasonRaw = payloadObject.skip_reason;
+              const subOperationId = typeof payloadObject.sub_operation_id === "string" ? payloadObject.sub_operation_id : undefined;
+              const executionOwner = typeof payloadObject.execution_owner === "string" ? payloadObject.execution_owner : undefined;
+              const refreshTarget = typeof payloadObject.refresh_target === "string" ? payloadObject.refresh_target : undefined;
               const stageLabel = resolveStageLabel(stageRaw, SHOW_REFRESH_STAGE_LABELS);
               const progressMessage = buildProgressMessage(
                 stageLabel,
@@ -11002,8 +10773,11 @@ export default function TrrShowDetailPage() {
                 current,
                 total: FULL_SHOW_REFRESH_TOTAL_PHASES,
                 stageKey: typeof stageKeyRaw === "string" ? stageKeyRaw : null,
-                topic: typeof topicRaw === "string" ? normalizeRefreshLogTopic(topicRaw) : null,
+                topic: typeof topicRaw === "string" ? normalizeRefreshLogTopic(topicRaw) : (typeof refreshTarget === "string" ? normalizeRefreshLogTopic(refreshTarget) : null),
                 provider: typeof providerRaw === "string" ? providerRaw : null,
+                subOperationId: subOperationId ?? null,
+                executionOwner: executionOwner ?? null,
+                parentOperationId: subOperationId ? (typeof payloadObject.parent_operation_id === "string" ? payloadObject.parent_operation_id : null) : null,
               });
               return;
             }
@@ -12357,6 +12131,124 @@ export default function TrrShowDetailPage() {
     if (status === "skipped") return "Skipped";
     return "Pending";
   };
+  const renderShowCreditsCastMember = (member: TrrCastMember & { merged_photo_url?: string | null }) => {
+    const thumbnailUrl = member.merged_photo_url;
+    const episodeLabel =
+      typeof member.total_episodes === "number" ? `${member.total_episodes} episodes` : null;
+    const meaningfulRoles = getMeaningfulShowCreditsRoles(member.roles);
+    const personName = member.full_name || member.cast_member_name || "Unknown";
+    const personHref = buildPersonAdminUrl({
+      showSlug: showSlugForRouting,
+      personSlug: buildPersonRouteSlug({
+        personName: member.full_name || member.cast_member_name || null,
+        personId: member.person_id,
+      }),
+      tab: "overview",
+    }) as Route;
+
+    if (castViewMode === "list") {
+      return (
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50">
+          <div className="flex items-start gap-4">
+            <Link
+              href={personHref}
+              className="block w-24 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+            >
+              <div className="relative aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+                {thumbnailUrl ? (
+                  <CastPhoto
+                    src={thumbnailUrl}
+                    alt={personName}
+                    thumbnail_focus_x={member.thumbnail_focus_x}
+                    thumbnail_focus_y={member.thumbnail_focus_y}
+                    thumbnail_zoom={member.thumbnail_zoom}
+                    thumbnail_crop_mode={member.thumbnail_crop_mode}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-zinc-400">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                      <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </Link>
+            <div className="min-w-0 flex-1">
+              <Link
+                href={personHref}
+                className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+              >
+                <p className="font-semibold text-zinc-900">{personName}</p>
+              </Link>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-600">
+                {episodeLabel && <span>{episodeLabel}</span>}
+                {member.latest_season && <span>Latest season: {member.latest_season}</span>}
+              </div>
+              {meaningfulRoles.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {meaningfulRoles.map((role) => (
+                    <span
+                      key={`${member.person_id}-${role}`}
+                      className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                    >
+                      {role}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50">
+        <Link
+          href={personHref}
+          className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+        >
+          <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
+            {thumbnailUrl ? (
+              <CastPhoto
+                src={thumbnailUrl}
+                alt={personName}
+                thumbnail_focus_x={member.thumbnail_focus_x}
+                thumbnail_focus_y={member.thumbnail_focus_y}
+                thumbnail_zoom={member.thumbnail_zoom}
+                thumbnail_crop_mode={member.thumbnail_crop_mode}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-zinc-400">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                  <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
+                </svg>
+              </div>
+            )}
+          </div>
+          <p className="font-semibold text-zinc-900">{personName}</p>
+          {episodeLabel && <p className="text-sm text-zinc-600">{episodeLabel}</p>}
+          {member.latest_season && (
+            <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
+          )}
+          {meaningfulRoles.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {meaningfulRoles.map((role) => (
+                <span
+                  key={`${member.person_id}-${role}`}
+                  className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
+                >
+                  {role}
+                </span>
+              ))}
+            </div>
+          )}
+        </Link>
+      </div>
+    );
+  };
 
   const healthBadgeClassName = (status: HealthStatus): string => {
     if (status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
@@ -13272,12 +13164,7 @@ export default function TrrShowDetailPage() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400">
-                    Credits
-                  </p>
-                  <h3 className="text-xl font-bold text-zinc-900">
-                    {show.name}
-                  </h3>
+                  <h3 className="text-xl font-bold text-zinc-900">Credits</h3>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700">
@@ -13759,9 +13646,17 @@ export default function TrrShowDetailPage() {
               )}
               <div className="space-y-8">
                 <section>
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
-                    Cast
-                  </p>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
+                      Cast
+                    </p>
+                    <ShowCreditsCastViewControls
+                      viewMode={castViewMode}
+                      galleryColumns={castGalleryColumns}
+                      onViewModeChange={setCastViewMode}
+                      onGalleryColumnsChange={setCastGalleryColumns}
+                    />
+                  </div>
                   {castGalleryMembers.length === 0 ? (
                     !castRosterReady ? (
                       <p className="text-sm text-zinc-500">Loading cast roster...</p>
@@ -13771,110 +13666,12 @@ export default function TrrShowDetailPage() {
                       <p className="text-sm text-zinc-500">No cast members match the selected filters.</p>
                     )
                   ) : (
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {visibleCastGalleryMembers.map((member) => {
-                        const thumbnailUrl = member.merged_photo_url;
-                        const episodeLabel =
-                          typeof member.total_episodes === "number"
-                            ? `${member.total_episodes} episodes`
-                            : null;
-
-                        return (
-                          <div
-                            key={member.id}
-                            className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 transition hover:border-zinc-300 hover:bg-zinc-100/50"
-                          >
-                            <Link
-                              href={buildPersonAdminUrl({
-                                showSlug: showSlugForRouting,
-                                personSlug: buildPersonRouteSlug({
-                                  personName: member.full_name || member.cast_member_name || null,
-                                  personId: member.person_id,
-                                }),
-                                tab: "overview",
-                              }) as Route}
-                              className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
-                            >
-                            <div className="relative mb-3 aspect-[4/5] overflow-hidden rounded-lg bg-zinc-200">
-                              {thumbnailUrl ? (
-                                <CastPhoto
-                                  src={thumbnailUrl}
-                                  alt={member.full_name || member.cast_member_name || "Cast member"}
-                                  thumbnail_focus_x={member.thumbnail_focus_x}
-                                  thumbnail_focus_y={member.thumbnail_focus_y}
-                                  thumbnail_zoom={member.thumbnail_zoom}
-                                  thumbnail_crop_mode={member.thumbnail_crop_mode}
-                                />
-                              ) : (
-                                <div className="flex h-full items-center justify-center text-zinc-400">
-                                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
-                                    <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" strokeWidth="2" />
-                                  </svg>
-                                </div>
-                              )}
-                            </div>
-                            <p className="font-semibold text-zinc-900">
-                              {member.full_name || member.cast_member_name || "Unknown"}
-                            </p>
-                            {episodeLabel && <p className="text-sm text-zinc-600">{episodeLabel}</p>}
-                            {member.latest_season && (
-                              <p className="text-xs text-zinc-500">Latest season: {member.latest_season}</p>
-                            )}
-                            {member.roles.length > 0 && (
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {member.roles.map((role) => (
-                                  <span
-                                    key={`${member.person_id}-${role}`}
-                                    className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
-                                  >
-                                    {role}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleRefreshCastMember(
-                                  member.person_id,
-                                  member.full_name || member.cast_member_name || "Cast member"
-                                );
-                              }}
-                              disabled={castAnyJobRunning || Boolean(refreshingPersonIds[member.person_id])}
-                              title={castAnyJobRunning ? "Cast sync in progress" : undefined}
-                              className="mt-3 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
-                            >
-                              {refreshingPersonIds[member.person_id]
-                                ? "Refreshing..."
-                                : "Refresh Person"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                openCastRoleEditor(
-                                  member.person_id,
-                                  member.full_name || member.cast_member_name || "Cast member"
-                                );
-                              }}
-                              disabled={castAnyJobRunning}
-                              title={castAnyJobRunning ? "Cast sync in progress" : undefined}
-                              className="mt-2 w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50"
-                            >
-                              Edit Roles
-                            </button>
-                            <RefreshProgressBar
-                              show={Boolean(refreshingPersonIds[member.person_id])}
-                              stage={refreshingPersonProgress[member.person_id]?.stage}
-                              message={refreshingPersonProgress[member.person_id]?.message}
-                              current={refreshingPersonProgress[member.person_id]?.current}
-                              total={refreshingPersonProgress[member.person_id]?.total}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <ShowCreditsCastMembers
+                      members={visibleCastMembers}
+                      viewMode={castViewMode}
+                      galleryColumns={castGalleryColumns}
+                      renderMember={renderShowCreditsCastMember}
+                    />
                   )}
                 </section>
 
@@ -13883,43 +13680,24 @@ export default function TrrShowDetailPage() {
                     <p className="mb-3 text-xs font-semibold uppercase tracking-[0.3em] text-zinc-500">
                       Crew
                     </p>
-                    <div className="space-y-4">
-                      {crewDisplaySections.map((section) => (
-                        <div key={section.title} className="rounded-xl border border-zinc-200 bg-zinc-50/80">
-                          <div className="border-b border-zinc-200 px-4 py-3">
-                            <p className="text-sm font-semibold text-zinc-900">{section.title}</p>
-                          </div>
-                          <div className="divide-y divide-zinc-200">
-                            {section.rows.slice(0, crewRenderLimit).map((row) => (
-                              <div
-                                key={row.credit_id}
-                                className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto]"
-                              >
-                                <div className="min-w-0">
-                                  <Link
-                                    href={buildPersonAdminUrl({
-                                      showSlug: showSlugForRouting,
-                                      personSlug: buildPersonRouteSlug({
-                                        personName: row.person_name,
-                                        personId: row.person_id,
-                                      }),
-                                      tab: "overview",
-                                    }) as Route}
-                                    className="font-semibold text-zinc-900 hover:underline"
-                                  >
-                                    {row.person_name || "Unknown"}
-                                  </Link>
-                                </div>
-                                <div className="min-w-0 text-sm text-zinc-600">{row.role || "Unspecified"}</div>
-                                <div className="text-right text-xs text-zinc-500">
-                                  {[row.episodes_label, row.years_label].filter(Boolean).join(" • ") || "IMDb"}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <ShowCreditsCrewSections
+                      sections={visibleCrewSections}
+                      renderPersonName={(row) => (
+                        <Link
+                          href={buildPersonAdminUrl({
+                            showSlug: showSlugForRouting,
+                            personSlug: buildPersonRouteSlug({
+                              personName: row.personName,
+                              personId: row.personId,
+                            }),
+                            tab: "overview",
+                          }) as Route}
+                          className="hover:underline"
+                        >
+                          {row.personName || "Unknown"}
+                        </Link>
+                      )}
+                    />
                   </section>
                 )}
 
@@ -15199,24 +14977,45 @@ export default function TrrShowDetailPage() {
                     <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                       Availability
                     </p>
-                    {overviewWatchAvailability.length > 0 ? (
-                      <div className="grid gap-3 md:grid-cols-2">
-                        {overviewWatchAvailability.map((region) => (
-                          <div
-                            key={`overview-watch-availability-${region.regionCode}`}
-                            className="rounded-lg border border-zinc-200 bg-white p-3"
-                          >
-                            <p className="text-sm font-semibold text-zinc-900">{region.regionLabel}</p>
+                    {watchProviderRegions.length > 0 ? (
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                            Region
+                          </span>
+                          <div className="relative inline-flex">
+                            <select
+                              aria-label="Availability region"
+                              className="appearance-none rounded-full border border-zinc-200 bg-white px-3 py-1 pr-8 text-sm font-medium text-zinc-700 shadow-sm"
+                              value={selectedAvailabilityRegion?.regionCode ?? ""}
+                              onChange={(event) => setSelectedAvailabilityRegionCode(event.target.value)}
+                            >
+                              {watchProviderRegionOptions.map((option) => (
+                                <option key={`availability-region-${option.regionCode}`} value={option.regionCode}>
+                                  {option.regionCode} · {option.regionLabel}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-zinc-500">
+                              ▾
+                            </span>
+                          </div>
+                        </div>
+                        {selectedAvailabilityRegion ? (
+                          <div className="rounded-lg border border-zinc-200 bg-white p-3">
+                            <p className="text-sm font-semibold text-zinc-900">
+                              {selectedAvailabilityRegion.regionLabel}
+                            </p>
                             <div className="mt-3 space-y-3">
                               <div>
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
                                   Stream
                                 </p>
                                 <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {region.stream.length > 0 ? (
-                                    region.stream.map((provider) => (
+                                  {selectedAvailabilityRegion.stream.length > 0 ? (
+                                    selectedAvailabilityRegion.stream.map((provider) => (
                                       <span
-                                        key={`overview-watch-stream-${region.regionCode}-${provider}`}
+                                        key={`overview-watch-stream-${selectedAvailabilityRegion.regionCode}-${provider}`}
                                         className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-semibold text-zinc-700"
                                       >
                                         {provider}
@@ -15229,13 +15028,32 @@ export default function TrrShowDetailPage() {
                               </div>
                               <div>
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                  Buy
+                                  Free
                                 </p>
                                 <div className="mt-1 flex flex-wrap gap-1.5">
-                                  {region.buy.length > 0 ? (
-                                    region.buy.map((provider) => (
+                                  {selectedAvailabilityRegion.free.length > 0 ? (
+                                    selectedAvailabilityRegion.free.map((provider) => (
                                       <span
-                                        key={`overview-watch-buy-${region.regionCode}-${provider}`}
+                                        key={`overview-watch-free-${selectedAvailabilityRegion.regionCode}-${provider}`}
+                                        className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                                      >
+                                        {provider}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-zinc-500">None</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                  Rent / Buy
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                  {selectedAvailabilityRegion.buyRent.length > 0 ? (
+                                    selectedAvailabilityRegion.buyRent.map((provider) => (
+                                      <span
+                                        key={`overview-watch-buy-rent-${selectedAvailabilityRegion.regionCode}-${provider}`}
                                         className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
                                       >
                                         {provider}
@@ -15248,15 +15066,15 @@ export default function TrrShowDetailPage() {
                               </div>
                             </div>
                           </div>
-                        ))}
+                        ) : null}
                       </div>
                     ) : (
                       <div className="space-y-3">
                         <div className="flex flex-wrap gap-2">
-                          {overviewStreamingProviders.length > 0 ? (
-                            overviewStreamingProviders.map((provider) => (
+                          {fallbackWatchProviders.length > 0 ? (
+                            fallbackWatchProviders.map((provider) => (
                               <span
-                                key={provider}
+                                key={`overview-watch-fallback-${provider}`}
                                 className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700"
                               >
                                 {provider}
@@ -15267,21 +15085,10 @@ export default function TrrShowDetailPage() {
                           )}
                         </div>
                         <p className="text-xs text-zinc-500">
-                          Regional stream and buy availability is limited to the United States, United Kingdom, Canada,
-                          and Australia.
+                          Typed TMDb availability is unavailable for this show.
                         </p>
                       </div>
                     )}
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {overviewStreamingProviders.map((provider) => (
-                        <span
-                          key={`overview-streaming-summary-${provider}`}
-                          className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm text-zinc-700"
-                        >
-                          {provider}
-                        </span>
-                      ))}
-                    </div>
                   </div>
                 </div>
 
@@ -15860,6 +15667,11 @@ export default function TrrShowDetailPage() {
                           <div className="min-w-0">
                             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-700">
                               {step.topic.label}
+                              {step.executionOwner && (
+                                <span className="text-xs text-zinc-500 ml-1">
+                                  ({step.executionOwner === "remote_worker" ? "Modal" : step.executionOwner})
+                                </span>
+                              )}
                             </p>
                             <p className="truncate text-[11px] text-zinc-500">{step.topic.description}</p>
                             <p className="truncate text-[11px] text-zinc-600">
@@ -15870,6 +15682,14 @@ export default function TrrShowDetailPage() {
                             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusPillClass}`}>
                               {statusText}
                             </span>
+                            {step.status === "failed" && step.parentOperationId && (
+                              <button
+                                className="text-xs text-blue-500 hover:text-blue-700 ml-2"
+                                onClick={() => retryRefreshTarget(step.topic.key, step.parentOperationId!)}
+                              >
+                                Retry
+                              </button>
+                            )}
                             {step.latest && (
                               <p className="mt-1 text-[10px] text-zinc-400">
                                 {new Date(step.latest.at).toLocaleTimeString()}

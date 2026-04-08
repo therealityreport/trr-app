@@ -72,5 +72,10 @@ describe("SocialGrowthSection", () => {
 
     expect(screen.getByText("475K")).toBeInTheDocument();
     expect(screen.getByText("Daily Channel Metrics")).toBeInTheDocument();
+    expect(mocks.fetchAdminWithAuth).toHaveBeenCalledWith(
+      "/api/admin/trr-api/people/person-1/social-growth?handle=lisabarlow14",
+      undefined,
+      { allowDevAdminBypass: true },
+    );
   });
 });

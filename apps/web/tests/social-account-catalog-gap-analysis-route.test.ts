@@ -42,7 +42,7 @@ describe("social account catalog gap-analysis proxy route", () => {
         sample_missing_source_ids: ["ABC123"],
         has_resumable_frontier: true,
         needs_recent_sync: false,
-        recommended_action: "resume_tail",
+        recommended_action: "backfill_posts",
       },
       stale: false,
     });

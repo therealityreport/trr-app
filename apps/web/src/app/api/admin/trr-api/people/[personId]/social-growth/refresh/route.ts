@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { getInternalAdminBearerToken } from "@/lib/server/trr-api/internal-admin-auth";
+import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes — Modal scrape can take a while
@@ -40,20 +40,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const serviceRoleKey = getInternalAdminBearerToken();
-    if (!serviceRoleKey) {
-      return NextResponse.json({ error: "Backend auth not configured" }, { status: 502 });
+    let headers: Headers;
+    try {
+      headers = buildInternalAdminHeaders({
+        "Content-Type": "application/json",
+      });
+    } catch {
+      return NextResponse.json(
+        { error: "Backend auth not configured" },
+        { status: 502 }
+      );
     }
 
     const upstream = await fetch(backendUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serviceRoleKey}`,
-      },
+      headers,
       body: JSON.stringify({ handle, force }),
     });
-
     const data = await upstream.json().catch(() => ({ error: "Invalid response from backend" }));
 
     if (!upstream.ok) {

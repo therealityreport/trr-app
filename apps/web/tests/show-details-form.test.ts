@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCanonicalShowAlternativeNames,
+  buildShowDetailsFormValue,
   deriveShowDetailsAlternativeNames,
   deriveShowDetailsNickname,
   deriveShowDetailsSlugPreview,
@@ -62,5 +63,45 @@ describe("show details form helpers", () => {
 
   it("uses the shared slugification rule for the preview", () => {
     expect(deriveShowDetailsSlugPreview("The Valley & Friends")).toBe("the-valley-and-friends");
+  });
+
+  it("builds editable details state from the backend-owned show contract", () => {
+    expect(
+      buildShowDetailsFormValue({
+        name: "The Valley",
+        slug: "the-valley",
+        canonical_slug: "the-valley",
+        alternative_names: ["Valley Girls", "The Valley"],
+        description: "Chaos in the valley.",
+        premiere_date: "2024-03-19",
+        imdb_id: "tt1234567",
+        tmdb_id: 98765,
+        external_ids: {
+          tvdb_id: "tvdb-1",
+          wikidata_id: "Q123",
+          tv_rage_id: "rage-9",
+        },
+        genres: ["Reality", "Drama"],
+        networks: ["Bravo"],
+        streaming_providers: ["Peacock"],
+        watch_providers: ["Should not be used when streaming providers exist"],
+        tags: ["friend group", "la"],
+      })
+    ).toEqual({
+      displayName: "The Valley",
+      nickname: "valley-girls",
+      altNamesText: "Valley Girls",
+      description: "Chaos in the valley.",
+      premiereDate: "2024-03-19",
+      imdbId: "tt1234567",
+      tmdbId: "98765",
+      tvdbId: "tvdb-1",
+      wikidataId: "Q123",
+      tvRageId: "rage-9",
+      genresText: "Reality\nDrama",
+      networksText: "Bravo",
+      streamingProvidersText: "Peacock",
+      tagsText: "friend group\nla",
+    });
   });
 });

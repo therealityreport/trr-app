@@ -58,9 +58,15 @@ describe("show settings links UI structure", () => {
     expect(contents).toMatch(/Open Community/);
     expect(contents).toMatch(/Assigned Flairs/);
     expect(contents).toMatch(/Networks & Streaming/);
-    expect(contents).toMatch(/overviewWatchAvailability\.map/);
+    expect(contents).toMatch(/watchProviderRegionOptions = useMemo/);
+    expect(contents).toMatch(/resolveDefaultOverviewWatchProviderRegion/);
+    expect(contents).toMatch(/aria-label="Availability region"/);
     expect(contents).toMatch(/Stream/);
-    expect(contents).toMatch(/Buy/);
+    expect(contents).toMatch(/Free/);
+    expect(contents).toMatch(/Rent \/ Buy/);
+    expect(contents).toMatch(/Typed TMDb availability is unavailable for this show\./);
+    expect(contents).not.toMatch(/overviewWatchAvailability\.map/);
+    expect(contents).not.toMatch(/overviewStreamingProviders/);
     expect(contents).not.toMatch(/Brands \(Network & Streaming\)/);
   });
 

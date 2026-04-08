@@ -146,8 +146,41 @@ export interface BrandProfilePayload {
   targets: BrandProfileTarget[];
   shows: BrandProfileShow[];
   assets: BrandProfileAsset[];
+  streaming_services: string[];
   social_profiles: BrandProfileSocialProfile[];
 }
+
+const STREAMING_SERVICE_CANONICAL_LABELS: Record<string, string> = {
+  "peacock premium": "Peacock",
+  "peacock premium plus": "Peacock",
+  "apple tv store": "Apple TV",
+  "amazon video": "Prime Video",
+  "amazon prime video": "Prime Video",
+};
+
+const normalizeStreamingServiceKey = (value: string): string => value.trim().toLowerCase();
+
+export const canonicalizeBrandStreamingService = (value: string): string | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return STREAMING_SERVICE_CANONICAL_LABELS[normalizeStreamingServiceKey(trimmed)] ?? trimmed;
+};
+
+export const normalizeBrandStreamingServices = (
+  values: ReadonlyArray<string | null | undefined>,
+): string[] => {
+  const deduped = new Map<string, string>();
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const canonical = canonicalizeBrandStreamingService(value);
+    if (!canonical) continue;
+    const key = normalizeStreamingServiceKey(canonical);
+    if (!deduped.has(key)) {
+      deduped.set(key, canonical);
+    }
+  }
+  return [...deduped.values()].sort((left, right) => left.localeCompare(right));
+};
 
 const FRIENDLY_HOST_SUFFIXES = [".com", ".org", ".tv", ".net", ".co", ".io", ".app"] as const;
 

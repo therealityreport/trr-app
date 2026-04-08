@@ -26,7 +26,7 @@ export interface AuthenticatedUser {
 }
 
 const DEV_ADMIN_BYPASS_UID = "dev-admin-bypass";
-const DEV_ADMIN_BYPASS_EMAIL = "dev-admin@localhost";
+const DEV_ADMIN_BYPASS_EMAIL = "codex@thereality.report";
 const DEFAULT_DEV_ADMIN_ALLOWED_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
