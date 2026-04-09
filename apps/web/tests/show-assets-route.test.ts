@@ -35,6 +35,9 @@ describe("show assets route", () => {
           limit: 75,
           offset: 25,
           count: 1,
+          has_more: true,
+          next_cursor: "b2Zmc2V0OjI2",
+          cursor: "b2Zmc2V0OjI1",
           truncated: false,
           full: false,
         },
@@ -62,10 +65,34 @@ describe("show assets route", () => {
         limit: 75,
         offset: 25,
         count: 1,
+        has_more: true,
+        next_cursor: "b2Zmc2V0OjI2",
+        cursor: "b2Zmc2V0OjI1",
         truncated: false,
         full: false,
       },
     });
+  });
+
+  it("prefers cursor-based pagination when the UI supplies a next_cursor token", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { assets: [], pagination: { limit: 75, offset: 25, count: 0, has_more: false, next_cursor: null, cursor: "b2Zmc2V0OjI1", truncated: false, full: false } },
+      durationMs: 5,
+    });
+
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/admin/trr-api/shows/show-1/assets?limit=75&offset=0&cursor=b2Zmc2V0OjI1"
+      ),
+      { params: Promise.resolve({ showId: "show-1" }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/show-1/assets?limit=75&cursor=b2Zmc2V0OjI1",
+      expect.objectContaining({ routeName: "show-assets" }),
+    );
   });
 
   it("supports full fetch mode with truthful truncation metadata", async () => {

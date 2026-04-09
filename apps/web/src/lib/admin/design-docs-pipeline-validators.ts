@@ -9,6 +9,7 @@ import {
   CONTENT_BLOCK_TYPE_IDS,
   type ContentBlock,
 } from "./design-docs-config.ts";
+import { getReusableUiPrimitive } from "./design-docs-ui-primitives";
 import type {
   A11yAuditFinding,
   A11yAuditResult,
@@ -34,6 +35,7 @@ type DesignDocsRecord = {
   date: string;
   section: string;
   type: string;
+  ogImage?: string;
   fonts?: ReadonlyArray<{ name: string; usedIn?: unknown; weights?: unknown }>;
   colors?: Record<string, unknown>;
   contentBlocks?: readonly ContentBlock[];
@@ -87,6 +89,21 @@ function getArticleCollection(articles?: readonly DesignDocsRecord[]) {
 
 function findArticleById(articleId: string, articles?: readonly DesignDocsRecord[]) {
   return getArticleCollection(articles).find((article) => article.id === articleId) ?? null;
+}
+
+function isNytInteractiveArticle(article: DesignDocsRecord) {
+  return article.url.includes("nytimes.com/interactive/");
+}
+
+function getContentBlockArray(article: DesignDocsRecord) {
+  return article.contentBlocks ?? [];
+}
+
+function getSocialImages(article: DesignDocsRecord) {
+  const architecture = article.architecture as
+    | { publicAssets?: { socialImages?: readonly unknown[] } }
+    | undefined;
+  return architecture?.publicAssets?.socialImages ?? [];
 }
 
 function extractRendererBlockTypes(source: string): Set<string> {
@@ -358,6 +375,71 @@ export async function auditGeneratedConfigIntegrity({
     ),
   );
   blockingErrors.push(...chartBindingIssues);
+
+  const socialImageCoverageIssues: string[] = [];
+  if (isNytInteractiveArticle(article) && article.ogImage && getSocialImages(article).length === 0) {
+    socialImageCoverageIssues.push(
+      `${article.id} exposes NYT interactive social/share imagery but architecture.publicAssets.socialImages is missing`,
+    );
+  }
+
+  checks.push(
+    createCheck(
+      "social image coverage",
+      socialImageCoverageIssues.length === 0 ? "pass" : "fail",
+      socialImageCoverageIssues.length === 0
+        ? "Recoverable social/share image sets are present when expected"
+        : "Recoverable social/share imagery is missing from config",
+      socialImageCoverageIssues,
+    ),
+  );
+  blockingErrors.push(...socialImageCoverageIssues);
+
+  const reusablePrimitiveCoverageIssues: string[] = [];
+  for (const block of getContentBlockArray(article)) {
+    if (block.type !== "site-header-shell" && block.type !== "storyline") {
+      continue;
+    }
+
+    if (block.primitiveId && !getReusableUiPrimitive(block.primitiveId)) {
+      reusablePrimitiveCoverageIssues.push(
+        `${article.id} ${block.type} block references unknown primitive "${block.primitiveId}"`,
+      );
+      continue;
+    }
+
+    if (!isNytInteractiveArticle(article)) {
+      continue;
+    }
+
+    if (block.type === "site-header-shell" && !block.primitiveId) {
+      reusablePrimitiveCoverageIssues.push(
+        `${article.id} site-header-shell must reference a reusable primitive instead of inline shell structure`,
+      );
+    }
+
+    if (
+      block.type === "storyline" &&
+      (block.title === "Tariffs and Trade" || block.links?.some((link) => link.label === "Tariff Tracker")) &&
+      !block.primitiveId
+    ) {
+      reusablePrimitiveCoverageIssues.push(
+        `${article.id} Tariffs and Trade storyline must reference a reusable primitive instead of inline chrome`,
+      );
+    }
+  }
+
+  checks.push(
+    createCheck(
+      "reusable primitive coverage",
+      reusablePrimitiveCoverageIssues.length === 0 ? "pass" : "fail",
+      reusablePrimitiveCoverageIssues.length === 0
+        ? "Publisher shell/storyline chrome is backed by reusable primitive references"
+        : "Reusable primitive coverage gaps detected",
+      reusablePrimitiveCoverageIssues,
+    ),
+  );
+  blockingErrors.push(...reusablePrimitiveCoverageIssues);
 
   const requiredFieldIssues: string[] = [];
   if (!article.url?.startsWith("https://")) {
@@ -736,6 +818,38 @@ export async function runDesignDocsIntegrationChecks({
         (article) => article?.contentBlocks?.some((block) => block.type === "storyline") ? null : createFailure("nfl storyline", "present", "missing", article?.id),
         (article) => article?.contentBlocks?.some((block) => block.type === "showcase-link") ? null : createFailure("nfl showcase-link", "present", "missing", article?.id),
         (article) => article?.contentBlocks?.some((block) => block.type === "puzzle-entry-point") ? null : createFailure("nfl puzzle-entry-point", "present", "missing", article?.id),
+      ],
+    },
+    {
+      id: "trump-tariffs-us-imports",
+      checks: [
+        (article) => article?.type === "interactive" ? null : createFailure("imports type", "interactive", String(article?.type), article?.id),
+        (article) => getSocialImages(article ?? ({} as DesignDocsRecord)).length === 5 ? null : createFailure("imports socialImages", "5", String(getSocialImages(article ?? ({} as DesignDocsRecord)).length), article?.id),
+        (article) =>
+          article?.contentBlocks?.some(
+            (block) => block.type === "storyline" && block.primitiveId === "nyt.storyline.tariffs-and-trade.standard",
+          )
+            ? null
+            : createFailure("imports storyline primitive", "nyt.storyline.tariffs-and-trade.standard", "missing", article?.id),
+      ],
+    },
+    {
+      id: "trump-tariffs-reaction",
+      checks: [
+        (article) => article?.type === "interactive" ? null : createFailure("reaction type", "interactive", String(article?.type), article?.id),
+        (article) => getSocialImages(article ?? ({} as DesignDocsRecord)).length === 5 ? null : createFailure("reaction socialImages", "5", String(getSocialImages(article ?? ({} as DesignDocsRecord)).length), article?.id),
+        (article) =>
+          article?.contentBlocks?.some(
+            (block) => block.type === "site-header-shell" && block.primitiveId === "nyt.interactive.header-shell.standard",
+          )
+            ? null
+            : createFailure("reaction shell primitive", "nyt.interactive.header-shell.standard", "missing", article?.id),
+        (article) =>
+          article?.contentBlocks?.some(
+            (block) => block.type === "storyline" && block.primitiveId === "nyt.storyline.tariffs-and-trade.standard",
+          )
+            ? null
+            : createFailure("reaction storyline primitive", "nyt.storyline.tariffs-and-trade.standard", "missing", article?.id),
       ],
     },
   ];

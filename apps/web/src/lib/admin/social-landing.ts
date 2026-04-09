@@ -49,6 +49,12 @@ export interface SharedPipelineSummary {
   review_items: SharedReviewItemSummary[];
 }
 
+export interface RedditDashboardSummary {
+  active_community_count: number;
+  archived_community_count: number;
+  show_count: number;
+}
+
 export interface NetworkProfileSet {
   key: string;
   title: string;
@@ -83,4 +89,5 @@ export interface SocialLandingPayload {
   show_sets: ShowProfileSet[];
   people_profiles: PersonProfileSummary[];
   shared_pipeline: SharedPipelineSummary;
+  reddit_dashboard: RedditDashboardSummary;
 }

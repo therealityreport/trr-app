@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
+import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import {
   buildFollowersGainedSeries,
   type CastComparisonWindow,
@@ -68,6 +69,13 @@ interface CastSocialBladeComparisonProps {
   seasonNumber: number;
   comparisonWindow: CastComparisonWindow | null;
 }
+
+type MemberLoadResult = {
+  key: string;
+  data: SocialGrowthData | null;
+  error: string | null;
+  notFound: boolean;
+};
 
 // ============================================================================
 // Constants
@@ -972,7 +980,7 @@ export default function CastSocialBladeComparison({
     [membersWithIG]
   );
 
-  const loadMembers = useCallback(async (targetMembers: CastMember[]) => {
+  const loadMembers = useCallback(async (targetMembers: CastMember[]): Promise<MemberLoadResult[]> => {
     return Promise.all(
       targetMembers.map(async (member) => {
         const key = entryKey(member.person_id, member.instagram_handle!);
@@ -1007,6 +1015,52 @@ export default function CastSocialBladeComparison({
     );
   }, []);
 
+  const fetchPendingRefreshSnapshot = useCallback(
+    async (currentPendingKeys: string[], options?: { forceRefresh?: boolean }): Promise<MemberLoadResult[]> => {
+      const pendingSet = new Set(currentPendingKeys);
+      const targetMembers = membersWithIG.filter((member) =>
+        pendingSet.has(entryKey(member.person_id, member.instagram_handle!))
+      );
+      if (targetMembers.length === 0) return [];
+
+      const params = new URLSearchParams();
+      for (const member of targetMembers) {
+        params.append("item", `${member.person_id}:${member.instagram_handle!}`);
+      }
+      if (options?.forceRefresh) {
+        params.set("refresh", "1");
+      }
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social-growth/cast-comparison/snapshot?${params.toString()}`,
+        { cache: "no-store" },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        data?: {
+          items?: Array<{
+            personId?: string;
+            handle?: string;
+            data?: SocialGrowthData | null;
+            error?: string | null;
+            not_found?: boolean;
+          }>;
+        };
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to fetch cast SocialBlade snapshot");
+      }
+      return Array.isArray(payload.data?.items)
+        ? payload.data.items.map((item) => ({
+            key: entryKey(String(item.personId || ""), String(item.handle || "")),
+            data: item.data ?? null,
+            error: typeof item.error === "string" ? item.error : null,
+            notFound: item.not_found === true,
+          }))
+        : [];
+    },
+    [membersWithIG],
+  );
+
   const fetchAll = useCallback(async () => {
     const targetMembers = membersWithIG;
     const targetKeys = new Set(
@@ -1037,14 +1091,11 @@ export default function CastSocialBladeComparison({
     );
   }, [loadMembers, membersWithIG]);
 
-  const pollPendingRefreshes = useCallback(async (currentPendingKeys: string[]) => {
+  const pollPendingRefreshes = useCallback(async (currentPendingKeys: string[], options?: { forceRefresh?: boolean }) => {
     const pendingSet = new Set(currentPendingKeys);
-    const targetMembers = membersWithIG.filter((member) =>
-      pendingSet.has(entryKey(member.person_id, member.instagram_handle!))
-    );
-    if (targetMembers.length === 0) return [];
+    if (pendingSet.size === 0) return [];
 
-    const results = await loadMembers(targetMembers);
+    const results = await fetchPendingRefreshSnapshot(currentPendingKeys, options);
     const resultMap = new Map(results.map((result) => [result.key, result]));
     const nextPending = new Set<string>();
 
@@ -1087,7 +1138,7 @@ export default function CastSocialBladeComparison({
     );
 
     return [...nextPending];
-  }, [loadMembers, membersWithIG]);
+  }, [fetchPendingRefreshSnapshot]);
 
   const triggerBatchRefresh = useCallback(async (targetEntries: CastEntry[], force = false) => {
     if (targetEntries.length === 0 || batchRefreshing) return;
@@ -1193,6 +1244,15 @@ export default function CastSocialBladeComparison({
     if (membersWithIG.length > 0) fetchAll();
   }, [fetchAll, membersWithIG.length]);
 
+  const liveRefreshSnapshot = useSharedPollingResource<{ nextPending: string[] }>({
+    key: `cast-socialblade-refresh:${[...pendingRefreshKeys].sort().join(",") || "idle"}`,
+    shouldRun: pendingRefreshKeys.length > 0 && pollAttempt < MAX_POLL_ATTEMPTS,
+    intervalMs: POLL_INTERVAL_MS,
+    fetchData: async (_signal, request) => ({
+      nextPending: await pollPendingRefreshes(pendingRefreshKeys, { forceRefresh: request?.forceRefresh }),
+    }),
+  });
+
   useEffect(() => {
     if (pendingRefreshKeys.length === 0) return;
     if (pollAttempt >= MAX_POLL_ATTEMPTS) {
@@ -1211,15 +1271,15 @@ export default function CastSocialBladeComparison({
       setPendingRefreshKeys([]);
       return;
     }
+    if (!liveRefreshSnapshot.data) return;
+    setPendingRefreshKeys(liveRefreshSnapshot.data.nextPending);
+    setPollAttempt((current) => current + 1);
+  }, [liveRefreshSnapshot.data, pendingRefreshKeys, pollAttempt]);
 
-    const timer = window.setTimeout(async () => {
-      const nextPending = await pollPendingRefreshes(pendingRefreshKeys);
-      setPendingRefreshKeys(nextPending);
-      setPollAttempt((current) => current + 1);
-    }, POLL_INTERVAL_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [pendingRefreshKeys, pollAttempt, pollPendingRefreshes]);
+  useEffect(() => {
+    if (!liveRefreshSnapshot.error) return;
+    setBatchError(liveRefreshSnapshot.error);
+  }, [liveRefreshSnapshot.error]);
 
   const loadedEntries = entries.filter((e) => e.data);
   const allLoading = entries.every((e) => e.loading);

@@ -9,6 +9,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import type {
+  RedditDashboardSummary,
   SharedReviewItemSummary,
   SharedRunSummary,
   ShowProfileSet,
@@ -66,6 +67,20 @@ const loadLandingData = async (
       review_items: Array.isArray(data?.shared_pipeline?.review_items)
         ? data.shared_pipeline.review_items
         : [],
+    },
+    reddit_dashboard: {
+      active_community_count:
+        typeof data?.reddit_dashboard?.active_community_count === "number"
+          ? data.reddit_dashboard.active_community_count
+          : 0,
+      archived_community_count:
+        typeof data?.reddit_dashboard?.archived_community_count === "number"
+          ? data.reddit_dashboard.archived_community_count
+          : 0,
+      show_count:
+        typeof data?.reddit_dashboard?.show_count === "number"
+          ? data.reddit_dashboard.show_count
+          : 0,
     },
   };
 };
@@ -223,6 +238,71 @@ const ShowCard = ({ show }: { show: ShowProfileSet }) => {
   );
 };
 
+const RedditDashboardCard = ({
+  summary,
+}: {
+  summary: RedditDashboardSummary;
+}) => {
+  const totalCommunities =
+    summary.active_community_count + summary.archived_community_count;
+
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className={sectionEyebrowClass}>Reddit</p>
+          <h2 className="text-lg font-semibold text-zinc-900">REDDIT DASHBOARD</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Open the dedicated Reddit control center to review saved communities
+            across shows and jump into existing community workflows.
+          </p>
+        </div>
+        <Link
+          href="/social/reddit"
+          className="inline-flex rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+        >
+          Open Reddit Dashboard
+        </Link>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            Total Communities
+          </p>
+          <p className="mt-2 text-3xl font-bold text-zinc-900">
+            {totalCommunities.toLocaleString()}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            Active
+          </p>
+          <p className="mt-2 text-3xl font-bold text-zinc-900">
+            {summary.active_community_count.toLocaleString()}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            Archived
+          </p>
+          <p className="mt-2 text-3xl font-bold text-zinc-900">
+            {summary.archived_community_count.toLocaleString()}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            Shows Covered
+          </p>
+          <p className="mt-2 text-3xl font-bold text-zinc-900">
+            {summary.show_count.toLocaleString()}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+};
+
 export default function AdminSocialMediaPage() {
   const { user, checking, hasAccess } = useAdminGuard();
   const [landing, setLanding] = useState<SocialLandingPayload | null>(null);
@@ -342,6 +422,11 @@ export default function AdminSocialMediaPage() {
     runs: [],
     review_items: [],
   };
+  const redditDashboard = landing?.reddit_dashboard ?? {
+    active_community_count: 0,
+    archived_community_count: 0,
+    show_count: 0,
+  };
 
   return (
     <ClientOnly>
@@ -381,6 +466,8 @@ export default function AdminSocialMediaPage() {
             </div>
           ) : (
             <div className="space-y-6">
+              <RedditDashboardCard summary={redditDashboard} />
+
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>

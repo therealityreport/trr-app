@@ -77,6 +77,7 @@ describe("cast screentime admin access", () => {
     const firstCall = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = new Headers(firstCall?.headers);
     expect(headers.get("Authorization")).toMatch(/^Bearer /);
+    expect(headers.get("Accept")).toBe("application/json");
   });
 
   it("returns an actionable error when the internal admin secret is missing", async () => {

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
+import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import {
   buildAdminRedditCommunityUrl,
@@ -53,6 +54,7 @@ interface RedditCommunity {
   franchise_focus_targets: string[];
   episode_title_patterns: string[];
   post_flair_categories: Record<string, string>;
+  post_flair_assignments: Record<string, RedditFlairAssignment>;
   post_flairs_updated_at: string | null;
   is_active: boolean;
   created_at: string;
@@ -67,6 +69,17 @@ interface RedditCommunityResponse extends Omit<RedditCommunity, "assigned_thread
 }
 
 type RedditCommunityScopeType = "show" | "franchise" | "network";
+
+interface RedditFlairAssignment {
+  show_ids: string[];
+  season_ids: string[];
+  person_ids: string[];
+}
+
+interface FlairAssignmentPersonOption {
+  id: string;
+  name: string;
+}
 
 type PeriodPostMatchType = "flair" | "scan" | "all";
 
@@ -573,7 +586,8 @@ export interface RedditSourcesManagerProps {
   initialCommunityId?: string;
   hideCommunityList?: boolean;
   backHref?: string;
-  episodeDiscussionsPlacement?: "settings" | "inline";
+  episodeDiscussionsPlacement?: "settings" | "inline" | "hidden";
+  inventoryOnly?: boolean;
   enableEpisodeSync?: boolean;
   onCommunityContextChange?: (context: RedditCommunityContext | null) => void;
 }
@@ -656,19 +670,110 @@ const displayFlair = (raw: string | null | undefined): string => {
   return raw.replace(/:[a-zA-Z0-9_-]+:/g, "").trim() || raw.trim();
 };
 
-type FlairCategory = "cast" | "season";
-
-const FLAIR_CATEGORY_LABELS: Record<FlairCategory, string> = {
-  cast: "Cast",
-  season: "Season",
+const uniqueStringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const normalized = entry.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
 };
 
-const FLAIR_CATEGORY_COLORS: Record<FlairCategory, { bg: string; text: string }> = {
-  cast: { bg: "bg-purple-100", text: "text-purple-700" },
-  season: { bg: "bg-amber-100", text: "text-amber-700" },
+const normalizeFlairAssignments = (value: unknown): Record<string, RedditFlairAssignment> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const out: Record<string, RedditFlairAssignment> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const flairKey = normalizeFlairKey(key);
+    if (!flairKey) continue;
+    const assignment = entry as Record<string, unknown>;
+    out[flairKey] = {
+      show_ids: uniqueStringList(assignment.show_ids),
+      season_ids: uniqueStringList(assignment.season_ids),
+      person_ids: uniqueStringList(assignment.person_ids),
+    };
+  }
+  return out;
 };
 
-const FLAIR_CATEGORY_CYCLE: (FlairCategory | undefined)[] = [undefined, "cast", "season"];
+const emptyFlairAssignment = (): RedditFlairAssignment => ({
+  show_ids: [],
+  season_ids: [],
+  person_ids: [],
+});
+
+const toggleAssignedId = (list: string[], id: string, checked: boolean): string[] => {
+  if (!id) return list;
+  if (checked) {
+    return list.includes(id) ? list : [...list, id];
+  }
+  return list.filter((value) => value !== id);
+};
+
+const sortFlairAssignmentShows = (
+  showIds: string[],
+  coveredShows: CoveredShow[],
+): string[] => {
+  const order = new Map(coveredShows.map((show, index) => [show.trr_show_id, index] as const));
+  return [...showIds].sort((a, b) => {
+    const aOrder = order.get(a);
+    const bOrder = order.get(b);
+    if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder;
+    if (aOrder !== undefined) return -1;
+    if (bOrder !== undefined) return 1;
+    return a.localeCompare(b);
+  });
+};
+
+const extractSeasonOptions = (value: unknown): ShowSeasonOption[] => {
+  if (!Array.isArray(value)) return [];
+  return [...value]
+    .filter(
+      (season): season is ShowSeasonOption =>
+        typeof season === "object" &&
+        season !== null &&
+        Boolean((season as ShowSeasonOption).id) &&
+        typeof (season as ShowSeasonOption).season_number === "number" &&
+        Number.isFinite((season as ShowSeasonOption).season_number),
+    )
+    .sort((a, b) => b.season_number - a.season_number);
+};
+
+const extractPersonOptions = (value: unknown): FlairAssignmentPersonOption[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: FlairAssignmentPersonOption[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const candidate = entry as Record<string, unknown>;
+    const id =
+      typeof candidate.id === "string"
+        ? candidate.id.trim()
+        : typeof candidate.person_id === "string"
+          ? candidate.person_id.trim()
+          : "";
+    const nameCandidates = [
+      candidate.display_name,
+      candidate.name,
+      candidate.person_name,
+      candidate.full_name,
+      candidate.label,
+    ];
+    const name =
+      nameCandidates.find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim() ??
+      "";
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+};
 
 const describeFlairMode = (mode: DiscoveryThread["flair_mode"]): string | null => {
   if (!mode) return null;
@@ -2274,6 +2379,7 @@ const toCommunityModel = (community: RedditCommunityResponse): RedditCommunity =
     !Array.isArray(community.post_flair_categories)
       ? (community.post_flair_categories as Record<string, string>)
       : {},
+  post_flair_assignments: normalizeFlairAssignments(community.post_flair_assignments),
   post_flairs_updated_at: community.post_flairs_updated_at ?? null,
 });
 
@@ -2399,12 +2505,14 @@ export default function RedditSourcesManager({
   hideCommunityList = false,
   backHref,
   episodeDiscussionsPlacement = "settings",
+  inventoryOnly = false,
   enableEpisodeSync = false,
   onCommunityContextChange,
 }: RedditSourcesManagerProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [communities, setCommunities] = useState<RedditCommunity[]>([]);
+  const [showArchivedCommunities, setShowArchivedCommunities] = useState(false);
   const [coveredShows, setCoveredShows] = useState<CoveredShow[]>([]);
   const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(
     initialCommunityId ?? null,
@@ -2483,6 +2591,15 @@ export default function RedditSourcesManager({
   const [episodeSaving, setEpisodeSaving] = useState(false);
   const [assignedThreadsExpanded, setAssignedThreadsExpanded] = useState(true);
   const [showCommunitySettingsModal, setShowCommunitySettingsModal] = useState(false);
+  const [showFlairAssignmentsModal, setShowFlairAssignmentsModal] = useState(false);
+  const [flairAssignmentsDraft, setFlairAssignmentsDraft] = useState<
+    Record<string, RedditFlairAssignment>
+  >({});
+  const [selectedFlairAssignmentKey, setSelectedFlairAssignmentKey] = useState<string | null>(null);
+  const [flairAssignmentContextShowId, setFlairAssignmentContextShowId] = useState<string>("");
+  const [flairAssignmentSeasonOptions, setFlairAssignmentSeasonOptions] = useState<ShowSeasonOption[]>([]);
+  const [flairAssignmentPeople, setFlairAssignmentPeople] = useState<FlairAssignmentPersonOption[]>([]);
+  const [flairAssignmentLoading, setFlairAssignmentLoading] = useState(false);
   const [showDedicatedSeasonMenu, setShowDedicatedSeasonMenu] = useState(false);
   const [selectedShowLabel, setSelectedShowLabel] = useState<string | null>(null);
   const [selectedShowSlug, setSelectedShowSlug] = useState<string | null>(null);
@@ -2524,11 +2641,17 @@ export default function RedditSourcesManager({
   const seasonEpisodesRequestInFlightRef = useRef<Map<string, Promise<SeasonEpisodeRow[]>>>(new Map());
   const periodOptionsRequestInFlightRef = useRef<Map<string, Promise<EpisodePeriodOption[] | null>>>(new Map());
   const seasonIdResolutionInFlightRef = useRef<Map<string, Promise<string | null>>>(new Map());
+  const flairAssignmentPeopleCacheRef = useRef<Map<string, FlairAssignmentPersonOption[]>>(new Map());
   const communityBootstrapStartedAtRef = useRef<number | null>(null);
   const bootstrapRequestEpochRef = useRef(0);
   const communityContextStartedAtRef = useRef<number | null>(null);
   const firstCachePayloadLoggedRef = useRef(false);
   const dedicatedSeasonMenuRef = useRef<HTMLDivElement | null>(null);
+  const inventoryOnlyRef = useRef(inventoryOnly);
+
+  useEffect(() => {
+    inventoryOnlyRef.current = inventoryOnly;
+  }, [inventoryOnly]);
   const episodeContextRequestTokenRef = useRef(0);
   const windowCacheHydrationTokenRef = useRef(0);
   const hydratedWindowContainersRef = useRef<Set<string>>(new Set());
@@ -2654,6 +2777,8 @@ export default function RedditSourcesManager({
                   post_flairs_updated_at: patch.post_flairs_updated_at ?? community.post_flairs_updated_at,
                   post_flair_categories:
                     patch.post_flair_categories ?? community.post_flair_categories,
+                  post_flair_assignments:
+                    patch.post_flair_assignments ?? community.post_flair_assignments,
                 }
               : community,
           ),
@@ -2703,7 +2828,7 @@ export default function RedditSourcesManager({
   );
 
   const fetchCoveredShows = useCallback(async () => {
-    if (mode !== "global" || hideCommunityList) return;
+    if (mode !== "global") return;
     if (coveredShowsRequestInFlightRef.current) {
       await coveredShowsRequestInFlightRef.current;
       return;
@@ -2734,12 +2859,14 @@ export default function RedditSourcesManager({
         coveredShowsRequestInFlightRef.current = null;
       }
     }
-  }, [communityShowId, fetchWithTimeout, getAuthHeaders, hideCommunityList, mode]);
+  }, [communityShowId, fetchWithTimeout, getAuthHeaders, mode]);
 
   const fetchCommunities = useCallback(async (options?: { includeAssignedThreads?: boolean }) => {
     const includeAssignedThreads = options?.includeAssignedThreads ?? true;
+    const includeInactive = mode === "global";
     const requestKey = JSON.stringify({
       includeAssignedThreads,
+      includeInactive,
       mode,
       showId: showId ?? null,
       seasonId: seasonId ?? null,
@@ -2757,6 +2884,9 @@ export default function RedditSourcesManager({
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
       params.set("include_assigned_threads", includeAssignedThreads ? "1" : "0");
+      if (includeInactive) {
+        params.set("include_inactive", "true");
+      }
       if (mode === "season") {
         if (showId) params.set("trr_show_id", showId);
         if (seasonId) params.set("trr_season_id", seasonId);
@@ -2788,6 +2918,7 @@ export default function RedditSourcesManager({
           }
         }
         if (prev && list.some((community) => community.id === prev)) return prev;
+        if (inventoryOnly && !hideCommunityList) return null;
         return list[0]?.id ?? null;
       });
     })();
@@ -2805,6 +2936,7 @@ export default function RedditSourcesManager({
     getAuthHeaders,
     hideCommunityList,
     initialCommunityId,
+    inventoryOnly,
     mode,
     seasonId,
     showId,
@@ -2881,6 +3013,12 @@ export default function RedditSourcesManager({
     setSelectedSupabaseFlairKeys(new Set());
     setAssignedThreadsExpanded(true);
     setShowCommunitySettingsModal(false);
+    setShowFlairAssignmentsModal(false);
+    setFlairAssignmentsDraft({});
+    setSelectedFlairAssignmentKey(null);
+    setFlairAssignmentContextShowId("");
+    setFlairAssignmentSeasonOptions([]);
+    setFlairAssignmentPeople([]);
     setShowDedicatedSeasonMenu(false);
     setSelectedShowLabel(null);
     setSelectedShowSlug(null);
@@ -2902,6 +3040,16 @@ export default function RedditSourcesManager({
   const selectedCommunity = useMemo(
     () => communities.find((community) => community.id === selectedCommunityId) ?? null,
     [communities, selectedCommunityId],
+  );
+  const visibleCommunities = useMemo(() => {
+    if (mode !== "global" || hideCommunityList || showArchivedCommunities) {
+      return communities;
+    }
+    return communities.filter((community) => community.is_active);
+  }, [communities, hideCommunityList, mode, showArchivedCommunities]);
+  const archivedCommunityCount = useMemo(
+    () => communities.filter((community) => !community.is_active).length,
+    [communities],
   );
   const selectedCommunityScope = useMemo<RedditCommunityScopeType>(
     () => (selectedCommunity ? deriveCommunityScope(selectedCommunity) : "show"),
@@ -2931,6 +3079,152 @@ export default function RedditSourcesManager({
     selectedCommunityShowId,
     selectedCommunityShowName,
     selectedCommunitySubreddit,
+  ]);
+  const flairAssignmentFlairs = useMemo(
+    () => (selectedCommunity ? normalizeFlairList(selectedCommunity.post_flairs) : []),
+    [selectedCommunity],
+  );
+  const flairAssignmentShowOptions = useMemo(() => {
+    const options = [...coveredShows];
+    if (
+      selectedCommunity &&
+      selectedCommunity.trr_show_id &&
+      !options.some((show) => show.trr_show_id === selectedCommunity.trr_show_id)
+    ) {
+      options.unshift({
+        trr_show_id: selectedCommunity.trr_show_id,
+        show_name: selectedCommunity.trr_show_name,
+      });
+    }
+    return options;
+  }, [coveredShows, selectedCommunity]);
+  const selectedFlairAssignment = useMemo(() => {
+    if (!selectedFlairAssignmentKey) return emptyFlairAssignment();
+    return flairAssignmentsDraft[selectedFlairAssignmentKey] ?? emptyFlairAssignment();
+  }, [flairAssignmentsDraft, selectedFlairAssignmentKey]);
+  const selectedFlairAssignmentLabel = useMemo(() => {
+    if (!selectedFlairAssignmentKey) return "";
+    return (
+      flairAssignmentFlairs.find((flair) => normalizeFlairKey(flair) === selectedFlairAssignmentKey) ??
+      selectedFlairAssignmentKey
+    );
+  }, [flairAssignmentFlairs, selectedFlairAssignmentKey]);
+  const updateFlairAssignmentDraft = useCallback(
+    (
+      flairKey: string,
+      updater: (current: RedditFlairAssignment) => RedditFlairAssignment,
+    ) => {
+      setFlairAssignmentsDraft((current) => {
+        const next = updater(current[flairKey] ?? emptyFlairAssignment());
+        return {
+          ...current,
+          [flairKey]: {
+            show_ids: uniqueStringList(next.show_ids),
+            season_ids: uniqueStringList(next.season_ids),
+            person_ids: uniqueStringList(next.person_ids),
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const loadFlairAssignmentShowContext = useCallback(
+    async (showIdValue: string, assignment?: RedditFlairAssignment) => {
+      if (!showIdValue) {
+        setFlairAssignmentSeasonOptions([]);
+        setFlairAssignmentPeople([]);
+        return;
+      }
+      setFlairAssignmentLoading(true);
+      try {
+        const headers = await getAuthHeaders();
+        let seasons = seasonOptionsCacheRef.current.get(showIdValue) ?? null;
+        if (!seasons) {
+          const response = await fetchWithTimeout(
+            `/api/admin/trr-api/shows/${showIdValue}/seasons?limit=100&include_episode_signal=true`,
+            {
+              headers,
+              cache: "no-store",
+              timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+            },
+          );
+          if (!response.ok) {
+            throw new Error("Failed to load seasons for flair assignments");
+          }
+          const payload = (await response.json().catch(() => ({}))) as { seasons?: unknown };
+          seasons = extractSeasonOptions(payload.seasons);
+          seasonOptionsCacheRef.current.set(showIdValue, seasons);
+        }
+        setFlairAssignmentSeasonOptions(seasons);
+
+        const assignedSeasonNumbers = seasons
+          .filter((season) => (assignment?.season_ids ?? []).includes(season.id))
+          .map((season) => season.season_number)
+          .filter((seasonNumber) => Number.isFinite(seasonNumber));
+        const peopleCacheKey = `${showIdValue}:${assignedSeasonNumbers.sort((a, b) => a - b).join(",")}`;
+        let people = flairAssignmentPeopleCacheRef.current.get(peopleCacheKey) ?? null;
+        if (!people) {
+          const castRequests = [fetchWithTimeout(`/api/admin/trr-api/shows/${showIdValue}/cast?limit=200`, {
+            headers,
+            cache: "no-store",
+            timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+          })];
+          for (const seasonNumber of assignedSeasonNumbers) {
+            castRequests.push(
+              fetchWithTimeout(
+                `/api/admin/trr-api/shows/${showIdValue}/seasons/${seasonNumber}/cast?limit=200`,
+                {
+                  headers,
+                  cache: "no-store",
+                  timeoutMs: REQUEST_TIMEOUT_MS.seasonContext,
+                },
+              ),
+            );
+          }
+          const responses = await Promise.all(castRequests);
+          const peopleLists: FlairAssignmentPersonOption[] = [];
+          for (const response of responses) {
+            if (!response.ok) continue;
+            const payload = (await response.json().catch(() => ({}))) as { cast?: unknown };
+            peopleLists.push(...extractPersonOptions(payload.cast));
+          }
+          const deduped = extractPersonOptions(
+            peopleLists.map((person) => ({ id: person.id, display_name: person.name })),
+          );
+          people = deduped;
+          flairAssignmentPeopleCacheRef.current.set(peopleCacheKey, people);
+        }
+        setFlairAssignmentPeople(people);
+      } finally {
+        setFlairAssignmentLoading(false);
+      }
+    },
+    [fetchWithTimeout, getAuthHeaders],
+  );
+
+  useEffect(() => {
+    if (!showFlairAssignmentsModal || !selectedCommunity) return;
+    const draft = normalizeFlairAssignments(selectedCommunity.post_flair_assignments);
+    setFlairAssignmentsDraft(draft);
+    const firstFlairKey = normalizeFlairKey(flairAssignmentFlairs[0]);
+    setSelectedFlairAssignmentKey((current) => current ?? firstFlairKey ?? null);
+    setFlairAssignmentContextShowId(selectedCommunity.trr_show_id);
+  }, [flairAssignmentFlairs, selectedCommunity, showFlairAssignmentsModal]);
+
+  useEffect(() => {
+    if (!showFlairAssignmentsModal || !selectedFlairAssignmentKey) return;
+    void loadFlairAssignmentShowContext(
+      flairAssignmentContextShowId || selectedCommunity?.trr_show_id || "",
+      flairAssignmentsDraft[selectedFlairAssignmentKey] ?? emptyFlairAssignment(),
+    );
+  }, [
+    flairAssignmentContextShowId,
+    flairAssignmentsDraft,
+    loadFlairAssignmentShowContext,
+    selectedCommunity?.trr_show_id,
+    selectedFlairAssignmentKey,
+    showFlairAssignmentsModal,
   ]);
 
   useEffect(() => {
@@ -4698,6 +4992,51 @@ export default function RedditSourcesManager({
     [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
   );
 
+  const persistFlairAssignments = useCallback(
+    async (communityId: string, nextAssignments: Record<string, RedditFlairAssignment>) => {
+      const previous = communities.find((community) => community.id === communityId);
+      if (!previous) return false;
+
+      const sanitizedAssignments = normalizeFlairAssignments(nextAssignments);
+      mergeCommunityPatch(communityId, { post_flair_assignments: sanitizedAssignments });
+      setBusyAction("save-flair-assignments");
+      setBusyLabel("Saving flair assignments...");
+      setError(null);
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ post_flair_assignments: sanitizedAssignments }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          community?: RedditCommunityResponse;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to save flair assignments");
+        }
+        if (payload.community) {
+          const nextCommunity = toCommunityModel(payload.community);
+          mergeCommunityPatch(communityId, {
+            post_flair_assignments: nextCommunity.post_flair_assignments,
+          });
+        }
+        return true;
+      } catch (err) {
+        mergeCommunityPatch(communityId, {
+          post_flair_assignments: previous.post_flair_assignments,
+        });
+        setError(err instanceof Error ? err.message : "Failed to save flair assignments");
+        return false;
+      } finally {
+        setBusyAction(null);
+        setBusyLabel(null);
+      }
+    },
+    [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
+  );
+
   const persistCommunityFocus = useCallback(
     async (
       communityId: string,
@@ -4818,14 +5157,30 @@ export default function RedditSourcesManager({
 
   const groupedCommunities = useMemo(() => {
     const grouped = new Map<string, RedditCommunity[]>();
-    for (const community of communities) {
-      const key = community.trr_show_name || "Unknown Show";
-      const list = grouped.get(key) ?? [];
-      list.push(community);
-      grouped.set(key, list);
+    const groupsInOrder = [
+      ["Network Communities", [] as RedditCommunity[]],
+      ["Franchise Communities", [] as RedditCommunity[]],
+      ["Show Communities", [] as RedditCommunity[]],
+      ["Other", [] as RedditCommunity[]],
+    ] as const;
+    for (const [label, items] of groupsInOrder) {
+      grouped.set(label, items);
     }
-    return [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [communities]);
+    for (const community of visibleCommunities) {
+      const key =
+        community.network_focus_targets.length > 0
+          ? "Network Communities"
+          : community.franchise_focus_targets.length > 0
+            ? "Franchise Communities"
+            : community.is_show_focused
+              ? "Show Communities"
+              : "Other";
+      grouped.get(key)?.push(community);
+    }
+    return groupsInOrder
+      .map(([label]) => [label, grouped.get(label) ?? []] as [string, RedditCommunity[]])
+      .filter(([, items]) => items.length > 0);
+  }, [visibleCommunities]);
 
   const visibleDiscoveryThreads = useMemo(() => {
     const items = discovery?.threads ?? [];
@@ -4861,8 +5216,8 @@ export default function RedditSourcesManager({
   }, [communities]);
 
   const communityGroups = useMemo<Array<[string, RedditCommunity[]]>>(
-    () => (mode === "global" ? groupedCommunities : [[showName ?? "Show", communities]]),
-    [communities, groupedCommunities, mode, showName],
+    () => (mode === "global" ? groupedCommunities : [[showName ?? "Show", visibleCommunities]]),
+    [groupedCommunities, mode, showName, visibleCommunities],
   );
   const isSeasonLandingView = mode === "season" && !hideCommunityList;
   const isDedicatedCommunityView = hideCommunityList;
@@ -4893,6 +5248,23 @@ export default function RedditSourcesManager({
     showName,
     showSlug,
   ]);
+
+  useEffect(() => {
+    if (hideCommunityList) return;
+    if (visibleCommunities.length === 0) {
+      setSelectedCommunityId(null);
+      return;
+    }
+    if (inventoryOnlyRef.current && selectedCommunityId === null) {
+      return;
+    }
+    const stillVisible = visibleCommunities.some(
+      (community) => community.id === selectedCommunityId,
+    );
+    if (!stillVisible) {
+      setSelectedCommunityId(visibleCommunities[0]?.id ?? null);
+    }
+  }, [hideCommunityList, selectedCommunityId, visibleCommunities]);
   const seasonSelectionCommunitySlug = useMemo(
     () => normalizeCommunitySlugForPath(selectedCommunity?.subreddit ?? null) || null,
     [selectedCommunity?.subreddit],
@@ -5699,120 +6071,104 @@ export default function RedditSourcesManager({
     [resolveBackfillContainerLabel, setContainerRefreshProgress],
   );
 
-  const fetchBackfillOperation = useCallback(
-    async (operationId: string): Promise<AdminOperationState> => {
-      const headers = await getAuthHeaders();
-      const response = await fetchWithTimeout(`/api/admin/trr-api/operations/${operationId}`, {
-        headers,
-        cache: "no-store",
-        timeoutMs: REQUEST_TIMEOUT_MS.runStatus,
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Failed to fetch reddit backfill operation");
+  const fetchBackfillSnapshot = useCallback(
+    async (options?: { signal?: AbortSignal; forceRefresh?: boolean }) => {
+      if (!selectedCommunity || !backfillOperationId) {
+        throw new Error("Missing reddit backfill operation");
       }
+      const params = new URLSearchParams({
+        operation_id: backfillOperationId,
+      });
+      if (episodeSeasonId) {
+        params.set("season_id", episodeSeasonId);
+      }
+      if (options?.forceRefresh) {
+        params.set("refresh", "1");
+      }
+      const response = await fetchAdminWithAuth(
+        `/api/admin/reddit/communities/${selectedCommunity.id}/backfill/snapshot?${params.toString()}`,
+        {
+          cache: "no-store",
+          signal: options?.signal,
+        },
+        { allowDevAdminBypass: true },
+      );
       const payload = (await response.json().catch(() => ({}))) as {
-        operation?: Record<string, unknown>;
+        data?: { operation?: Record<string, unknown> };
+        error?: string;
       };
-      const operation = payload.operation ?? {};
-      const status = operation.status;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to fetch reddit backfill snapshot");
+      }
+      const operationEnvelope =
+        payload.data?.operation && typeof payload.data.operation === "object"
+          ? (payload.data.operation as Record<string, unknown>)
+          : {};
+      const operationPayload =
+        operationEnvelope.operation && typeof operationEnvelope.operation === "object"
+          ? (operationEnvelope.operation as Record<string, unknown>)
+          : operationEnvelope;
+      const status = operationPayload.status;
       if (!isAdminOperationStatus(status)) {
-        throw new Error("Invalid reddit backfill operation payload");
+        throw new Error("Invalid reddit backfill snapshot payload");
       }
       return {
-        id: typeof operation.id === "string" ? operation.id : operationId,
-        status,
-        progress_payload:
-          operation.progress_payload && typeof operation.progress_payload === "object"
-            ? (operation.progress_payload as RedditBackfillOperationPayload)
-            : null,
-        result_payload:
-          operation.result_payload && typeof operation.result_payload === "object"
-            ? (operation.result_payload as RedditBackfillOperationPayload)
-            : null,
-        error_payload:
-          operation.error_payload && typeof operation.error_payload === "object"
-            ? (operation.error_payload as Record<string, unknown>)
-            : null,
-        attached: typeof operation.attached === "boolean" ? operation.attached : undefined,
+        operation: {
+          id: typeof operationPayload.id === "string" ? operationPayload.id : backfillOperationId,
+          status,
+          progress_payload:
+            operationPayload.progress_payload && typeof operationPayload.progress_payload === "object"
+              ? (operationPayload.progress_payload as RedditBackfillOperationPayload)
+              : null,
+          result_payload:
+            operationPayload.result_payload && typeof operationPayload.result_payload === "object"
+              ? (operationPayload.result_payload as RedditBackfillOperationPayload)
+              : null,
+          error_payload:
+            operationPayload.error_payload && typeof operationPayload.error_payload === "object"
+              ? (operationPayload.error_payload as Record<string, unknown>)
+              : null,
+          attached: typeof operationPayload.attached === "boolean" ? operationPayload.attached : undefined,
+        } satisfies AdminOperationState,
+        cacheStatus: response.headers.get("x-trr-cache") ?? "miss",
       };
     },
-    [fetchWithTimeout, getAuthHeaders],
+    [backfillOperationId, episodeSeasonId, selectedCommunity],
   );
 
+  const liveBackfillSnapshot = useSharedPollingResource<{
+    operation: AdminOperationState;
+    cacheStatus: string;
+  }>({
+    key: `reddit-sources-backfill:${selectedCommunity?.id ?? "none"}:${episodeSeasonId ?? "none"}:${backfillOperationId ?? "none"}`,
+    shouldRun: Boolean(selectedCommunity && backfillOperationId && backfillRunning),
+    intervalMs: CONTAINER_RUN_POLL_INTERVAL_MS,
+    fetchData: async (signal, request) => await fetchBackfillSnapshot({ signal, forceRefresh: request?.forceRefresh }),
+  });
+
   useEffect(() => {
-    if (!backfillOperationId || !backfillRunning) return;
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let visibilityListenerRegistered = false;
-
-    const clearPendingPoll = () => {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
+    const snapshot = liveBackfillSnapshot.data;
+    if (!snapshot) return;
+    const operation = snapshot.operation;
+    applyBackfillOperationPayload(operation.result_payload ?? operation.progress_payload ?? null);
+    if (operation.status === "completed" || operation.status === "failed" || operation.status === "cancelled") {
+      setBackfillRunning(false);
+      setStoredCountsRefreshNonce((current) => current + 1);
+      if (operation.status === "failed") {
+        const errorMessage =
+          typeof operation.error_payload?.message === "string"
+            ? operation.error_payload.message
+            : "Reddit stale-window recovery failed";
+        setError(errorMessage);
       }
-    };
+    }
+  }, [applyBackfillOperationPayload, liveBackfillSnapshot.data]);
 
-    const scheduleNextPoll = () => {
-      clearPendingPoll();
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        return;
-      }
-      timer = setTimeout(() => {
-        void poll();
-      }, CONTAINER_RUN_POLL_INTERVAL_MS);
-    };
-
-    const poll = async () => {
-      try {
-        const operation = await fetchBackfillOperation(backfillOperationId);
-        if (cancelled) return;
-        applyBackfillOperationPayload(operation.result_payload ?? operation.progress_payload ?? null);
-        if (
-          operation.status === "completed" ||
-          operation.status === "failed" ||
-          operation.status === "cancelled"
-        ) {
-          setBackfillRunning(false);
-          setStoredCountsRefreshNonce((current) => current + 1);
-          if (operation.status === "failed") {
-            const errorMessage =
-              typeof operation.error_payload?.message === "string"
-                ? operation.error_payload.message
-                : "Reddit stale-window recovery failed";
-            setError(errorMessage);
-          }
-          return;
-        }
-        scheduleNextPoll();
-      } catch (error) {
-        if (cancelled) return;
-        setBackfillRunning(false);
-        setError(error instanceof Error ? error.message : "Failed to poll reddit backfill operation");
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        clearPendingPoll();
-        return;
-      }
-      void poll();
-    };
-
-    void poll();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    visibilityListenerRegistered = true;
-
-    return () => {
-      cancelled = true;
-      clearPendingPoll();
-      if (visibilityListenerRegistered) {
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-      }
-    };
-  }, [applyBackfillOperationPayload, backfillOperationId, backfillRunning, fetchBackfillOperation]);
+  useEffect(() => {
+    if (!liveBackfillSnapshot.error) return;
+    setBackfillRunning(false);
+    setError(liveBackfillSnapshot.error);
+  }, [liveBackfillSnapshot.error]);
 
   const pollContainerRefreshRun = useCallback(
     async (input: {
@@ -7694,39 +8050,57 @@ export default function RedditSourcesManager({
               </p>
               <h3 className="text-xl font-bold text-zinc-900">Reddit Communities</h3>
               <p className="text-sm text-zinc-500">
-                Review show, network, and franchise communities for this season.
+                {mode === "global"
+                  ? "Review saved communities across shows and jump into the existing Reddit workflows."
+                  : "Review show, network, and franchise communities for this season."}
               </p>
-              <div className="mt-3 space-y-1.5">
-                <label
-                  htmlFor="reddit-season-selection-landing"
-                  className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500"
-                >
-                  Season Selection
-                </label>
-                <select
-                  id="reddit-season-selection-landing"
-                  aria-label="Season Selection"
-                  value={activeSeasonSelection != null ? String(activeSeasonSelection) : ""}
-                  onChange={(event) => handleSeasonSelectionChange(event.target.value)}
-                  disabled={seasonSelectionOptions.length === 0 || !seasonSelectionShowSlug}
-                  className="w-full max-w-[180px] rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm font-semibold text-zinc-700 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
-                >
-                  {seasonSelectionOptions.length > 0 ? (
-                    seasonSelectionOptions.map((season) => (
-                      <option key={`season-select-landing-${season.id}`} value={String(season.season_number)}>
-                        S{season.season_number}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">Unavailable</option>
-                  )}
-                </select>
-              </div>
+              {isSeasonLandingView ? (
+                <div className="mt-3 space-y-1.5">
+                  <label
+                    htmlFor="reddit-season-selection-landing"
+                    className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-500"
+                  >
+                    Season Selection
+                  </label>
+                  <select
+                    id="reddit-season-selection-landing"
+                    aria-label="Season Selection"
+                    value={activeSeasonSelection != null ? String(activeSeasonSelection) : ""}
+                    onChange={(event) => handleSeasonSelectionChange(event.target.value)}
+                    disabled={seasonSelectionOptions.length === 0 || !seasonSelectionShowSlug}
+                    className="w-full max-w-[180px] rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm font-semibold text-zinc-700 focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900 disabled:bg-zinc-100 disabled:text-zinc-500"
+                  >
+                    {seasonSelectionOptions.length > 0 ? (
+                      seasonSelectionOptions.map((season) => (
+                        <option
+                          key={`season-select-landing-${season.id}`}
+                          value={String(season.season_number)}
+                        >
+                          S{season.season_number}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">Unavailable</option>
+                    )}
+                  </select>
+                </div>
+              ) : null}
             </>
           )}
         </div>
         {allowCreateActions && (
           <div className="flex items-center gap-2">
+            {mode === "global" && !hideCommunityList && archivedCommunityCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowArchivedCommunities((current) => !current)}
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                {showArchivedCommunities
+                  ? "Hide Archived Communities"
+                  : "Show Archived Communities"}
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={isBusy}
@@ -8316,7 +8690,7 @@ export default function RedditSourcesManager({
           {!hideCommunityList && (
             <section className="xl:col-span-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             <h4 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">Communities</h4>
-            {communities.length === 0 ? (
+            {visibleCommunities.length === 0 ? (
               <p className="mt-3 text-sm text-zinc-500">
                 No communities yet. Use <span className="font-semibold">Add Community</span> to get started.
               </p>
@@ -8333,6 +8707,7 @@ export default function RedditSourcesManager({
                       <button
                         key={community.id}
                         type="button"
+                        aria-label={community.display_name || getCommunityTitle(community)}
                         onClick={() => {
                           setSelectedCommunityId(community.id);
                           setSeasonDiscovery(null);
@@ -8341,7 +8716,9 @@ export default function RedditSourcesManager({
                         className={`w-full rounded-lg border px-3 py-2 text-left transition ${
                           selectedCommunityId === community.id
                             ? "border-zinc-900 bg-zinc-900/5"
-                            : "border-zinc-200 hover:border-zinc-400"
+                            : community.is_active
+                              ? "border-zinc-200 hover:border-zinc-400"
+                              : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-zinc-400"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -8349,7 +8726,17 @@ export default function RedditSourcesManager({
                             <p className="truncate text-sm font-semibold text-zinc-900">
                               {community.display_name || `r/${community.subreddit}`}
                             </p>
-                            <p className="truncate text-xs text-zinc-500">{getCommunityTitle(community)}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <p className="truncate text-xs text-zinc-500">{getCommunityTitle(community)}</p>
+                              {!community.is_active ? (
+                                <span
+                                  aria-hidden="true"
+                                  className="rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500"
+                                >
+                                  Archived
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                           <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-700">
                             {community.assigned_thread_count}
@@ -8428,6 +8815,27 @@ export default function RedditSourcesManager({
                       {selectedCommunity.analysis_flairs.length} scan ·{" "}
                       {selectedRelevantPostFlairs.length} relevant flairs
                     </p>
+                    <div className="mt-2 space-y-1.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                        Post Flairs
+                      </p>
+                      {selectedCommunity.post_flairs.length > 0 ? (
+                        <div className="max-h-24 overflow-y-auto pr-1">
+                          <div className="flex flex-wrap gap-1">
+                            {selectedCommunity.post_flairs.map((flair) => (
+                              <span
+                                key={`${selectedCommunity.id}-header-flair-${flair}`}
+                                className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold leading-4 text-zinc-700"
+                              >
+                                {displayFlair(flair)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-zinc-500">No post flairs discovered yet.</p>
+                      )}
+                    </div>
                     {renderSupabaseSummary()}
                     {renderRedditAnalyticsSummary()}
                     {selectedCommunity.notes && (
@@ -8438,7 +8846,7 @@ export default function RedditSourcesManager({
                   </article>
                 )}
 
-                {episodeDiscussionsPlacement === "inline" && renderEpisodeDiscussionPanel()}
+                {episodeDiscussionsPlacement === "inline" ? renderEpisodeDiscussionPanel() : null}
 
                 {showCommunitySettingsModal && (
                   <div
@@ -8509,114 +8917,31 @@ export default function RedditSourcesManager({
                         )}
                       </div>
 
-                      {selectedCommunity.is_show_focused &&
-                        selectedCommunity.post_flairs.length > 0 && (
-                          <div className="mb-3 rounded-lg border border-zinc-200 p-3">
-                            <div className="mb-1 flex items-center justify-between">
+                      {selectedCommunity.post_flairs.length > 0 && (
+                        <div className="mb-3 rounded-lg border border-zinc-200 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-1">
                               <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-                                Flair Categories
+                                Flair Assignments
                               </p>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  disabled={isBusy}
-                                  className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                                  onClick={async () => {
-                                    setBusyAction("auto-categorize-flairs");
-                                    setBusyLabel("Auto-categorizing flairs...");
-                                    setError(null);
-                                    try {
-                                      const headers = await getAuthHeaders();
-                                      const response = await fetchWithTimeout(
-                                        `/api/admin/reddit/communities/${selectedCommunity.id}/auto-categorize-flairs`,
-                                        {
-                                          method: "POST",
-                                          headers: { ...headers, "Content-Type": "application/json" },
-                                          body: JSON.stringify({ show_id: selectedCommunity.trr_show_id }),
-                                        },
-                                      );
-                                      const payload = (await response.json().catch(() => ({}))) as {
-                                        error?: string;
-                                        categories?: Record<string, string>;
-                                        matched?: number;
-                                        total?: number;
-                                      };
-                                      if (!response.ok) {
-                                        throw new Error(payload.error ?? "Failed to auto-categorize flairs");
-                                      }
-                                      if (payload.categories) {
-                                        const merged = {
-                                          ...selectedCommunity.post_flair_categories,
-                                          ...payload.categories,
-                                        };
-                                        void persistFlairCategories(selectedCommunity.id, merged);
-                                      }
-                                      setBusyLabel(
-                                        `Categorized ${payload.matched ?? 0} of ${payload.total ?? 0} flairs`,
-                                      );
-                                      setTimeout(() => setBusyLabel(null), 3000);
-                                    } catch (err) {
-                                      setError(err instanceof Error ? err.message : "Failed to auto-categorize flairs");
-                                    } finally {
-                                      setBusyAction(null);
-                                    }
-                                  }}
-                                >
-                                  Auto-Categorize
-                                </button>
-                                <span className="text-[11px] text-zinc-400">
-                                  {(() => {
-                                    const cats = selectedCommunity.post_flair_categories;
-                                    const castCount = Object.values(cats).filter((c) => c === "cast").length;
-                                    const seasonCount = Object.values(cats).filter((c) => c === "season").length;
-                                    const parts: string[] = [];
-                                    if (castCount > 0) parts.push(`${castCount} cast`);
-                                    if (seasonCount > 0) parts.push(`${seasonCount} season`);
-                                    return parts.length > 0 ? parts.join(" · ") : "Click to categorize";
-                                  })()}
-                                </span>
-                              </div>
+                              <p className="text-xs text-zinc-500">
+                                Map each discovered flair to shows, seasons, and people.
+                              </p>
+                              <p className="text-[11px] text-zinc-400">
+                                {Object.keys(selectedCommunity.post_flair_assignments).length} flair mappings saved
+                              </p>
                             </div>
-                            <p className="mb-2 text-[11px] text-zinc-400">
-                              Click a flair to cycle: uncategorized → cast → season
-                            </p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {selectedCommunity.post_flairs.map((flair) => {
-                                const key = normalizeFlairKey(flair);
-                                const category = selectedCommunity.post_flair_categories[key] as
-                                  | FlairCategory
-                                  | undefined;
-                                const colors = category
-                                  ? FLAIR_CATEGORY_COLORS[category]
-                                  : { bg: "bg-zinc-100", text: "text-zinc-700" };
-                                const label = category ? FLAIR_CATEGORY_LABELS[category] : null;
-                                return (
-                                  <button
-                                    key={`flair-cat-${selectedCommunity.id}-${flair}`}
-                                    type="button"
-                                    disabled={isBusy}
-                                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors ${colors.bg} ${colors.text} hover:opacity-80 disabled:opacity-50`}
-                                    onClick={() => {
-                                      const currentIdx = FLAIR_CATEGORY_CYCLE.indexOf(category);
-                                      const nextCategory =
-                                        FLAIR_CATEGORY_CYCLE[(currentIdx + 1) % FLAIR_CATEGORY_CYCLE.length];
-                                      const nextMap = { ...selectedCommunity.post_flair_categories };
-                                      if (nextCategory) {
-                                        nextMap[key] = nextCategory;
-                                      } else {
-                                        delete nextMap[key];
-                                      }
-                                      void persistFlairCategories(selectedCommunity.id, nextMap);
-                                    }}
-                                  >
-                                    {label ? `${label}: ` : ""}
-                                    {displayFlair(flair)}
-                                  </button>
-                                );
-                              })}
-                            </div>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                              onClick={() => setShowFlairAssignmentsModal(true)}
+                            >
+                              Manage Flair Assignments
+                            </button>
                           </div>
-                        )}
+                        </div>
+                      )}
 
                       <div className="space-y-3">
                     <div className="rounded-lg border border-zinc-200 p-3">
@@ -8961,8 +9286,247 @@ export default function RedditSourcesManager({
                     )}
 
                     {renderEpisodeTitlePhraseSettings()}
-                    {episodeDiscussionsPlacement === "settings" && renderEpisodeDiscussionPanel()}
+                    {episodeDiscussionsPlacement === "settings" ? renderEpisodeDiscussionPanel() : null}
                   </div>
+                    </article>
+                  </div>
+                )}
+
+                {showFlairAssignmentsModal && selectedCommunity && (
+                  <div
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+                    onClick={() => setShowFlairAssignmentsModal(false)}
+                  >
+                    <article
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label="Flair Assignments"
+                      className="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h5 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-500">
+                            Flair Assignments
+                          </h5>
+                          <p className="text-sm text-zinc-500">
+                            Assign each flair to shows, seasons, and people.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                            onClick={() => setShowFlairAssignmentsModal(false)}
+                          >
+                            Close
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            className="rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+                            onClick={async () => {
+                              const saved = await persistFlairAssignments(
+                                selectedCommunity.id,
+                                flairAssignmentsDraft,
+                              );
+                              if (saved) {
+                                setShowFlairAssignmentsModal(false);
+                              }
+                            }}
+                          >
+                            Save Assignments
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
+                        <div className="rounded-xl border border-zinc-200 p-3">
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                            Post Flairs
+                          </p>
+                          <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+                            {flairAssignmentFlairs.map((flair) => {
+                              const flairKey = normalizeFlairKey(flair);
+                              const assignment = flairAssignmentsDraft[flairKey] ?? emptyFlairAssignment();
+                              const assignmentCount =
+                                assignment.show_ids.length +
+                                assignment.season_ids.length +
+                                assignment.person_ids.length;
+                              return (
+                                <button
+                                  key={`flair-assignment-select-${selectedCommunity.id}-${flair}`}
+                                  type="button"
+                                  onClick={() => setSelectedFlairAssignmentKey(flairKey)}
+                                  className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                                    selectedFlairAssignmentKey === flairKey
+                                      ? "border-zinc-900 bg-zinc-900/5"
+                                      : "border-zinc-200 hover:border-zinc-400"
+                                  }`}
+                                >
+                                  <span className="block text-sm font-semibold text-zinc-900">
+                                    {displayFlair(flair)}
+                                  </span>
+                                  <span className="block text-[11px] text-zinc-500">
+                                    {assignmentCount} assignments
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          {!selectedFlairAssignmentKey ? (
+                            <div className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500">
+                              Select a flair to edit assignments.
+                            </div>
+                          ) : (
+                            <>
+                              <div className="rounded-xl border border-zinc-200 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                      Selected Flair
+                                    </p>
+                                    <h6 className="text-lg font-bold text-zinc-900">
+                                      {displayFlair(selectedFlairAssignmentLabel)}
+                                    </h6>
+                                  </div>
+                                  <label className="flex min-w-[220px] flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                    Show Context
+                                    <select
+                                      value={flairAssignmentContextShowId}
+                                      onChange={(event) =>
+                                        setFlairAssignmentContextShowId(event.target.value)
+                                      }
+                                      className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-medium normal-case tracking-normal text-zinc-900"
+                                    >
+                                      {flairAssignmentShowOptions.map((show) => (
+                                        <option key={show.trr_show_id} value={show.trr_show_id}>
+                                          {show.show_name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                </div>
+                              </div>
+
+                              <div className="rounded-xl border border-zinc-200 p-4">
+                                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                  Shows
+                                </p>
+                                <div className="grid gap-2 md:grid-cols-2">
+                                  {flairAssignmentShowOptions.map((show) => (
+                                    <label
+                                      key={`flair-show-${selectedFlairAssignmentKey}-${show.trr_show_id}`}
+                                      className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedFlairAssignment.show_ids.includes(show.trr_show_id)}
+                                        onChange={(event) => {
+                                          updateFlairAssignmentDraft(selectedFlairAssignmentKey, (current) => ({
+                                            ...current,
+                                            show_ids: sortFlairAssignmentShows(
+                                              toggleAssignedId(
+                                                current.show_ids,
+                                                show.trr_show_id,
+                                                event.target.checked,
+                                              ),
+                                              flairAssignmentShowOptions,
+                                            ),
+                                          }));
+                                        }}
+                                      />
+                                      <span>{show.show_name}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="grid gap-4 xl:grid-cols-2">
+                                <div className="rounded-xl border border-zinc-200 p-4">
+                                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                    Seasons
+                                  </p>
+                                  {flairAssignmentLoading ? (
+                                    <p className="text-sm text-zinc-500">Loading seasons...</p>
+                                  ) : flairAssignmentSeasonOptions.length === 0 ? (
+                                    <p className="text-sm text-zinc-500">No seasons available for this show.</p>
+                                  ) : (
+                                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                                      {flairAssignmentSeasonOptions.map((season) => {
+                                        const label = `S${season.season_number}`;
+                                        return (
+                                          <label
+                                            key={`flair-season-${selectedFlairAssignmentKey}-${season.id}`}
+                                            className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              aria-label={label}
+                                              checked={selectedFlairAssignment.season_ids.includes(season.id)}
+                                              onChange={(event) => {
+                                                updateFlairAssignmentDraft(selectedFlairAssignmentKey, (current) => ({
+                                                  ...current,
+                                                  season_ids: toggleAssignedId(
+                                                    current.season_ids,
+                                                    season.id,
+                                                    event.target.checked,
+                                                  ),
+                                                }));
+                                              }}
+                                            />
+                                            <span>{label}</span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="rounded-xl border border-zinc-200 p-4">
+                                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                    People
+                                  </p>
+                                  {flairAssignmentLoading ? (
+                                    <p className="text-sm text-zinc-500">Loading people...</p>
+                                  ) : flairAssignmentPeople.length === 0 ? (
+                                    <p className="text-sm text-zinc-500">No cast found for this show context.</p>
+                                  ) : (
+                                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                                      {flairAssignmentPeople.map((person) => (
+                                        <label
+                                          key={`flair-person-${selectedFlairAssignmentKey}-${person.id}`}
+                                          className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            aria-label={person.name}
+                                            checked={selectedFlairAssignment.person_ids.includes(person.id)}
+                                            onChange={(event) => {
+                                              updateFlairAssignmentDraft(selectedFlairAssignmentKey, (current) => ({
+                                                ...current,
+                                                person_ids: toggleAssignedId(
+                                                  current.person_ids,
+                                                  person.id,
+                                                  event.target.checked,
+                                                ),
+                                              }));
+                                            }}
+                                          />
+                                          <span>{person.name}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </article>
                   </div>
                 )}

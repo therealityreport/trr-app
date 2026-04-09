@@ -4,12 +4,14 @@ const {
   getCoveredShowsMock,
   getShowByIdMock,
   listPersonExternalIdsMock,
+  listRedditCommunitiesMock,
   fetchSocialBackendJsonMock,
   fetchAdminBackendJsonMock,
 } = vi.hoisted(() => ({
   getCoveredShowsMock: vi.fn(),
   getShowByIdMock: vi.fn(),
   listPersonExternalIdsMock: vi.fn(),
+  listRedditCommunitiesMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
 }));
@@ -27,6 +29,10 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
 }));
 
+vi.mock("@/lib/server/admin/reddit-sources-repository", () => ({
+  listRedditCommunities: listRedditCommunitiesMock,
+}));
+
 vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
@@ -39,6 +45,7 @@ describe("social landing repository", () => {
     getCoveredShowsMock.mockReset();
     getShowByIdMock.mockReset();
     listPersonExternalIdsMock.mockReset();
+    listRedditCommunitiesMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
 
@@ -62,6 +69,72 @@ describe("social landing repository", () => {
         show_total_episodes: 1000,
         created_at: "2026-01-01T00:00:00Z",
         created_by_firebase_uid: "admin",
+      },
+    ]);
+
+    listRedditCommunitiesMock.mockResolvedValue([
+      {
+        id: "community-1",
+        trr_show_id: "show-rhoslc",
+        trr_show_name: "The Real Housewives of Salt Lake City",
+        subreddit: "BravoRealHousewives",
+        display_name: "Bravo RH",
+        notes: null,
+        post_flairs: [],
+        analysis_flairs: [],
+        analysis_all_flairs: [],
+        is_show_focused: false,
+        network_focus_targets: [],
+        franchise_focus_targets: [],
+        episode_title_patterns: [],
+        post_flair_categories: {},
+        post_flairs_updated_at: null,
+        is_active: true,
+        created_by_firebase_uid: "admin",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "community-2",
+        trr_show_id: "show-wwhl",
+        trr_show_name: "Watch What Happens Live with Andy Cohen",
+        subreddit: "WWHL",
+        display_name: null,
+        notes: null,
+        post_flairs: [],
+        analysis_flairs: [],
+        analysis_all_flairs: [],
+        is_show_focused: false,
+        network_focus_targets: [],
+        franchise_focus_targets: [],
+        episode_title_patterns: [],
+        post_flair_categories: {},
+        post_flairs_updated_at: null,
+        is_active: true,
+        created_by_firebase_uid: "admin",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "community-3",
+        trr_show_id: "show-wwhl",
+        trr_show_name: "Watch What Happens Live with Andy Cohen",
+        subreddit: "AndyCohenArchive",
+        display_name: null,
+        notes: null,
+        post_flairs: [],
+        analysis_flairs: [],
+        analysis_all_flairs: [],
+        is_show_focused: false,
+        network_focus_targets: [],
+        franchise_focus_targets: [],
+        episode_title_patterns: [],
+        post_flair_categories: {},
+        post_flairs_updated_at: null,
+        is_active: false,
+        created_by_firebase_uid: "admin",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
       },
     ]);
 
@@ -453,5 +526,10 @@ describe("social landing repository", () => {
         }),
       ]),
     );
+    expect(payload.reddit_dashboard).toEqual({
+      active_community_count: expect.any(Number),
+      archived_community_count: expect.any(Number),
+      show_count: expect.any(Number),
+    });
   });
 });

@@ -116,6 +116,8 @@ describe("server auth adapter", () => {
 
   it("does not attempt supabase fallback when TRR_CORE_SUPABASE_* is unset", async () => {
     verifyIdTokenMock.mockRejectedValue(new Error("firebase down"));
+    process.env.SUPABASE_URL = "https://legacy.supabase.co";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "legacy-service-role";
     delete process.env.TRR_CORE_SUPABASE_URL;
     delete process.env.TRR_CORE_SUPABASE_SERVICE_ROLE_KEY;
 

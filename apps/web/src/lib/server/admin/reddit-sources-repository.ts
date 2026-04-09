@@ -10,6 +10,13 @@ import {
 import {
   sanitizeEpisodeTitlePatterns,
 } from "@/lib/server/admin/reddit-episode-rules";
+import { toCanonicalFlairKey } from "@/lib/reddit/flair-key";
+
+export interface RedditFlairAssignment {
+  show_ids: string[];
+  season_ids: string[];
+  person_ids: string[];
+}
 
 export interface RedditCommunityRow {
   id: string;
@@ -26,6 +33,7 @@ export interface RedditCommunityRow {
   franchise_focus_targets: string[];
   episode_title_patterns: string[];
   post_flair_categories: Record<string, string>;
+  post_flair_assignments: Record<string, RedditFlairAssignment>;
   post_flairs_updated_at: string | null;
   is_active: boolean;
   created_by_firebase_uid: string;
@@ -94,6 +102,7 @@ export interface UpdateRedditCommunityInput {
   franchiseFocusTargets?: string[];
   episodeTitlePatterns?: string[];
   postFlairCategories?: Record<string, string>;
+  postFlairAssignments?: Record<string, RedditFlairAssignment>;
 }
 
 export interface ListRedditThreadsOptions {
@@ -153,6 +162,7 @@ interface RedditCommunityRowRaw
     | "franchise_focus_targets"
     | "episode_title_patterns"
     | "post_flair_categories"
+    | "post_flair_assignments"
   > {
   post_flairs: unknown;
   analysis_flairs: unknown;
@@ -161,6 +171,7 @@ interface RedditCommunityRowRaw
   franchise_focus_targets: unknown;
   episode_title_patterns: unknown;
   post_flair_categories: unknown;
+  post_flair_assignments: unknown;
 }
 
 const toThreadsArray = (value: unknown): RedditThreadRow[] => {
@@ -196,6 +207,38 @@ const toFlairCategoriesMap = (value: unknown): Record<string, string> => {
     if (typeof cat === "string" && VALID_FLAIR_CATEGORIES.has(cat)) {
       out[key] = cat;
     }
+  }
+  return out;
+};
+
+const toStringIdList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const normalized = entry.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+};
+
+const toFlairAssignmentsMap = (value: unknown): Record<string, RedditFlairAssignment> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const out: Record<string, RedditFlairAssignment> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const flairKey = toCanonicalFlairKey(key);
+    if (!flairKey) continue;
+    const assignment = entry as Record<string, unknown>;
+    out[flairKey] = {
+      show_ids: toStringIdList(assignment.show_ids),
+      season_ids: toStringIdList(assignment.season_ids),
+      person_ids: toStringIdList(assignment.person_ids),
+    };
   }
   return out;
 };
@@ -319,6 +362,7 @@ const toCommunityRow = (row: RedditCommunityRowRaw): RedditCommunityRow => {
     franchise_focus_targets: toFocusTargets(row.franchise_focus_targets),
     episode_title_patterns: toEpisodeTitlePatterns(row.episode_title_patterns),
     post_flair_categories: toFlairCategoriesMap(row.post_flair_categories),
+    post_flair_assignments: toFlairAssignmentsMap(row.post_flair_assignments),
     post_flairs_updated_at: row.post_flairs_updated_at,
     is_active: row.is_active,
     created_by_firebase_uid: row.created_by_firebase_uid,
@@ -592,6 +636,12 @@ export async function updateRedditCommunity(
     if (input.postFlairCategories !== undefined) {
       const sanitized = toFlairCategoriesMap(input.postFlairCategories);
       sets.push(`post_flair_categories = $${idx++}::jsonb`);
+      values.push(JSON.stringify(sanitized));
+    }
+
+    if (input.postFlairAssignments !== undefined) {
+      const sanitized = toFlairAssignmentsMap(input.postFlairAssignments);
+      sets.push(`post_flair_assignments = $${idx++}::jsonb`);
       values.push(JSON.stringify(sanitized));
     }
 

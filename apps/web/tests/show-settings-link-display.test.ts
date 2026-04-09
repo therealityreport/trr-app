@@ -12,6 +12,8 @@ import {
 describe("show link display helpers", () => {
   it("distinguishes fandom seeds from wiki pages", () => {
     expect(isFandomSeedUrl("https://real-housewives.fandom.com")).toBe(true);
+    expect(isFandomSeedUrl("https://real-housewives.fandom.com/wiki/Real_Housewives_Wiki")).toBe(true);
+    expect(isFandomSeedUrl("https://real-housewives.fandom.com/wiki/Special:AllPages")).toBe(true);
     expect(isFandomSeedUrl("https://real-housewives.fandom.com/wiki/The_Real_Housewives_of_Salt_Lake_City")).toBe(false);
   });
 

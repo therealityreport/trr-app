@@ -5,12 +5,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { ContentBlock } from "@/lib/admin/design-docs-config";
+import {
+  getSvgIconPrimitive,
+  resolveSiteHeaderShellBlock,
+  resolveStorylineBlock,
+  type PrimitiveSvgShape,
+} from "@/lib/admin/design-docs-ui-primitives";
 
 type SiteHeaderShellBlock = Extract<ContentBlock, { type: "site-header-shell" }>;
 type StorylineBlock = Extract<ContentBlock, { type: "storyline" }>;
-
-const T_LOGO_PATH =
-  "M43.6284633,34.8996508 C41.83393,39.6379642 38.53153,43.2989842 33.7932167,45.2371375 L33.7932167,34.8996508 L39.46463,29.8027175 L33.7932167,24.7777375 L33.7932167,17.6709842 C38.9621033,17.3120775 42.5514567,13.5074375 42.5514567,8.84136417 C42.5514567,2.73966417 36.7369967,0.5859375 33.4345967,0.5859375 C32.71707,0.5859375 31.9270167,0.5859375 30.7789167,0.872890833 L30.7789167,1.16013083 C31.20949,1.16013083 31.8550633,1.08846417 32.0709233,1.08846417 C34.36827,1.08846417 36.0911367,2.16518417 36.0911367,4.2469575 C36.0911367,5.82620417 34.7988433,7.40545083 32.5017833,7.40545083 C26.83037,7.40545083 20.15419,2.81133083 12.9038167,2.81133083 C6.44292333,2.81133083 1.99242333,7.6207375 1.99242333,12.5023842 C1.99242333,17.3120775 4.79201,18.8913242 7.73521667,19.9680442 L7.80717,19.6808042 C6.87378333,19.1066108 6.22763667,18.1018442 6.22763667,16.5223108 C6.22763667,14.3688708 8.23774333,12.5743375 10.7503767,12.5743375 C16.8520767,12.5743375 26.68675,17.6709842 32.7887367,17.6709842 L33.36293,17.6709842 L33.36293,24.8496908 L27.6918033,29.8027175 L33.36293,34.8996508 L33.36293,45.3804708 C30.9942033,46.2416175 28.5532367,46.6010975 26.0406033,46.6010975 C16.5648367,46.6010975 10.53509,40.8577308 10.53509,31.3102975 C10.53509,29.0135242 10.8220433,26.7878442 11.46819,24.6341175 L16.20593,22.5526308 L16.20593,43.6576042 L25.8253167,39.4226775 L25.8253167,17.8146042 L11.6834767,24.1315908 C13.1191033,19.9680442 16.06231,16.9531708 19.5799967,15.2303042 L19.50833,15.0150175 C10.0322767,17.0967908 0.84375,24.2754975 0.84375,35.0432708 C0.84375,47.4622442 11.32457,56.0768642 23.5285433,56.0768642 C36.4497567,56.0768642 43.7720833,47.4622442 43.84375,34.8996508 L43.6284633,34.8996508 Z";
 
 function IconButton({
   label,
@@ -48,60 +51,51 @@ function IconButton({
   );
 }
 
-function MenuIcon() {
+function renderPrimitiveShape(shape: PrimitiveSvgShape, index: number) {
+  if (shape.kind === "rect") {
+    return <rect key={index} x={shape.x} y={shape.y} width={shape.width} height={shape.height} rx={shape.rx} fill={shape.fill} />;
+  }
+  if (shape.kind === "circle") {
+    return <circle key={index} cx={shape.cx} cy={shape.cy} r={shape.r} fill={shape.fill} stroke={shape.stroke} strokeWidth={shape.strokeWidth} />;
+  }
+  if (shape.kind === "line") {
+    return <line key={index} x1={shape.x1} y1={shape.y1} x2={shape.x2} y2={shape.y2} stroke={shape.stroke} strokeWidth={shape.strokeWidth} strokeLinecap={shape.strokeLinecap} />;
+  }
+  if (shape.kind === "polygon") {
+    return <polygon key={index} points={shape.points} fill={shape.fill} />;
+  }
   return (
-    <svg width="17" height="14" viewBox="0 0 17 14" fill="none" aria-hidden="true">
-      <rect x="0" y="0" width="17" height="2" rx="0.5" fill="#121212" />
-      <rect x="0" y="6" width="17" height="2" rx="0.5" fill="#121212" />
-      <rect x="0" y="12" width="17" height="2" rx="0.5" fill="#121212" />
-    </svg>
+    <path
+      key={index}
+      d={shape.d}
+      fill={shape.fill}
+      stroke={shape.stroke}
+      strokeWidth={shape.strokeWidth}
+      strokeLinecap={shape.strokeLinecap}
+      strokeLinejoin={shape.strokeLinejoin}
+      strokeMiterlimit={shape.strokeMiterlimit}
+    />
   );
 }
 
-function SearchIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="6.5" cy="6.5" r="5.5" stroke="#121212" strokeWidth="1.5" />
-      <line x1="10.5" y1="10.5" x2="15" y2="15" stroke="#121212" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
+function PrimitiveSvgIcon({ id, size }: { id: string; size?: number }) {
+  const primitive = getSvgIconPrimitive(id);
+  if (!primitive) {
+    return null;
+  }
 
-function ChevronDown() {
-  return (
-    <svg width="13" height="8" viewBox="0 0 13 8" fill="none" aria-hidden="true">
-      <polygon fill="#121212" points="6.5,8 0,1.4 1.4,0 6.5,5.2 11.6,0 13,1.4" />
-    </svg>
-  );
-}
+  const width = size ?? primitive.width;
+  const height = size ? (size * primitive.height) / primitive.width : primitive.height;
 
-function ChevronRight() {
   return (
-    <svg width="20" height="20" viewBox="0 0 25 24" fill="none" aria-hidden="true">
-      <path d="M9.90283 3L8 5.115L14.1808 12L8 18.885L9.90283 21L18 12L9.90283 3Z" fill="#666666" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
-      <path d="M2 2l11 11" strokeWidth="2" strokeMiterlimit="10" strokeLinecap="square" stroke="#111" />
-      <path d="M13 2L2 13" strokeWidth="2" strokeMiterlimit="10" strokeLinecap="square" stroke="#111" />
+    <svg width={width} height={height} viewBox={primitive.viewBox} fill="none" aria-hidden="true">
+      {primitive.shapes.map((shape, index) => renderPrimitiveShape(shape, index))}
     </svg>
   );
 }
 
 function NytGlyph({ size = 44 }: { size?: number }) {
-  return (
-    <svg viewBox="0 0 44 57" width={size} height={(size * 57) / 44} aria-hidden="true">
-      <g stroke="none" strokeWidth="1" fill="none" fillRule="evenodd">
-        <g fill="var(--color-content-primary,#121212)">
-          <path d={T_LOGO_PATH} />
-        </g>
-      </g>
-    </svg>
-  );
+  return <PrimitiveSvgIcon id="nyt.icon.t-logo.44" size={size} />;
 }
 
 function NytWordmark() {
@@ -124,6 +118,8 @@ function NytWordmark() {
 }
 
 export function NytStorylineRail({ block }: { block: StorylineBlock }) {
+  const resolvedBlock = resolveStorylineBlock(block);
+
   return (
     <div
       className="css-1gwp8pp"
@@ -184,7 +180,7 @@ export function NytStorylineRail({ block }: { block: StorylineBlock }) {
               marginRight: 16,
             }}
           >
-            {block.title}
+            {resolvedBlock.title}
           </span>
         </p>
         <ul
@@ -198,7 +194,7 @@ export function NytStorylineRail({ block }: { block: StorylineBlock }) {
             listStyle: "none",
           }}
         >
-          {block.links.map((item) => (
+          {resolvedBlock.links.map((item) => (
             <li
               className="css-1qej4jr"
               key={item.href}
@@ -233,8 +229,9 @@ export function NytStorylineRail({ block }: { block: StorylineBlock }) {
 }
 
 export default function NytInteractiveShell({ block }: { block: SiteHeaderShellBlock }) {
+  const resolvedBlock = resolveSiteHeaderShellBlock(block);
   const [activePanel, setActivePanel] = useState<"menu" | "search" | "account" | null>(null);
-  const [expandedSection, setExpandedSection] = useState(block.menuSections[0]?.label ?? "");
+  const [expandedSection, setExpandedSection] = useState(resolvedBlock.menuSections[0]?.label ?? "");
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
@@ -249,15 +246,15 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
   }, [activePanel]);
 
   const expandedMenuSection =
-    block.menuSections.find((section) => section.label === expandedSection) ?? null;
+    resolvedBlock.menuSections.find((section) => section.label === expandedSection) ?? null;
 
   const filteredSearchLinks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return block.searchPanel.links;
-    return block.searchPanel.links.filter((entry) =>
+    if (!query) return resolvedBlock.searchPanel.links;
+    return resolvedBlock.searchPanel.links.filter((entry) =>
       `${entry.label} ${entry.description ?? ""}`.toLowerCase().includes(query),
     );
-  }, [block.searchPanel.links, searchQuery]);
+  }, [resolvedBlock.searchPanel.links, searchQuery]);
 
   return (
     <>
@@ -265,7 +262,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
         id="interactive-masthead-spacer"
         className="css-1xltzhg"
         data-testid="interactive-masthead-spacer"
-        style={{ height: block.mastheadSpacerHeight }}
+        style={{ height: resolvedBlock.mastheadSpacerHeight }}
       />
 
       <div
@@ -295,7 +292,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
               onClick={() => setActivePanel((value) => (value === "menu" ? null : "menu"))}
               testId="nyt-shell-menu-button"
             >
-              <MenuIcon />
+              <PrimitiveSvgIcon id="nyt.icon.menu.17" />
             </IconButton>
             <IconButton
               label="Open search"
@@ -303,7 +300,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
               onClick={() => setActivePanel((value) => (value === "search" ? null : "search"))}
               testId="nyt-shell-search-button"
             >
-              <SearchIcon />
+              <PrimitiveSvgIcon id="nyt.icon.search.16" />
             </IconButton>
           </div>
 
@@ -313,7 +310,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
 
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 140, justifyContent: "flex-end" }}>
             <a
-              href={block.subscribeHref}
+              href={resolvedBlock.subscribeHref}
               style={{
                 fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
                 fontSize: 11,
@@ -327,11 +324,11 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                 whiteSpace: "nowrap",
               }}
             >
-              {block.subscribeLabel}
+              {resolvedBlock.subscribeLabel}
             </a>
             <button
               type="button"
-              aria-label={block.accountLabel}
+              aria-label={resolvedBlock.accountLabel}
               aria-expanded={activePanel === "account"}
               data-testid="nyt-shell-account-button"
               onClick={() => setActivePanel((value) => (value === "account" ? null : "account"))}
@@ -347,7 +344,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                 whiteSpace: "nowrap",
               }}
             >
-              {block.accountLabel}
+              {resolvedBlock.accountLabel}
             </button>
           </div>
         </div>
@@ -413,7 +410,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                     padding: 6,
                   }}
                 >
-                  <CloseIcon />
+                  <PrimitiveSvgIcon id="nyt.icon.close.15" />
                 </button>
               </div>
 
@@ -438,7 +435,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                         Home <NytGlyph size={14} />
                       </Link>
                     </li>
-                    {block.menuSections.map((section) => {
+                    {resolvedBlock.menuSections.map((section) => {
                       const isExpanded = section.label === expandedSection;
                       return (
                         <li key={section.label}>
@@ -480,7 +477,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                                 transform: isExpanded ? "rotate(180deg)" : undefined,
                               }}
                             >
-                              <ChevronDown />
+                              <PrimitiveSvgIcon id="nyt.icon.chevron-down.13" />
                             </button>
                           </div>
                         </li>
@@ -691,7 +688,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={block.searchPanel.title}
+            aria-label={resolvedBlock.searchPanel.title}
             data-testid="nyt-shell-search-panel"
             onClick={(event) => event.stopPropagation()}
             style={{
@@ -713,7 +710,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                   color: "#121212",
                 }}
               >
-                {block.searchPanel.title}
+                {resolvedBlock.searchPanel.title}
               </h2>
               <button
                 type="button"
@@ -721,7 +718,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                 onClick={() => setActivePanel(null)}
                 style={{ border: "none", background: "transparent", cursor: "pointer", padding: 4 }}
               >
-                <CloseIcon />
+                <PrimitiveSvgIcon id="nyt.icon.close.15" />
               </button>
             </div>
 
@@ -739,11 +736,11 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                   border: 0,
                 }}
               >
-                {block.searchPanel.placeholder}
+                {resolvedBlock.searchPanel.placeholder}
               </span>
               <input
                 type="search"
-                placeholder={block.searchPanel.placeholder}
+                placeholder={resolvedBlock.searchPanel.placeholder}
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 style={{
@@ -800,7 +797,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                       </div>
                     ) : null}
                   </div>
-                  <ChevronRight />
+                  <PrimitiveSvgIcon id="nyt.icon.chevron-right.20" />
                 </a>
               ))}
               {filteredSearchLinks.length === 0 ? (
@@ -856,7 +853,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                 <div>
                   <h1
                     data-testid="email-address"
-                    aria-label={`Account Information For: ${block.accountPanel.email}`}
+                    aria-label={`Account Information For: ${resolvedBlock.accountPanel.email}`}
                     style={{
                       margin: 0,
                       fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
@@ -866,7 +863,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                       color: "#121212",
                     }}
                   >
-                    {block.accountPanel.email}
+                    {resolvedBlock.accountPanel.email}
                   </h1>
                 </div>
                 <button
@@ -876,7 +873,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                   onClick={() => setActivePanel(null)}
                   style={{ border: "none", background: "transparent", cursor: "pointer", padding: 4 }}
                 >
-                  <CloseIcon />
+                  <PrimitiveSvgIcon id="nyt.icon.close.15" />
                 </button>
               </div>
 
@@ -894,7 +891,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                     color: "#121212",
                   }}
                 >
-                  {block.accountPanel.greeting}
+                  {resolvedBlock.accountPanel.greeting}
                 </p>
                 <p
                   data-testid="relationship-copy"
@@ -907,13 +904,13 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                     color: "#666666",
                   }}
                 >
-                  {block.accountPanel.relationshipCopy}
+                  {resolvedBlock.accountPanel.relationshipCopy}
                 </p>
               </div>
 
               <a
                 data-testid="subscribe-CTA"
-                href={block.accountPanel.subscribeHref}
+                href={resolvedBlock.accountPanel.subscribeHref}
                 style={{
                   display: "inline-block",
                   background: "#326891",
@@ -927,7 +924,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                   borderRadius: 4,
                 }}
               >
-                {block.accountPanel.subscribeLabel}
+                {resolvedBlock.accountPanel.subscribeLabel}
               </a>
 
               <p
@@ -943,15 +940,15 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                 Already subscribed?{" "}
                 <a
                   data-testid="try-different-email-link"
-                  href={block.accountPanel.alternateLoginHref}
+                  href={resolvedBlock.accountPanel.alternateLoginHref}
                   style={{ color: "#326891", textDecoration: "none" }}
                 >
-                  {block.accountPanel.alternateLoginLabel}
+                  {resolvedBlock.accountPanel.alternateLoginLabel}
                 </a>
               </p>
 
               <div style={{ marginTop: 28, display: "grid", gap: 24 }}>
-                {block.accountPanel.sections.map((section) => (
+                {resolvedBlock.accountPanel.sections.map((section) => (
                   <div key={section.heading}>
                     <h2
                       style={{
@@ -992,7 +989,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                           >
                             {item.label}
                           </span>
-                          <ChevronRight />
+                          <PrimitiveSvgIcon id="nyt.icon.chevron-right.20" />
                         </a>
                       ))}
                     </div>
@@ -1003,7 +1000,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
               <div style={{ marginTop: 28, paddingTop: 16, borderTop: "1px solid #efefef" }}>
                 <a
                   data-testid="logout-link-regi"
-                  href={block.accountPanel.logoutHref}
+                  href={resolvedBlock.accountPanel.logoutHref}
                   style={{
                     fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
                     fontSize: 14,
@@ -1012,7 +1009,7 @@ export default function NytInteractiveShell({ block }: { block: SiteHeaderShellB
                     textDecoration: "none",
                   }}
                 >
-                  {block.accountPanel.logoutLabel}
+                  {resolvedBlock.accountPanel.logoutLabel}
                 </a>
               </div>
             </div>

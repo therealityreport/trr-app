@@ -96,6 +96,7 @@ const jsonResponse = (body: unknown, status = 200): Response =>
   });
 
 type FetchOverrides = {
+  person?: (url: string) => Response;
   credits?: (url: string) => Response;
   fandom?: (url: string) => Response;
   videos?: (url: string) => Response;
@@ -126,6 +127,7 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
       });
     }
     if (url.startsWith(`/api/admin/trr-api/people/${PERSON_ID}`) && !url.includes("/photos") && !url.includes("/cover-photo")) {
+      if (overrides.person) return overrides.person(url);
       return jsonResponse({
         person: {
           id: PERSON_ID,
@@ -259,6 +261,129 @@ describe("people page tab runtime behavior", () => {
     expect(screen.getByText("Andy C.")).toBeInTheDocument();
   });
 
+  it("switches the social tab between linked Instagram, Facebook, and YouTube handles", async () => {
+    mocks.pathname = `/people/${PERSON_ID}/social`;
+    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=social`);
+    const fetchMock = createFetchMock({
+      person: () =>
+        jsonResponse({
+          person: {
+            id: PERSON_ID,
+            full_name: "Andy Cohen",
+            known_for: null,
+            external_ids: {
+              instagram: "andycohen",
+              facebook: "andycohen",
+              youtube: "@andycohen",
+            },
+            alternative_names: {},
+            created_at: "2026-02-24T00:00:00.000Z",
+            updated_at: "2026-02-24T00:00:00.000Z",
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/admin/trr-api/people/") && url.includes("/social-growth?handle=andycohen")) {
+        return jsonResponse({
+          username: "andycohen",
+          account_handle: "andycohen",
+          platform: "instagram",
+          scraped_at: "2026-04-08T12:00:00Z",
+          freshness_status: "fresh",
+          profile_stats: {
+            followers: 100,
+            following: 20,
+            media_count: 5,
+            engagement_rate: "1.2%",
+            average_likes: 10,
+            average_comments: 2,
+          },
+          rankings: { sb_rank: "1st", followers_rank: "2nd", engagement_rate_rank: "3rd", grade: "A" },
+          daily_channel_metrics_60day: { period: "Last 1 Day", row_count: 1, headers: ["Date"], data: [{ Date: "2026-04-08" }] },
+          daily_total_followers_chart: null,
+        });
+      }
+      if (url.includes("/api/admin/trr-api/social/profiles/facebook/andycohen/socialblade")) {
+        return jsonResponse({
+          username: "andycohen",
+          account_handle: "andycohen",
+          platform: "facebook",
+          scraped_at: "2026-04-08T12:00:00Z",
+          freshness_status: "fresh",
+          profile_stats_labels: { followers: "Likes", following: "Talking About", media_count: "Posts" },
+          profile_stats: {
+            followers: 250,
+            following: 80,
+            media_count: 12,
+            engagement_rate: "2.4%",
+            average_likes: 16,
+            average_comments: 3,
+          },
+          rankings: { sb_rank: "4th", followers_rank: "5th", engagement_rate_rank: "6th", grade: "A-" },
+          daily_channel_metrics_60day: { period: "Last 1 Day", row_count: 1, headers: ["Date"], data: [{ Date: "2026-04-08" }] },
+          daily_total_followers_chart: null,
+        });
+      }
+      if (url.includes("/api/admin/trr-api/social/profiles/youtube/andycohen/socialblade")) {
+        return jsonResponse({
+          username: "andycohen",
+          account_handle: "andycohen",
+          platform: "youtube",
+          scraped_at: "2026-04-08T12:00:00Z",
+          freshness_status: "fresh",
+          profile_stats_labels: { followers: "Subscribers", following: "Views", media_count: "Videos" },
+          profile_stats: {
+            followers: 500,
+            following: 1200,
+            media_count: 18,
+            engagement_rate: "4.6%",
+            average_likes: 200,
+            average_comments: 9,
+          },
+          rankings: { sb_rank: "7th", followers_rank: "8th", engagement_rate_rank: "9th", grade: "B+" },
+          daily_channel_metrics_60day: { period: "Last 1 Day", row_count: 1, headers: ["Date"], data: [{ Date: "2026-04-08" }] },
+          daily_total_followers_chart: null,
+        });
+      }
+      return jsonResponse({ seasons: [] });
+    });
+
+    render(<PersonPage />);
+
+    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await screen.findByRole("button", { name: "Instagram · @andycohen" });
+
+    expect(screen.getByRole("link", { name: "Open account page" })).toHaveAttribute(
+      "href",
+      "/admin/social/instagram/andycohen/socialblade",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Facebook · @andycohen" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Open account page" })).toHaveAttribute(
+        "href",
+        "/admin/social/facebook/andycohen/socialblade",
+      );
+    });
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/social/profiles/facebook/andycohen/socialblade"),
+      ),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Youtube · @andycohen" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Open account page" })).toHaveAttribute(
+        "href",
+        "/admin/social/youtube/andycohen/socialblade",
+      );
+    });
+  });
+
   it("shows saved total on the gallery tab and ignores operations-health failures", async () => {
     mocks.pathname = `/people/${PERSON_ID}/gallery`;
     mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=gallery`);
@@ -323,7 +448,7 @@ describe("people page tab runtime behavior", () => {
     expect(screen.queryByText(/Failed to load active admin operations/i)).not.toBeInTheDocument();
   });
 
-  it("renders the person shell before gallery completes and uses the deferred-count primary slice", async () => {
+  it("renders the person shell before gallery completes and uses the exact-count primary slice", async () => {
     mocks.pathname = `/people/${PERSON_ID}/gallery`;
     mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=gallery`);
     let resolvePhotos: ((response: Response) => void) | null = null;
@@ -375,7 +500,7 @@ describe("people page tab runtime behavior", () => {
       String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`),
     );
     expect(String(photosRequest?.[0])).toContain("limit=48");
-    expect(String(photosRequest?.[0])).toContain("include_total_count=false");
+    expect(String(photosRequest?.[0])).not.toContain("include_total_count=false");
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/cover-photo"))).toBe(false);
     expect(
       mocks.fetchAdminWithAuth.mock.calls.some(([url]) =>
@@ -390,13 +515,16 @@ describe("people page tab runtime behavior", () => {
           limit: 48,
           offset: 0,
           count: 0,
-          total_count: null,
-          total_count_status: "deferred",
+          total_count: 0,
+          total_count_status: "exact",
           next_offset: 0,
           has_more: false,
         },
       }),
     );
+
+    await screen.findByText("Saved total: 0 photos");
+    expect(screen.queryByText("Exact saved count is loading in the background.")).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/cover-photo"))).toBe(true);

@@ -196,12 +196,13 @@ export function buildPersonGalleryShowOptions(
 ): PersonGalleryOtherShowOption[] {
   const byIdentity = new Map<string, PersonGalleryShowOptionAccumulator>();
   for (const photo of photos) {
-    if (photo.bucket_type !== "show") continue;
     const showId = typeof photo.resolved_show_id === "string" ? photo.resolved_show_id.trim() || null : null;
     const showName =
       photo.resolved_show_name?.trim() ||
       (typeof photo.bucket_label === "string" ? photo.bucket_label.trim() : "") ||
       "";
+    const hasLegacyShowIdentity = photo.bucket_type == null && (showId !== null || showName.length > 0);
+    if (photo.bucket_type !== "show" && !hasLegacyShowIdentity) continue;
     if (!showName || isWwhlShowName(showName)) continue;
     const normalizedShowName = normalizeShowNameToken(showName);
     const acronym = buildShowAcronym(showName);

@@ -22,9 +22,14 @@ type SharedExecutorContext<T> = {
   publish: (update: Partial<SharedLiveSnapshot<T>>) => void;
 };
 
+type SharedPollRequest = {
+  forceRefresh?: boolean;
+  cause?: "interval" | "manual" | "mutation" | "visibility";
+};
+
 type SharedPollConfig<T> = {
   key: AdminLiveResourceKey;
-  fetchData: (signal: AbortSignal) => Promise<T>;
+  fetchData: (signal: AbortSignal, request?: SharedPollRequest) => Promise<T>;
   intervalMs: number;
   shouldRun: boolean;
   leaseDurationMs?: number;
@@ -100,6 +105,7 @@ class SharedLiveResourceCoordinator<T> {
   private readonly channelName: string;
   private readonly channel: BroadcastChannel | null;
   private config: SharedResourceConfig<T>;
+  private pendingPollRequest: SharedPollRequest | null = null;
 
   constructor(config: SharedResourceConfig<T>) {
     this.config = config;
@@ -151,8 +157,9 @@ class SharedLiveResourceCoordinator<T> {
     this.reconcile();
   }
 
-  requestImmediateRefresh(): void {
+  requestImmediateRefresh(request?: SharedPollRequest): void {
     if (!this.shouldRunInThisTab()) return;
+    this.pendingPollRequest = request ?? { cause: "manual" };
     this.clearTimer();
     if (this.config.mode === "sse") {
       this.stopExecutor();
@@ -274,9 +281,11 @@ class SharedLiveResourceCoordinator<T> {
     if (config.mode !== "poll") return;
     const controller = new AbortController();
     this.executorAbort = controller;
+    const request = this.pendingPollRequest ?? { cause: "interval" };
+    this.pendingPollRequest = null;
     try {
       this.writeLease(Date.now() + this.leaseDurationMs());
-      const data = await config.fetchData(controller.signal);
+      const data = await config.fetchData(controller.signal, request);
       const now = Date.now();
       this.publish(
         {
@@ -514,8 +523,8 @@ const useSharedLiveResource = <T,>(config: SharedResourceConfig<T>) => {
     coordinator.setInterest(subscriberIdRef.current, config.shouldRun);
   }, [config.shouldRun, coordinator]);
 
-  const refetch = useCallback(() => {
-    coordinator?.requestImmediateRefresh();
+  const refetch = useCallback((request?: SharedPollRequest) => {
+    coordinator?.requestImmediateRefresh(request);
   }, [coordinator]);
 
   return {

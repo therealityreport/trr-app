@@ -1,38 +1,43 @@
 import { describe, expect, it } from "vitest";
-import fs from "node:fs";
-import path from "node:path";
 
-describe("bravo video thumbnail sync wiring", () => {
-  it("wires show page videos tab to thumbnail sync and hosted-first rendering", () => {
-    const filePath = path.resolve(__dirname, "../src/app/admin/trr-shows/[showId]/page.tsx");
-    const contents = fs.readFileSync(filePath, "utf8");
+import { resolveBravoVideoThumbnailUrl } from "@/lib/admin/bravo-video-thumbnails";
 
-    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}\/bravo\/videos\/sync-thumbnails/);
-    expect(contents).toMatch(/resolveBravoVideoThumbnailUrl/);
-    expect(contents).toMatch(/syncThumbnails:\s*activeTab === "assets" && assetsView === "videos"/);
+describe("bravo video thumbnail resolution", () => {
+  it("prefers hosted thumbnails before falling back to Bravo-provided image urls", () => {
+    expect(
+      resolveBravoVideoThumbnailUrl({
+        hosted_image_url: " https://cdn.example.com/hosted.jpg ",
+        image_url: "https://images.example.com/fallback.jpg",
+        original_image_url: "https://images.example.com/original.jpg",
+      })
+    ).toBe("https://cdn.example.com/hosted.jpg");
   });
 
-  it("wires season page videos tab to thumbnail sync and hosted-first rendering", () => {
-    const filePath = path.resolve(
-      __dirname,
-      "../src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx"
-    );
-    const contents = fs.readFileSync(filePath, "utf8");
+  it("falls back through image_url and original_image_url when hosted media is absent", () => {
+    expect(
+      resolveBravoVideoThumbnailUrl({
+        hosted_image_url: null,
+        image_url: "https://images.example.com/fallback.jpg",
+        original_image_url: "https://images.example.com/original.jpg",
+      })
+    ).toBe("https://images.example.com/fallback.jpg");
 
-    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{requestShowId\}\/bravo\/videos\/sync-thumbnails/);
-    expect(contents).toMatch(/resolveBravoVideoThumbnailUrl/);
-    expect(contents).toMatch(/fetchSeasonBravoVideos\(\{\s*forceSync:\s*true\s*\}\)/);
+    expect(
+      resolveBravoVideoThumbnailUrl({
+        hosted_image_url: "",
+        image_url: " ",
+        original_image_url: "https://images.example.com/original.jpg",
+      })
+    ).toBe("https://images.example.com/original.jpg");
   });
 
-  it("wires person page videos tab to thumbnail sync and hosted-first rendering", () => {
-    const filePath = path.resolve(
-      __dirname,
-      "../src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx"
-    );
-    const contents = fs.readFileSync(filePath, "utf8");
-
-    expect(contents).toMatch(/\/api\/admin\/trr-api\/shows\/\$\{showIdForApi\}\/bravo\/videos\/sync-thumbnails/);
-    expect(contents).toMatch(/resolveBravoVideoThumbnailUrl/);
-    expect(contents).toMatch(/fetchBravoVideos\(\{\s*forceSync:\s*true\s*\}\)/);
+  it("returns null when no usable thumbnail source exists", () => {
+    expect(
+      resolveBravoVideoThumbnailUrl({
+        hosted_image_url: null,
+        image_url: "",
+        original_image_url: " ",
+      })
+    ).toBeNull();
   });
 });

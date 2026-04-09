@@ -79,6 +79,11 @@ describe("mapPhotoToMetadata", () => {
     expect(formatPhotoSourceLabel("getty")).toBe("Getty");
   });
 
+  it("humanizes known web scrape domains instead of showing raw source keys", () => {
+    expect(formatPhotoSourceLabel("web_scrape:bravotv.com")).toBe("Bravo TV");
+    expect(formatPhotoSourceLabel("web_scrape:example.com")).toBe("example.com");
+  });
+
   it("decodes IMDb episode entities and parses numeric-string season metadata", () => {
     const result = mapPhotoToMetadata({
       id: "imdb-entities-1",

@@ -114,6 +114,35 @@ describe("/api/admin/reddit/communities route", () => {
     );
   });
 
+  it("passes include_inactive=true through to the communities repository fallback", async () => {
+    loadStableRedditReadMock.mockImplementation(async ({ fallback }) => ({
+      payload: await fallback(),
+      source: "local",
+    }));
+    listRedditCommunitiesMock.mockResolvedValue([
+      {
+        id: "community-archived",
+        subreddit: "RHOBH",
+        is_active: false,
+        assigned_thread_count: 0,
+        assigned_threads: [],
+      },
+    ]);
+
+    const request = new NextRequest(
+      "http://localhost/api/admin/reddit/communities?include_inactive=true",
+      { method: "GET" },
+    );
+
+    const response = await GET(request);
+
+    expect(response.status).toBe(200);
+    expect(listRedditCommunitiesMock).toHaveBeenCalledWith({
+      trrShowId: undefined,
+      includeInactive: true,
+    });
+  });
+
   it("includes assigned threads when include_assigned_threads=1", async () => {
     loadStableRedditReadMock.mockResolvedValue({
       payload: {

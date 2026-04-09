@@ -419,12 +419,11 @@ function parseSocialAccountProfilePath(pathname: string): {
 
 function mapLegacyAdminSocialPath(pathname: string, searchParams?: URLSearchParams): string | null {
   if (
-    pathname === "/social/reddit" ||
     pathname === "/admin/social/reddit" ||
     pathname === "/social/official/reddit" ||
     pathname === "/admin/social/official/reddit"
   ) {
-    return appendSearch("/social", searchParams);
+    return appendSearch("/social/reddit", searchParams);
   }
   if (pathname === "/social-media" || pathname === "/admin/social-media") {
     return appendSearch("/social", searchParams);

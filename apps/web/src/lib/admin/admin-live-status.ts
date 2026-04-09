@@ -25,6 +25,25 @@ const LIVE_STATUS_URL = "/api/admin/trr-api/social/ingest/live-status";
 const LIVE_STATUS_STREAM_URL = "/api/admin/trr-api/social/ingest/live-status/stream";
 const LIVE_STATUS_TIMEOUT_MS = 30_000;
 
+type SnapshotEnvelope<T> = {
+  data: T;
+  generated_at?: string | null;
+  cache_age_ms?: number;
+  stale?: boolean;
+};
+
+const unwrapLiveStatusPayload = (
+  payload: AdminSocialLiveStatus | SnapshotEnvelope<AdminSocialLiveStatus>,
+): AdminSocialLiveStatus => {
+  if (payload && typeof payload === "object" && "data" in payload && payload.data && typeof payload.data === "object") {
+    return {
+      ...payload.data,
+      generated_at: payload.generated_at ?? payload.data.generated_at,
+    };
+  }
+  return payload as AdminSocialLiveStatus;
+};
+
 const readStreamErrorMessage = async (response: Response): Promise<string> => {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
@@ -116,13 +135,14 @@ export const useAdminLiveStatus = (options: { shouldRun: boolean }) => {
     key: "admin-social-live-status-fallback",
     shouldRun: options.shouldRun && !sse.connected,
     intervalMs: 10_000,
-    fetchData: async (signal) => {
+    fetchData: async (signal, request) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), LIVE_STATUS_TIMEOUT_MS);
       signal.addEventListener("abort", () => controller.abort(), { once: true });
       try {
+        const url = request?.forceRefresh ? `${LIVE_STATUS_URL}?refresh=1` : LIVE_STATUS_URL;
         const response = await fetchAdminWithAuth(
-          LIVE_STATUS_URL,
+          url,
           { method: "GET", cache: "no-store", signal: controller.signal },
           { allowDevAdminBypass: true },
         );
@@ -130,7 +150,7 @@ export const useAdminLiveStatus = (options: { shouldRun: boolean }) => {
           const body = (await response.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `HTTP ${response.status}`);
         }
-        return (await response.json()) as AdminSocialLiveStatus;
+        return unwrapLiveStatusPayload((await response.json()) as AdminSocialLiveStatus);
       } finally {
         clearTimeout(timeout);
       }
