@@ -219,8 +219,7 @@ describe("admin host proxy", () => {
   it.each([
     ["/social-media", "http://admin.localhost:3000/social"],
     ["/admin/social-media", "http://admin.localhost:3000/social"],
-    ["/social/reddit", "http://admin.localhost:3000/social"],
-    ["/admin/social/reddit", "http://admin.localhost:3000/social"],
+    ["/admin/social/reddit", "http://admin.localhost:3000/social/reddit"],
     ["/shows/rhoslc", "http://admin.localhost:3000/rhoslc"],
     ["/admin/design-docs/overview", "http://admin.localhost:3000/design-docs/overview"],
     ["/admin/api-references", "http://admin.localhost:3000/api-references"],
@@ -241,6 +240,7 @@ describe("admin host proxy", () => {
     ["/shows", "http://admin.localhost:3000/admin/shows"],
     ["/shows/settings", "http://admin.localhost:3000/admin/shows/settings"],
     ["/social", "http://admin.localhost:3000/admin/social"],
+    ["/social/reddit", "http://admin.localhost:3000/admin/social/reddit"],
     ["/social/instagram/bravotv", "http://admin.localhost:3000/admin/social/instagram/bravotv"],
     ["/design-docs/overview", "http://admin.localhost:3000/admin/design-docs/overview"],
     ["/api-references", "http://admin.localhost:3000/admin/api-references"],

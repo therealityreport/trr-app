@@ -127,6 +127,9 @@ import {
   fetchWithTimeout,
 } from "@/lib/admin/admin-fetch";
 import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
+import { resolveBravoVideoThumbnailUrl } from "@/lib/admin/bravo-video-thumbnails";
+import { buildScopedAdminRequestId, resolveRequestIdFromPayload } from "@/lib/admin/request-id";
+import { useTabRouteNavigation } from "@/lib/admin/use-tab-route-navigation";
 import { useSeasonCore } from "@/lib/admin/season-page/use-season-core";
 import type { SeasonAsset } from "@/lib/server/trr-api/trr-shows-repository";
 
@@ -407,7 +410,6 @@ const SEASON_STREAM_MAX_DURATION_MS = 12 * 60 * 1000;
 const SEASON_REFRESH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const SEASON_ASSET_LOAD_TIMEOUT_MS = 60_000;
 const SEASON_ASSET_PAGE_SIZE = 500;
-const SEASON_ASSET_MAX_PAGES = 30;
 const SEASON_CAST_LOAD_TIMEOUT_MS = 60_000;
 const SEASON_PERSON_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const SEASON_PERSON_STREAM_MAX_DURATION_MS = 6 * 60 * 1000;
@@ -1161,15 +1163,14 @@ export default function SeasonDetailPage() {
   );
 
   const buildSeasonRefreshRequestId = useCallback(() => {
-    const counter = ++seasonRefreshRequestCounterRef.current;
-    const timestampToken = Date.now().toString(36);
-    const showToken = String(showId || "unknown")
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 32);
-    const seasonToken = Number.isFinite(seasonNumber) ? String(seasonNumber) : "na";
-    return `season-refresh-${showToken}-s${seasonToken}-${timestampToken}-${counter}`;
+    return buildScopedAdminRequestId({
+      prefix: "season-refresh",
+      counter: ++seasonRefreshRequestCounterRef.current,
+      parts: [
+        { value: showId, fallback: "unknown" },
+        { prefix: "s", value: Number.isFinite(seasonNumber) ? String(seasonNumber) : "na", fallback: "na" },
+      ],
+    });
   }, [seasonNumber, showId]);
 
   useEffect(() => {
@@ -1351,23 +1352,20 @@ export default function SeasonDetailPage() {
   }, [show?.name, showSlugForRouting]);
   const seasonCanonicalReplaceRef = useRef<string | null>(null);
 
-  const setTab = useCallback(
-    (tab: TabId) => {
-      setActiveTab(tab);
+  const setTab = useTabRouteNavigation<TabId>({
+    router,
+    setActiveTab,
+    buildHref: (tab) => {
       const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
-      router.replace(
-        buildSeasonAdminUrl({
-          showSlug: showSlugForRouting,
-          seasonNumber,
-          tab,
-          assetsSubTab: tab === "assets" ? assetsView : undefined,
-          query: preservedQuery,
-        }) as Route,
-        { scroll: false }
-      );
+      return buildSeasonAdminUrl({
+        showSlug: showSlugForRouting,
+        seasonNumber,
+        tab,
+        assetsSubTab: tab === "assets" ? assetsView : undefined,
+        query: preservedQuery,
+      }) as Route;
     },
-    [assetsView, router, searchParams, seasonNumber, showSlugForRouting]
-  );
+  });
 
   const setAssetsSubTab = useCallback(
     (view: "images" | "videos" | "branding") => {
@@ -2299,14 +2297,32 @@ export default function SeasonDetailPage() {
     const sourcesParam = advancedFilters.sources.length
       ? `&sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
       : "";
-    const fetchAssetRows = async (url: string): Promise<SeasonAsset[]> => {
+    const fetchAssetRows = async (
+      url: string,
+    ): Promise<{ rows: SeasonAsset[]; nextCursor: string | null }> => {
       try {
         const data = await adminGetJson<{ assets?: unknown }>(url, {
           headers,
           timeoutMs: SEASON_ASSET_LOAD_TIMEOUT_MS,
         });
         const payload = data.assets;
-        return Array.isArray(payload) ? (payload as SeasonAsset[]) : [];
+        const pagination =
+          typeof data === "object" && data && "pagination" in data
+            ? ((data as { pagination?: unknown }).pagination as
+                | { has_more?: boolean; next_cursor?: string | null }
+                | undefined)
+            : undefined;
+        const nextCursor =
+          typeof pagination?.next_cursor === "string" && pagination.next_cursor.trim()
+            ? pagination.next_cursor
+            : null;
+        if (pagination?.has_more && !nextCursor) {
+          throw new Error("Gallery pagination response is missing next cursor.");
+        }
+        return {
+          rows: Array.isArray(payload) ? (payload as SeasonAsset[]) : [],
+          nextCursor,
+        };
       } catch (error) {
         if (isAbortError(error) || (error instanceof AdminRequestError && error.status === 408)) {
           throw new Error(
@@ -2321,18 +2337,15 @@ export default function SeasonDetailPage() {
 
     const result = await fetchAllPaginatedGalleryRowsWithMeta({
       pageSize: SEASON_ASSET_PAGE_SIZE,
-      maxPages: SEASON_ASSET_MAX_PAGES,
-      fetchPage: (offset, limit) =>
+      fetchPage: (cursor, limit) =>
         fetchAssetRows(
-          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=${limit}&offset=${offset}${sourcesParam}`
+          `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?limit=${limit}${sourcesParam}${
+            cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
+          }`,
         ),
     });
     setAssets(result.rows);
-    setAssetsTruncatedWarning(
-      result.truncated
-        ? `Showing first ${result.rows.length} assets due to pagination cap. Narrow filters to refine.`
-        : null
-    );
+    setAssetsTruncatedWarning(null);
   }, [showId, seasonNumber, getAuthHeaders, advancedFilters.sources]);
 
   useEffect(() => {
@@ -2648,9 +2661,7 @@ export default function SeasonDetailPage() {
                 const source = typeof (payload as { source?: unknown }).source === "string"
                   ? (payload as { source: string }).source
                   : null;
-                const payloadRequestId = typeof (payload as { request_id?: unknown }).request_id === "string"
-                  ? (payload as { request_id: string }).request_id
-                  : requestId;
+                const payloadRequestId = resolveRequestIdFromPayload(payload, requestId);
                 lastSeenRequestId = payloadRequestId;
                 const sourceTotal = parseProgressNumber((payload as { source_total?: unknown }).source_total);
                 const mirroredCount = parseProgressNumber((payload as { mirrored_count?: unknown }).mirrored_count);
@@ -2714,9 +2725,7 @@ export default function SeasonDetailPage() {
                   ? (payload as Record<string, unknown>)
                   : {};
                 sawComplete = true;
-                const completeRequestId = typeof (payloadObject as { request_id?: unknown }).request_id === "string"
-                  ? String((payloadObject as { request_id?: unknown }).request_id)
-                  : requestId;
+                const completeRequestId = resolveRequestIdFromPayload(payloadObject, requestId);
                 lastSeenRequestId = completeRequestId;
                 const completeLiveCounts = resolveJobLiveCounts(assetsRefreshLiveCounts, payloadObject);
                 setAssetsRefreshLiveCounts(completeLiveCounts);
@@ -2741,8 +2750,7 @@ export default function SeasonDetailPage() {
                   payload && typeof payload === "object"
                     ? (payload as { error?: unknown; detail?: unknown; request_id?: unknown })
                     : null;
-                const payloadRequestId =
-                  typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
+                const payloadRequestId = resolveRequestIdFromPayload(errorPayload, requestId);
                 lastSeenRequestId = payloadRequestId;
                 const errorText =
                   typeof errorPayload?.error === "string" && errorPayload.error
@@ -4600,19 +4608,6 @@ export default function SeasonDetailPage() {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
     return parsed.toLocaleDateString();
-  };
-
-  const resolveBravoVideoThumbnailUrl = (video: BravoVideoItem): string | null => {
-    if (typeof video.hosted_image_url === "string" && video.hosted_image_url.trim()) {
-      return video.hosted_image_url.trim();
-    }
-    if (typeof video.image_url === "string" && video.image_url.trim()) {
-      return video.image_url.trim();
-    }
-    if (typeof video.original_image_url === "string" && video.original_image_url.trim()) {
-      return video.original_image_url.trim();
-    }
-    return null;
   };
 
   const advancedFilteredMediaAssets = useMemo(() => {

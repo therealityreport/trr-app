@@ -27,6 +27,11 @@ describe("show links refresh progress", () => {
           season_scanned: 5,
           people_scanned: 12,
         },
+        target_progress: {
+          shows: { completed: 0, total: 1 },
+          seasons: { completed: 0, total: 5 },
+          cast_members: { completed: 0, total: 12 },
+        },
         stage_budget: {
           stage: "show",
           max_fandom_candidates: 180,
@@ -39,7 +44,7 @@ describe("show links refresh progress", () => {
     expect(summary.headline).toBe("Show Links still running...");
     expect(summary.elapsedLabel).toBe("111s elapsed");
     expect(summary.stageElapsedLabel).toBe("34s in this stage");
-    expect(summary.targetSummary).toBe("Targets: show 1 · seasons 5 · cast 12");
+    expect(summary.targetSummary).toBe("0/1 Shows · 0/5 Seasons · 0/12 Cast Members");
     expect(summary.metrics).toEqual(
       expect.arrayContaining([
         { label: "Discovered", value: "8" },
@@ -58,9 +63,14 @@ describe("show links refresh progress", () => {
         heartbeat: true,
         elapsed_ms: 145_000,
         stage_elapsed_ms: 90_000,
+        target_progress: {
+          shows: { completed: 1, total: 1 },
+          seasons: { completed: 7, total: 7 },
+          cast_members: { completed: 4, total: 59 },
+        },
         stage_progress: {
           processed_targets: 4,
-          total_targets: 9,
+          total_targets: 59,
           links_discovered: 11,
           targets_with_links: 3,
           current_target_label: "Heather Gay",
@@ -70,7 +80,8 @@ describe("show links refresh progress", () => {
     );
 
     expect(summary.headline).toBe("Cast Links still running...");
-    expect(summary.stageProgressLabel).toBe("4/9 processed · 11 links found · 3 matches");
+    expect(summary.targetSummary).toBe("1/1 Shows · 7/7 Seasons · 4/59 Cast Members");
+    expect(summary.stageProgressLabel).toBe("4/59 processed · 11 links found · 3 matches");
     expect(summary.currentTargetLabel).toBe("Heather Gay");
   });
 

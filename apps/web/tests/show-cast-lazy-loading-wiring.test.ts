@@ -11,8 +11,9 @@ describe("show detail cast lazy-loading wiring", () => {
   const creditsViewsContents = fs.readFileSync(creditsViewsPath, "utf8");
 
   it("keeps initial page load Promise.all free of fetchCast", () => {
-    expect(contents).toMatch(/await Promise\.allSettled\(\[fetchSeasons\(\), checkCoverage\(\)\]\)/);
-    expect(contents).not.toMatch(/await Promise\.allSettled\(\[fetchSeasons\(\), fetchCast\(\), checkCoverage\(\)\]\)/);
+    expect(contents).toMatch(/useShowIdentityLoad/);
+    expect(contents).toMatch(/const \{\s*[\s\S]*fetchSeasons,\s*loadShowIdentity,\s*\} = useShowIdentityLoad/s);
+    expect(contents).toMatch(/const autoLoadKey = `\$\{showId\}:cast`;/);
   });
 
   it("loads cast lazily on cast tab entry", () => {

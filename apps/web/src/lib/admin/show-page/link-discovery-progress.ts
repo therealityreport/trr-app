@@ -55,6 +55,28 @@ const humanizeBudgetReason = (value: unknown): string | null => {
 };
 
 const buildTargetSummary = (value: unknown): string | null => {
+  if (value && typeof value === "object") {
+    const targetProgress = value as Record<string, unknown>;
+    const renderBucket = (bucketValue: unknown, label: string): string | null => {
+      if (!bucketValue || typeof bucketValue !== "object") return null;
+      const bucket = bucketValue as Record<string, unknown>;
+      const completed = parseProgressNumber(bucket.completed);
+      const total = parseProgressNumber(bucket.total);
+      if (completed === null || total === null || total <= 0) return null;
+      return `${completed}/${total} ${label}`;
+    };
+
+    const progressParts = [
+      renderBucket(targetProgress.shows, "Shows"),
+      renderBucket(targetProgress.seasons, "Seasons"),
+      renderBucket(targetProgress.cast_members, "Cast Members"),
+    ].filter((part): part is string => Boolean(part));
+
+    if (progressParts.length > 0) {
+      return progressParts.join(" · ");
+    }
+  }
+
   if (!value || typeof value !== "object") return null;
   const targets = value as Record<string, unknown>;
   const showCount = parseProgressNumber(targets.show_scanned);
@@ -145,7 +167,11 @@ export const buildLinkDiscoveryProgressSummary = (
 
   const elapsedLabel = formatElapsedLabel(parseProgressNumber(payload.elapsed_ms));
   const stageElapsedLabel = formatElapsedLabel(parseProgressNumber(payload.stage_elapsed_ms), "in this stage");
-  const targetSummary = buildTargetSummary(payload.scan_targets);
+  const targetSummary = buildTargetSummary(
+    payload.target_progress && typeof payload.target_progress === "object"
+      ? payload.target_progress
+      : payload.scan_targets
+  );
   const { stageProgressLabel, currentTargetLabel } = buildStageProgressSummary(payload.stage_progress, currentStage);
 
   const metrics: LinkDiscoveryProgressMetric[] = [];

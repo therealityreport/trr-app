@@ -42,7 +42,8 @@ import {
   type SocialSyncRetryKind,
   type SocialSyncSessionStreamPayload,
 } from "@/lib/admin/social-sync-session";
-import { useSharedSseResource } from "@/lib/admin/shared-live-resource";
+import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
+import { useSharedPollingResource, useSharedSseResource } from "@/lib/admin/shared-live-resource";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
 import {
   pickFirstNonVideoUrl,
@@ -658,6 +659,16 @@ interface WeekLiveHealthSnapshot {
   day_account_rows: WeekLiveHealthDayRow[];
   asset_health: WeekLiveHealthAssetRow[];
   updated_at?: string | null;
+}
+
+interface WeekSocialSnapshot {
+  worker_health?: WorkerHealthPayload | null;
+  week_live_health?: WeekLiveHealthSnapshot | null;
+  run_progress?: RunProgressSnapshot | null;
+  sync_session?: SocialSyncSessionProgressSnapshot | null;
+  generated_at?: string | null;
+  cache_age_ms?: number;
+  stale?: boolean;
 }
 
 type PlatformFilter = "all" | "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
@@ -4723,7 +4734,6 @@ export default function WeekDetailPage() {
   const weekDetailInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
   const weekSummaryInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
   const syncWorkerHealthInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
-  const syncWeekLiveHealthInFlightRef = useRef<Map<string, Promise<Response>>>(new Map());
   const [weekOverviewLoadedKey, setWeekOverviewLoadedKey] = useState<string | null>(null);
   const syncSessionStateRef = useRef<{
     dateStart: string;
@@ -5602,6 +5612,16 @@ export default function WeekDetailPage() {
       }
       markAdminOperationSessionStatus(syncOperationFlowScope, "cancelled");
       markAdminRunSessionStatus(syncRunFlowScope, "cancelled");
+      try {
+        await invalidateAdminSnapshotFamilies([
+          {
+            pageFamily: "week-social",
+            scope: `${showIdForApi}:${seasonNumber}:${weekIndex}`,
+          },
+        ]);
+      } catch {
+        // Best-effort only.
+      }
       setSyncPollError("Sync cancelled by user.");
     } catch (err) {
       setSyncPollError(`Failed to cancel: ${err instanceof Error ? err.message : String(err)}`);
@@ -5615,6 +5635,7 @@ export default function WeekDetailPage() {
     syncOperationFlowScope,
     syncRunFlowScope,
     syncRunId,
+    weekIndex,
   ]);
 
   useEffect(() => {
@@ -5816,6 +5837,12 @@ export default function WeekDetailPage() {
       adoptRun(runId, syncSessionIdValue, null);
       setSyncSessionProgress(result);
       setSyncPass(Math.max(1, Number(result.pass_sequence ?? 1) || 1));
+      void invalidateAdminSnapshotFamilies([
+        {
+          pageFamily: "week-social",
+          scope: `${showIdForApi}:${seasonNumber}:${weekIndex}`,
+        },
+      ]).catch(() => undefined);
       return {
         syncSessionId: syncSessionIdValue,
         runId,
@@ -5837,6 +5864,7 @@ export default function WeekDetailPage() {
       seasonNumber,
       showIdForApi,
       sourceScope,
+      weekIndex,
     ],
   );
 
@@ -6003,6 +6031,12 @@ export default function WeekDetailPage() {
             preserveLastGoodJobsIfEmpty: true,
             preserveLastGoodRunIfMissing: true,
           }).catch(() => undefined);
+          void invalidateAdminSnapshotFamilies([
+            {
+              pageFamily: "week-social",
+              scope: `${showIdForApi}:${seasonNumber}:${weekIndex}`,
+            },
+          ]).catch(() => undefined);
         }
       } catch (err) {
         setSyncError(err instanceof Error ? err.message : "Failed to retry sync session");
@@ -6018,6 +6052,7 @@ export default function WeekDetailPage() {
       seasonNumber,
       showIdForApi,
       syncSessionId,
+      weekIndex,
     ],
   );
 
@@ -6060,6 +6095,12 @@ export default function WeekDetailPage() {
       preserveLastGoodJobsIfEmpty: true,
       preserveLastGoodRunIfMissing: true,
     }).catch(() => undefined);
+    void invalidateAdminSnapshotFamilies([
+      {
+        pageFamily: "week-social",
+        scope: `${showIdForApi}:${seasonNumber}:${weekIndex}`,
+      },
+    ]).catch(() => undefined);
   }, [
     fetchSyncProgress,
     manualAttachRuns,
@@ -6069,6 +6110,7 @@ export default function WeekDetailPage() {
     syncOperationFlowScope,
     syncRunFlowKey,
     syncRunFlowScope,
+    weekIndex,
   ]);
 
   const fetchCommentsCoverage = useCallback(
@@ -6248,109 +6290,158 @@ export default function WeekDetailPage() {
     } satisfies WorkerHealthPayload;
   }, [getSyncRunRequestHeaders]);
 
+  const liveWeekSnapshot = useSharedPollingResource<{
+    payload: WeekSocialSnapshot;
+    cacheStatus: string;
+  }>({
+    key: `week-social-snapshot:${showIdForApi}:${seasonNumber}:${weekIndex}:${sourceScope}:${resolvedSeasonId ?? "none"}:${platformFilter}:${syncRunId ?? "none"}:${syncSessionId ?? "none"}`,
+    shouldRun: hasValidNumericPathParams && isAdmin && (syncingComments || Boolean(data)),
+    intervalMs: syncingComments ? SYNC_ACTIVE_POLL_INTERVAL_MS : 30_000,
+    fetchData: async (signal, request) =>
+      await fetchWeekSnapshot({
+        signal,
+        forceRefresh: request?.forceRefresh,
+        runId: syncRunId,
+        syncSessionId,
+      }),
+  });
+
+  const applyWeekSnapshotPayload = useCallback((payload: WeekSocialSnapshot) => {
+    setSyncWorkerHealth(payload.worker_health ?? null);
+    if (payload.week_live_health) {
+      setSyncWeekLiveHealth(payload.week_live_health);
+    }
+    if (payload.run_progress) {
+      setSyncRunProgress(payload.run_progress);
+    }
+    if (payload.sync_session) {
+      setSyncSessionProgress(payload.sync_session);
+      setSyncPass(Math.max(1, Number(payload.sync_session.pass_sequence ?? 1) || 1));
+    }
+  }, []);
+
+  const invalidateWeekSnapshotFamily = useCallback(async () => {
+    try {
+      await invalidateAdminSnapshotFamilies([
+        {
+          pageFamily: "week-social",
+          scope: `${showIdForApi}:${seasonNumber}:${weekIndex}`,
+        },
+      ]);
+    } catch {
+      // Best-effort only.
+    }
+  }, [seasonNumber, showIdForApi, weekIndex]);
+
   useEffect(() => {
-    if (!hasValidNumericPathParams || !isAdmin) return;
-    let cancelled = false;
-    let timeoutId: number | null = null;
+    if (!liveWeekSnapshot.data) return;
+    applyWeekSnapshotPayload(liveWeekSnapshot.data.payload);
+  }, [applyWeekSnapshotPayload, liveWeekSnapshot.data]);
 
-    const clearPendingPoll = () => {
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-    };
-
-    const refreshWorkerHealth = async () => {
-      try {
-        const health = await fetchSyncWorkerHealth();
-        if (!cancelled) {
-          setSyncWorkerHealth(health);
-        }
-      } catch {
-        if (!cancelled) {
-          setSyncWorkerHealth(null);
-        }
-      }
-    };
-
-    const scheduleNextPoll = () => {
-      clearPendingPoll();
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        return;
-      }
-      timeoutId = window.setTimeout(() => {
-        void refreshWorkerHealth();
-        scheduleNextPoll();
-      }, 30_000);
-    };
-
-    const handleVisibilityChange = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        clearPendingPoll();
-        return;
-      }
-      void refreshWorkerHealth();
-      scheduleNextPoll();
-    };
-
-    void refreshWorkerHealth();
-    scheduleNextPoll();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      cancelled = true;
-      clearPendingPoll();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [fetchSyncWorkerHealth, hasValidNumericPathParams, isAdmin]);
-
-  const fetchSyncWeekLiveHealth = useCallback(async () => {
-    if (!hasValidNumericPathParams) return null;
-    const headers = await getSyncRunRequestHeaders();
-    const params = new URLSearchParams({
-      source_scope: sourceScope,
-      timezone: SOCIAL_TIME_ZONE,
-    });
-    if (platformFilter !== "all") {
-      params.set("platforms", platformFilter);
+  useEffect(() => {
+    if (!liveWeekSnapshot.error) return;
+    if (syncingComments) {
+      setSyncPollError(liveWeekSnapshot.error);
     }
-    if (resolvedSeasonId) {
-      params.set("season_id", resolvedSeasonId);
-    }
-    const url = `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}/live-health?${params.toString()}`;
-    const requestKey = `GET ${url}`;
-    let inFlight = syncWeekLiveHealthInFlightRef.current.get(requestKey);
-    if (!inFlight) {
-      inFlight = registerInFlightRequest(
-        syncWeekLiveHealthInFlightRef.current,
-        requestKey,
-        fetchWithTimeout(
-          url,
-          { headers, cache: "no-store" },
-          REQUEST_TIMEOUT_MS.weekLiveHealth,
-          "Week live health request timed out",
-        ),
+  }, [liveWeekSnapshot.error, syncingComments]);
+
+  const fetchWeekSnapshot = useCallback(
+    async (
+      options?: {
+        signal?: AbortSignal;
+        forceRefresh?: boolean;
+        runId?: string | null;
+        syncSessionId?: string | null;
+      },
+    ) => {
+      if (!hasValidNumericPathParams) {
+        throw new Error(invalidPathParamsError ?? "Invalid season/week URL");
+      }
+      const headers = await getSyncRunRequestHeaders();
+      const params = new URLSearchParams({
+        source_scope: sourceScope,
+        timezone: SOCIAL_TIME_ZONE,
+      });
+      if (platformFilter !== "all") {
+        params.set("platforms", platformFilter);
+      }
+      if (resolvedSeasonId) {
+        params.set("season_id", resolvedSeasonId);
+      }
+      if (options?.runId) {
+        params.set("run_id", options.runId);
+      }
+      if (options?.syncSessionId) {
+        params.set("sync_session_id", options.syncSessionId);
+      }
+      if (options?.forceRefresh) {
+        params.set("refresh", "1");
+      }
+      const response = await fetchWithTimeout(
+        `/api/admin/trr-api/shows/${showIdForApi}/seasons/${seasonNumber}/social/analytics/week/${weekIndex}/snapshot?${params.toString()}`,
+        { headers, cache: "no-store", signal: options?.signal },
+        REQUEST_TIMEOUT_MS.runProgress,
+        "Week social snapshot request timed out",
       );
-    }
-    const rawResponse = await inFlight;
-    const response = typeof rawResponse.clone === "function" ? rawResponse.clone() : rawResponse;
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? "Failed to fetch week live health");
-    }
-    const payload = await parseResponseJson<WeekLiveHealthSnapshot>(response, "Failed to fetch week live health");
-    setSyncWeekLiveHealth(payload);
-    return payload;
-  }, [
-    getSyncRunRequestHeaders,
-    hasValidNumericPathParams,
-    platformFilter,
-    resolvedSeasonId,
-    seasonNumber,
-    showIdForApi,
-    sourceScope,
-    weekIndex,
-  ]);
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Failed to fetch week social snapshot");
+      }
+      const envelope = await parseResponseJson<
+        | WeekSocialSnapshot
+        | {
+            data?: WeekSocialSnapshot;
+            generated_at?: string | null;
+            cache_age_ms?: number;
+            stale?: boolean;
+          }
+      >(response, "Failed to fetch week social snapshot");
+      const payload =
+        envelope && typeof envelope === "object" && "data" in envelope && envelope.data
+          ? {
+              ...envelope.data,
+              generated_at: envelope.generated_at ?? envelope.data.generated_at,
+              cache_age_ms:
+                typeof envelope.cache_age_ms === "number"
+                  ? envelope.cache_age_ms
+                  : envelope.data.cache_age_ms,
+              stale: typeof envelope.stale === "boolean" ? envelope.stale : envelope.data.stale,
+            }
+          : (envelope as WeekSocialSnapshot);
+      return {
+        payload,
+        cacheStatus: response.headers.get("x-trr-cache") ?? "miss",
+      };
+    },
+    [
+      getSyncRunRequestHeaders,
+      hasValidNumericPathParams,
+      invalidPathParamsError,
+      platformFilter,
+      resolvedSeasonId,
+      seasonNumber,
+      showIdForApi,
+      sourceScope,
+      weekIndex,
+    ],
+  );
+
+  const refreshWeekSnapshotNow = useCallback(
+    async (
+      _cause: "manual" | "mutation" = "mutation",
+      options?: { runId?: string | null; syncSessionId?: string | null },
+    ) => {
+      await invalidateWeekSnapshotFamily();
+      const snapshot = await fetchWeekSnapshot({
+        forceRefresh: true,
+        runId: options?.runId ?? syncRunId,
+        syncSessionId: options?.syncSessionId ?? syncSessionId,
+      });
+      applyWeekSnapshotPayload(snapshot.payload);
+      return snapshot;
+    },
+    [applyWeekSnapshotPayload, fetchWeekSnapshot, invalidateWeekSnapshotFamily, syncRunId, syncSessionId],
+  );
 
   const syncAllCommentsForWeek = useCallback(async () => {
     if (!data) return;
@@ -6567,7 +6658,7 @@ export default function WeekDetailPage() {
           sortFieldValue: sortField,
           sortDirValue: sortDir,
         }),
-        fetchSyncWeekLiveHealth(),
+        liveWeekSnapshot.refetch({ cause: "mutation" }),
       ]);
     };
 
@@ -6599,10 +6690,7 @@ export default function WeekDetailPage() {
         setSyncRun(null);
         setSyncJobs([]);
         setSyncRunProgress(null);
-        void fetchSyncProgress(nextRunId, {
-          preserveLastGoodJobsIfEmpty: true,
-          preserveLastGoodRunIfMissing: true,
-        }).catch(() => undefined);
+        void liveWeekSnapshot.refetch({ forceRefresh: true, cause: "mutation" });
       } else {
         void refreshLiveWeekData();
       }
@@ -6659,8 +6747,7 @@ export default function WeekDetailPage() {
     void applyStreamEvent();
   }, [
     fetchData,
-    fetchSyncProgress,
-    fetchSyncWeekLiveHealth,
+    liveWeekSnapshot,
     resolvedSeasonId,
     seasonNumber,
     showIdForApi,
@@ -6778,16 +6865,24 @@ export default function WeekDetailPage() {
     const poll = async () => {
       if (cancelled || generation !== syncPollGenerationRef.current) return;
       try {
-        const snapshot = await fetchSyncProgress(syncRunId, {
-          preserveLastGoodJobsIfEmpty: true,
-          preserveLastGoodRunIfMissing: true,
+        const snapshot = await fetchWeekSnapshot({
+          forceRefresh: true,
+          runId: syncRunId,
+          syncSessionId,
           signal: abortController.signal,
         });
         if (cancelled || generation !== syncPollGenerationRef.current) return;
+        applyWeekSnapshotPayload(snapshot.payload);
         syncPollFailureCountRef.current = 0;
         setSyncPollError(null);
         setSyncLastSuccessAt(new Date());
-        const currentRun = snapshot.run;
+        const currentRun = snapshot.payload.run_progress
+          ? {
+              id: String(snapshot.payload.run_progress.run_id || syncRunId),
+              status: snapshot.payload.run_progress.run_status,
+              summary: snapshot.payload.run_progress.summary ?? {},
+            }
+          : null;
         if (currentRun && TERMINAL_RUN_STATUSES.has(currentRun.status)) {
           if (syncSessionId) {
             return;
@@ -7004,10 +7099,11 @@ export default function WeekDetailPage() {
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [
+    applyWeekSnapshotPayload,
     fetchCommentsCoverage,
     fetchData,
     fetchMirrorCoverage,
-    fetchSyncProgress,
+    fetchWeekSnapshot,
     queueSyncPass,
     requeueMirrorJobs,
     sortDir,
@@ -7022,32 +7118,6 @@ export default function WeekDetailPage() {
     syncStartedAt,
     syncingComments,
   ]);
-
-  useEffect(() => {
-    if (!syncingComments || !hasValidNumericPathParams) return;
-    if (!syncPollingEnabled) return;
-    let cancelled = false;
-    let timeoutId: number | null = null;
-
-    const pollLiveHealth = async () => {
-      if (cancelled) return;
-      try {
-        await fetchSyncWeekLiveHealth();
-      } catch {
-        // Keep sync polling resilient when live-health is temporarily unavailable.
-      }
-      if (cancelled) return;
-      timeoutId = window.setTimeout(() => {
-        void pollLiveHealth();
-      }, SYNC_ACTIVE_POLL_INTERVAL_MS);
-    };
-
-    void pollLiveHealth();
-    return () => {
-      cancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [fetchSyncWeekLiveHealth, hasValidNumericPathParams, syncPollingEnabled, syncingComments]);
 
   useEffect(() => {
     if (!syncingComments && syncPass !== 0) {
@@ -8038,13 +8108,6 @@ export default function WeekDetailPage() {
     });
   }, [syncWeekLiveHealth?.asset_health]);
 
-  useEffect(() => {
-    if (!syncRunId || !syncWeekLiveHealth) return;
-    void fetchSyncWeekLiveHealth().catch(() => {
-      // Keep historical sync panels resilient when live-health refresh is temporarily unavailable.
-    });
-  }, [fetchSyncWeekLiveHealth, platformFilter, syncRunId, syncWeekLiveHealth]);
-
   const syncStepStatus = useMemo(() => {
     const queueStatus = (() => {
       if (!syncRun) {
@@ -8776,9 +8839,7 @@ export default function WeekDetailPage() {
                       syncPollFailureCountRef.current = 0;
                       missingRunConsecutiveCountRef.current = 0;
                       terminalCoverageFailureCountRef.current = 0;
-                      if (syncRunId) {
-                        void fetchSyncProgress(syncRunId).catch(() => {});
-                      }
+                      void refreshWeekSnapshotNow("manual");
                     }}
                     className="rounded border border-red-300 bg-white px-2 py-0.5 text-xs font-semibold text-red-600 hover:bg-red-50"
                   >

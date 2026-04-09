@@ -267,6 +267,92 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     );
   });
 
+  it("updates structured flair assignments when PATCH payload is valid", async () => {
+    updateRedditCommunityMock.mockResolvedValue({
+      id: COMMUNITY_ID,
+      subreddit: "realhousewivesofSLC",
+      analysis_flairs: [],
+      analysis_all_flairs: [],
+      is_show_focused: true,
+      network_focus_targets: [],
+      franchise_focus_targets: [],
+      episode_title_patterns: ["Live Episode Discussion"],
+      post_flair_assignments: {
+        s6: {
+          show_ids: ["show-1", "show-2"],
+          season_ids: ["season-1"],
+          person_ids: ["person-1"],
+        },
+      },
+    });
+
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        post_flair_assignments: {
+          "S6 ❄️": {
+            show_ids: ["show-1", "show-2"],
+            season_ids: ["season-1"],
+            person_ids: ["person-1"],
+          },
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await PATCH(request, {
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.community?.post_flair_assignments).toEqual({
+      s6: {
+        show_ids: ["show-1", "show-2"],
+        season_ids: ["season-1"],
+        person_ids: ["person-1"],
+      },
+    });
+    expect(updateRedditCommunityMock).toHaveBeenCalledWith(
+      { firebaseUid: "admin-uid", isAdmin: true },
+      COMMUNITY_ID,
+      expect.objectContaining({
+        postFlairAssignments: {
+          s6: {
+            show_ids: ["show-1", "show-2"],
+            season_ids: ["season-1"],
+            person_ids: ["person-1"],
+          },
+        },
+      }),
+    );
+  });
+
+  it("rejects invalid structured flair assignments payloads", async () => {
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        post_flair_assignments: {
+          S6: {
+            show_ids: ["show-1", 2],
+            season_ids: ["season-1"],
+            person_ids: ["person-1"],
+          },
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await PATCH(request, {
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toContain("post_flair_assignments");
+    expect(updateRedditCommunityMock).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid network_focus_targets payloads", async () => {
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",

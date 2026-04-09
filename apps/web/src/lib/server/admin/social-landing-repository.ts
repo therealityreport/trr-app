@@ -14,6 +14,7 @@ import type {
   NetworkProfileSet,
   PersonProfileShowSummary,
   PersonProfileSummary,
+  RedditDashboardSummary,
   SharedAccountSourceSummary,
   SharedPipelineSummary,
   SharedReviewItemSummary,
@@ -23,6 +24,7 @@ import type {
   SocialLandingPayload,
   SocialLandingPlatform,
 } from "@/lib/admin/social-landing";
+import { listRedditCommunities } from "@/lib/server/admin/reddit-sources-repository";
 import {
   getCoveredShows,
   type CoveredShow,
@@ -279,6 +281,33 @@ const safeLoadSharedReviewItems = async (): Promise<SharedReviewItemSummary[]> =
   }
 };
 
+const safeLoadRedditDashboardSummary = async (): Promise<RedditDashboardSummary> => {
+  try {
+    const communities = await listRedditCommunities({ includeInactive: true });
+    const showIds = new Set(
+      communities
+        .map((community) => community.trr_show_id?.trim())
+        .filter((value): value is string => Boolean(value)),
+    );
+    const activeCommunityCount = communities.filter((community) => community.is_active)
+      .length;
+    const archivedCommunityCount = communities.length - activeCommunityCount;
+
+    return {
+      active_community_count: activeCommunityCount,
+      archived_community_count: archivedCommunityCount,
+      show_count: showIds.size,
+    };
+  } catch (error) {
+    console.warn("[social-landing] Failed to load reddit dashboard summary", error);
+    return {
+      active_community_count: 0,
+      archived_community_count: 0,
+      show_count: 0,
+    };
+  }
+};
+
 const safeLoadShowDetail = async (showId: string): Promise<TrrShow | null> => {
   try {
     return await getShowById(showId);
@@ -477,12 +506,13 @@ const buildPeopleProfiles = async (
 };
 
 export async function getSocialLandingPayload(): Promise<SocialLandingPayload> {
-  const [coveredShows, sharedSources, sharedRuns, sharedReviewItems] =
+  const [coveredShows, sharedSources, sharedRuns, sharedReviewItems, redditDashboard] =
     await Promise.all([
       getCoveredShows(),
       safeLoadSharedSources(),
       safeLoadSharedRuns(),
       safeLoadSharedReviewItems(),
+      safeLoadRedditDashboardSummary(),
     ]);
 
   const showPairs = await Promise.all(
@@ -515,5 +545,6 @@ export async function getSocialLandingPayload(): Promise<SocialLandingPayload> {
       runs: sharedRuns,
       review_items: sharedReviewItems,
     } satisfies SharedPipelineSummary,
+    reddit_dashboard: redditDashboard,
   };
 }

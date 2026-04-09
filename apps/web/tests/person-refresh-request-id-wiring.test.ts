@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { buildScopedAdminRequestId } from "@/lib/admin/request-id";
 
 describe("person refresh request-id diagnostics wiring", () => {
   const pagePath = path.resolve(
@@ -12,7 +13,17 @@ describe("person refresh request-id diagnostics wiring", () => {
   it("generates per-click request ids with show+person context and monotonic counter", () => {
     expect(pageContents).toMatch(/personRefreshRequestCounterRef = useRef\(0\)/);
     expect(pageContents).toMatch(/const buildPersonRefreshRequestId = useCallback\(/);
-    expect(pageContents).toMatch(/person-refresh-\$\{showToken\}-p\$\{personToken\}-\$\{timestampToken\}-\$\{counter\}/);
+    expect(
+      buildScopedAdminRequestId({
+        prefix: "person-refresh",
+        counter: 9,
+        now: 1234567890,
+        parts: [
+          { value: "Top Chef" },
+          { prefix: "p", value: "Andy Cohen" },
+        ],
+      })
+    ).toBe("person-refresh-top-chef-pandy-cohen-kf12oi-9");
   });
 
   it("attaches x-trr-request-id header to refresh and reprocess stream requests", () => {

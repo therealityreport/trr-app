@@ -119,6 +119,8 @@ import {
   inferHasTextOverlay,
 } from "@/lib/gallery-filter-utils";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
+import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
+import { resolveBravoVideoThumbnailUrl } from "@/lib/admin/bravo-video-thumbnails";
 import {
   contentTypeToAssetKind,
   contentTypeToContextType,
@@ -181,6 +183,7 @@ import {
   markAdminOperationSessionStatus,
   upsertAdminOperationSession,
 } from "@/lib/admin/operation-session";
+import { useTabRouteNavigation } from "@/lib/admin/use-tab-route-navigation";
 import { SHOW_SOCIAL_PLATFORM_TABS } from "@/lib/admin/show-page/constants";
 import { useShowCoverage } from "@/lib/admin/show-page/use-show-coverage";
 import { useShowDetailsController } from "@/lib/admin/show-page/use-show-details-controller";
@@ -1139,6 +1142,7 @@ const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
 const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
+const GALLERY_ASSET_PAGE_SIZE = 500;
 const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const CAST_INCREMENTAL_INITIAL_LIMIT = 48;
@@ -3177,50 +3181,41 @@ export default function TrrShowDetailPage() {
     return fromPath ?? "overview";
   }, [searchParams, socialPathFilters?.platform]);
 
-  const setTab = useCallback(
-    (tab: TabId) => {
+  const setTab = useTabRouteNavigation<TabId>({
+    router,
+    setActiveTab,
+    beforeSelect: (tab) => {
       if (
         tab !== "details" &&
         hasUnsavedDetailsChanges &&
         !window.confirm("You have unsaved show detail changes. Leave this tab?")
       ) {
-        return;
+        return false;
       }
-      setActiveTab(tab);
+      return true;
+    },
+    buildHref: (tab) => {
       const preservedQuery = cleanLegacyRoutingQuery(new URLSearchParams(searchParams.toString()));
       const socialSeasonNumber = getSocialSeasonNumberForRouting();
-      router.replace(
-        buildShowAdminUrl({
-          showSlug: showSlugForRouting,
-          tab,
-          assetsSubTab: tab === "assets" ? assetsView : undefined,
-          socialRoute:
-            tab === "social"
-              ? {
-                  seasonNumber: socialSeasonNumber,
-                  weekIndex: socialPathFilters?.weekIndex,
-                  platform:
-                    socialPathFilters?.platform ??
-                    (socialPlatformTab !== "overview" ? socialPlatformTab : undefined),
-                  handle: socialPathFilters?.handle,
-                }
-              : undefined,
-          query: preservedQuery,
-        }) as Route,
-        { scroll: false }
-      );
+      return buildShowAdminUrl({
+        showSlug: showSlugForRouting,
+        tab,
+        assetsSubTab: tab === "assets" ? assetsView : undefined,
+        socialRoute:
+          tab === "social"
+            ? {
+                seasonNumber: socialSeasonNumber,
+                weekIndex: socialPathFilters?.weekIndex,
+                platform:
+                  socialPathFilters?.platform ??
+                  (socialPlatformTab !== "overview" ? socialPlatformTab : undefined),
+                handle: socialPathFilters?.handle,
+              }
+            : undefined,
+        query: preservedQuery,
+      }) as Route;
     },
-    [
-      assetsView,
-      getSocialSeasonNumberForRouting,
-      hasUnsavedDetailsChanges,
-      router,
-      searchParams,
-      showSlugForRouting,
-      socialPathFilters,
-      socialPlatformTab,
-    ]
-  );
+  });
 
   useEffect(() => {
     if (activeTab !== "cast") return;
@@ -8001,19 +7996,6 @@ export default function TrrShowDetailPage() {
     return parsed.toLocaleDateString();
   };
 
-  const resolveBravoVideoThumbnailUrl = (video: BravoVideoItem): string | null => {
-    if (typeof video.hosted_image_url === "string" && video.hosted_image_url.trim()) {
-      return video.hosted_image_url.trim();
-    }
-    if (typeof video.image_url === "string" && video.image_url.trim()) {
-      return video.image_url.trim();
-    }
-    if (typeof video.original_image_url === "string" && video.original_image_url.trim()) {
-      return video.original_image_url.trim();
-    }
-    return null;
-  };
-
   const formatDateRange = (
     premiere: string | null | undefined,
     finale: string | null | undefined
@@ -9502,9 +9484,6 @@ export default function TrrShowDetailPage() {
       });
       try {
         const headers = await getAuthHeaders();
-        const sourcesParam = advancedFilters.sources.length
-          ? `&sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
-          : "";
         const dedupe = (rows: SeasonAsset[]) => {
           const seen = new Set<string>();
           const out: SeasonAsset[] = [];
@@ -9532,9 +9511,15 @@ export default function TrrShowDetailPage() {
           };
         };
 
-        const fetchAssetRows = async (
-          url: string
-        ): Promise<{ rows: SeasonAsset[]; truncated: boolean }> => {
+        const fetchAssetPage = async (
+          baseUrl: string,
+          cursor: string | null,
+          limit: number,
+        ): Promise<{ rows: SeasonAsset[]; nextCursor: string | null }> => {
+          const separator = baseUrl.includes("?") ? "&" : "?";
+          const url = `${baseUrl}${separator}limit=${limit}${
+            cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
+          }`;
           let res: Response;
           try {
             res = await fetchWithTimeout(url, { headers }, GALLERY_ASSET_LOAD_TIMEOUT_MS);
@@ -9548,59 +9533,68 @@ export default function TrrShowDetailPage() {
             }
             throw error;
           }
-          if (!res.ok) return { rows: [], truncated: false };
+          if (!res.ok) return { rows: [], nextCursor: null };
           const data = await res.json().catch(() => ({}));
           const assets = (data as { assets?: unknown }).assets;
-          const pagination = (data as { pagination?: { truncated?: unknown } }).pagination;
-          const truncated = Boolean(pagination?.truncated);
+          const pagination =
+            typeof data === "object" && data && "pagination" in data
+              ? ((data as { pagination?: unknown }).pagination as
+                  | { has_more?: boolean; next_cursor?: string | null }
+                  | undefined)
+              : undefined;
+          const nextCursor =
+            typeof pagination?.next_cursor === "string" && pagination.next_cursor.trim()
+              ? pagination.next_cursor
+              : null;
+          if (pagination?.has_more && !nextCursor) {
+            throw new Error("Gallery pagination response is missing next cursor.");
+          }
           return {
             rows: Array.isArray(assets) ? (assets as SeasonAsset[]) : [],
-            truncated,
+            nextCursor,
           };
         };
 
-        const fetchShowAssets = async (): Promise<{ rows: SeasonAsset[]; truncated: boolean }> =>
-          fetchAssetRows(`/api/admin/trr-api/shows/${showId}/assets?full=1${sourcesParam}`);
+        const fetchAssetRows = async (
+          baseUrl: string,
+        ): Promise<{ rows: SeasonAsset[]; truncated: boolean }> =>
+          fetchAllPaginatedGalleryRowsWithMeta({
+            pageSize: GALLERY_ASSET_PAGE_SIZE,
+            fetchPage: (cursor, limit) => fetchAssetPage(baseUrl, cursor, limit),
+          });
+
+        const fetchShowAssetsBaseUrl = advancedFilters.sources.length
+          ? `/api/admin/trr-api/shows/${showId}/assets?sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
+          : `/api/admin/trr-api/shows/${showId}/assets`;
+
+        const fetchSeasonAssetsBaseUrl = (targetSeasonNumber: number): string =>
+          advancedFilters.sources.length
+            ? `/api/admin/trr-api/shows/${showId}/seasons/${targetSeasonNumber}/assets?sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
+            : `/api/admin/trr-api/shows/${showId}/seasons/${targetSeasonNumber}/assets`;
 
         if (seasonNumber === "all") {
           // Fetch show-level assets once + season assets for all seasons.
           const [showAssets, ...seasonResults] = await Promise.all([
-            fetchShowAssets(),
+            fetchAssetRows(fetchShowAssetsBaseUrl),
             ...visibleSeasons.map(async (season) => {
-              return fetchAssetRows(
-                `/api/admin/trr-api/shows/${showId}/seasons/${season.season_number}/assets?full=1${sourcesParam}`
-              );
+              return fetchAssetRows(fetchSeasonAssetsBaseUrl(season.season_number));
             }),
           ]);
           const dedupedAssets = dedupe([
             ...(showAssets?.rows ?? []),
             ...seasonResults.flatMap((result) => result.rows),
           ]);
-          const isTruncated = Boolean(
-            showAssets?.truncated || seasonResults.some((result) => result.truncated)
-          );
           setGalleryAssets(dedupedAssets);
-          setGalleryTruncatedWarning(
-            isTruncated
-              ? `Showing first ${dedupedAssets.length} assets due to pagination cap. Narrow filters to refine.`
-              : null
-          );
+          setGalleryTruncatedWarning(null);
           setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
         } else {
           const [showAssets, seasonAssets] = await Promise.all([
-            fetchShowAssets(),
-            fetchAssetRows(
-              `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?full=1${sourcesParam}`
-            ),
+            fetchAssetRows(fetchShowAssetsBaseUrl),
+            fetchAssetRows(fetchSeasonAssetsBaseUrl(seasonNumber)),
           ]);
           const dedupedAssets = dedupe([...(showAssets?.rows ?? []), ...(seasonAssets?.rows ?? [])]);
-          const isTruncated = Boolean(showAssets?.truncated || seasonAssets?.truncated);
           setGalleryAssets(dedupedAssets);
-          setGalleryTruncatedWarning(
-            isTruncated
-              ? `Showing first ${dedupedAssets.length} assets due to pagination cap. Narrow filters to refine.`
-              : null
-          );
+          setGalleryTruncatedWarning(null);
           setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
         }
       } finally {
@@ -11372,16 +11366,6 @@ export default function TrrShowDetailPage() {
       loadGalleryAssets("all");
     }
   }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
-
-  // Eagerly load gallery assets once on mount so the header logo resolves
-  // without waiting for the user to visit the Assets tab.
-  const logoLoadAttemptedRef = useRef(false);
-  useEffect(() => {
-    if (logoLoadAttemptedRef.current) return;
-    if (!hasAccess || !showId || activeTab === "assets") return;
-    logoLoadAttemptedRef.current = true;
-    loadGalleryAssets("all");
-  }, [hasAccess, showId, activeTab, loadGalleryAssets]);
 
   const handleRefreshCastMember = useCallback(
     async (personId: string, label: string) => {

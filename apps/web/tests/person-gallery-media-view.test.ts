@@ -179,6 +179,28 @@ describe("person gallery media view helpers", () => {
     ]);
   });
 
+  it("recovers show tabs from resolved show metadata when legacy rows are missing bucket_type", () => {
+    const options = buildPersonGalleryShowOptions([
+      makePhoto({
+        id: "legacy-rhoslc",
+        bucket_type: null,
+        bucket_key: null,
+        bucket_label: null,
+        resolved_show_id: "show-rhoslc",
+        resolved_show_name: "The Real Housewives of Salt Lake City",
+      }),
+    ]);
+
+    expect(options).toEqual([
+      {
+        key: "id:show-rhoslc",
+        showId: "show-rhoslc",
+        showName: "The Real Housewives of Salt Lake City",
+        acronym: "RHOSLC",
+      },
+    ]);
+  });
+
   it("keeps the highest grouped event count per event bucket", () => {
     const availability = computePersonGalleryMediaViewAvailability({
       photos: [

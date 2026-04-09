@@ -138,6 +138,9 @@ const NORMALIZED_SOURCE_LABELS: Record<string, string> = {
   nbcumv: "NBCUMV",
   getty: "Getty",
 };
+const SCRAPE_HOSTNAME_LABELS: Record<string, string> = {
+  "bravotv.com": "Bravo TV",
+};
 
 const CONTENT_TYPE_TO_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -359,6 +362,31 @@ const normalizeUrl = (value: string | null | undefined): string | null => {
   }
 };
 
+const extractHostnameCandidate = (value: string | null | undefined): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return new URL(trimmed).hostname.toLowerCase().replace(/^www\./, "") || null;
+  } catch {
+    const cleaned = trimmed
+      .replace(/^web[_-]?scrape:?/i, "")
+      .replace(/^harvest:?/i, "")
+      .replace(/^https?:\/\//i, "")
+      .replace(/^www\./i, "")
+      .split(/[/?#:]/, 1)[0]
+      ?.trim()
+      .toLowerCase();
+    return cleaned || null;
+  }
+};
+
+const resolveSourceHostnameLabel = (hostname: string | null | undefined): string | null => {
+  const normalized = typeof hostname === "string" ? hostname.trim().toLowerCase().replace(/^www\./, "") : "";
+  if (!normalized) return null;
+  return SCRAPE_HOSTNAME_LABELS[normalized] ?? normalized;
+};
+
 const getDomainLabel = (value: string | null | undefined): string | null => {
   const normalized = normalizeUrl(value);
   if (!normalized) return null;
@@ -372,17 +400,36 @@ const getDomainLabel = (value: string | null | undefined): string | null => {
     if (hostname.includes("fandom.com") || hostname.includes("wikia.com") || hostname.includes("nocookie.net")) {
       return "FANDOM";
     }
+    const mappedHostnameLabel = resolveSourceHostnameLabel(hostname);
+    if (mappedHostnameLabel && mappedHostnameLabel !== hostname) {
+      return mappedHostnameLabel;
+    }
     return hostname ? hostname.toUpperCase() : null;
   } catch {
     return null;
   }
 };
 
-export const formatPhotoSourceLabel = (value: string | null | undefined): string => {
+export const formatPhotoSourceLabel = (
+  value: string | null | undefined,
+  sourceUrl?: string | null
+): string => {
   if (typeof value !== "string") return "unknown";
-  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  const raw = value.trim();
+  const normalized = raw.toLowerCase().replace(/_/g, "-");
   if (!normalized) return "unknown";
-  return NORMALIZED_SOURCE_LABELS[normalized] ?? value.trim();
+  const canonicalLabel = NORMALIZED_SOURCE_LABELS[normalized];
+  if (canonicalLabel) return canonicalLabel;
+  if (
+    normalized.startsWith("web-scrape") ||
+    normalized.startsWith("webscrape") ||
+    normalized.includes("harvest")
+  ) {
+    const hostname = extractHostnameCandidate(sourceUrl) ?? extractHostnameCandidate(raw);
+    const hostnameLabel = resolveSourceHostnameLabel(hostname);
+    if (hostnameLabel) return hostnameLabel;
+  }
+  return raw;
 };
 
 const resolveOriginalImageUrl = (

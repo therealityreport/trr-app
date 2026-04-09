@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { buildScopedAdminRequestId } from "@/lib/admin/request-id";
 
 describe("season refresh request-id diagnostics wiring", () => {
   const pagePath = path.resolve(
@@ -12,7 +13,17 @@ describe("season refresh request-id diagnostics wiring", () => {
   it("generates per-click request ids with show+season context and monotonic counter", () => {
     expect(pageContents).toMatch(/seasonRefreshRequestCounterRef = useRef\(0\)/);
     expect(pageContents).toMatch(/const buildSeasonRefreshRequestId = useCallback\(/);
-    expect(pageContents).toMatch(/season-refresh-\$\{showToken\}-s\$\{seasonToken\}-\$\{timestampToken\}-\$\{counter\}/);
+    expect(
+      buildScopedAdminRequestId({
+        prefix: "season-refresh",
+        counter: 3,
+        now: 1234567890,
+        parts: [
+          { value: "Top Chef" },
+          { prefix: "s", value: 21 },
+        ],
+      })
+    ).toBe("season-refresh-top-chef-s21-kf12oi-3");
   });
 
   it("attaches x-trr-request-id to refresh-photos stream request headers", () => {

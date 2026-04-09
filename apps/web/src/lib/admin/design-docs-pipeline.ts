@@ -1,15 +1,20 @@
 import { JSDOM } from "jsdom";
 import type {
   ExtractionPlan,
+  HydratedInteractionCoverage,
   LayoutFamily,
   MergedExtractionOutput,
   NavigationData,
   NavigationLink,
   PublisherClassification,
+  SiteShellExtraction,
+  SocialShareAsset,
+  SocialShareAssetSet,
   TaxonomyMapping,
   TaxonomySectionMapping,
   TechInventory,
 } from "./design-docs-pipeline-types.ts";
+import { matchReusableUiPrimitive } from "./design-docs-ui-primitives";
 
 type ExtractionInput = {
   articleUrl: string;
@@ -47,6 +52,41 @@ function resolveHref(value: string | null | undefined, articleUrl: string): stri
 
 function uniqueSorted(values: readonly string[]): string[] {
   return [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+function uniqueByName<T extends { name: string }>(values: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+
+  for (const value of values) {
+    if (seen.has(value.name)) {
+      continue;
+    }
+    seen.add(value.name);
+    result.push(value);
+  }
+
+  return result;
+}
+
+const SOCIAL_SHARE_SLOTS = [
+  { name: "facebookJumbo", marker: "facebookjumbo", ratio: "1.91:1" },
+  { name: "video16x9-3000", marker: "videosixteenbynine3000", ratio: "16:9", width: 3000 },
+  { name: "video16x9-1600", marker: "videosixteenbyninejumbo1600", ratio: "16:9", width: 1600 },
+  { name: "google4x3", marker: "googlefourbythree", ratio: "4:3", width: 800 },
+  { name: "square3x", marker: "mediumsquareat3x", ratio: "1:1", width: 1000 },
+] as const;
+
+function detectShareSlot(url: string) {
+  const normalized = url.toLowerCase();
+  return SOCIAL_SHARE_SLOTS.find((slot) => normalized.includes(slot.marker)) ?? null;
+}
+
+function extractUrlsFromJsonish(text: string) {
+  return Array.from(
+    text.matchAll(/https?:\/\/[^\s"'<>]+/g),
+    (match) => match[0].replace(/[",]+$/, ""),
+  );
 }
 
 function addSection(
@@ -150,6 +190,13 @@ function detectTechInventory(sourceHtml: string, articleUrl: string): TechInvent
 }
 
 function classifyLayoutFamily(articleUrl: string, sourceHtml: string, techInventory: TechInventory): LayoutFamily {
+  if (
+    articleUrl.includes("nytimes.com/interactive/") ||
+    /interactive-masthead-spacer|storyline-menu-title|Search The New York Times|Account Information/i.test(sourceHtml)
+  ) {
+    return "nyt-interactive";
+  }
+
   if (
     techInventory.frameworks.some((framework) => framework.name === "Birdkit") ||
     /newsgraphics|ai2html|data-birdkit-hydrate/i.test(sourceHtml)
@@ -512,6 +559,150 @@ function detectDropdownMenus(document: Document, articleUrl: string) {
   return menus.length > 0 ? menus : undefined;
 }
 
+export function extractSocialShareAssets({
+  articleUrl,
+  sourceHtml,
+}: ExtractionInput): SocialShareAsset[] {
+  const dom = createDom(sourceHtml, articleUrl);
+  const { document } = dom.window;
+  const assets: SocialShareAsset[] = [];
+
+  const addAsset = (url: string, source: SocialShareAsset["source"]) => {
+    const normalizedUrl = resolveHref(url, articleUrl);
+    const slot = detectShareSlot(normalizedUrl);
+    if (!slot) {
+      return;
+    }
+    assets.push({
+      name: slot.name,
+      url: normalizedUrl,
+      ratio: slot.ratio,
+      width: "width" in slot ? slot.width : undefined,
+      source,
+    });
+  };
+
+  for (const meta of document.querySelectorAll(
+    "meta[property='og:image'], meta[name='twitter:image'], meta[name='twitter:image:src']",
+  )) {
+    const content = meta.getAttribute("content");
+    if (content) {
+      addAsset(content, "meta");
+    }
+  }
+
+  for (const script of document.querySelectorAll("script[type='application/ld+json']")) {
+    for (const url of extractUrlsFromJsonish(script.textContent ?? "")) {
+      addAsset(url, "json-ld");
+    }
+  }
+
+  const nextData = document.querySelector("#__NEXT_DATA__")?.textContent;
+  if (nextData) {
+    for (const url of extractUrlsFromJsonish(nextData)) {
+      addAsset(url, "next-data");
+    }
+  }
+
+  for (const url of extractUrlsFromJsonish(sourceHtml)) {
+    addAsset(url, "heuristic");
+  }
+
+  return uniqueByName(
+    SOCIAL_SHARE_SLOTS.flatMap((slot) => assets.find((asset) => asset.name === slot.name) ?? []),
+  );
+}
+
+export function extractSiteShellInteractions({
+  articleUrl,
+  sourceHtml,
+  publisherClassification,
+}: ExtractionInput & { publisherClassification?: PublisherClassification }): SiteShellExtraction {
+  const dom = createDom(sourceHtml, articleUrl);
+  const { document } = dom.window;
+  const storylineRoot =
+    document.querySelector("[aria-labelledby='storyline-menu-title'], .storyline, [data-testid='nyt-storyline-rail']") ??
+    document.querySelector("[id*='storyline' i]");
+  const storylineTitle =
+    normalizeText(document.getElementById("storyline-menu-title")?.textContent) ||
+    normalizeText(storylineRoot?.querySelector("h1, h2, h3, p, span")?.textContent);
+  const storylineLinks = Array.from(storylineRoot?.querySelectorAll("a") ?? [])
+    .map((anchor) => ({
+      label: getLinkLabel(anchor),
+      href: resolveHref(anchor.getAttribute("href"), articleUrl),
+    }))
+    .filter((entry) => entry.label && entry.href)
+    .slice(0, 12);
+
+  const spacer = document.getElementById("interactive-masthead-spacer");
+  const spacerHeight = Number(spacer?.getAttribute("style")?.match(/height:\s*(\d+)/i)?.[1] ?? "") || undefined;
+  const hasMenuButton =
+    document.querySelector("button[aria-label*='section navigation' i], button[aria-label*='menu' i]") !== null;
+  const hasSearchButton =
+    document.querySelector("button[aria-label*='search' i], [role='search'] button") !== null;
+  const hasAccountButton =
+    document.querySelector("button[aria-label='Account'], button[aria-label*='account' i], [data-testid='nyt-shell-account-button']") !== null;
+
+  const interactionCoverage: HydratedInteractionCoverage = {
+    mastheadSpacer: spacer !== null,
+    storyline: !!storylineTitle && storylineLinks.length > 0,
+    menuOverlay: document.querySelector("[role='dialog'][aria-label='Section Navigation']") !== null,
+    searchPanel: document.querySelector("[role='dialog'][aria-label='Search The New York Times']") !== null,
+    accountDrawer: document.querySelector("[role='dialog'][aria-label='Account Information']") !== null,
+  };
+
+  const layoutFamily = publisherClassification?.layoutFamily ?? "generic-publisher";
+  const storylinePrimitive = storylineTitle
+    ? matchReusableUiPrimitive({
+        publisher: articleUrl.includes("nytimes.com") ? "nyt" : "generic",
+        layoutFamily,
+        kind: "storyline",
+        title: storylineTitle,
+        linkLabels: storylineLinks.map((entry) => entry.label),
+      })
+    : null;
+  const siteHeaderPrimitive =
+    articleUrl.includes("nytimes.com") &&
+    layoutFamily === "nyt-interactive" &&
+    spacerHeight === 43 &&
+    hasMenuButton &&
+    hasSearchButton &&
+    hasAccountButton &&
+    interactionCoverage.menuOverlay &&
+    interactionCoverage.searchPanel &&
+    interactionCoverage.accountDrawer
+      ? matchReusableUiPrimitive({
+          publisher: "nyt",
+          layoutFamily,
+          kind: "site-header-shell",
+          mastheadSpacerHeight: 43,
+          menuSectionCount: 11,
+          searchLinkCount: 6,
+          accountSectionCount: 3,
+        })
+      : null;
+
+  return {
+    siteHeader: hasMenuButton || hasSearchButton || hasAccountButton || spacerHeight
+      ? {
+          mastheadSpacerHeight: spacerHeight,
+          hasMenuButton,
+          hasSearchButton,
+          hasAccountButton,
+          primitiveMatchId: siteHeaderPrimitive?.id,
+        }
+      : undefined,
+    storyline: storylineTitle
+      ? {
+          title: storylineTitle,
+          links: storylineLinks,
+          primitiveMatchId: storylinePrimitive?.id,
+        }
+      : undefined,
+    interactionCoverage,
+  };
+}
+
 export function classifyPublisherPatterns({
   articleUrl,
   sourceHtml,
@@ -632,6 +823,9 @@ export function mergeDesignDocsExtractionOutputs(input: {
   sourceHtml: string;
   publisherClassification: PublisherClassification;
   navigationData: NavigationData;
+  socialShareAssets?: SocialShareAssetSet | null;
+  siteShell?: SiteShellExtraction | null;
+  interactionCoverage?: HydratedInteractionCoverage | null;
   extractionOutputs?: Record<string, unknown>;
   blockCompleteness?: number | null;
 }): MergedExtractionOutput {
@@ -640,6 +834,22 @@ export function mergeDesignDocsExtractionOutputs(input: {
     sourceHtmlLength: input.sourceHtml.length,
     publisherClassification: input.publisherClassification,
     navigationData: input.navigationData,
+    socialShareAssets: input.socialShareAssets ?? null,
+    siteShell: input.siteShell ?? null,
+    interactionCoverage: input.interactionCoverage ?? input.siteShell?.interactionCoverage ?? null,
+    reusablePrimitives: [
+      input.siteShell?.siteHeader?.primitiveMatchId,
+      input.siteShell?.storyline?.primitiveMatchId,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((id) => ({
+        id,
+        publisher: input.articleUrl.includes("nytimes.com") ? "nyt" : "generic",
+        layoutFamily: input.publisherClassification.layoutFamily,
+        kind: id.includes("storyline") ? "storyline" : "site-header-shell",
+        variant: "matched",
+        signature: id,
+      })),
     extractionOutputs: input.extractionOutputs ?? {},
     blockCompleteness: input.blockCompleteness ?? null,
     techInventory: input.publisherClassification.techInventory,

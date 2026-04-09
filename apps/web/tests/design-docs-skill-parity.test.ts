@@ -140,9 +140,9 @@ describe("design-docs-agent skill parity", () => {
         })
       : null;
 
-    expect(entries).toHaveLength(22);
+    expect(entries).toHaveLength(25);
     expect(entries.every((entry) => entry.status === "active")).toBe(true);
-    expect(docSkills).toHaveLength(22);
+    expect(docSkills).toHaveLength(25);
     expect(docSkills).toEqual(entries.map((entry) => entry.skill));
 
     expect(skillDoc).toContain("## Ownership Matrix");

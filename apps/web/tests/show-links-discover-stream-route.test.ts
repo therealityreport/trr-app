@@ -126,4 +126,42 @@ describe("show links discover stream proxy route", () => {
     const forwardedHeaders = new Headers((backendFetch?.[1] as RequestInit | undefined)?.headers);
     expect(forwardedHeaders.get("x-trr-prefer-local-execution")).toBe("1");
   });
+
+  it("fails fast on backend database configuration errors without exhausting retries", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === BACKEND_HEALTH_URL) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: "DATABASE_SERVICE_UNAVAILABLE",
+              reason: "database_configuration",
+              message:
+                "Database service unavailable: runtime DB configuration is incomplete. Set TRR_DB_URL and optional TRR_DB_FALLBACK_URL.",
+              retryable: true,
+            },
+          }),
+          {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }
+        )
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(makeRequest(), {
+      params: Promise.resolve({ showId: "show-1" }),
+    });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(text).toContain("\"checkpoint\":\"backend_http_error\"");
+    expect(text).toContain("\"error_code\":\"DATABASE_SERVICE_UNAVAILABLE\"");
+    expect(text).toContain("Set TRR_DB_URL and optional TRR_DB_FALLBACK_URL");
+  });
 });

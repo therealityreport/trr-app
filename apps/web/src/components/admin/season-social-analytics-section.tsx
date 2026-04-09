@@ -11,6 +11,7 @@ import SocialPlatformTabIcon from "@/components/admin/SocialPlatformTabIcon";
 import SocialPostsSection from "@/components/admin/social-posts-section";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import CastContentSection from "@/components/admin/cast-content-section";
+import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
   canonicalizeHostedMediaUrl,
@@ -31,7 +32,7 @@ import {
   type SocialSyncSessionProgressSnapshot,
   type SocialSyncSessionStreamPayload,
 } from "@/lib/admin/social-sync-session";
-import { useSharedSseResource } from "@/lib/admin/shared-live-resource";
+import { useSharedPollingResource, useSharedSseResource } from "@/lib/admin/shared-live-resource";
 import { logAdminPageReadDiagnostic, measurePayloadBytes } from "@/lib/admin/page-read-diagnostics";
 
 type Platform = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
@@ -130,6 +131,19 @@ type SocialRunSummary = {
   affected_platforms?: string[];
   error_counts?: Record<string, number>;
   success_rate_pct?: number | null;
+};
+
+type SeasonSocialAnalyticsSnapshot = {
+  analytics?: AnalyticsResponse | null;
+  targets?: SocialTarget[];
+  runs?: SocialRun[];
+  run_summaries?: SocialRunSummary[];
+  worker_health?: Record<string, unknown> | null;
+  shared_status?: SharedSeasonStatus | null;
+  jobs?: SocialJob[];
+  generated_at?: string | null;
+  cache_age_ms?: number;
+  stale?: boolean;
 };
 
 export type SocialTarget = {
@@ -1232,9 +1246,6 @@ const REQUEST_TIMEOUT_MS = {
 } as const;
 const DEV_LOW_HEAT_MODE = process.env.NODE_ENV !== "production";
 const DEV_VISIBLE_POLL_INTERVAL_MS = 8_000;
-const ANALYTICS_POLL_REFRESH_MS = 60_000;
-const ANALYTICS_POLL_REFRESH_ACTIVE_MS = 4_000;
-const LIVE_POLL_BACKOFF_MS = [3_000, 6_000, 10_000, 15_000] as const;
 const INITIAL_SOCIAL_REFRESH_CONCURRENCY = 2;
 const DEFERRED_SOCIAL_REFRESH_CONCURRENCY = 2;
 const WEEK_DETAIL_FETCH_CONCURRENCY = 2;
@@ -2331,7 +2342,6 @@ export default function SeasonSocialAnalyticsSection({
     targets: null,
     runs: null,
   });
-  const pollGenerationRef = useRef(0);
   const pollFailureCountRef = useRef(0);
   const autoSyncGenerationRef = useRef(0);
   const autoSyncSessionRef = useRef<{
@@ -2348,7 +2358,6 @@ export default function SeasonSocialAnalyticsSection({
     startedAtMs: number;
     enabled: boolean;
   } | null>(null);
-  const lastAnalyticsPollAtRef = useRef(0);
   const runSeasonIngestButtonRef = useRef<HTMLButtonElement | null>(null);
   const ingestExportTriggerRef = useRef<HTMLButtonElement | null>(null);
   const ingestExportPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -3289,6 +3298,118 @@ export default function SeasonSocialAnalyticsSection({
     }
   }, [analyticsView, getAuthHeaders, isActiveView, readErrorMessage, seasonId, seasonNumber, showId]);
 
+  const applySeasonSnapshot = useCallback(
+    (
+      snapshot: SeasonSocialAnalyticsSnapshot,
+      options?: {
+        preserveLastGoodJobsIfEmpty?: boolean;
+      },
+    ) => {
+      const generatedAt = parseDateOrNull(snapshot.generated_at ?? null) ?? new Date();
+      if (snapshot.analytics) {
+        setAnalytics(snapshot.analytics);
+      }
+      if (Array.isArray(snapshot.targets)) {
+        setTargets(snapshot.targets);
+      }
+      if (Array.isArray(snapshot.runs)) {
+        setRuns(snapshot.runs);
+      }
+      if (Array.isArray(snapshot.run_summaries)) {
+        setRunSummaries(snapshot.run_summaries);
+        setRunSummaryError(null);
+      }
+      if (snapshot.worker_health && typeof snapshot.worker_health === "object") {
+        setWorkerHealth(normalizeWorkerHealth(snapshot.worker_health));
+        setWorkerHealthError(null);
+      }
+      if (snapshot.shared_status && typeof snapshot.shared_status === "object") {
+        setSharedStatus(snapshot.shared_status);
+        setSharedStatusError(null);
+      }
+      if (Array.isArray(snapshot.jobs)) {
+        const nextJobs = snapshot.jobs;
+        setJobs((current) => {
+          if (
+            options?.preserveLastGoodJobsIfEmpty &&
+            nextJobs.length === 0 &&
+            activeRunId &&
+            current.some((job) => job.run_id === activeRunId)
+          ) {
+            return current;
+          }
+          return nextJobs;
+        });
+      }
+      setLastUpdated(generatedAt);
+      setSectionLastSuccessAt((current) => ({
+        analytics: snapshot.analytics ? generatedAt : current.analytics,
+        targets: Array.isArray(snapshot.targets) ? generatedAt : current.targets,
+        runs: Array.isArray(snapshot.runs) ? generatedAt : current.runs,
+      }));
+    },
+    [activeRunId],
+  );
+
+  const fetchSeasonSnapshot = useCallback(
+    async (options?: { forceRefresh?: boolean; signal?: AbortSignal }) => {
+      const headers = await getAuthHeaders();
+      const params = new URLSearchParams(queryString);
+      params.set("season_id", seasonId);
+      params.set("source_scope", scope);
+      params.set("runs_limit", activeRunId ? "1" : "100");
+      params.set("run_summaries_limit", "20");
+      params.set("jobs_limit", "100");
+      if (activeRunId) {
+        params.set("run_id", activeRunId);
+      } else {
+        params.delete("run_id");
+      }
+      if (options?.forceRefresh) {
+        params.set("refresh", "1");
+      }
+
+      const response = await fetchAdminWithTimeout(
+        `/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/social/analytics/snapshot?${params.toString()}`,
+        { headers, cache: "no-store", signal: options?.signal },
+        REQUEST_TIMEOUT_MS.analytics,
+        "Social analytics snapshot request timed out",
+      );
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, "Failed to load season social analytics snapshot"));
+      }
+      const envelope = await parseResponseJson<
+        | SeasonSocialAnalyticsSnapshot
+        | {
+            data?: SeasonSocialAnalyticsSnapshot;
+            generated_at?: string | null;
+            cache_age_ms?: number;
+            stale?: boolean;
+          }
+      >(
+        response,
+        "Failed to load season social analytics snapshot",
+      );
+      const payload =
+        envelope && typeof envelope === "object" && "data" in envelope && envelope.data
+          ? {
+              ...envelope.data,
+              generated_at: envelope.generated_at ?? envelope.data.generated_at,
+              cache_age_ms:
+                typeof envelope.cache_age_ms === "number"
+                  ? envelope.cache_age_ms
+                  : envelope.data.cache_age_ms,
+              stale: typeof envelope.stale === "boolean" ? envelope.stale : envelope.data.stale,
+            }
+          : (envelope as SeasonSocialAnalyticsSnapshot);
+      return {
+        payload,
+        cacheStatus: response.headers.get("x-trr-cache") ?? "miss",
+      };
+    },
+    [activeRunId, getAuthHeaders, queryString, readErrorMessage, scope, seasonId, seasonNumber, showId],
+  );
+
   const fetchCommentsCoverage = useCallback(
     async (scopeWindow: {
       platform: "all" | Platform;
@@ -3512,7 +3633,7 @@ export default function SeasonSocialAnalyticsSection({
     [fetchWeekDetail],
   );
 
-  const refreshAll = useCallback(async () => {
+  const refreshAll = useCallback(async (options?: { forceRefresh?: boolean }) => {
     const requestView: SocialAnalyticsView = analyticsView;
     const existingRequest = inFlightRef.current.refreshAllByView.get(requestView);
     if (existingRequest) {
@@ -3560,48 +3681,39 @@ export default function SeasonSocialAnalyticsSection({
         runs: null as string | null,
         jobs: null as string | null,
       };
-
-      const [analyticsResult, targetsResult, runsResult] =
-        await settleWithConcurrencyLimit(
-          [
-            () => fetchAnalytics() as Promise<unknown>,
-            () => fetchTargets() as Promise<unknown>,
-            () => fetchRuns() as Promise<unknown>,
-          ],
-          INITIAL_SOCIAL_REFRESH_CONCURRENCY,
-        );
-
-      if (!isCurrentRequest()) {
-        return;
-      }
-
-      if (targetsResult.status === "rejected") {
-        nextSectionErrors.targets =
-          targetsResult.reason instanceof Error ? targetsResult.reason.message : "Failed to load social targets";
-      }
-
-      if (analyticsResult.status === "rejected") {
-        nextSectionErrors.analytics =
-          analyticsResult.reason instanceof Error
-            ? analyticsResult.reason.message
-            : "Failed to load social analytics";
-      }
-
-      if (runsResult.status === "fulfilled") {
-        const loadedRuns = runsResult.value as SocialRun[];
+      let snapshotPayload: SeasonSocialAnalyticsSnapshot | null = null;
+      let snapshotCacheStatus = "miss";
+      try {
+        const snapshot = await fetchSeasonSnapshot({ forceRefresh: options?.forceRefresh });
+        snapshotPayload = snapshot.payload;
+        snapshotCacheStatus = snapshot.cacheStatus;
+        applySeasonSnapshot(snapshot.payload, { preserveLastGoodJobsIfEmpty: true });
+        const loadedRuns = Array.isArray(snapshot.payload.runs) ? snapshot.payload.runs : [];
         const activeRun = loadedRuns.find((run) => ACTIVE_RUN_STATUSES.has(run.status));
         if (activeRun) {
           setActiveRunId(activeRun.id);
         } else if (!runningIngest) {
           setActiveRunId(null);
         }
-
         if (selectedRunId && !loadedRuns.some((run) => run.id === selectedRunId)) {
           setSelectedRunId(null);
         }
-      } else {
-        nextSectionErrors.runs =
-          runsResult.reason instanceof Error ? runsResult.reason.message : "Failed to load social runs";
+        setWorkerHealthError(null);
+        setSharedStatusError(null);
+        setRunSummaryError(null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load season social analytics snapshot";
+        nextSectionErrors.analytics = message;
+        nextSectionErrors.targets = message;
+        nextSectionErrors.runs = message;
+        nextSectionErrors.jobs = message;
+        setWorkerHealthError(message);
+        setSharedStatusError(message);
+        setRunSummaryError(message);
+      }
+
+      if (!isCurrentRequest()) {
+        return;
       }
 
       if (!isCurrentRequest()) {
@@ -3616,97 +3728,17 @@ export default function SeasonSocialAnalyticsSection({
         resource: "primary-bootstrap",
         requestRole: "primary",
         phase: nextSectionErrors.analytics || nextSectionErrors.targets || nextSectionErrors.runs ? "error" : "success",
+        cacheStatus:
+          snapshotCacheStatus === "refresh" ? "refresh" : snapshotCacheStatus === "hit" ? "hit" : "miss",
+        cacheHit: snapshotCacheStatus === "hit",
+        stale: Boolean(snapshotPayload?.stale),
+        refreshCause: options?.forceRefresh ? "manual" : "bootstrap",
         durationMs: Date.now() - primaryStartedAt,
-        payloadBytes:
-          (analyticsResult.status === "fulfilled" ? measurePayloadBytes(analyticsResult.value) ?? 0 : 0) +
-          (targetsResult.status === "fulfilled" ? measurePayloadBytes(targetsResult.value) ?? 0 : 0) +
-          (runsResult.status === "fulfilled" ? measurePayloadBytes(runsResult.value) ?? 0 : 0),
+        payloadBytes: measurePayloadBytes(snapshotPayload),
         message: [nextSectionErrors.analytics, nextSectionErrors.targets, nextSectionErrors.runs]
           .filter((value): value is string => Boolean(value))
           .join(" | "),
       });
-
-      void (async () => {
-        const secondaryStartedAt = Date.now();
-        const [runSummariesResult, workerHealthResult, sharedStatusResult] = await settleWithConcurrencyLimit(
-          [
-            () => fetchRunSummaries() as Promise<unknown>,
-            () => fetchWorkerHealth() as Promise<unknown>,
-            () => fetchSharedStatus() as Promise<unknown>,
-          ],
-          DEFERRED_SOCIAL_REFRESH_CONCURRENCY,
-        );
-
-        if (!isCurrentRequest()) {
-          return;
-        }
-
-        if (runSummariesResult.status === "rejected") {
-          setRunSummaryError(
-            runSummariesResult.reason instanceof Error
-              ? runSummariesResult.reason.message
-              : "Failed to load social run summary",
-          );
-        } else {
-          setRunSummaryError(null);
-        }
-
-        if (workerHealthResult.status === "rejected") {
-          setWorkerHealthError(
-            workerHealthResult.reason instanceof Error
-              ? workerHealthResult.reason.message
-              : "Failed to load social worker health",
-          );
-        } else {
-          setWorkerHealthError(null);
-        }
-
-        if (sharedStatusResult.status === "rejected") {
-          setSharedStatusError(
-            sharedStatusResult.reason instanceof Error
-              ? sharedStatusResult.reason.message
-              : "Failed to load shared social pipeline status",
-          );
-        } else {
-          setSharedStatusError(null);
-        }
-
-        logAdminPageReadDiagnostic({
-          pageFamily: "season-social-analytics",
-          resource: "secondary-bootstrap",
-          requestRole: "secondary",
-          phase:
-            runSummariesResult.status === "rejected" ||
-            workerHealthResult.status === "rejected" ||
-            sharedStatusResult.status === "rejected"
-              ? "error"
-              : "success",
-          durationMs: Date.now() - secondaryStartedAt,
-          payloadBytes:
-            (runSummariesResult.status === "fulfilled" ? measurePayloadBytes(runSummariesResult.value) ?? 0 : 0) +
-            (workerHealthResult.status === "fulfilled" ? measurePayloadBytes(workerHealthResult.value) ?? 0 : 0) +
-            (sharedStatusResult.status === "fulfilled" ? measurePayloadBytes(sharedStatusResult.value) ?? 0 : 0),
-          message: [
-            runSummariesResult.status === "rejected"
-              ? runSummariesResult.reason instanceof Error
-                ? runSummariesResult.reason.message
-                : "Failed to load social run summary"
-              : null,
-            workerHealthResult.status === "rejected"
-              ? workerHealthResult.reason instanceof Error
-                ? workerHealthResult.reason.message
-                : "Failed to load social worker health"
-              : null,
-            sharedStatusResult.status === "rejected"
-              ? sharedStatusResult.reason instanceof Error
-                ? sharedStatusResult.reason.message
-                : "Failed to load shared social pipeline status"
-              : null,
-          ]
-            .filter((value): value is string => Boolean(value))
-            .join(" | "),
-        });
-      })();
     })();
 
     inFlightRef.current.refreshAllByView.set(requestView, request);
@@ -3719,17 +3751,26 @@ export default function SeasonSocialAnalyticsSection({
       }
     }
   }, [
-    fetchAnalytics,
-    fetchRunSummaries,
-    fetchRuns,
-    fetchSharedStatus,
-    fetchTargets,
-    fetchWorkerHealth,
+    applySeasonSnapshot,
+    fetchSeasonSnapshot,
     isCurrentRefreshRequest,
     runningIngest,
     selectedRunId,
     analyticsView,
   ]);
+
+  const invalidateSeasonSnapshotFamily = useCallback(async () => {
+    try {
+      await invalidateAdminSnapshotFamilies([
+        {
+          pageFamily: "season-social-analytics",
+          scope: `${showId}:${seasonNumber}`,
+        },
+      ]);
+    } catch {
+      // Best-effort only.
+    }
+  }, [seasonNumber, showId]);
 
   useEffect(() => {
     void refreshAll();
@@ -4564,6 +4605,7 @@ export default function SeasonSocialAnalyticsSection({
           setActiveRunId(nextRunId);
           setSelectedRunId(nextRunId);
           setJobs([]);
+          await invalidateSeasonSnapshotFamily();
           await fetchJobs(nextRunId);
           await fetchRuns();
           await fetchRunSummaries();
@@ -4580,134 +4622,75 @@ export default function SeasonSocialAnalyticsSection({
       fetchRunSummaries,
       fetchRuns,
       getAuthHeaders,
+      invalidateSeasonSnapshotFamily,
       seasonId,
       seasonNumber,
       showId,
     ],
   );
 
-  // Poll for job + run updates using a single-flight loop (no overlapping requests).
+  const liveSeasonSnapshot = useSharedPollingResource<{
+    payload: SeasonSocialAnalyticsSnapshot;
+    cacheStatus: string;
+  }>({
+    key: `season-social-analytics-snapshot:${showId}:${seasonNumber}:${seasonId}:${analyticsView}:${scope}:${platformFilter}:${weekFilter}:${activeRunId ?? "none"}`,
+    shouldRun:
+      analyticsView !== "reddit" &&
+      primaryBootstrapReady &&
+      Boolean(activeRunId) &&
+      (hasRunningJobs || runningIngest),
+    intervalMs: DEV_LOW_HEAT_MODE ? DEV_VISIBLE_POLL_INTERVAL_MS : runningIngest ? 3_000 : 5_000,
+    fetchData: async (signal, request) => await fetchSeasonSnapshot({ signal, forceRefresh: request?.forceRefresh }),
+  });
+
   useEffect(() => {
-    if (!primaryBootstrapReady) return;
-    if (!activeRunId) return;
-    if (!hasRunningJobs && !runningIngest) return;
-    if (DEV_LOW_HEAT_MODE && !isDocumentVisible) return;
-
-    pollGenerationRef.current += 1;
-    const generation = pollGenerationRef.current;
+    if (!liveSeasonSnapshot.data) return;
+    applySeasonSnapshot(liveSeasonSnapshot.data.payload, { preserveLastGoodJobsIfEmpty: true });
+    setSectionErrors((current) => ({
+      ...current,
+      analytics: null,
+      runs: null,
+      jobs: null,
+    }));
     pollFailureCountRef.current = 0;
-    const baseInterval = DEV_LOW_HEAT_MODE ? DEV_VISIBLE_POLL_INTERVAL_MS : runningIngest ? 3_000 : 5_000;
-    let timer: number | null = null;
-    let cancelled = false;
-    let inFlight = false;
+    setPollingStatus((current) => (current === "retrying" ? "recovered" : current));
+    logAdminPageReadDiagnostic({
+      pageFamily: "season-social-analytics",
+      resource: "live-snapshot",
+      requestRole: "polling",
+      phase: "success",
+      cacheHit: liveSeasonSnapshot.data.cacheStatus === "hit",
+      payloadBytes: measurePayloadBytes(liveSeasonSnapshot.data.payload),
+      message: liveSeasonSnapshot.data.payload.stale ? "served stale snapshot" : undefined,
+    });
+  }, [applySeasonSnapshot, liveSeasonSnapshot.data]);
 
-    const scheduleNext = () => {
-      if (cancelled) return;
-      const failureIndex = Math.min(pollFailureCountRef.current, LIVE_POLL_BACKOFF_MS.length - 1);
-      const delay = pollFailureCountRef.current > 0 ? LIVE_POLL_BACKOFF_MS[failureIndex] : baseInterval;
-      timer = window.setTimeout(() => {
-        void poll();
-      }, delay);
-    };
-
-    const poll = async () => {
-      if (cancelled || inFlight) return;
-      inFlight = true;
-      try {
-        const [runsResult, jobsResult, workerHealthResult] = await Promise.allSettled([
-          fetchRuns({ runId: activeRunId, limit: 1 }),
-          fetchJobs(activeRunId, { preserveLastGoodIfEmpty: true, limit: 100 }),
-          fetchWorkerHealth(),
-        ]);
-        if (cancelled || generation !== pollGenerationRef.current) return;
-
-        const runsErrorRaw =
-          runsResult.status === "rejected"
-            ? runsResult.reason instanceof Error
-              ? runsResult.reason.message
-              : "Failed to refresh social runs"
-            : null;
-        const jobsErrorRaw =
-          jobsResult.status === "rejected"
-            ? jobsResult.reason instanceof Error
-              ? jobsResult.reason.message
-              : "Failed to refresh social jobs"
-            : null;
-        const workerHealthErrorRaw =
-          workerHealthResult.status === "rejected"
-            ? workerHealthResult.reason instanceof Error
-              ? workerHealthResult.reason.message
-              : "Failed to refresh social worker health"
-            : null;
-        const runsError = isTransientDevRestartMessage(runsErrorRaw) ? null : runsErrorRaw;
-        const jobsError = isTransientDevRestartMessage(jobsErrorRaw) ? null : jobsErrorRaw;
-        const workerHealthError = isTransientDevRestartMessage(workerHealthErrorRaw)
-          ? null
-          : workerHealthErrorRaw;
-        const runAndJobsSucceeded = runsResult.status === "fulfilled" && jobsResult.status === "fulfilled";
-        const failureMessages = [runsErrorRaw, jobsErrorRaw, workerHealthErrorRaw].filter(
-          (message): message is string => Boolean(message && message.trim()),
-        );
-        const transientRestartWindowFailure =
-          failureMessages.length > 0 && failureMessages.every((message) => isTransientDevRestartMessage(message));
-
-        setSectionErrors((current) => ({
-          ...current,
-          runs: runsError,
-          jobs: jobsError,
-        }));
-        setWorkerHealthError(workerHealthError);
-
-        if (runAndJobsSucceeded) {
-          const now = Date.now();
-          const refreshInterval = DEV_LOW_HEAT_MODE
-            ? DEV_VISIBLE_POLL_INTERVAL_MS
-            : runningIngest
-              ? ANALYTICS_POLL_REFRESH_ACTIVE_MS
-              : ANALYTICS_POLL_REFRESH_MS;
-          if (now - lastAnalyticsPollAtRef.current >= refreshInterval) {
-            lastAnalyticsPollAtRef.current = now;
-            void fetchAnalytics()
-              .then(() => {
-                setSectionErrors((current) => ({ ...current, analytics: null }));
-              })
-              .catch((analyticsError) => {
-                setSectionErrors((current) => ({
-                  ...current,
-                  analytics:
-                    analyticsError instanceof Error ? analyticsError.message : "Failed to load social analytics",
-                }));
-              });
-          }
-        }
-
-        if (runAndJobsSucceeded) {
-          pollFailureCountRef.current = 0;
-          setPollingStatus((current) => (current === "retrying" ? "recovered" : current));
-        } else {
-          if (transientRestartWindowFailure) {
-            pollFailureCountRef.current = Math.max(1, pollFailureCountRef.current);
-          } else {
-            pollFailureCountRef.current += 1;
-          }
-          if (shouldSetPollingRetry(pollFailureCountRef.current)) {
-            setPollingStatus("retrying");
-          }
-        }
-      } finally {
-        inFlight = false;
-        scheduleNext();
-      }
-    };
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer !== null) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [activeRunId, fetchAnalytics, fetchJobs, fetchRuns, fetchWorkerHealth, hasRunningJobs, isDocumentVisible, primaryBootstrapReady, runningIngest]);
+  useEffect(() => {
+    if (!liveSeasonSnapshot.error) return;
+    const message = isTransientDevRestartMessage(liveSeasonSnapshot.error) ? null : liveSeasonSnapshot.error;
+    setSectionErrors((current) => ({
+      ...current,
+      analytics: message,
+      runs: message,
+      jobs: message,
+    }));
+    setWorkerHealthError(message);
+    if (isTransientDevRestartMessage(liveSeasonSnapshot.error)) {
+      pollFailureCountRef.current = Math.max(1, pollFailureCountRef.current);
+    } else {
+      pollFailureCountRef.current += 1;
+    }
+    if (shouldSetPollingRetry(pollFailureCountRef.current)) {
+      setPollingStatus("retrying");
+    }
+    logAdminPageReadDiagnostic({
+      pageFamily: "season-social-analytics",
+      resource: "live-snapshot",
+      requestRole: "polling",
+      phase: "error",
+      message: liveSeasonSnapshot.error,
+    });
+  }, [liveSeasonSnapshot.error]);
 
   useEffect(() => {
     if (pollingStatus !== "recovered") return;
@@ -4764,6 +4747,7 @@ export default function SeasonSocialAnalyticsSection({
       setSyncCommentsCoveragePreview(null);
       setSyncMirrorCoveragePreview(null);
       autoSyncSessionRef.current = null;
+      await invalidateSeasonSnapshotFamily();
       await fetchJobs(activeRunId);
       await fetchAnalytics();
       await fetchRuns();
@@ -4781,6 +4765,7 @@ export default function SeasonSocialAnalyticsSection({
     fetchRunSummaries,
     fetchRuns,
     getAuthHeaders,
+    invalidateSeasonSnapshotFamily,
     seasonNumber,
     showId,
   ]);
@@ -5093,6 +5078,7 @@ export default function SeasonSocialAnalyticsSection({
             : null,
         });
         autoSyncSessionRef.current = null;
+        await invalidateSeasonSnapshotFamily();
         if (runId) {
           setActiveRunId(runId);
           setSelectedRunId(runId);
@@ -5198,6 +5184,7 @@ export default function SeasonSocialAnalyticsSection({
       }
 
       // Immediately fetch jobs to pick up the newly created running jobs
+      await invalidateSeasonSnapshotFamily();
       await fetchJobs(runId);
       await fetchRuns();
       await fetchRunSummaries();
@@ -5235,6 +5222,7 @@ export default function SeasonSocialAnalyticsSection({
     showId,
     syncStrategy,
     triggerSeasonRunSocialBladeRefresh,
+    invalidateSeasonSnapshotFamily,
     weekFilter,
   ]);
 

@@ -62,16 +62,18 @@ For the admin gallery facebank seed toggle proxy route
 - `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY`
 - `TRR_INTERNAL_ADMIN_SHARED_SECRET`
 
-`TRR_CORE_SUPABASE_URL` and `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY` are also the
-active server-side Supabase auth inputs when `TRR_AUTH_PROVIDER=supabase`.
-They are not dormant scaffolding.
+`TRR_CORE_SUPABASE_URL` and `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY` are the
+canonical server-side Supabase auth inputs for TRR-APP. The app does not use legacy `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` for this surface.
+`TRR_INTERNAL_ADMIN_SHARED_SECRET` is the secret used to mint the internal
+admin bearer JWT that the proxy forwards to TRR-Backend.
 
 The proxy sends:
 
 - `Authorization: Bearer <TRR_CORE_SUPABASE_SERVICE_ROLE_KEY>`
-- `X-TRR-Internal-Admin-Secret: <TRR_INTERNAL_ADMIN_SHARED_SECRET>`
 
-Backend accepts this service-role path only for the facebank seed toggle endpoint and only when the shared secret matches.
+Backend accepts this service-role path only for the facebank seed toggle endpoint,
+and the JWT verifier now tolerates the legacy Supabase `service_role` issuer shape
+(`iss="supabase"`) when the signature and project ref still match.
 
 ## Learn More
 

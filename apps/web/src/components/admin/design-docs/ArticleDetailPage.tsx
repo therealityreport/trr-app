@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { ARTICLES, isAthleticArticle } from "@/lib/admin/design-docs-config";
 import type { ContentBlock } from "@/lib/admin/design-docs-config";
+import { resolveStorylineBlock } from "@/lib/admin/design-docs-ui-primitives";
 import Ai2htmlArtboard, {
   TRUMP_REPORT_CARD_DESKTOP_OVERLAYS,
   TRUMP_REPORT_CARD_MOBILE_OVERLAYS,
@@ -398,7 +399,7 @@ function getArticleBlockBaseLabel(block: ContentBlock) {
     case "featured-image":
       return "Featured Image";
     case "storyline":
-      return block.title;
+      return resolveStorylineBlock(block).title || "Storyline";
     case "author-bio":
       return "Author Bio";
     case "quote":
@@ -1065,6 +1066,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
     (block): block is Extract<ContentBlock, { type: "storyline" }> =>
       block.type === "storyline",
   );
+  const resolvedStorylineBlock = storylineBlock
+    ? resolveStorylineBlock(storylineBlock)
+    : null;
   const sectionForType = (type: ContentBlock["type"]) =>
     blockSections.find((entry) => entry.type === type);
 
@@ -1405,10 +1409,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     listStyle: "none",
                   }}
                 >
-                  {"contentBlocks" in article && Array.isArray(article.contentBlocks)
-                    ? article.contentBlocks
-                        .find((block) => block.type === "storyline")
-                        ?.links.map((item) => (
+                  {resolvedStorylineBlock
+                    ? resolvedStorylineBlock.links.map((item) => (
                           <li
                             className="css-1qej4jr"
                             key={item.href}
@@ -1457,7 +1459,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
       {!isTrumpTariffsImports && siteHeaderShellBlock && storylineBlock ? (
         <ArticleBlockSection
           id={sectionForType("storyline")?.id ?? "storyline"}
-          label={sectionForType("storyline")?.label ?? storylineBlock.title}
+          label={sectionForType("storyline")?.label ?? resolvedStorylineBlock?.title ?? "Storyline"}
           showHeading={showBlockStructure}
         >
           <BlockAnnotation
@@ -2544,9 +2546,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     fontSize: 15, fontWeight: 700, lineHeight: "15px",
                     color: "#121212", whiteSpace: "nowrap", flexShrink: 0,
                   }}>
-                    {block.title}
+                    {resolveStorylineBlock(block).title}
                   </div>
-                  {block.links.map((item, i) => (
+                  {resolveStorylineBlock(block).links.map((item, i) => (
                     /* div.Storyline_ItemTitle: nyt-franklin 14px/500/14px #52524F */
                     <div key={i} style={{
                       fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',

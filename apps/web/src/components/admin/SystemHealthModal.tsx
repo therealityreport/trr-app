@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import AdminModal from "@/components/admin/AdminModal";
+import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminLiveStatus } from "@/lib/admin/admin-live-status";
 
@@ -276,33 +277,8 @@ type HealthDotStatus = {
 };
 
 type HealthState = "healthy" | "degraded" | "down" | "loading" | "error";
-
-type SharedHealthSnapshot = {
-  data: HealthDotStatus | null;
-  error: string | null;
-  lastFetchedMs: number | null;
-};
-
-type SharedHealthSubscriber = {
-  shouldPoll: boolean;
-  onUpdate: (snapshot: SharedHealthSnapshot) => void;
-};
-
-const IS_DEV_ENV = process.env.NODE_ENV !== "production";
-const HEALTH_DOT_POLL_BASE_INTERVAL_MS = 5_000;
-const HEALTH_DOT_POLL_IDLE_INTERVAL_MS = 15_000;
-const HEALTH_DOT_POLL_DEEP_IDLE_INTERVAL_MS = 30_000;
-const HEALTH_DOT_POLL_IDLE_AFTER_MS = 30_000;
-const HEALTH_DOT_POLL_DEEP_IDLE_AFTER_MS = 120_000;
 const QUEUE_STATUS_POLL_INTERVAL_MS = 5_000;
-const FOLLOWER_CHECK_INTERVAL_MS = 5_000;
-const HEALTH_DOT_FETCH_TIMEOUT_MS = 12_000;
 const QUEUE_STATUS_FETCH_TIMEOUT_MS = 30_000;
-const STARTUP_JITTER_MIN_MS = 200;
-const STARTUP_JITTER_MAX_MS = 1_800;
-const LEASE_DURATION_MS = 45_000;
-
-const HEALTH_DOT_URL = "/api/admin/trr-api/social/ingest/health-dot";
 const QUEUE_STATUS_URL = "/api/admin/trr-api/social/ingest/queue-status";
 const CANCEL_STUCK_JOBS_URL = "/api/admin/trr-api/social/ingest/stuck-jobs/cancel";
 const CANCEL_DISPATCH_BLOCKED_JOBS_URL = "/api/admin/trr-api/social/ingest/dispatch-blocked-jobs/cancel";
@@ -316,20 +292,6 @@ const ADMIN_OPERATIONS_HEALTH_URL = "/api/admin/trr-api/operations/health";
 const CANCEL_ACTIVE_ADMIN_OPERATIONS_URL = "/api/admin/trr-api/operations/cancel";
 const CANCEL_STALE_ADMIN_OPERATIONS_URL = "/api/admin/trr-api/operations/stale/cancel";
 const ADMIN_OPERATIONS_HEALTH_LIMIT = 100;
-
-const LEASE_STORAGE_KEY = "trr:admin:health-dot:leader:v1";
-const SNAPSHOT_STORAGE_KEY = "trr:admin:health-dot:snapshot:v1";
-const BROADCAST_CHANNEL_NAME = "trr-admin-health-dot";
-
-type LeaderLease = {
-  tabId: string;
-  expiresAt: number;
-};
-
-const createTabId = (): string => {
-  const randomPart = Math.random().toString(36).slice(2, 10);
-  return `tab-${Date.now()}-${randomPart}`;
-};
 
 const isSocialAdminPath = (pathname: string): boolean => {
   const normalized = pathname.toLowerCase();
@@ -996,402 +958,6 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     liveWorkers,
     recentFailureSummary: `${recentFailureCount.toLocaleString()} recent failures`,
     recentFailures,
-  };
-}
-
-class SharedHealthDotPoller {
-  private subscribers = new Map<string, SharedHealthSubscriber>();
-  private snapshot: SharedHealthSnapshot = { data: null, error: null, lastFetchedMs: null };
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private inFlight = false;
-  private leader = false;
-  private tabId = createTabId();
-  private channel: BroadcastChannel | null = null;
-  private lastObservedState: HealthState | null = null;
-  private unchangedStateSinceMs: number | null = null;
-
-  constructor() {
-    if (typeof window === "undefined") return;
-
-    if (typeof BroadcastChannel !== "undefined") {
-      this.channel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
-      this.channel.onmessage = (event) => {
-        this.handleIncomingSnapshot(event.data);
-      };
-    }
-
-    const cachedSnapshot = this.readSnapshotFromStorage();
-    if (cachedSnapshot) {
-      this.snapshot = cachedSnapshot;
-    }
-
-    window.addEventListener("storage", this.handleStorageEvent);
-    document.addEventListener("visibilitychange", this.handleVisibilityChange);
-  }
-
-  subscribe(id: string, onUpdate: (snapshot: SharedHealthSnapshot) => void): void {
-    this.subscribers.set(id, { shouldPoll: false, onUpdate });
-    onUpdate(this.snapshot);
-    this.reconcile();
-  }
-
-  unsubscribe(id: string): void {
-    this.subscribers.delete(id);
-    this.reconcile();
-  }
-
-  setInterest(id: string, shouldPoll: boolean): void {
-    const existing = this.subscribers.get(id);
-    if (!existing) return;
-    if (existing.shouldPoll === shouldPoll) return;
-    this.subscribers.set(id, { ...existing, shouldPoll });
-    this.reconcile();
-  }
-
-  requestImmediatePoll(): void {
-    if (!this.shouldPollInThisTab()) return;
-    this.markStatusObservedNow();
-    this.clearTimer();
-    this.scheduleTick(0);
-  }
-
-  private hasActiveInterest(): boolean {
-    for (const entry of this.subscribers.values()) {
-      if (entry.shouldPoll) return true;
-    }
-    return false;
-  }
-
-  private shouldPollInThisTab(): boolean {
-    if (typeof document === "undefined") return false;
-    if (document.visibilityState !== "visible") return false;
-    return this.hasActiveInterest();
-  }
-
-  private scheduleTick(delayMs: number): void {
-    if (this.timer) return;
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      void this.tick();
-    }, delayMs);
-  }
-
-  private clearTimer(): void {
-    if (!this.timer) return;
-    clearTimeout(this.timer);
-    this.timer = null;
-  }
-
-  private randomStartupDelay(): number {
-    return STARTUP_JITTER_MIN_MS + Math.floor(Math.random() * STARTUP_JITTER_MAX_MS);
-  }
-
-  private markStatusObservedNow(): void {
-    if (!IS_DEV_ENV || this.lastObservedState === null) return;
-    this.unchangedStateSinceMs = Date.now();
-  }
-
-  private nextLeaderDelayMs(): number {
-    if (!IS_DEV_ENV) return HEALTH_DOT_POLL_BASE_INTERVAL_MS;
-    if (this.unchangedStateSinceMs === null) return HEALTH_DOT_POLL_BASE_INTERVAL_MS;
-    const unchangedForMs = Date.now() - this.unchangedStateSinceMs;
-    if (unchangedForMs >= HEALTH_DOT_POLL_DEEP_IDLE_AFTER_MS) {
-      return HEALTH_DOT_POLL_DEEP_IDLE_INTERVAL_MS;
-    }
-    if (unchangedForMs >= HEALTH_DOT_POLL_IDLE_AFTER_MS) {
-      return HEALTH_DOT_POLL_IDLE_INTERVAL_MS;
-    }
-    return HEALTH_DOT_POLL_BASE_INTERVAL_MS;
-  }
-
-  private updateCadence(snapshot: SharedHealthSnapshot): void {
-    const nextState = healthState(snapshot.data, snapshot.error);
-    const fetchedAt = snapshot.lastFetchedMs ?? Date.now();
-    if (this.lastObservedState !== nextState || this.unchangedStateSinceMs === null) {
-      this.lastObservedState = nextState;
-      this.unchangedStateSinceMs = fetchedAt;
-      return;
-    }
-    this.lastObservedState = nextState;
-  }
-
-  private reconcile = (): void => {
-    if (!this.shouldPollInThisTab()) {
-      this.clearTimer();
-      this.releaseLeaderLease();
-      return;
-    }
-    if (this.timer) return;
-    const hasPolledBefore = this.snapshot.lastFetchedMs !== null;
-    this.scheduleTick(hasPolledBefore ? FOLLOWER_CHECK_INTERVAL_MS : this.randomStartupDelay());
-  };
-
-  private handleVisibilityChange = (): void => {
-    if (typeof document === "undefined") return;
-    if (document.visibilityState === "visible" && this.hasActiveInterest()) {
-      this.requestImmediatePoll();
-      return;
-    }
-    this.reconcile();
-  };
-
-  private async tick(): Promise<void> {
-    if (!this.shouldPollInThisTab()) {
-      this.releaseLeaderLease();
-      return;
-    }
-
-    const leaderNow = this.tryAcquireLeaderLease();
-    this.leader = leaderNow;
-    if (leaderNow) {
-      await this.pollHealthDot();
-      if (!this.shouldPollInThisTab()) {
-        this.releaseLeaderLease();
-        return;
-      }
-      this.scheduleTick(this.nextLeaderDelayMs());
-      return;
-    }
-
-    this.scheduleTick(FOLLOWER_CHECK_INTERVAL_MS);
-  }
-
-  private readLease(): LeaderLease | null {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = window.localStorage.getItem(LEASE_STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as Partial<LeaderLease>;
-      if (typeof parsed.tabId !== "string" || typeof parsed.expiresAt !== "number") {
-        return null;
-      }
-      return {
-        tabId: parsed.tabId,
-        expiresAt: parsed.expiresAt,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  private writeLease(expiresAt: number): void {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        LEASE_STORAGE_KEY,
-        JSON.stringify({ tabId: this.tabId, expiresAt }),
-      );
-    } catch {
-      // localStorage unavailable; fallback to in-tab polling.
-    }
-  }
-
-  private tryAcquireLeaderLease(): boolean {
-    if (typeof window === "undefined") return true;
-
-    const now = Date.now();
-    const lease = this.readLease();
-    if (!lease || lease.expiresAt <= now || lease.tabId === this.tabId) {
-      this.writeLease(now + LEASE_DURATION_MS);
-      const confirmed = this.readLease();
-      return confirmed?.tabId === this.tabId;
-    }
-    return false;
-  }
-
-  private releaseLeaderLease(): void {
-    if (!this.leader || typeof window === "undefined") {
-      this.leader = false;
-      return;
-    }
-    try {
-      const lease = this.readLease();
-      if (lease?.tabId === this.tabId) {
-        window.localStorage.removeItem(LEASE_STORAGE_KEY);
-      }
-    } catch {
-      // Ignore storage failures.
-    } finally {
-      this.leader = false;
-    }
-  }
-
-  private readSnapshotFromStorage(): SharedHealthSnapshot | null {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = window.localStorage.getItem(SNAPSHOT_STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as Partial<SharedHealthSnapshot>;
-      if (
-        parsed &&
-        (parsed.data === null || typeof parsed.data === "object") &&
-        (parsed.error === null || typeof parsed.error === "string") &&
-        (parsed.lastFetchedMs === null || typeof parsed.lastFetchedMs === "number")
-      ) {
-        return {
-          data: (parsed.data as HealthDotStatus | null) ?? null,
-          error: parsed.error ?? null,
-          lastFetchedMs: parsed.lastFetchedMs ?? null,
-        };
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  private publish(snapshot: SharedHealthSnapshot, options?: { broadcast?: boolean }): void {
-    this.updateCadence(snapshot);
-    this.snapshot = snapshot;
-    for (const subscriber of this.subscribers.values()) {
-      subscriber.onUpdate(snapshot);
-    }
-
-    if (!options?.broadcast || typeof window === "undefined") return;
-
-    try {
-      window.localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Ignore storage failures.
-    }
-
-    try {
-      this.channel?.postMessage(snapshot);
-    } catch {
-      // Ignore BroadcastChannel failures.
-    }
-  }
-
-  private handleIncomingSnapshot(payload: unknown): void {
-    if (!payload || typeof payload !== "object") return;
-    const incoming = payload as Partial<SharedHealthSnapshot>;
-    const incomingFetched =
-      typeof incoming.lastFetchedMs === "number" ? incoming.lastFetchedMs : null;
-    const currentFetched = this.snapshot.lastFetchedMs;
-    if (incomingFetched !== null && currentFetched !== null && incomingFetched <= currentFetched) {
-      return;
-    }
-    this.publish({
-      data: (incoming.data as HealthDotStatus | null) ?? null,
-      error: typeof incoming.error === "string" ? incoming.error : null,
-      lastFetchedMs: incomingFetched,
-    });
-  }
-
-  private handleStorageEvent = (event: StorageEvent): void => {
-    if (event.key !== SNAPSHOT_STORAGE_KEY || !event.newValue) return;
-    try {
-      const parsed = JSON.parse(event.newValue) as SharedHealthSnapshot;
-      this.handleIncomingSnapshot(parsed);
-    } catch {
-      // Ignore malformed payloads.
-    }
-  };
-
-  private async pollHealthDot(): Promise<void> {
-    if (this.inFlight) return;
-    this.inFlight = true;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(new DOMException("Request timed out", "AbortError")),
-      HEALTH_DOT_FETCH_TIMEOUT_MS,
-    );
-
-    try {
-      this.writeLease(Date.now() + LEASE_DURATION_MS);
-      const response = await fetchAdminWithAuth(
-        HEALTH_DOT_URL,
-        { cache: "no-store", signal: controller.signal },
-        { allowDevAdminBypass: true },
-      );
-
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-        const error = typeof body.error === "string" ? body.error : `HTTP ${response.status}`;
-        this.publish(
-          {
-            data: this.snapshot.data,
-            error,
-            lastFetchedMs: Date.now(),
-          },
-          { broadcast: true },
-        );
-        return;
-      }
-
-      const data = (await response.json()) as HealthDotStatus;
-      this.publish(
-        {
-          data,
-          error: null,
-          lastFetchedMs: Date.now(),
-        },
-        { broadcast: true },
-      );
-    } catch (error) {
-      const message = normalizeFetchErrorMessage(error);
-      this.publish(
-        {
-          data: this.snapshot.data,
-          error: message,
-          lastFetchedMs: Date.now(),
-        },
-        { broadcast: true },
-      );
-    } finally {
-      clearTimeout(timeoutId);
-      this.inFlight = false;
-    }
-  }
-}
-
-const getSharedHealthDotPoller = (): SharedHealthDotPoller | null => {
-  if (typeof window === "undefined") return null;
-  const globalKey = "__trr_admin_health_dot_poller__" as const;
-  const withPoller = window as Window & {
-    [globalKey]?: SharedHealthDotPoller;
-  };
-  if (!withPoller[globalKey]) {
-    withPoller[globalKey] = new SharedHealthDotPoller();
-  }
-  return withPoller[globalKey] ?? null;
-};
-
-function useSharedHealthDot(options: { isOpen: boolean; isSocialRoute: boolean }) {
-  const [snapshot, setSnapshot] = useState<SharedHealthSnapshot>({
-    data: null,
-    error: null,
-    lastFetchedMs: null,
-  });
-  const subscriberIdRef = useRef<string>(createTabId());
-
-  useEffect(() => {
-    const poller = getSharedHealthDotPoller();
-    if (!poller) return;
-    const id = subscriberIdRef.current;
-    poller.subscribe(id, setSnapshot);
-    return () => {
-      poller.unsubscribe(id);
-    };
-  }, []);
-
-  useEffect(() => {
-    const poller = getSharedHealthDotPoller();
-    if (!poller) return;
-    poller.setInterest(subscriberIdRef.current, options.isOpen || options.isSocialRoute);
-  }, [options.isOpen, options.isSocialRoute]);
-
-  const refetch = useCallback(() => {
-    const poller = getSharedHealthDotPoller();
-    poller?.requestImmediatePoll();
-  }, []);
-
-  return {
-    data: snapshot.data,
-    error: snapshot.error,
-    lastFetched: snapshot.lastFetchedMs ? new Date(snapshot.lastFetchedMs) : null,
-    refetch,
   };
 }
 
@@ -2287,10 +1853,9 @@ export function HealthIndicator({
 }) {
   const pathname = usePathname() ?? "";
   const socialRoute = useMemo(() => isSocialAdminPath(pathname), [pathname]);
-  const healthDot = useSharedHealthDot({ isOpen: false, isSocialRoute: socialRoute });
   const liveStatus = useAdminLiveStatus({ shouldRun: socialRoute });
-  const statusData = (liveStatus.data?.health_dot as HealthDotStatus | null | undefined) ?? healthDot.data;
-  const state = healthState(statusData, liveStatus.error ?? healthDot.error);
+  const statusData = (liveStatus.data?.health_dot as HealthDotStatus | null | undefined) ?? null;
+  const state = healthState(statusData, liveStatus.error);
 
   return (
     <button
@@ -2316,7 +1881,6 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const pathname = usePathname() ?? "";
   const socialRoute = useMemo(() => isSocialAdminPath(pathname), [pathname]);
 
-  const healthDot = useSharedHealthDot({ isOpen, isSocialRoute: socialRoute });
   const liveStatus = useAdminLiveStatus({ shouldRun: isOpen || socialRoute });
   const queueStatus = useMemo(
     () => ({
@@ -2371,11 +1935,21 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           by_status: queueStatus.data.queue.by_status,
         },
       }
-    : healthDot.data;
+    : null;
 
-  const state = healthState(statusData, liveStatus.error ?? queueStatus.error ?? healthDot.error);
-  const lastFetched =
-    liveStatus.lastFetched ?? adminOperations.lastFetched ?? queueStatus.lastFetched ?? healthDot.lastFetched;
+  const state = healthState(statusData, liveStatus.error ?? queueStatus.error);
+  const lastFetched = liveStatus.lastFetched ?? adminOperations.lastFetched ?? queueStatus.lastFetched;
+  const refreshSystemHealth = useCallback(
+    async (cause: "manual" | "mutation" = "mutation") => {
+      try {
+        await invalidateAdminSnapshotFamilies([{ pageFamily: "system-health" }]);
+      } catch {
+        // Best effort only.
+      }
+      await liveStatus.refetch({ forceRefresh: true, cause });
+    },
+    [liveStatus],
+  );
   const modalState = useMemo(
     () => {
       const socialState = queueStatus.data ? modalQueueHealthState(queueStatus.data) : state;
@@ -2415,13 +1989,13 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       return {
         cancelledJobs: Number(payload.cancelled_jobs ?? 0),
         stuckJobsRemaining: Number(payload.stuck_jobs_remaining ?? 0),
       };
     },
-    [healthDot, queueStatus],
+    [refreshSystemHealth],
   );
 
   const cancelDispatchBlockedJobs = useCallback(
@@ -2444,13 +2018,13 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       return {
         cancelledJobs: Number(payload.cancelled_jobs ?? 0),
         dispatchBlockedJobsRemaining: Number(payload.dispatch_blocked_jobs_remaining ?? 0),
       };
     },
-    [healthDot, queueStatus],
+    [refreshSystemHealth],
   );
 
   const fetchWorkerDetail = useCallback(async (workerId: string) => {
@@ -2639,7 +2213,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([adminOperations.refetch(), queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       const cancelledOperations = Number(payload.cancelled_operations ?? 0);
       const remaining = Number(payload.stale_operations_remaining ?? 0);
       setActionNotice(
@@ -2652,7 +2226,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setClearingStaleAdminOperations(false);
     }
-  }, [adminOperations, healthDot, queueStatus]);
+  }, [refreshSystemHealth]);
 
   const cancelSingleAdminOperation = useCallback(
     async (operationId: string) => {
@@ -2677,7 +2251,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         if (!response.ok) {
           throw new Error(payload.error ?? `HTTP ${response.status}`);
         }
-        await Promise.all([adminOperations.refetch(), queueStatus.refetch(), healthDot.refetch()]);
+        await refreshSystemHealth();
         const cancelledOperations = Number(payload.cancelled_operations ?? 0);
         const status = String(payload.operation?.status || "").trim().toLowerCase();
         if (status === "cancelled") {
@@ -2703,7 +2277,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         });
       }
     },
-    [adminOperations, healthDot, queueStatus],
+    [refreshSystemHealth],
   );
 
   const cancelAllActiveAdminOperations = useCallback(async () => {
@@ -2729,7 +2303,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([adminOperations.refetch(), queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       const requested = Number(payload.cancel_requested_operations ?? 0);
       const remaining = Number(payload.active_operations_remaining ?? 0);
       setActionNotice(
@@ -2742,7 +2316,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setCancelingAllActiveAdminOperations(false);
     }
-  }, [adminOperations, healthDot, queueStatus]);
+  }, [refreshSystemHealth]);
 
   const dismissRecentFailure = useCallback(
     async (jobId: string) => {
@@ -2768,7 +2342,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         if (!response.ok) {
           throw new Error(payload.error ?? `HTTP ${response.status}`);
         }
-        await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+        await refreshSystemHealth();
         const dismissedJobs = Number(payload.dismissed_jobs ?? 0);
         const remaining = Number(payload.recent_failures_remaining ?? 0);
         if (dismissedJobs > 0) {
@@ -2790,7 +2364,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         });
       }
     },
-    [healthDot, queueStatus],
+    [refreshSystemHealth],
   );
 
   const dismissAllRecentFailures = useCallback(async () => {
@@ -2816,7 +2390,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       const dismissedJobs = Number(payload.dismissed_jobs ?? 0);
       const remaining = Number(payload.recent_failures_remaining ?? 0);
       setActionNotice(
@@ -2829,7 +2403,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setDismissingAllRecentFailures(false);
     }
-  }, [healthDot, queueStatus]);
+  }, [refreshSystemHealth]);
 
   const cancelAllActiveJobs = useCallback(async () => {
     setActionNotice(null);
@@ -2854,7 +2428,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       const cancelledJobs = Number(payload.cancelled_jobs ?? 0);
       const remaining = Number(payload.active_jobs_remaining ?? 0);
       if (cancelledJobs > 0) {
@@ -2867,7 +2441,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setCancelingActiveJobs(false);
     }
-  }, [healthDot, queueStatus]);
+  }, [refreshSystemHealth]);
 
   const resetSocialIngestHealth = useCallback(async () => {
     setActionNotice(null);
@@ -2896,7 +2470,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       setActionNotice(
         `Fresh slate ready: cancelled ${Number(payload.cancelled_jobs ?? 0)} active jobs, ` +
           `dismissed ${Number(payload.dismissed_failures ?? 0)} recent failures, ` +
@@ -2910,7 +2484,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setResettingHealth(false);
     }
-  }, [healthDot, queueStatus]);
+  }, [refreshSystemHealth]);
 
   const clearOlderWorkerCheckins = useCallback(async () => {
     setActionNotice(null);
@@ -2935,7 +2509,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await Promise.all([queueStatus.refetch(), healthDot.refetch()]);
+      await refreshSystemHealth();
       const deletedWorkers = Number(payload.deleted_workers ?? 0);
       const totalWorkersAfter = Number(payload.total_workers_after ?? 0);
       setActionNotice(
@@ -2948,7 +2522,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setClearingOlderWorkerCheckins(false);
     }
-  }, [healthDot, queueStatus]);
+  }, [refreshSystemHealth]);
 
   return (
     <AdminModal
@@ -2978,9 +2552,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           <button
             type="button"
             onClick={() => {
-              adminOperations.refetch();
-              queueStatus.refetch();
-              healthDot.refetch();
+              void refreshSystemHealth("manual");
             }}
             className="rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-50"
           >
@@ -2989,9 +2561,9 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         </div>
       </div>
       <div className="max-h-[calc(90vh-8.5rem)] overflow-y-auto pr-1">
-        {(queueStatus.error || healthDot.error || adminOperations.error) && (
+        {(queueStatus.error || liveStatus.error || adminOperations.error) && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {adminOperations.error ?? queueStatus.error ?? healthDot.error}
+            {adminOperations.error ?? queueStatus.error ?? liveStatus.error}
           </div>
         )}
 

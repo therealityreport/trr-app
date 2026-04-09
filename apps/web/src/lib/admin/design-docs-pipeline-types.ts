@@ -105,11 +105,65 @@ export interface NavigationData {
   }>;
 }
 
+export interface SocialShareAsset {
+  name: string;
+  url: string;
+  ratio: string;
+  width?: number;
+  source: "meta" | "json-ld" | "next-data" | "heuristic";
+}
+
+export interface SocialShareAssetSet {
+  assets: SocialShareAsset[];
+}
+
+export interface HydratedInteractionCoverage {
+  mastheadSpacer: boolean;
+  storyline: boolean;
+  menuOverlay: boolean;
+  searchPanel: boolean;
+  accountDrawer: boolean;
+}
+
+export interface SiteShellStorylineExtraction {
+  title: string;
+  links: Array<{ label: string; href: string }>;
+  primitiveMatchId?: string;
+}
+
+export interface SiteHeaderShellExtraction {
+  mastheadSpacerHeight?: number;
+  hasMenuButton: boolean;
+  hasSearchButton: boolean;
+  hasAccountButton: boolean;
+  primitiveMatchId?: string;
+}
+
+export interface SiteShellExtraction {
+  siteHeader?: SiteHeaderShellExtraction;
+  storyline?: SiteShellStorylineExtraction;
+  interactionCoverage: HydratedInteractionCoverage;
+}
+
+export interface ReusableUiPrimitive {
+  id: string;
+  publisher: string;
+  layoutFamily: LayoutFamily;
+  kind: "icon" | "icon-set" | "site-header-shell" | "storyline";
+  variant: string;
+  signature: string;
+  provenance?: string;
+}
+
 export interface MergedExtractionOutput {
   articleUrl: string;
   sourceHtmlLength: number;
   publisherClassification: PublisherClassification;
   navigationData: NavigationData;
+  socialShareAssets?: SocialShareAssetSet | null;
+  siteShell?: SiteShellExtraction | null;
+  interactionCoverage?: HydratedInteractionCoverage | null;
+  reusablePrimitives?: ReusableUiPrimitive[];
   extractionOutputs: Record<string, unknown>;
   blockCompleteness?: number | null;
   techInventory: TechInventory;

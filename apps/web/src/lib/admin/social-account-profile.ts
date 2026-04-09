@@ -20,6 +20,22 @@ export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatf
   "threads",
 ];
 
+export const SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
+  "instagram",
+  "youtube",
+  "facebook",
+];
+
+export type SocialBladeProfileStatsLabels = Partial<{
+  followers: string;
+  following: string;
+  media_count: string;
+  engagement_rate: string;
+  average_likes: string;
+  average_comments: string;
+  chart_metric_label: string;
+}>;
+
 export type SocialAccountProfileSummary = {
   platform: SocialPlatformSlug;
   account_handle: string;
@@ -60,6 +76,50 @@ export type SocialAccountProfileSummary = {
   top_collaborators: SocialAccountProfileCollaboratorTagAggregate[];
   top_tags: SocialAccountProfileCollaboratorTagAggregate[];
   source_status: Array<Record<string, unknown>>;
+};
+
+export type SocialBladeGrowthData = {
+  username: string;
+  account_handle?: string | null;
+  platform: SocialPlatformSlug;
+  scraped_at: string;
+  freshness_status?: "fresh" | "stale" | "missing" | "unknown";
+  is_stale?: boolean;
+  age_hours?: number | null;
+  refresh_status?: "refreshed" | "skipped";
+  refresh_skipped_reason?: string;
+  stats_refreshed?: boolean;
+  history_source?: string | null;
+  chart_metric_label?: string | null;
+  socialblade_url?: string | null;
+  profile_stats_labels?: SocialBladeProfileStatsLabels;
+  profile_stats: {
+    followers: number;
+    following: number;
+    media_count: number;
+    engagement_rate: string;
+    average_likes: number;
+    average_comments: number;
+  };
+  rankings: {
+    sb_rank: string;
+    followers_rank: string;
+    engagement_rate_rank: string;
+    grade: string;
+  };
+  daily_channel_metrics_60day: {
+    period: string;
+    row_count: number;
+    headers: string[];
+    data: Array<Record<string, string>>;
+  };
+  daily_total_followers_chart: {
+    frequency: string;
+    metric: string;
+    total_data_points: number;
+    date_range: { from: string; to: string };
+    data: Array<{ date: string; followers: number }>;
+  } | null;
 };
 
 export type SocialAccountProfileShowBucket = {
@@ -120,10 +180,21 @@ export type SocialAccountCatalogPost = SocialAccountProfilePost & {
   candidate_matches?: Array<Record<string, unknown>>;
 };
 
+export type SocialAccountCatalogAction = "backfill" | "sync_recent" | "sync_newer" | "resume_tail";
+
+export type SocialAccountCatalogActionScope =
+  | "full_history"
+  | "bounded_window"
+  | "recent_window"
+  | "head_gap"
+  | "frontier_resume";
+
 export type SocialAccountCatalogRun = {
   job_id: string;
   run_id: string;
   status?: string | null;
+  catalog_action?: SocialAccountCatalogAction | null;
+  catalog_action_scope?: SocialAccountCatalogActionScope | null;
   created_at?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
@@ -297,6 +368,8 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   season_id?: string | null;
   run_id: string;
   run_status: string;
+  catalog_action?: SocialAccountCatalogAction | null;
+  catalog_action_scope?: SocialAccountCatalogActionScope | null;
   operational_state?:
     | "blocked_auth"
     | "discovering"
@@ -569,6 +642,7 @@ export type SocialAccountProfileCollaboratorTagAggregate = {
 
 export const SOCIAL_ACCOUNT_PROFILE_TAB_LABELS: Record<SocialAccountProfileTab, string> = {
   stats: "Stats",
+  socialblade: "SocialBlade",
   catalog: "Catalog",
   posts: "Posts",
   hashtags: "Hashtags",

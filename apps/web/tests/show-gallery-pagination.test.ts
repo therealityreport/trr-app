@@ -1,22 +1,34 @@
 import { describe, expect, it } from "vitest";
-import fs from "node:fs";
-import path from "node:path";
 
-describe("show gallery pagination wiring", () => {
-  it("uses full-fetch gallery endpoints with truncation metadata and warning", () => {
-    const filePath = path.resolve(
-      __dirname,
-      "../src/app/admin/trr-shows/[showId]/page.tsx"
-    );
-    const contents = fs.readFileSync(filePath, "utf8");
+import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
 
-    expect(contents).not.toContain("fetchAllPaginatedGalleryRowsWithMeta");
-    expect(contents).not.toContain("const GALLERY_ASSET_PAGE_SIZE = 500;");
-    expect(contents).not.toContain("const GALLERY_ASSET_MAX_PAGES = 30;");
-    expect(contents).toContain("setGalleryTruncatedWarning(");
-    expect(contents).toContain("pagination?.truncated");
-    expect(contents).toContain("Showing first ${dedupedAssets.length} assets due to pagination cap. Narrow filters to refine.");
-    expect(contents).toContain("/api/admin/trr-api/shows/${showId}/assets?full=1");
-    expect(contents).toContain("/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets?full=1");
+describe("show gallery pagination", () => {
+  it("aggregates all pages exposed by backend cursors without a fixed page cap", async () => {
+    const requests: Array<{ cursor: string | null; limit: number }> = [];
+
+    const result = await fetchAllPaginatedGalleryRowsWithMeta({
+      pageSize: 500,
+      async fetchPage(cursor, limit) {
+        requests.push({ cursor, limit });
+        if (cursor === null) {
+          return {
+            rows: Array.from({ length: 500 }, (_, index) => ({ id: `asset-${index + 1}` })),
+            nextCursor: "offset:500",
+          };
+        }
+        return {
+          rows: [{ id: "asset-501" }],
+          nextCursor: null,
+        };
+      },
+    });
+
+    expect(result.rows).toHaveLength(501);
+    expect(result.truncated).toBe(false);
+    expect(result.pagesFetched).toBe(2);
+    expect(requests).toEqual([
+      { cursor: null, limit: 500 },
+      { cursor: "offset:500", limit: 500 },
+    ]);
   });
 });

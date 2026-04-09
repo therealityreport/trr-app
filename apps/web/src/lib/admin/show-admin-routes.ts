@@ -51,7 +51,13 @@ export type SocialAnalyticsViewSlug =
   | "tiktok-sentiment";
 export type SocialPlatformSlug = "instagram" | "tiktok" | "twitter" | "youtube" | "facebook" | "threads";
 export type SocialWeekSubTab = "details" | SocialPlatformSlug;
-export type SocialAccountProfileTab = "stats" | "catalog" | "posts" | "hashtags" | "collaborators-tags";
+export type SocialAccountProfileTab =
+  | "stats"
+  | "socialblade"
+  | "catalog"
+  | "posts"
+  | "hashtags"
+  | "collaborators-tags";
 
 type RouteSource = "path" | "query" | "default";
 
@@ -640,6 +646,7 @@ export function parseSeasonSocialPathFilters(pathname: string): ParsedSocialPath
 const toSocialAccountProfileTab = (value: string | null | undefined): SocialAccountProfileTab | null => {
   const normalized = normalizeSegment(value);
   if (!normalized) return "stats";
+  if (normalized === "socialblade" || normalized === "social-blade") return "socialblade";
   if (normalized === "catalog") return "catalog";
   if (normalized === "posts") return "posts";
   if (normalized === "hashtags" || normalized === "hashtag") return "hashtags";

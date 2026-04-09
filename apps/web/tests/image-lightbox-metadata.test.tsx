@@ -134,6 +134,28 @@ describe("ImageLightbox metadata panel", () => {
     expect(screen.getByText("EXAMPLE.COM | Unknown Page")).toBeInTheDocument();
   });
 
+  it("humanizes known scrape domains in the badge and Found on row", () => {
+    render(
+      <ImageLightbox
+        src="https://cdn.example.com/image.jpg"
+        alt="Test image"
+        isOpen
+        onClose={() => {}}
+        metadata={buildMetadata({
+          source: "web_scrape:bravotv.com",
+          sourceUrl: "https://www.bravotv.com/the-daily-dish/jen-shah-gallery",
+          sourcePageTitle: "Jen Shah Gallery",
+        })}
+      />
+    );
+
+    expect(screen.getAllByText(/BRAVO TV/i).length).toBeGreaterThan(0);
+
+    openMetadataPanel();
+
+    expect(screen.getByText("Bravo TV | Jen Shah Gallery")).toBeInTheDocument();
+  });
+
   it("normalizes Getty provenance labels for NBCUMV-backed metadata", () => {
     render(
       <ImageLightbox

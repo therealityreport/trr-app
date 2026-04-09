@@ -156,6 +156,78 @@ const getErrorDetail = (error: unknown): string => {
   return "unknown error";
 };
 
+type BackendErrorInfo = {
+  detail: string;
+  errorCode: string;
+  retryable: boolean;
+};
+
+const parseBackendErrorResponse = async (response: Response): Promise<BackendErrorInfo> => {
+  const fallbackErrorCode = `HTTP_${response.status}`;
+  const rawText = (await response.text()).trim();
+  if (!rawText) {
+    return {
+      detail: fallbackErrorCode,
+      errorCode: fallbackErrorCode,
+      retryable: response.status >= 500,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(rawText) as {
+      detail?: {
+        code?: unknown;
+        reason?: unknown;
+        message?: unknown;
+        retryable?: unknown;
+      } | string;
+    };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return {
+        detail: parsed.detail.trim(),
+        errorCode: fallbackErrorCode,
+        retryable: response.status >= 500,
+      };
+    }
+    if (parsed.detail && typeof parsed.detail === "object") {
+      const detailObject = parsed.detail as {
+        code?: unknown;
+        reason?: unknown;
+        message?: unknown;
+        retryable?: unknown;
+      };
+      const code =
+        typeof detailObject.code === "string" && detailObject.code.trim()
+          ? detailObject.code.trim()
+          : fallbackErrorCode;
+      const reason =
+        typeof detailObject.reason === "string" && detailObject.reason.trim()
+          ? detailObject.reason.trim()
+          : "";
+      const message =
+        typeof detailObject.message === "string" && detailObject.message.trim()
+          ? detailObject.message.trim()
+          : rawText;
+      const explicitRetryable =
+        typeof detailObject.retryable === "boolean" ? detailObject.retryable : response.status >= 500;
+      const retryable = !(code === "DATABASE_SERVICE_UNAVAILABLE" && reason === "database_configuration") && explicitRetryable;
+      return {
+        detail: message,
+        errorCode: code,
+        retryable,
+      };
+    }
+  } catch {
+    // Fall back to raw text below.
+  }
+
+  return {
+    detail: rawText,
+    errorCode: fallbackErrorCode,
+    retryable: response.status >= 500,
+  };
+};
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -280,6 +352,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         });
 
         let backendResponse: Response | null = null;
+        let backendFailure: BackendErrorInfo | null = null;
         let lastError: unknown = null;
         let attemptsUsed = 0;
 
@@ -364,8 +437,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             }
 
             const response = await fetchPromise;
-            if (response.ok || response.status < 500 || attempt >= BACKEND_FETCH_ATTEMPTS) {
+            if (response.ok) {
               backendResponse = response;
+              break;
+            }
+
+            const backendError = await parseBackendErrorResponse(response);
+            if (!backendError.retryable || response.status < 500 || attempt >= BACKEND_FETCH_ATTEMPTS) {
+              backendFailure = backendError;
               break;
             }
 
@@ -408,7 +487,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           }
         }
 
-        if (!backendResponse) {
+        if (!backendResponse && !backendFailure) {
           emitEvent("error", {
             stage: "proxy_connecting",
             error: "Backend fetch failed",
@@ -425,13 +504,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           return;
         }
 
-        if (!backendResponse.ok) {
-          const errorText = await backendResponse.text();
+        if (backendFailure) {
           emitEvent("error", {
             stage: "backend",
             error: "Failed to stream links discovery",
-            detail: errorText || `HTTP ${backendResponse.status}`,
-            error_code: `HTTP_${backendResponse.status}`,
+            detail: backendFailure.detail,
+            error_code: backendFailure.errorCode,
             checkpoint: "backend_http_error",
             stream_state: "failed",
             is_terminal: true,
@@ -441,7 +519,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           return;
         }
 
-        if (!backendResponse.body) {
+        if (!backendResponse || !backendResponse.body) {
           emitEvent("error", {
             stage: "backend",
             error: "No stream body returned from backend",

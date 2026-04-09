@@ -7,6 +7,10 @@ export type AdminPageReadDiagnostic = {
   phase: "start" | "success" | "error";
   dedupeHit?: boolean;
   cacheHit?: boolean;
+  cacheStatus?: "hit" | "miss" | "refresh";
+  stale?: boolean;
+  refreshCause?: "interval" | "manual" | "mutation" | "sse" | "visibility" | "bootstrap";
+  sharedRole?: "leader" | "follower";
   backoffState?: string;
   payloadBytes?: number;
   queryCount?: number;

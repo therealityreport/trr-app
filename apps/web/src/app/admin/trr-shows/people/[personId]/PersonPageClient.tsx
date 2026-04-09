@@ -14,6 +14,8 @@ import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-g
 import { AdminRequestError, adminGetJson, adminMutation, adminStream } from "@/lib/admin/admin-fetch";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import { logAdminPageReadDiagnostic, measurePayloadBytes } from "@/lib/admin/page-read-diagnostics";
+import { buildScopedAdminRequestId, resolveRequestIdFromPayload } from "@/lib/admin/request-id";
+import { useTabRouteNavigation } from "@/lib/admin/use-tab-route-navigation";
 import {
   canonicalizeOperationStatus,
   isCanonicalTerminalStatus,
@@ -38,7 +40,9 @@ import {
 } from "@/lib/admin/getty-local-prefetch";
 import {
   buildPersonAdminUrl,
+  buildSocialAccountProfileUrl,
   buildPersonRouteSlug,
+  normalizeSocialAccountProfileHandle,
   buildSeasonAdminUrl,
   buildShowAdminUrl,
   cleanLegacyPersonRoutingQuery,
@@ -54,6 +58,7 @@ import ReassignImageModal from "@/components/admin/ReassignImageModal";
 import { ImageScrapeDrawer, type PersonContext } from "@/components/admin/ImageScrapeDrawer";
 import SocialGrowthSection from "@/components/admin/social-growth-section";
 import { AdvancedFilterDrawer } from "@/components/admin/AdvancedFilterDrawer";
+import { normalizePersonExternalIdValue } from "@/lib/admin/person-external-ids";
 import {
   PersonExternalIdsEditor,
 } from "@/components/admin/PersonExternalIdsEditor";
@@ -115,6 +120,7 @@ import {
   resolveJobLiveCounts,
   type JobLiveCounts,
 } from "@/lib/admin/job-live-counts";
+import { resolveBravoVideoThumbnailUrl } from "@/lib/admin/bravo-video-thumbnails";
 import {
   inferHasTextOverlay,
   inferPeopleCountForPersonPhoto,
@@ -3339,6 +3345,9 @@ function TagPeoplePanel({
   );
 }
 
+const SOCIALBLADE_PERSON_PLATFORM_ORDER = ["instagram", "facebook", "youtube"] as const;
+type SocialBladePersonPlatform = (typeof SOCIALBLADE_PERSON_PLATFORM_ORDER)[number];
+
 export default function PersonProfilePage() {
   const params = useParams();
   const pathname = usePathname();
@@ -3559,19 +3568,14 @@ export default function PersonProfilePage() {
   );
 
   const buildPersonRefreshRequestId = useCallback(() => {
-    const counter = ++personRefreshRequestCounterRef.current;
-    const timestampToken = Date.now().toString(36);
-    const showToken = String(showIdForApi || "unknown")
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 32);
-    const personToken = String(personId || "unknown")
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 32);
-    return `person-refresh-${showToken}-p${personToken}-${timestampToken}-${counter}`;
+    return buildScopedAdminRequestId({
+      prefix: "person-refresh",
+      counter: ++personRefreshRequestCounterRef.current,
+      parts: [
+        { value: showIdForApi, fallback: "unknown" },
+        { prefix: "p", value: personId, fallback: "unknown" },
+      ],
+    });
   }, [personId, showIdForApi]);
 
   const refreshStreamPath = personId
@@ -4501,22 +4505,19 @@ export default function PersonProfilePage() {
     photosNextOffsetRef.current = photosNextOffset;
   }, [photosNextOffset]);
 
-  const setTab = useCallback(
-    (tab: TabId) => {
-      setActiveTab(tab);
-      if (!personSlugForRouting) return;
-      router.replace(
-        buildPersonAdminUrl({
-          personSlug: personSlugForRouting,
-          tab,
-          showId: personRouteShowContext ?? undefined,
-          query: personQueryContext,
-        }) as Route,
-        { scroll: false }
-      );
+  const setTab = useTabRouteNavigation<TabId>({
+    router,
+    setActiveTab,
+    buildHref: (tab) => {
+      if (!personSlugForRouting) return null;
+      return buildPersonAdminUrl({
+        personSlug: personSlugForRouting,
+        tab,
+        showId: personRouteShowContext ?? undefined,
+        query: personQueryContext,
+      }) as Route;
     },
-    [personQueryContext, personRouteShowContext, personSlugForRouting, router]
-  );
+  });
 
   const advancedFilters = useMemo(
     () =>
@@ -5637,8 +5638,16 @@ export default function PersonProfilePage() {
             });
             const nextPhotos = append ? mergePersonPhotoPages(fetchedPhotos, pagePhotos) : pagePhotos;
             fetchedPhotos.splice(0, fetchedPhotos.length, ...nextPhotos);
-            setPhotosSavedTotal(pagination.total_count);
-            setPhotosSavedTotalStatus(pagination.total_count_status ?? "deferred");
+            if (
+              pagination.total_count_status === "exact" ||
+              typeof pagination.total_count === "number"
+            ) {
+              setPhotosSavedTotal(pagination.total_count ?? 0);
+              setPhotosSavedTotalStatus("exact");
+            } else {
+              setPhotosSavedTotal((current) => current);
+              setPhotosSavedTotalStatus((current) => (current === "exact" ? "exact" : "deferred"));
+            }
             setPhotosHasMore(pagination.has_more);
             setPhotosNextOffset(pagination.next_offset);
             const foundEnsuredPhoto = ensurePhotoId
@@ -7853,9 +7862,7 @@ export default function PersonProfilePage() {
                     ? ((payload as { run_id: string }).run_id)
                     : null;
                 const payloadRequestId =
-                  typeof (payload as { request_id?: unknown }).request_id === "string"
-                    ? ((payload as { request_id: string }).request_id)
-                    : null;
+                  resolveRequestIdFromPayload(payload, requestId);
                 const resolvedRunId = payloadRequestId ?? runId ?? requestId;
                 const currentRaw = (payload as { current?: unknown }).current;
                 const totalRaw = (payload as { total?: unknown }).total;
@@ -8150,9 +8157,7 @@ export default function PersonProfilePage() {
                 } else if (eventType === "complete") {
                   sawComplete = true;
                 const payloadRequestId =
-                  payload && typeof payload === "object" && typeof payload.request_id === "string"
-                    ? payload.request_id
-                    : requestId;
+                  resolveRequestIdFromPayload(payload, requestId);
                 const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
                 setRefreshLiveCounts(completeLiveCounts);
                 const summary = payload && typeof payload === "object" && "summary" in payload
@@ -8239,7 +8244,7 @@ export default function PersonProfilePage() {
                     : null;
                   const stage = errorPayload?.stage ? `[${errorPayload.stage}] ` : "";
                   const payloadRequestId =
-                  typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
+                    resolveRequestIdFromPayload(errorPayload, requestId);
                   const attemptUsedRaw = errorPayload?.attempts_used;
                   const maxAttemptsRaw = errorPayload?.max_attempts;
                   const attemptsUsed =
@@ -8972,9 +8977,7 @@ export default function PersonProfilePage() {
                 ? ((payload as { run_id: string }).run_id)
                 : null;
             const payloadRequestId =
-              typeof (payload as { request_id?: unknown }).request_id === "string"
-                ? ((payload as { request_id: string }).request_id)
-                : null;
+              resolveRequestIdFromPayload(payload, requestId);
             const checkpoint =
               typeof (payload as { checkpoint?: unknown }).checkpoint === "string"
                 ? ((payload as { checkpoint: string }).checkpoint)
@@ -9136,9 +9139,7 @@ export default function PersonProfilePage() {
             } else if (eventType === "complete") {
             sawComplete = true;
             const payloadRequestId =
-              payload && typeof payload === "object" && typeof payload.request_id === "string"
-                ? payload.request_id
-                : requestId;
+              resolveRequestIdFromPayload(payload, requestId);
             const completeLiveCounts = resolveJobLiveCounts(refreshLiveCounts, payload);
             setRefreshLiveCounts(completeLiveCounts);
             const summary = payload && typeof payload === "object" && "summary" in payload
@@ -9203,7 +9204,7 @@ export default function PersonProfilePage() {
                   })
                 : null;
             const payloadRequestId =
-              typeof errorPayload?.request_id === "string" ? errorPayload.request_id : requestId;
+              resolveRequestIdFromPayload(errorPayload, requestId);
             const attemptUsedRaw = errorPayload?.attempts_used;
             const maxAttemptsRaw = errorPayload?.max_attempts;
             const attemptsUsed =
@@ -9861,7 +9862,7 @@ export default function PersonProfilePage() {
 
     const loadData = async () => {
       try {
-        await fetchPhotos({ signal, includeTotalCount: false, requestRole: "primary" });
+        await fetchPhotos({ signal, requestRole: "primary" });
         if (signal.aborted) return;
         if (!cancelled) {
           setPrimaryGalleryReady(true);
@@ -10262,19 +10263,6 @@ export default function PersonProfilePage() {
     return parsed.toLocaleDateString();
   };
 
-  const resolveBravoVideoThumbnailUrl = (video: BravoVideoItem): string | null => {
-    if (typeof video.hosted_image_url === "string" && video.hosted_image_url.trim()) {
-      return video.hosted_image_url.trim();
-    }
-    if (typeof video.image_url === "string" && video.image_url.trim()) {
-      return video.image_url.trim();
-    }
-    if (typeof video.original_image_url === "string" && video.original_image_url.trim()) {
-      return video.original_image_url.trim();
-    }
-    return null;
-  };
-
   // Extract external IDs - database uses 'imdb'/'tmdb' keys, not 'imdb_id'/'tmdb_id'
   const rawExternalIds = person?.external_ids as {
     imdb?: string;
@@ -10287,15 +10275,38 @@ export default function PersonProfilePage() {
     tvdb_id: rawExternalIds.tvdb,
   } : undefined;
 
-  // Resolve Instagram handle from external_ids (matches backend COALESCE chain)
-  const instagramHandle = useMemo(() => {
+  const socialBladeAccounts = useMemo(() => {
     const ids = person?.external_ids as Record<string, unknown> | undefined;
-    if (!ids) return null;
-    const raw =
-      (typeof ids.instagram_id === "string" ? ids.instagram_id : null) ??
-      (typeof ids.instagram === "string" ? ids.instagram : null);
-    return raw?.trim() || null;
+    if (!ids) return [] as Array<{ platform: SocialBladePersonPlatform; handle: string }>;
+    return SOCIALBLADE_PERSON_PLATFORM_ORDER.flatMap((platform) => {
+      const rawCandidates = [ids[`${platform}_id`], ids[platform]];
+      const rawValue = rawCandidates.find((value) => typeof value === "string" && value.trim()) as string | undefined;
+      if (!rawValue) return [];
+      const normalizedExternalId = normalizePersonExternalIdValue(platform, rawValue);
+      const normalizedHandle = normalizeSocialAccountProfileHandle(normalizedExternalId);
+      if (!normalizedHandle) return [];
+      return [{ platform, handle: normalizedHandle }];
+    });
   }, [person?.external_ids]);
+  const [selectedSocialBladePlatform, setSelectedSocialBladePlatform] = useState<SocialBladePersonPlatform>("instagram");
+  const selectedSocialBladeAccount = useMemo(
+    () =>
+      socialBladeAccounts.find((account) => account.platform === selectedSocialBladePlatform) ??
+      socialBladeAccounts[0] ??
+      null,
+    [selectedSocialBladePlatform, socialBladeAccounts],
+  );
+
+  useEffect(() => {
+    if (!socialBladeAccounts.length) {
+      setSelectedSocialBladePlatform("instagram");
+      return;
+    }
+    setSelectedSocialBladePlatform((current) => {
+      if (socialBladeAccounts.some((account) => account.platform === current)) return current;
+      return socialBladeAccounts[0].platform;
+    });
+  }, [socialBladeAccounts]);
 
   const canonical = useMemo(() => {
     return {
@@ -12181,10 +12192,55 @@ export default function PersonProfilePage() {
 
           {/* Social Tab */}
           {activeTab === "social" && (
-            <SocialGrowthSection
-              personId={personId}
-              instagramHandle={instagramHandle}
-            />
+            <div className="space-y-4">
+              {socialBladeAccounts.length ? (
+                <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Linked SocialBlade accounts</p>
+                    <div className="mt-3 flex flex-wrap gap-2" aria-label="Person socialblade platform switcher">
+                      {socialBladeAccounts.map((account) => {
+                        const isActive = selectedSocialBladeAccount?.platform === account.platform;
+                        return (
+                          <button
+                            key={`${account.platform}:${account.handle}`}
+                            type="button"
+                            aria-pressed={isActive}
+                            onClick={() => setSelectedSocialBladePlatform(account.platform)}
+                            className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                              isActive
+                                ? "border-zinc-900 bg-zinc-900 text-white"
+                                : "border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100"
+                            }`}
+                          >
+                            {account.platform.charAt(0).toUpperCase() + account.platform.slice(1)} · @{account.handle}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {selectedSocialBladeAccount ? (
+                    <Link
+                      href={
+                        buildSocialAccountProfileUrl({
+                          platform: selectedSocialBladeAccount.platform,
+                          handle: selectedSocialBladeAccount.handle,
+                          tab: "socialblade",
+                        }) as Route
+                      }
+                      className="inline-flex items-center justify-center rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                    >
+                      Open account page
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <SocialGrowthSection
+                personId={personId}
+                platform={selectedSocialBladeAccount?.platform ?? "instagram"}
+                handle={selectedSocialBladeAccount?.handle ?? null}
+              />
+            </div>
           )}
         </main>
 

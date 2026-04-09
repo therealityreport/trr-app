@@ -32,6 +32,8 @@ const baseCommunity = {
   network_focus_targets: ["Bravo"],
   franchise_focus_targets: ["Real Housewives"],
   episode_title_patterns: ["Live Episode Discussion", "Post Episode Discussion"],
+  post_flair_categories: {},
+  post_flair_assignments: {},
   post_flairs_updated_at: "2026-01-01T00:00:00.000Z",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -73,6 +75,32 @@ const secondaryCommunity = {
   network_focus_targets: [],
   franchise_focus_targets: [],
   episode_title_patterns: [],
+  post_flair_categories: {},
+  post_flair_assignments: {},
+  post_flairs_updated_at: null,
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z",
+  assigned_thread_count: 0,
+  assigned_threads: [],
+};
+
+const archivedCommunity = {
+  id: "community-archived",
+  trr_show_id: "show-3",
+  trr_show_name: "The Real Housewives of Beverly Hills",
+  subreddit: "RHOBH",
+  display_name: "RHOBH",
+  notes: "Archived for off-season cleanup",
+  is_active: false,
+  post_flairs: [],
+  analysis_flairs: [],
+  analysis_all_flairs: [],
+  is_show_focused: false,
+  network_focus_targets: [],
+  franchise_focus_targets: [],
+  episode_title_patterns: [],
+  post_flair_categories: {},
+  post_flair_assignments: {},
   post_flairs_updated_at: null,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -84,7 +112,31 @@ const coveredShowsPayload = {
   shows: [
     { trr_show_id: "show-1", show_name: "The Real Housewives of Salt Lake City" },
     { trr_show_id: "show-2", show_name: "The Real Housewives of Potomac" },
+    { trr_show_id: "show-3", show_name: "Below Deck" },
   ],
+};
+
+const showCastLookup: Record<
+  string,
+  Array<{ id?: string; person_id?: string; display_name?: string; name?: string }>
+> = {
+  "show-1": [
+    { id: "person-angie", display_name: "Angie K" },
+    { id: "person-lisa", display_name: "Lisa Barlow" },
+  ],
+  "show-2": [{ id: "person-karen", display_name: "Karen Huger" }],
+  "show-3": [{ id: "person-captain-lee", display_name: "Captain Lee" }],
+};
+
+const seasonCastLookup: Record<
+  string,
+  Array<{ id?: string; person_id?: string; display_name?: string; name?: string }>
+> = {
+  "show-1:6": [
+    { id: "person-angie", display_name: "Angie K" },
+    { id: "person-lisa", display_name: "Lisa Barlow" },
+  ],
+  "show-1:7": [{ id: "person-angie", display_name: "Angie K" }],
 };
 
 const discoveryPayload = {
@@ -210,6 +262,17 @@ const seasonEpisodeLookup: Record<string, Array<{ id: string; episode_number: nu
 const maybeHandleSeasonPeriodRequests = (url: string): Response | null => {
   if (url.includes("/social/analytics")) {
     return jsonResponse(defaultAnalyticsPayload);
+  }
+  const seasonCastMatch = url.match(/\/api\/admin\/trr-api\/shows\/([^/]+)\/seasons\/(\d+)\/cast(?:\?|$)/);
+  if (seasonCastMatch) {
+    const showId = seasonCastMatch[1] ?? "";
+    const seasonNumber = seasonCastMatch[2] ?? "";
+    return jsonResponse({ cast: seasonCastLookup[`${showId}:${seasonNumber}`] ?? [] });
+  }
+  const showCastMatch = url.match(/\/api\/admin\/trr-api\/shows\/([^/]+)\/cast(?:\?|$)/);
+  if (showCastMatch) {
+    const showId = showCastMatch[1] ?? "";
+    return jsonResponse({ cast: showCastLookup[showId] ?? [] });
   }
   const seasonEpisodesMatch = url.match(/\/api\/admin\/trr-api\/seasons\/([^/]+)\/episodes(?:\?|$)/);
   if (seasonEpisodesMatch) {
@@ -353,7 +416,7 @@ describe("RedditSourcesManager", () => {
       const contextResponse = maybeHandleSeasonPeriodRequests(url);
       if (contextResponse) return contextResponse;
       if (url.includes("/api/admin/reddit/communities")) {
-        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity, archivedCommunity] });
       }
       if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
       throw new Error(`Unexpected URL ${url}`);
@@ -366,7 +429,8 @@ describe("RedditSourcesManager", () => {
       expect(screen.getAllByText("r/BravoRealHousewives").length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    const bravoCommunityButton = screen.getByRole("button", { name: /Bravo RH/i });
+    fireEvent.click(bravoCommunityButton);
 
     await waitFor(() => {
       expect(screen.getByText("S6E5 discussion")).toBeInTheDocument();
@@ -374,11 +438,103 @@ describe("RedditSourcesManager", () => {
 
     expect(screen.getByRole("button", { name: "Add Community" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Thread" })).toBeEnabled();
+    expect(screen.getByText("Network Communities")).toBeInTheDocument();
+    expect(screen.getByText("Other")).toBeInTheDocument();
     expect(screen.getAllByText("The Real Housewives of Salt Lake City").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("The Real Housewives of Potomac").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Episode Discussion")).not.toBeInTheDocument();
-    expect(screen.queryByText("Live Thread")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /r\/RHOP/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /RHOBH/i })).not.toBeInTheDocument();
+    expect(within(bravoCommunityButton).queryByText("Episode Discussion")).not.toBeInTheDocument();
+    expect(within(bravoCommunityButton).queryByText("Live Thread")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Episode Discussion").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Live Thread").length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      const communityCalls = fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((url) => url.includes("/api/admin/reddit/communities"));
+      expect(communityCalls.some((url) => url.includes("include_inactive=true"))).toBe(true);
+    });
   }, 15_000);
+
+  it("groups global communities by scope precedence buckets", async () => {
+    const franchiseCommunity = {
+      ...secondaryCommunity,
+      id: "community-franchise",
+      subreddit: "RealHousewives",
+      display_name: "Real Housewives",
+      franchise_focus_targets: ["Real Housewives"],
+    };
+    const showCommunity = {
+      ...secondaryCommunity,
+      id: "community-show",
+      subreddit: "rhoslc",
+      trr_show_id: "show-1",
+      trr_show_name: "The Real Housewives of Salt Lake City",
+      is_show_focused: true,
+    };
+    const otherCommunity = {
+      ...secondaryCommunity,
+      id: "community-other",
+      subreddit: "RealityTV",
+      display_name: "Reality TV",
+      trr_show_name: "General Reality",
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({
+          communities: [baseCommunity, franchiseCommunity, showCommunity, otherCommunity],
+        });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    expect(await screen.findByText("Network Communities")).toBeInTheDocument();
+    expect(screen.getByText("Franchise Communities")).toBeInTheDocument();
+    expect(screen.getByText("Show Communities")).toBeInTheDocument();
+    expect(screen.getByText("Other")).toBeInTheDocument();
+
+    const networkGroup = screen.getByText("Network Communities").closest("div") as HTMLElement;
+    const franchiseGroup = screen.getByText("Franchise Communities").closest("div") as HTMLElement;
+    const showGroup = screen.getByText("Show Communities").closest("div") as HTMLElement;
+    const otherGroup = screen.getByText("Other").closest("div") as HTMLElement;
+
+    expect(within(networkGroup).getByRole("button", { name: /Bravo RH/i })).toBeInTheDocument();
+    expect(within(franchiseGroup).getByRole("button", { name: /Real Housewives/i })).toBeInTheDocument();
+    expect(within(showGroup).getByRole("button", { name: /rhoslc/i })).toBeInTheDocument();
+    expect(within(otherGroup).getByRole("button", { name: /Reality TV/i })).toBeInTheDocument();
+  });
+
+  it("defaults to active communities and reveals archived communities when toggled on", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity, archivedCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" initialCommunityId="community-1" />);
+
+    expect(await screen.findByRole("heading", { name: /reddit communities/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^RHOBH$/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /show archived communities/i }));
+
+    expect(await screen.findByRole("button", { name: /^RHOBH$/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/^Archived$/i).length).toBeGreaterThan(0);
+  });
 
   it("does not surface timeout error when bootstrap fetch is upstream-aborted", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -443,10 +599,15 @@ describe("RedditSourcesManager", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(<RedditSourcesManager mode="global" initialCommunityId="community-1" />);
+    render(<RedditSourcesManager mode="global" inventoryOnly />);
 
     expect(await screen.findByRole("heading", { name: /reddit communities/i })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Season Selection" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Season Selection" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Select a community to view assigned threads and discovery hints."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Episode Discussion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live Thread")).not.toBeInTheDocument();
     expect(useRouterReplaceMock).not.toHaveBeenCalled();
   });
 
@@ -1116,7 +1277,133 @@ describe("RedditSourcesManager", () => {
     expect(await screen.findByText("Community Settings")).toBeInTheDocument();
     expect(screen.getByText("Community Scope")).toBeInTheDocument();
     expect(screen.getAllByText("All Posts With Flair").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /manage flair assignments/i })).toBeInTheDocument();
   });
+
+  it("loads and saves multi-target flair assignments from the settings modal", async () => {
+    const assignmentCommunity = {
+      ...baseCommunity,
+      is_show_focused: true,
+      network_focus_targets: [],
+      franchise_focus_targets: [],
+      post_flairs: ["S6", "S7", "Angie K", "Lisa Barlow"],
+      analysis_flairs: [],
+      analysis_all_flairs: [],
+      post_flair_assignments: {
+        "angie k": {
+          show_ids: ["show-1"],
+          season_ids: [],
+          person_ids: ["person-angie"],
+        },
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.endsWith("/api/admin/reddit/communities/community-1") && init?.method === "PATCH") {
+        const payload = JSON.parse(String(init.body ?? "{}")) as {
+          post_flair_assignments?: Record<
+            string,
+            { show_ids?: string[]; season_ids?: string[]; person_ids?: string[] }
+          >;
+        };
+        return jsonResponse({
+          community: {
+            ...assignmentCommunity,
+            post_flair_assignments: payload.post_flair_assignments ?? {},
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [assignmentCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await screen.findByRole("button", { name: /Bravo RH/i });
+    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open community settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /manage flair assignments/i }));
+
+    const assignmentDialog = await screen.findByRole("dialog", { name: /flair assignments/i });
+    expect(within(assignmentDialog).getByRole("button", { name: /^Angie K/i })).toBeInTheDocument();
+    expect(within(assignmentDialog).getByRole("button", { name: /^S6/i })).toBeInTheDocument();
+
+    fireEvent.click(within(assignmentDialog).getByRole("button", { name: /^S6/i }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/admin/trr-api/shows/show-1/seasons?limit=100&include_episode_signal=true"),
+        expect.anything(),
+      );
+    });
+
+    fireEvent.click(screen.getByLabelText("The Real Housewives of Salt Lake City"));
+    expect(screen.getByLabelText("The Real Housewives of Salt Lake City")).toBeChecked();
+    fireEvent.click(screen.getByLabelText("Below Deck"));
+    expect(screen.getByLabelText("Below Deck")).toBeChecked();
+
+    expect(await screen.findByLabelText("S6")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("S6"));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes("/api/admin/trr-api/shows/show-1/seasons/6/cast"),
+      )).toBe(true);
+    });
+
+    expect(await screen.findByLabelText("Angie K")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Angie K"));
+
+    fireEvent.click(within(assignmentDialog).getByRole("button", { name: /save assignments/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/admin/reddit/communities/community-1"),
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.stringContaining("post_flair_assignments"),
+        }),
+      );
+    });
+
+    const patchBody = JSON.parse(
+      String(
+        fetchMock.mock.calls.find(
+          (call) =>
+            String(call[0]).endsWith("/api/admin/reddit/communities/community-1") &&
+            (call[1] as RequestInit | undefined)?.method === "PATCH",
+        )?.[1] &&
+          ((fetchMock.mock.calls.find(
+            (call) =>
+              String(call[0]).endsWith("/api/admin/reddit/communities/community-1") &&
+              (call[1] as RequestInit | undefined)?.method === "PATCH",
+          )?.[1] as RequestInit).body as string),
+      ),
+    ) as {
+      post_flair_assignments: Record<
+        string,
+        { show_ids: string[]; season_ids: string[]; person_ids: string[] }
+      >;
+    };
+
+    expect(patchBody.post_flair_assignments.s6).toEqual({
+      show_ids: ["show-1", "show-3"],
+      season_ids: ["season-1"],
+      person_ids: ["person-angie"],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /manage flair assignments/i }));
+    const reopenedDialog = await screen.findByRole("dialog", { name: /flair assignments/i });
+    fireEvent.click(within(reopenedDialog).getByRole("button", { name: /^S6/i }));
+    expect(screen.getByLabelText("Below Deck")).toBeChecked();
+    expect(screen.getByLabelText("S6")).toBeChecked();
+    expect(screen.getByLabelText("Angie K")).toBeChecked();
+  }, 15_000);
 
   it("optimistically adds a created community and asynchronously loads post flairs", async () => {
     const communities = [{ ...baseCommunity }, { ...secondaryCommunity }];
@@ -1788,6 +2075,28 @@ describe("RedditSourcesManager", () => {
           },
         });
       }
+      if (url.includes("/api/admin/reddit/communities/community-1/backfill/snapshot")) {
+        return jsonResponse({
+          data: {
+            operation: {
+              operation: {
+                id: "op-backfill-1",
+                status: "completed",
+                result_payload: {
+                  stage: "complete",
+                  message: "Reddit stale-window recovery session finished.",
+                  summary: { target_count: 1, completed_count: 1 },
+                  started: [
+                    { container_key: "episode-3", run: { run_id: "run-new-1", status: "completed" } },
+                  ],
+                  skipped: [],
+                  failures: [],
+                },
+              },
+            },
+          },
+        });
+      }
       if (url.includes("/api/admin/trr-api/operations/op-backfill-1")) {
         return jsonResponse({
           operation: {
@@ -1833,6 +2142,14 @@ describe("RedditSourcesManager", () => {
         fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/backfill")),
       ).toBe(true);
     });
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String(call[0]).includes("/api/admin/reddit/communities/community-1/backfill/snapshot"),
+        ),
+      ).toBe(true);
+    });
+    expect(screen.queryByText("Invalid reddit backfill snapshot payload")).not.toBeInTheDocument();
   });
 
   it("starts detail enrichment even when there are no stale windows", async () => {
@@ -3419,7 +3736,11 @@ describe("RedditSourcesManager", () => {
       await screen.findByText(/Pre-Season: live scrape blocked by Reddit \(403\); showing cached posts when available\./i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Failed to refresh posts for Pre-Season/i)).not.toBeInTheDocument();
-    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/admin/reddit/runs/"))).toBe(false);
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).includes("/api/admin/reddit/runs/run-partial-403"),
+      ),
+    ).toBe(false);
   });
 
   it("shows per-candidate reason when a post is not auto-synced", async () => {

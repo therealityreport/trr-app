@@ -35,6 +35,9 @@ describe("season assets route", () => {
           limit: 100,
           offset: 20,
           count: 1,
+          has_more: true,
+          next_cursor: "b2Zmc2V0OjIx",
+          cursor: "b2Zmc2V0OjIw",
           truncated: false,
           full: false,
         },
@@ -62,10 +65,46 @@ describe("season assets route", () => {
         limit: 100,
         offset: 20,
         count: 1,
+        has_more: true,
+        next_cursor: "b2Zmc2V0OjIx",
+        cursor: "b2Zmc2V0OjIw",
         truncated: false,
         full: false,
       },
     });
+  });
+
+  it("forwards backend cursor tokens for season gallery pagination", async () => {
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: {
+        assets: [],
+        pagination: {
+          limit: 100,
+          offset: 20,
+          count: 0,
+          has_more: false,
+          next_cursor: null,
+          cursor: "b2Zmc2V0OjIw",
+          truncated: false,
+          full: false,
+        },
+      },
+      durationMs: 4,
+    });
+
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/admin/trr-api/shows/show-1/seasons/6/assets?limit=100&cursor=b2Zmc2V0OjIw"
+      ),
+      { params: Promise.resolve({ showId: "show-1", seasonNumber: "6" }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/trr-api/shows/show-1/seasons/6/assets?limit=100&cursor=b2Zmc2V0OjIw",
+      expect.objectContaining({ routeName: "season-assets" }),
+    );
   });
 
   it("supports full fetch mode with truthful truncation metadata", async () => {

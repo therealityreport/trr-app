@@ -116,6 +116,56 @@ const baseSummary = {
   source_status: [],
 };
 
+const baseSocialBladeResponse = {
+  username: "bravotv",
+  account_handle: "bravotv",
+  platform: "instagram",
+  scraped_at: "2026-04-08T12:00:00Z",
+  freshness_status: "fresh" as const,
+  profile_stats_labels: {
+    followers: "Followers",
+    following: "Following",
+    media_count: "Posts",
+    engagement_rate: "Engagement",
+    average_likes: "Avg Likes",
+    average_comments: "Avg Comments",
+    chart_metric_label: "Followers",
+  },
+  profile_stats: {
+    followers: 1000,
+    following: 200,
+    media_count: 50,
+    engagement_rate: "2.1%",
+    average_likes: 110,
+    average_comments: 12,
+  },
+  rankings: {
+    sb_rank: "10th",
+    followers_rank: "20th",
+    engagement_rate_rank: "30th",
+    grade: "A-",
+  },
+  daily_channel_metrics_60day: {
+    period: "Last 2 Days",
+    row_count: 2,
+    headers: ["Date", "Followers Total"],
+    data: [
+      { Date: "2026-04-07", "Followers Total": "990" },
+      { Date: "2026-04-08", "Followers Total": "1000" },
+    ],
+  },
+  daily_total_followers_chart: {
+    frequency: "daily",
+    metric: "total_followers",
+    total_data_points: 2,
+    date_range: { from: "2026-04-07", to: "2026-04-08" },
+    data: [
+      { date: "2026-04-07", followers: 990 },
+      { date: "2026-04-08", followers: 1000 },
+    ],
+  },
+};
+
 describe("SocialAccountProfilePage", () => {
   beforeEach(() => {
     mocks.fetchAdminWithAuth.mockReset();
@@ -129,6 +179,31 @@ describe("SocialAccountProfilePage", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("renders the catalog page without a backgroundCatalogRunId initialization error", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-04-09T03:00:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    expect(() => {
+      render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+    }).not.toThrow();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
   });
 
   it("renders supported-platform catalog actions on the stats tab", async () => {
@@ -153,9 +228,36 @@ describe("SocialAccountProfilePage", () => {
         "Backfill Posts scans the full catalog and updates saved posts. If a saved older frontier exists, Backfill Posts resumes it automatically before continuing full-history fetches. Run Gap Analysis before using targeted repairs like Sync Newer.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Catalog Posts")).toBeInTheDocument();
+    expect(screen.getByText("Cataloged / Profile total")).toBeInTheDocument();
     expect(screen.getByText("Pending Review")).toBeInTheDocument();
     expect(screen.queryByText("Catalog Actions Unavailable In V1")).not.toBeInTheDocument();
+  });
+
+  it("shows catalog-supported post totals as cataloged over profile total on the stats card", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "twitter",
+          total_posts: 124_619,
+          live_total_posts: 124_619,
+          catalog_total_posts: 45,
+          live_catalog_total_posts: 45,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Cataloged / Profile total")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("45 / 124,619")).toBeInTheDocument();
+    expect(screen.queryByText("Catalog Posts")).not.toBeInTheDocument();
+    expect(screen.getByText("Pending Review")).toBeInTheDocument();
   });
 
   it("shows an empty-state banner instead of an error when the account has never been loaded", async () => {
@@ -175,6 +277,101 @@ describe("SocialAccountProfilePage", () => {
 
     expect(screen.getByText("No saved posts yet for @bravodailydish.")).toBeInTheDocument();
     expect(screen.queryByText("Social account profile not found.")).not.toBeInTheDocument();
+  });
+
+  it("shows the SocialBlade tab only for supported platforms", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({ ...baseSummary, platform: url.includes("/facebook/") ? "facebook" : "tiktok" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    const { rerender } = render(<SocialAccountProfilePage platform="facebook" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "SocialBlade" })).toBeInTheDocument();
+    });
+
+    rerender(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "SocialBlade" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("renders the SocialBlade dashboard and refreshes through the account proxy", async () => {
+    let refreshResolver: ((value: Response) => void) | null = null;
+    mocks.fetchAdminWithAuth.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return Promise.resolve(jsonResponse(baseSummary));
+      }
+      if (url.includes("/socialblade/refresh")) {
+        return new Promise<Response>((resolve) => {
+          refreshResolver = resolve;
+        });
+      }
+      if (url.includes("/socialblade")) {
+        return Promise.resolve(jsonResponse(baseSocialBladeResponse));
+      }
+      throw new Error(`Unhandled request: ${url} (${init?.method ?? "GET"})`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="socialblade" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Followers Growth")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refreshing..." })).toBeInTheDocument();
+    });
+
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/socialblade/refresh"),
+      ),
+    ).toBe(true);
+
+    await act(async () => {
+      refreshResolver?.(jsonResponse({ ...baseSocialBladeResponse, refresh_status: "refreshed" }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("SocialBlade data refreshed.")).toBeInTheDocument();
+    });
+  });
+
+  it("surfaces SocialBlade refresh errors on the account tab", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/socialblade/refresh")) {
+        return jsonResponse({ detail: "SocialBlade challenge blocked the refresh" }, 502);
+      }
+      if (url.includes("/socialblade")) {
+        return jsonResponse(baseSocialBladeResponse);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="socialblade" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Followers Growth")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Refresh failed:/)).toBeInTheDocument();
+      expect(screen.getByText(/SocialBlade challenge blocked the refresh/)).toBeInTheDocument();
+    });
   });
 
   it("does not fan out secondary reads while the summary is saturated", async () => {
@@ -904,7 +1101,7 @@ describe("SocialAccountProfilePage", () => {
       "href",
       "https://www.youtube.com/@bravo",
     );
-    expect(screen.getByText("12,562")).toBeInTheDocument();
+    expect(screen.getByText("417 / 12,562")).toBeInTheDocument();
 
     rerender(<SocialAccountProfilePage platform="youtube" handle="bravo" activeTab="hashtags" />);
 
@@ -2829,7 +3026,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       expect(screen.getByText("8,359,747")).toBeInTheDocument();
     });
     expect(screen.getByText("110,072,264")).toBeInTheDocument();
-    expect(screen.getAllByText("16,474").length).toBeGreaterThan(0);
+    expect(screen.getByText("16,474 / 16,475")).toBeInTheDocument();
     await waitFor(() => {
       expect(
         screen.getByText(
@@ -2921,7 +3118,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
       await waitFor(() => {
-        expect(screen.getAllByText("1,001").length).toBeGreaterThan(0);
+        expect(screen.getByText("1,001 / 16,475")).toBeInTheDocument();
       });
 
       await act(async () => {
@@ -3409,6 +3606,8 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
+          total_posts: 16475,
+          live_total_posts: 16475,
           catalog_total_posts: 0,
           live_catalog_total_posts: 0,
           catalog_last_post_at: null,
@@ -3496,7 +3695,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getAllByText("16,474").length).toBeGreaterThan(0);
+      expect(screen.getByText("16,474 / 16,475")).toBeInTheDocument();
     });
     expect(screen.getByText(formatLocalDateTime("2026-03-20T14:06:43.000Z"))).toBeInTheDocument();
   });
@@ -3577,6 +3776,179 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     await waitFor(() => {
       expect(screen.getByText("0%")).toBeInTheDocument();
       expect(screen.getByText("0 / 16,453 posts checked")).toBeInTheDocument();
+    });
+  });
+
+  it("treats completed sync-newer runs as bounded progress instead of full-history coverage", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+          total_posts: 10200,
+          live_total_posts: 10200,
+          catalog_recent_runs: [
+            {
+              run_id: "run-sync-newer-1",
+              status: "completed",
+              created_at: "2026-04-07T20:36:47.000Z",
+              catalog_action: "sync_newer",
+              catalog_action_scope: "head_gap",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-sync-newer-1/progress")) {
+        return jsonResponse({
+          run_id: "run-sync-newer-1",
+          run_status: "completed",
+          catalog_action: "sync_newer",
+          catalog_action_scope: "head_gap",
+          source_scope: "bravo",
+          created_at: "2026-04-07T20:36:47.000Z",
+          stages: {
+            shared_account_posts: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 17,
+              saved_count: 16,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          post_progress: {
+            completed_posts: 17,
+            matched_posts: 16,
+            total_posts: 10200,
+          },
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 1,
+            failed_jobs: 0,
+            active_jobs: 0,
+            items_found_total: 17,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("100%")).toBeInTheDocument();
+      expect(screen.getByText("17 posts checked")).toBeInTheDocument();
+      expect(screen.getByText("16 matched")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("17 / 10,200 posts checked")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/History discovery finished, but this run only checked 17 of 10,200 posts/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows at least 1% for full-history runs that checked some posts", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          total_posts: 10200,
+          live_total_posts: 10200,
+          catalog_recent_runs: [
+            {
+              run_id: "run-full-history-low-progress-1",
+              status: "completed",
+              created_at: "2026-04-07T20:36:47.000Z",
+              catalog_action: "backfill",
+              catalog_action_scope: "full_history",
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/run-full-history-low-progress-1/progress")) {
+        return jsonResponse({
+          run_id: "run-full-history-low-progress-1",
+          run_status: "completed",
+          catalog_action: "backfill",
+          catalog_action_scope: "full_history",
+          source_scope: "bravo",
+          created_at: "2026-04-07T20:36:47.000Z",
+          discovery: {
+            status: "completed",
+            partition_strategy: "cursor_breakpoints",
+            partition_count: 1,
+            discovered_count: 1,
+            queued_count: 0,
+            running_count: 0,
+            completed_count: 1,
+            failed_count: 0,
+            cancelled_count: 0,
+          },
+          stages: {
+            shared_account_discovery: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+            shared_account_posts: {
+              jobs_total: 1,
+              jobs_completed: 1,
+              jobs_failed: 0,
+              jobs_active: 0,
+              jobs_running: 0,
+              jobs_waiting: 0,
+              scraped_count: 17,
+              saved_count: 16,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          post_progress: {
+            completed_posts: 17,
+            matched_posts: 16,
+            total_posts: 10200,
+          },
+          summary: {
+            total_jobs: 2,
+            completed_jobs: 2,
+            failed_jobs: 0,
+            active_jobs: 0,
+            items_found_total: 17,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("1%")).toBeInTheDocument();
+      expect(screen.getByText("17 / 10,200 posts checked")).toBeInTheDocument();
+      expect(screen.getByText("16 matched")).toBeInTheDocument();
     });
   });
 
@@ -3883,6 +4255,128 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
     });
     expect(screen.getByText("Dismissed run run-fail.")).toBeInTheDocument();
+  });
+
+  it("dismisses a progress-derived failed run and clears the catalog progress panel", async () => {
+    let dismissed = false;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: dismissed
+            ? []
+            : [
+                {
+                  run_id: "run-derived-failed",
+                  status: "running",
+                  created_at: "2026-04-08T17:08:30.000Z",
+                },
+              ],
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            catalog_recent_runs: dismissed
+              ? []
+              : [
+                  {
+                    run_id: "run-derived-failed",
+                    status: "running",
+                    created_at: "2026-04-08T17:08:30.000Z",
+                  },
+                ],
+          },
+          catalog_run_progress: dismissed
+            ? null
+            : {
+                run_id: "run-derived-failed",
+                run_status: "failed",
+                run_state: "failed",
+                source_scope: "bravo",
+                created_at: "2026-04-08T17:08:30.000Z",
+                started_at: "2026-04-08T17:08:40.000Z",
+                completed_at: null,
+                stages: {},
+                per_handle: [],
+                recent_log: [],
+                worker_runtime: {},
+                post_progress: {
+                  completed_posts: 3729,
+                  matched_posts: 3729,
+                  total_posts: 5501,
+                },
+                summary: {
+                  total_jobs: 5,
+                  completed_jobs: 3,
+                  failed_jobs: 1,
+                  active_jobs: 0,
+                  items_found_total: 3729,
+                },
+                repairable_reason: "checkpoint_required",
+                alerts: [],
+              },
+          generated_at: "2026-04-09T03:00:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/runs/run-derived-failed/progress")) {
+        return jsonResponse({
+          run_id: "run-derived-failed",
+          run_status: "failed",
+          run_state: "failed",
+          source_scope: "bravo",
+          created_at: "2026-04-08T17:08:30.000Z",
+          started_at: "2026-04-08T17:08:40.000Z",
+          completed_at: null,
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          worker_runtime: {},
+          post_progress: {
+            completed_posts: 3729,
+            matched_posts: 3729,
+            total_posts: 5501,
+          },
+          summary: {
+            total_jobs: 5,
+            completed_jobs: 3,
+            failed_jobs: 1,
+            active_jobs: 0,
+            items_found_total: 3729,
+          },
+          repairable_reason: "checkpoint_required",
+          alerts: [],
+        });
+      }
+      if (url.includes("/catalog/runs/run-derived-failed/dismiss")) {
+        expect(init?.method).toBe("POST");
+        dismissed = true;
+        return jsonResponse({
+          run_id: "run-derived-failed",
+          status: "failed",
+          dismissed: true,
+          dismissed_at: "2026-04-08T17:53:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Run failed")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Dismissed run run-deri.")).toBeInTheDocument();
   });
 
   it("renders Facebook catalog actions with the shared profile UI", async () => {

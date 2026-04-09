@@ -63,7 +63,22 @@ export const isFandomSeedUrl = (urlValue: string | null | undefined): boolean =>
     if (!host.endsWith("fandom.com") && !host.endsWith("wikia.com")) return false;
     const path = decodeURIComponent(parsed.pathname || "").trim();
     if (!path || path === "/") return true;
-    return !path.includes("/wiki/");
+    if (!path.includes("/wiki/")) return true;
+    const slug = path.split("/wiki/", 2)[1]?.split(/[?#]/, 1)[0]?.trim() ?? "";
+    if (!slug) return false;
+    const title = slug.replace(/_/g, " ").trim();
+    const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (normalizedTitle === "special allpages") return true;
+    const communitySlug = host
+      .replace(/\.fandom\.com$/, "")
+      .replace(/\.wikia\.com$/, "")
+      .replace(/^www\./, "")
+      .trim();
+    const derivedSiteTitle = `${communitySlug.replace(/[_-]+/g, " ").trim()} wiki`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    return normalizedTitle.length > 0 && normalizedTitle === derivedSiteTitle;
   } catch {
     return false;
   }

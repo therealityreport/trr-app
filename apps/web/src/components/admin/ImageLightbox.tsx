@@ -10,6 +10,7 @@ import {
 } from "react";
 import Image from "next/image";
 import type { PhotoMetadata } from "@/lib/photo-metadata";
+import { formatPhotoSourceLabel } from "@/lib/photo-metadata";
 import {
   CONTENT_TYPE_OPTIONS,
   formatContentTypeLabel,
@@ -110,73 +111,21 @@ const ChevronDownIcon = ({ className }: { className?: string }) => (
 );
 
 function formatSourceBadgeLabel(source: string, sourceUrl?: string | null): string {
-  const raw = (source || "").trim();
-  if (!raw) return "unknown";
-
-  const lower = raw.toLowerCase();
-  if (lower === "nbcumv") return "NBCUMV";
-  if (lower === "getty") return "Getty";
-  if (lower.includes("harvest")) {
-    if (sourceUrl) {
-      try {
-        const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
-        if (hostname.includes("gettyimages.com")) return "GETTY";
-        if (hostname.includes("nbcumv.com")) return "NBCUMV";
-        if (hostname) return hostname;
-      } catch {
-        // Fall through to default fallback.
-      }
-    }
-    return "web";
-  }
-  if (lower.startsWith("web_scrape") || lower.startsWith("webscrape")) {
-    if (sourceUrl) {
-      try {
-        const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
-        if (hostname) return hostname;
-      } catch {
-        // Fall through to prefix cleanup.
-      }
-    }
-
-    const cleaned = raw
-      .replace(/^web[_-]?scrape:?/i, "")
-      .replace(/^www\./i, "")
-      .trim();
-    return cleaned || raw;
-  }
-
-  return raw;
+  return formatPhotoSourceLabel(source, sourceUrl);
 }
 
 function formatFoundOnSourceLabel(source: string, sourceUrl?: string | null): string {
-  const raw = (source || "").trim();
-  const lower = raw.toLowerCase();
-  if (lower === "nbcumv") return "NBCUMV";
-  if (lower === "getty") return "GETTY";
-  if (lower.includes("fandom")) return "FANDOM";
-  if (lower.includes("imdb")) return "IMDB";
-  if (lower.includes("tmdb")) return "TMDB";
-
-  if (sourceUrl) {
-    try {
-      const hostname = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, "");
-      if (hostname.includes("gettyimages.com")) return "GETTY";
-      if (hostname.includes("nbcumv.com")) return "NBCUMV";
-      if (hostname.includes("photobank.nbcuni.com")) return "NBCU PHOTO BANK";
-      if (hostname.includes("fandom")) return "FANDOM";
-      if (hostname.includes("imdb")) return "IMDB";
-      if (hostname.includes("tmdb") || hostname.includes("themoviedb")) return "TMDB";
-      return hostname.toUpperCase();
-    } catch {
-      // Ignore parse failures and use source fallback.
-    }
+  const label = formatPhotoSourceLabel(source, sourceUrl);
+  if (label === "unknown") return "UNKNOWN";
+  if (label === "NBCUMV") return "NBCUMV";
+  if (label === "Getty") return "GETTY";
+  if (label === "Fandom" || label === "Fandom Gallery") return "FANDOM";
+  if (label === "IMDb") return "IMDB";
+  if (label === "TMDb") return "TMDB";
+  if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(label)) {
+    return label.toUpperCase();
   }
-
-  if (lower.startsWith("web_scrape") || lower.startsWith("webscrape")) {
-    return "WEB";
-  }
-  return raw ? raw.toUpperCase() : "UNKNOWN";
+  return label;
 }
 
 const clampPercent = (value: number, min = 0, max = 100): number =>

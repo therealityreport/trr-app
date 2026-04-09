@@ -1,7 +1,9 @@
 export interface PaginatedGalleryFetchOptions<T> {
   pageSize?: number;
-  maxPages?: number;
-  fetchPage: (offset: number, limit: number) => Promise<T[]>;
+  fetchPage: (
+    cursor: string | null,
+    limit: number,
+  ) => Promise<{ rows: T[]; nextCursor: string | null }>;
 }
 
 export interface PaginatedGalleryFetchResult<T> {
@@ -13,20 +15,19 @@ export interface PaginatedGalleryFetchResult<T> {
 
 export async function fetchAllPaginatedGalleryRowsWithMeta<T>({
   pageSize = 48,
-  maxPages = 40,
   fetchPage,
 }: PaginatedGalleryFetchOptions<T>): Promise<PaginatedGalleryFetchResult<T>> {
   const effectivePageSize = Math.max(1, Math.floor(pageSize));
-  const effectiveMaxPages = Math.max(1, Math.floor(maxPages));
   const rows: T[] = [];
-  let offset = 0;
   let pagesFetched = 0;
+  let cursor: string | null = null;
+  const seenCursors = new Set<string>();
 
-  for (let page = 0; page < effectiveMaxPages; page += 1) {
-    const pageRows = await fetchPage(offset, effectivePageSize);
+  while (true) {
+    const { rows: pageRows, nextCursor } = await fetchPage(cursor, effectivePageSize);
     rows.push(...pageRows);
     pagesFetched += 1;
-    if (pageRows.length < effectivePageSize) {
+    if (!nextCursor) {
       return {
         rows,
         truncated: false,
@@ -34,29 +35,23 @@ export async function fetchAllPaginatedGalleryRowsWithMeta<T>({
         rowsFetched: rows.length,
       };
     }
-    offset += effectivePageSize;
-  }
 
-  return {
-    rows,
-    truncated: true,
-    pagesFetched,
-    rowsFetched: rows.length,
-  };
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("Gallery pagination cursor loop detected.");
+    }
+
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
 }
 
 export async function fetchAllPaginatedGalleryRows<T>({
   pageSize = 48,
-  maxPages = 40,
   fetchPage,
 }: PaginatedGalleryFetchOptions<T>): Promise<T[]> {
   const result = await fetchAllPaginatedGalleryRowsWithMeta({
     pageSize,
-    maxPages,
     fetchPage,
   });
-  if (result.truncated) {
-    throw new Error("Gallery pagination exceeded safety limit.");
-  }
   return result.rows;
 }

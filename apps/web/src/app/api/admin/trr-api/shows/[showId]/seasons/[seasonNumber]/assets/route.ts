@@ -54,6 +54,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
     const limit = Number.isFinite(parsedLimit) ? parsedLimit : 200;
     const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+    const cursor = searchParams.get("cursor")?.trim() || null;
     const full =
       searchParams.get("full") === "1" ||
       searchParams.get("full")?.toLowerCase() === "true";
@@ -64,8 +65,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const upstreamParams = new URLSearchParams({
       limit: String(full ? FULL_FETCH_LIMIT + 1 : limit),
-      offset: String(full ? 0 : offset),
     });
+    if (!full) {
+      if (cursor) upstreamParams.set("cursor", cursor);
+      else upstreamParams.set("offset", String(offset));
+    } else {
+      upstreamParams.set("offset", "0");
+    }
     if (full) upstreamParams.set("full", "true");
     if (sources.length > 0) upstreamParams.set("sources", sources.join(","));
 

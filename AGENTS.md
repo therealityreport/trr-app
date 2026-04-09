@@ -1,12 +1,22 @@
 # AGENTS — TRR-APP
 
-Canonical repo policy for `TRR-APP`. `CLAUDE.md` in this repo stays pointer-only.
+Last reviewed: 2026-04-09
+
+Canonical repo policy for `TRR-APP`. `CLAUDE.md` in this repo should mirror `AGENTS.md` via a sibling symlink.
 
 Read `../AGENTS.md` first for workspace policy. Use this file for app-local rules and validation, then return to the root policy whenever work changes shared contracts, secrets, managed Chrome usage, or shared handoff workflow.
 
 ## Scope
 - `apps/web/` — Next.js App Router UI, admin flows, and server data access
-- `apps/vue-wordle/` — secondary Vue app
+- `apps/vue-wordle/` — secondary Vue app with minimal maintenance support under its existing npm workflow
+
+## Deployment
+- Vercel is the current deployment target for `apps/web/`.
+- Use `apps/web/vercel.json` as the tracked deployment source of truth.
+- Treat `.vercel/project.json` as optional local linkage metadata when present; do not rely on it as tracked repo guidance.
+
+## Environment
+- See `../docs/workspace/env-contract.md` for the full env contract shared with the workspace.
 
 ## Non-Negotiable Rules
 - This repo owns UI behavior, admin flows, and client or server boundaries; backend contracts are followed here, not invented here.
@@ -17,8 +27,14 @@ Read `../AGENTS.md` first for workspace policy. Use this file for app-local rule
 - Preserve Firebase allowlist and admin-secret flows with `ADMIN_EMAIL_ALLOWLIST`, `ADMIN_DISPLAYNAME_ALLOWLIST`, and `TRR_INTERNAL_ADMIN_SHARED_SECRET`.
 - For shared changes, app updates land after backend and any affected screenalytics work.
 
+## Repo Layout and Package Managers
+- `apps/web` uses `pnpm`.
+- `apps/vue-wordle` remains minimally supported with its existing `npm` + `package-lock.json` workflow.
+- When touching `apps/vue-wordle`, use its existing `build` and `typecheck` scripts and avoid package-manager normalization in this pass.
+- This repo currently exposes app directories only. Do not introduce shared `packages/` policy unless the repo structure changes.
+
 ## Validation
 - `pnpm -C apps/web run lint`
 - `pnpm -C apps/web exec next build --webpack`
 - `pnpm -C apps/web run test:ci`
-- Run targeted managed-Chrome validation when admin UI behavior, route behavior, or data rendering changes.
+- When admin UI behavior, route behavior, or data rendering changes, run targeted browser validation with `chrome-devtools` when available or the managed-Chrome scripts referenced in `../AGENTS.md`.
