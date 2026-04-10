@@ -42,6 +42,7 @@ import {
   SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS,
 } from "@/lib/admin/social-account-profile";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { isLocalDevHostname } from "@/lib/admin/dev-admin-bypass";
 import { buildSocialAccountProfileUrl } from "@/lib/admin/show-admin-routes";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
@@ -183,7 +184,11 @@ const withSocialProfileRequestDedup = <T,>(key: string, loader: () => Promise<T>
 
 const INTEGER_FORMATTER = new Intl.NumberFormat("en-US");
 const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running", "cancelling"]);
+const ACTIVE_CATALOG_RECOVERY_STATUSES = new Set(["queued", "running", "fallback_enqueued", "blocked"]);
 const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const TIKTOK_EMPTY_FIRST_PAGE_ERROR_CODE = "tiktok_discovery_empty_first_page";
+const TIKTOK_EMPTY_FIRST_PAGE_ALERT_CODE = "tiktok_empty_first_page";
+const TIKTOK_DIRECT_FALLBACK_FAILED_ALERT_CODE = "tiktok_direct_fallback_failed";
 const CATALOG_ACTION_SCOPES: ReadonlyArray<SocialAccountCatalogActionScope> = [
   "full_history",
   "bounded_window",
@@ -1085,6 +1090,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       ),
     [supportsSocialBlade],
   );
+  const isLocalDevHost = useMemo(() => {
+    return typeof window !== "undefined" && isLocalDevHostname(window.location.hostname);
+  }, []);
 
   useEffect(() => {
     setPage(1);
@@ -2324,6 +2332,40 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         : "Instagram blocked this catalog run before history fetch could continue.",
     };
   }, [catalogRunProgress]);
+  const catalogAlertCodes = useMemo(() => {
+    return new Set(
+      (catalogRunProgress?.alerts ?? [])
+        .map((alert) => String(alert.code || "").trim().toLowerCase())
+        .filter((code) => code.length > 0),
+    );
+  }, [catalogRunProgress?.alerts]);
+  const hasActiveCatalogRecovery = useMemo(() => {
+    const recoveryStatus = String(catalogRunProgress?.recovery?.status || "").trim().toLowerCase();
+    return ACTIVE_CATALOG_RECOVERY_STATUSES.has(recoveryStatus);
+  }, [catalogRunProgress?.recovery?.status]);
+  const canRetryTikTokLocally = useMemo(() => {
+    if (platform !== "tiktok" || !isLocalDevHost || displayedCatalogRunStatus !== "failed") {
+      return false;
+    }
+    if (activeCatalogRunBlocksActions || cancellableCatalogRunIsActive || hasActiveCatalogRecovery) {
+      return false;
+    }
+    const lastErrorCode = String(catalogRunProgress?.last_error_code || "").trim().toLowerCase();
+    return (
+      lastErrorCode === TIKTOK_EMPTY_FIRST_PAGE_ERROR_CODE ||
+      catalogAlertCodes.has("tiktok_empty_first_page") ||
+      catalogAlertCodes.has(TIKTOK_DIRECT_FALLBACK_FAILED_ALERT_CODE)
+    );
+  }, [
+    activeCatalogRunBlocksActions,
+    cancellableCatalogRunIsActive,
+    catalogAlertCodes,
+    catalogRunProgress?.last_error_code,
+    displayedCatalogRunStatus,
+    hasActiveCatalogRecovery,
+    isLocalDevHost,
+    platform,
+  ]);
 
   const catalogGapAnalysisPresentation = useMemo(() => {
     if (!catalogGapAnalysis) return null;
@@ -2704,6 +2746,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     ) {
       return `Runner stopped at ${formatDateTime(catalogRunDiagnostics.oldest_posted_at_seen)} even though the earliest saved catalog post is ${formatDateTime(catalogRunDiagnostics.catalog_oldest_post_at)}. This backfill did not reach the full history yet.`;
     }
+    const failedRecoveryAlert = (catalogRunProgress?.alerts ?? []).find(
+      (alert) => String(alert.code || "").trim().toLowerCase() === TIKTOK_DIRECT_FALLBACK_FAILED_ALERT_CODE,
+    );
+    if (displayedCatalogRunStatus === "failed" && failedRecoveryAlert?.message) {
+      return failedRecoveryAlert.message;
+    }
     const lastErrorMessage = String(catalogRunProgress?.last_error_message || catalogRunDiagnostics?.last_error_message || "").trim();
     if (lastErrorMessage) {
       return lastErrorMessage;
@@ -2718,6 +2766,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
     return null;
   }, [
+    displayedCatalogRunStatus,
+    catalogRunProgress?.alerts,
     catalogRunProgress?.cancel_reason,
     catalogRunProgress?.last_error_code,
     catalogRunProgress?.last_error_message,
@@ -3794,6 +3844,22 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           {dismissingCatalogRunId === displayedCatalogRunId ? "Dismissing…" : "Dismiss"}
                         </button>
                       )}
+                    {canRetryTikTokLocally ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void runCatalogAction("backfill", {
+                            backfill_scope: "full_history",
+                            allow_inline_dev_fallback: true,
+                            execution_preference: "prefer_local_inline",
+                          })
+                        }
+                        disabled={catalogActionsBlocked}
+                        className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {runningCatalogAction === "backfill" ? "Retrying Locally…" : "Retry Locally"}
+                      </button>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-sm text-zinc-500">
                     Run {shortRunId(displayedCatalogRunId)} · {displayedCatalogRunStatusLabel}

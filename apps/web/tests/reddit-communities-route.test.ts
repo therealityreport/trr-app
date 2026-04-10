@@ -219,12 +219,13 @@ describe("/api/admin/reddit/communities route", () => {
     expect(createRedditCommunityMock).not.toHaveBeenCalled();
   });
 
-  it("creates a community when payload is valid", async () => {
+  it("defaults display_name from the normalized subreddit when payload is valid", async () => {
     createRedditCommunityMock.mockResolvedValue({
       id: "community-1",
       trr_show_id: SHOW_ID,
       trr_show_name: "The Real Housewives of Salt Lake City",
       subreddit: "BravoRealHousewives",
+      display_name: "BravoRealHousewives",
       post_flairs: [],
       post_flairs_updated_at: null,
       analysis_flairs: [],
@@ -261,6 +262,7 @@ describe("/api/admin/reddit/communities route", () => {
         trrShowId: SHOW_ID,
         trrShowName: "The Real Housewives of Salt Lake City",
         subreddit: "BravoRealHousewives",
+        displayName: "BravoRealHousewives",
         isShowFocused: false,
         networkFocusTargets: ["Bravo"],
         franchiseFocusTargets: ["Real Housewives"],

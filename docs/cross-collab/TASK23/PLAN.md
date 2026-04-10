@@ -1,13 +1,13 @@
 # Final Supabase connection audit and donor transition inventory — Task 23 Plan
 
 Repo: TRR-APP
-Last updated: 2026-04-02
+Last updated: 2026-04-09
 
 ## Goal
 Confirm the app’s live Postgres/Supabase contract, remove stale env documentation, and capture the app-visible parity surface the DeepFace reset must preserve.
 
 ## Status Snapshot
-Implemented. The app’s raw Postgres runtime was already canonical. This task clarified the active server-side Supabase auth envs, kept browser Supabase route-scoped to Flashback, and removed a stale `SCREENALYTICS_API_URL` app env entry.
+Implemented. The app’s raw Postgres runtime was already canonical. This task clarified the active server-side Supabase auth envs, removed stale browser Supabase requirements from the live contract, and removed a stale `SCREENALYTICS_API_URL` app env entry.
 
 ## Scope
 
@@ -30,13 +30,13 @@ Document which visible admin flows still depend on backend behavior that ultimat
 - `TRR_DB_URL`: primary server-side Postgres runtime env
 - `TRR_DB_FALLBACK_URL`: optional secondary runtime fallback
 - `TRR_CORE_SUPABASE_URL` and `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY`: active server-side Supabase auth/admin envs
-- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Flashback-only browser envs
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`: retired browser envs; no longer part of the active app runtime contract
 - `SCREENALYTICS_API_URL`: removed from `.env.example` because no active app code reads it
 
 ## Locked Contracts
 - App runtime raw Postgres remains `TRR_DB_URL` then `TRR_DB_FALLBACK_URL`.
 - Server-side Supabase admin/auth stays server-only.
-- Flashback browser Supabase remains route-scoped and non-core.
+- Browser `NEXT_PUBLIC_SUPABASE_*` vars are not part of the live app contract.
 
 ## Acceptance Criteria
 1. App docs no longer advertise stale screenalytics envs the app does not read.

@@ -1275,6 +1275,7 @@ describe("RedditSourcesManager", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open community settings" }));
 
     expect(await screen.findByText("Community Settings")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Bravo RH")).toBeInTheDocument();
     expect(screen.getByText("Community Scope")).toBeInTheDocument();
     expect(screen.getAllByText("All Posts With Flair").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /manage flair assignments/i })).toBeInTheDocument();
@@ -1412,7 +1413,7 @@ describe("RedditSourcesManager", () => {
       trr_show_id: "show-1",
       trr_show_name: "The Real Housewives of Salt Lake City",
       subreddit: "RHOSLC",
-      display_name: "RHOSLC Main",
+      display_name: "RHOSLC",
       notes: null,
       is_active: true,
       post_flairs: [],
@@ -1431,6 +1432,11 @@ describe("RedditSourcesManager", () => {
       const contextResponse = maybeHandleSeasonPeriodRequests(url);
       if (contextResponse) return contextResponse;
       if (url.endsWith("/api/admin/reddit/communities") && init?.method === "POST") {
+        expect(init.body).toBeDefined();
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          subreddit: "r/RHOSLC",
+          display_name: "RHOSLC",
+        });
         communities.push({
           ...createdCommunity,
           assigned_thread_count: 0,
@@ -1477,15 +1483,12 @@ describe("RedditSourcesManager", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add Community" }));
     fireEvent.change(screen.getByPlaceholderText("BravoRealHousewives or r/BravoRealHousewives"), {
-      target: { value: "RHOSLC" },
-    });
-    fireEvent.change(screen.getByPlaceholderText("Bravo RH Main Subreddit"), {
-      target: { value: "RHOSLC Main" },
+      target: { value: "r/RHOSLC" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save Community" }));
 
     await waitFor(() => {
-      expect(screen.getAllByText("RHOSLC Main").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("RHOSLC").length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
@@ -1509,7 +1512,7 @@ describe("RedditSourcesManager", () => {
       trr_show_id: "show-1",
       trr_show_name: "The Real Housewives of Salt Lake City",
       subreddit: "AnotherSub",
-      display_name: "Another Sub",
+      display_name: "AnotherSub",
       notes: null,
       is_active: true,
       post_flairs: [],
@@ -1572,18 +1575,58 @@ describe("RedditSourcesManager", () => {
     fireEvent.change(screen.getByPlaceholderText("BravoRealHousewives or r/BravoRealHousewives"), {
       target: { value: "AnotherSub" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Bravo RH Main Subreddit"), {
-      target: { value: "Another Sub" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Save Community" }));
 
     await waitFor(() => {
-      expect(screen.getAllByText("Another Sub").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("AnotherSub").length).toBeGreaterThan(0);
     });
-    fireEvent.click(screen.getByRole("button", { name: /Another Sub/i }));
+    fireEvent.click(screen.getByRole("button", { name: /AnotherSub/i }));
     fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
     await waitFor(() => {
       expect(screen.getByText("No relevant post flairs selected yet.")).toBeInTheDocument();
+    });
+  });
+
+  it("saves display name edits from Community Settings", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const contextResponse = maybeHandleSeasonPeriodRequests(url);
+      if (contextResponse) return contextResponse;
+      if (url.endsWith("/api/admin/reddit/communities/community-1") && init?.method === "PATCH") {
+        expect(init.body).toBeDefined();
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          display_name: "Bravo Real Housewives",
+        });
+        return jsonResponse({
+          community: {
+            ...baseCommunity,
+            display_name: "Bravo Real Housewives",
+          },
+        });
+      }
+      if (url.includes("/api/admin/reddit/communities")) {
+        return jsonResponse({ communities: [baseCommunity, secondaryCommunity] });
+      }
+      if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
+      throw new Error(`Unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<RedditSourcesManager mode="global" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("r/BravoRealHousewives").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Bravo RH/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Open community settings" }));
+
+    const displayNameInput = await screen.findByDisplayValue("Bravo RH");
+    fireEvent.change(displayNameInput, { target: { value: "Bravo Real Housewives" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Display Name" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Bravo Real Housewives").length).toBeGreaterThan(0);
     });
   });
 
