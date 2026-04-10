@@ -1394,6 +1394,9 @@ const getCommunityTypeBadges = (community: RedditCommunity): string[] => {
 const getCommunityTitle = (community: Pick<RedditCommunity, "subreddit">): string =>
   `r/${community.subreddit.replace(/^\/?r\//i, "")}`;
 
+const deriveCommunityDisplayName = (value: string | null | undefined): string =>
+  normalizeCommunitySlugForPath(value);
+
 const normalizeCommunityLookupKey = (value: string | null | undefined): string => {
   if (!value) return "";
   const raw = value.trim();
@@ -2528,7 +2531,6 @@ export default function RedditSourcesManager({
   const [showThreadForm, setShowThreadForm] = useState(false);
 
   const [communitySubreddit, setCommunitySubreddit] = useState("");
-  const [communityDisplayName, setCommunityDisplayName] = useState("");
   const [communityNotes, setCommunityNotes] = useState("");
   const [communityShowId, setCommunityShowId] = useState(showId ?? "");
   const [communityShowName, setCommunityShowName] = useState(showName ?? "");
@@ -2567,6 +2569,7 @@ export default function RedditSourcesManager({
   const [storedCountsRefreshNonce, setStoredCountsRefreshNonce] = useState(0);
   const [selectedSupabaseFlairKeys, setSelectedSupabaseFlairKeys] = useState<Set<string>>(new Set());
   const [showOnlyMatches, setShowOnlyMatches] = useState(true);
+  const [selectedCommunityDisplayNameInput, setSelectedCommunityDisplayNameInput] = useState("");
   const [selectedNetworkTargetInput, setSelectedNetworkTargetInput] = useState("");
   const [selectedFranchiseTargetInput, setSelectedFranchiseTargetInput] = useState("");
   const [episodePatternInput, setEpisodePatternInput] = useState("");
@@ -3643,6 +3646,9 @@ export default function RedditSourcesManager({
 
   useEffect(() => {
     if (!showCommunitySettingsModal) return;
+    setSelectedCommunityDisplayNameInput(
+      selectedCommunity?.display_name ?? deriveCommunityDisplayName(selectedCommunity?.subreddit),
+    );
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setShowCommunitySettingsModal(false);
@@ -3652,7 +3658,7 @@ export default function RedditSourcesManager({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [showCommunitySettingsModal]);
+  }, [selectedCommunity?.display_name, selectedCommunity?.subreddit, showCommunitySettingsModal]);
 
   useEffect(() => {
     if (!showDedicatedSeasonMenu) return;
@@ -5381,7 +5387,6 @@ export default function RedditSourcesManager({
 
   const resetCommunityForm = () => {
     setCommunitySubreddit("");
-    setCommunityDisplayName("");
     setCommunityNotes("");
     setCommunityScope(mode === "season" ? "show" : "network");
     setCommunityNetworkTargets([]);
@@ -5422,7 +5427,7 @@ export default function RedditSourcesManager({
           trr_show_id: effectiveShowId,
           trr_show_name: effectiveShowName,
           subreddit: communitySubreddit,
-          display_name: communityDisplayName || null,
+          display_name: deriveCommunityDisplayName(communitySubreddit) || null,
           notes: communityNotes || null,
           is_show_focused: communityScope === "show",
           network_focus_targets: communityScope === "network" ? communityNetworkTargets : [],
@@ -5486,6 +5491,53 @@ export default function RedditSourcesManager({
       setBusyLabel(null);
     }
   };
+
+  const persistCommunityDisplayName = useCallback(
+    async (communityId: string, rawDisplayName: string) => {
+      const previous = communities.find((community) => community.id === communityId);
+      if (!previous) return false;
+
+      const fallbackDisplayName = deriveCommunityDisplayName(previous.subreddit) || null;
+      const nextDisplayName = rawDisplayName.trim() || fallbackDisplayName;
+      if ((previous.display_name ?? "") === (nextDisplayName ?? "")) return true;
+
+      mergeCommunityPatch(communityId, { display_name: nextDisplayName });
+      setBusyAction("save-community-display-name");
+      setBusyLabel("Saving display name...");
+      setError(null);
+
+      try {
+        const headers = await getAuthHeaders();
+        const response = await fetchWithTimeout(`/api/admin/reddit/communities/${communityId}`, {
+          method: "PATCH",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: nextDisplayName }),
+        });
+        const payloadBody = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          community?: RedditCommunityResponse;
+        };
+        if (!response.ok) {
+          throw new Error(payloadBody.error ?? "Failed to save display name");
+        }
+        const persistedDisplayName = payloadBody.community
+          ? toCommunityModel(payloadBody.community).display_name
+          : nextDisplayName;
+        mergeCommunityPatch(communityId, { display_name: persistedDisplayName });
+        setSelectedCommunityDisplayNameInput(persistedDisplayName ?? fallbackDisplayName ?? "");
+        return true;
+      } catch (err) {
+        mergeCommunityPatch(communityId, { display_name: previous.display_name });
+        setSelectedCommunityDisplayNameInput(previous.display_name ?? fallbackDisplayName ?? "");
+        setError(err instanceof Error ? err.message : "Failed to save display name");
+        return false;
+      } finally {
+        setBusyAction(null);
+        setBusyLabel(null);
+      }
+    },
+    [communities, fetchWithTimeout, getAuthHeaders, mergeCommunityPatch],
+  );
 
   const handleCreateThread = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -8275,18 +8327,6 @@ export default function RedditSourcesManager({
               />
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
-                Display Name
-              </label>
-              <input
-                value={communityDisplayName}
-                onChange={(event) => setCommunityDisplayName(event.target.value)}
-                placeholder="Bravo RH Main Subreddit"
-                className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
-              />
-            </div>
-
             <div className="md:col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
                 Notes
@@ -8878,6 +8918,40 @@ export default function RedditSourcesManager({
                             Close
                           </button>
                         </div>
+                      </div>
+
+                      <div className="mb-3 rounded-lg border border-zinc-200 p-3">
+                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                          Display Name
+                        </p>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <input
+                            value={selectedCommunityDisplayNameInput}
+                            onChange={(event) => setSelectedCommunityDisplayNameInput(event.target.value)}
+                            placeholder={deriveCommunityDisplayName(selectedCommunity.subreddit)}
+                            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:border-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+                          />
+                          <button
+                            type="button"
+                            disabled={
+                              isBusy ||
+                              (selectedCommunityDisplayNameInput.trim() || deriveCommunityDisplayName(selectedCommunity.subreddit)) ===
+                                (selectedCommunity.display_name ?? deriveCommunityDisplayName(selectedCommunity.subreddit))
+                            }
+                            onClick={() => {
+                              void persistCommunityDisplayName(
+                                selectedCommunity.id,
+                                selectedCommunityDisplayNameInput,
+                              );
+                            }}
+                            className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+                          >
+                            Save Display Name
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Defaults to the subreddit name without <span className="font-mono">r/</span>.
+                        </p>
                       </div>
 
                       <div className="mb-3 rounded-lg border border-zinc-200 p-3">

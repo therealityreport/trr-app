@@ -148,6 +148,43 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
     );
   });
 
+  it("updates display_name when PATCH payload is valid", async () => {
+    updateRedditCommunityMock.mockResolvedValue({
+      id: COMMUNITY_ID,
+      subreddit: "BravoRealHousewives",
+      display_name: "Bravo Real Housewives",
+      analysis_flairs: [],
+      analysis_all_flairs: [],
+      is_show_focused: false,
+      network_focus_targets: ["Bravo"],
+      franchise_focus_targets: ["Real Housewives"],
+      episode_title_patterns: ["Live Episode Discussion"],
+    });
+
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        display_name: "  Bravo Real Housewives  ",
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await PATCH(request, {
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.community?.display_name).toBe("Bravo Real Housewives");
+    expect(updateRedditCommunityMock).toHaveBeenCalledWith(
+      { firebaseUid: "admin-uid", isAdmin: true },
+      COMMUNITY_ID,
+      expect.objectContaining({
+        displayName: "Bravo Real Housewives",
+      }),
+    );
+  });
+
   it("rejects invalid analysis flair payloads", async () => {
     const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
       method: "PATCH",

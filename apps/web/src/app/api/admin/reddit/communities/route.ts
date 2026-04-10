@@ -227,7 +227,7 @@ export async function POST(request: NextRequest) {
       trrShowName: body.trr_show_name.trim(),
       subreddit,
       displayName:
-        typeof body.display_name === "string" ? body.display_name.trim() || null : null,
+        typeof body.display_name === "string" ? body.display_name.trim() || subreddit : subreddit,
       notes: typeof body.notes === "string" ? body.notes.trim() || null : null,
       isActive: typeof body.is_active === "boolean" ? body.is_active : true,
       isShowFocused: typeof body.is_show_focused === "boolean" ? body.is_show_focused : undefined,

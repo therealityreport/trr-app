@@ -11,17 +11,17 @@ Read `../AGENTS.md` first for workspace policy. Use this file for app-local rule
 - `apps/vue-wordle/` — secondary Vue app with minimal maintenance support under its existing npm workflow
 
 ## Deployment
-- Vercel is the current deployment target for `apps/web/`.
-- Use `apps/web/vercel.json` as the tracked deployment source of truth.
-- Treat `.vercel/project.json` as optional local linkage metadata when present; do not rely on it as tracked repo guidance.
+- Vercel deploys `apps/web/`.
+- Use `apps/web/vercel.json` as source of truth.
+- Treat `.vercel/project.json` as local linkage only.
 
 ## Environment
-- See `../docs/workspace/env-contract.md` for the full env contract shared with the workspace.
+- See `../docs/workspace/env-contract.md` for env contract.
 
 ## Non-Negotiable Rules
 - This repo owns UI behavior, admin flows, and client or server boundaries; backend contracts are followed here, not invented here.
 - Follow backend contracts; do not invent response shapes or hardcode backend URLs.
-- Backend access must continue to flow through `TRR_API_URL` and `apps/web/src/lib/server/trr-api/backend.ts`.
+- Backend access must flow through `TRR_API_URL` and `apps/web/src/lib/server/trr-api/backend.ts`.
 - Keep server-only code under `apps/web/src/lib/server/` and preserve clear server/client boundaries.
 - Prefer Server Components; add `"use client"` only when interaction requires it.
 - Preserve Firebase allowlist and admin-secret flows with `ADMIN_EMAIL_ALLOWLIST`, `ADMIN_DISPLAYNAME_ALLOWLIST`, and `TRR_INTERNAL_ADMIN_SHARED_SECRET`.
@@ -29,9 +29,9 @@ Read `../AGENTS.md` first for workspace policy. Use this file for app-local rule
 
 ## Repo Layout and Package Managers
 - `apps/web` uses `pnpm`.
-- `apps/vue-wordle` remains minimally supported with its existing `npm` + `package-lock.json` workflow.
-- When touching `apps/vue-wordle`, use its existing `build` and `typecheck` scripts and avoid package-manager normalization in this pass.
-- This repo currently exposes app directories only. Do not introduce shared `packages/` policy unless the repo structure changes.
+- `apps/vue-wordle` stays on its `npm` workflow.
+- When touching `apps/vue-wordle`, use its scripts.
+- This repo exposes app directories only; do not add shared `packages/` policy unless the structure changes.
 
 ## Validation
 - `pnpm -C apps/web run lint`
