@@ -73,6 +73,11 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "Content-Type": "application/json" },
   });
 
+const setWindowLocation = (url: string): void => {
+  const parsed = new URL(url, window.location.origin);
+  window.history.replaceState({}, "", `${parsed.pathname}${parsed.search}${parsed.hash}`);
+};
+
 const formatLocalDateTime = (value: string): string => new Date(value).toLocaleString();
 
 const baseSummary = {
@@ -175,6 +180,7 @@ describe("SocialAccountProfilePage", () => {
       checking: false,
       hasAccess: true,
     });
+    setWindowLocation("https://admin.therealityreport.com/social");
   });
 
   afterEach(() => {
@@ -2110,6 +2116,427 @@ it("shows recovering catalog state details when the backend is waiting on a reco
   expect(screen.getByText(/transport: authenticated/i)).toBeInTheDocument();
   expect(screen.getByText(/attempt 1/i)).toBeInTheDocument();
   expect(screen.getByText(/next: catalog fetch/i)).toBeInTheDocument();
+});
+
+it("shows Retry Locally for failed TikTok empty-body runs on local dev", async () => {
+  setWindowLocation("http://localhost:3000/admin/social");
+
+  mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.includes("/summary")) {
+      return jsonResponse({
+        ...baseSummary,
+        platform: "tiktok",
+        account_handle: "bravowwhl",
+        profile_url: "https://www.tiktok.com/@bravowwhl",
+        catalog_recent_runs: [
+          {
+            run_id: "run-tiktok-failed-alert",
+            status: "failed",
+            created_at: "2026-04-08T17:08:30.000Z",
+            completed_at: "2026-04-08T17:21:00.000Z",
+          },
+        ],
+      });
+    }
+    const runId = url.searchParams.get("run_id");
+    if (url.pathname.includes("/snapshot") && (!runId || runId === "run-tiktok-failed-alert")) {
+      return jsonResponse({
+        summary: {
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravowwhl",
+          profile_url: "https://www.tiktok.com/@bravowwhl",
+          catalog_recent_runs: [
+            {
+              run_id: "run-tiktok-failed-alert",
+              status: "failed",
+              created_at: "2026-04-08T17:08:30.000Z",
+              completed_at: "2026-04-08T17:21:00.000Z",
+            },
+          ],
+        },
+        catalog_run_progress: {
+          run_id: "run-tiktok-failed-alert",
+          run_status: "failed",
+          run_state: "failed",
+          source_scope: "bravo",
+          last_error_code: "tiktok_discovery_empty_first_page",
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          alerts: [
+            {
+              code: "tiktok_empty_first_page",
+              severity: "error",
+              message: "TikTok returned no posts on the first discovery page.",
+            },
+          ],
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 1,
+            active_jobs: 0,
+            items_found_total: 0,
+          },
+        },
+      });
+    }
+    if (url.pathname.includes("/catalog/posts")) {
+      return jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+      });
+    }
+    if (url.pathname.includes("/catalog/review-queue")) {
+      return jsonResponse({ items: [] });
+    }
+    throw new Error(`Unhandled request: ${url}`);
+  });
+
+  render(<SocialAccountProfilePage platform="tiktok" handle="bravowwhl" activeTab="catalog" />);
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Retry Locally" })).toBeInTheDocument();
+  });
+});
+
+it("hides Retry Locally while a TikTok recovery handoff is still active", async () => {
+  setWindowLocation("http://localhost:3000/admin/social");
+
+  mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.includes("/summary")) {
+      return jsonResponse({
+        ...baseSummary,
+        platform: "tiktok",
+        account_handle: "bravowwhl",
+        profile_url: "https://www.tiktok.com/@bravowwhl",
+        catalog_recent_runs: [
+          {
+            run_id: "run-tiktok-recovery-active",
+            status: "failed",
+            created_at: "2026-04-08T17:08:30.000Z",
+            completed_at: "2026-04-08T17:21:00.000Z",
+          },
+        ],
+      });
+    }
+    const runId = url.searchParams.get("run_id");
+    if (url.pathname.includes("/snapshot") && (!runId || runId === "run-tiktok-recovery-active")) {
+      return jsonResponse({
+        summary: {
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravowwhl",
+          profile_url: "https://www.tiktok.com/@bravowwhl",
+          catalog_recent_runs: [
+            {
+              run_id: "run-tiktok-recovery-active",
+              status: "failed",
+              created_at: "2026-04-08T17:08:30.000Z",
+              completed_at: "2026-04-08T17:21:00.000Z",
+            },
+          ],
+        },
+        catalog_run_progress: {
+          run_id: "run-tiktok-recovery-active",
+          run_status: "failed",
+          run_state: "failed",
+          source_scope: "bravo",
+          last_error_code: "tiktok_discovery_empty_first_page",
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          recovery: {
+            status: "running",
+            reason: "tiktok_empty_body_transport_failure",
+            stage: "shared_account_posts",
+            job_id: "job-recovery-2",
+            attempt_count: 1,
+            transport: "public",
+            execution_backend: "local",
+          },
+          alerts: [],
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 1,
+            active_jobs: 0,
+            items_found_total: 0,
+          },
+        },
+      });
+    }
+    if (url.pathname.includes("/catalog/posts")) {
+      return jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+      });
+    }
+    if (url.pathname.includes("/catalog/review-queue")) {
+      return jsonResponse({ items: [] });
+    }
+    throw new Error(`Unhandled request: ${url}`);
+  });
+
+  render(<SocialAccountProfilePage platform="tiktok" handle="bravowwhl" activeTab="catalog" />);
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+  await waitFor(() => {
+    expect(screen.getByText(/reason: tiktok empty body transport failure/i)).toBeInTheDocument();
+  });
+
+  expect(screen.queryByRole("button", { name: "Retry Locally" })).not.toBeInTheDocument();
+});
+
+it("sends the explicit local TikTok backfill payload when Retry Locally is clicked", async () => {
+  setWindowLocation("http://localhost:3000/admin/social");
+
+  const backfillBodies: unknown[] = [];
+
+  mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.includes("/summary")) {
+      return jsonResponse({
+        ...baseSummary,
+        platform: "tiktok",
+        account_handle: "bravowwhl",
+        profile_url: "https://www.tiktok.com/@bravowwhl",
+        catalog_recent_runs: [
+          {
+            run_id: "run-tiktok-failed-payload",
+            status: "failed",
+            created_at: "2026-04-08T17:08:30.000Z",
+            completed_at: "2026-04-08T17:21:00.000Z",
+          },
+        ],
+      });
+    }
+    if (url.pathname.includes("/snapshot")) {
+      const runId = url.searchParams.get("run_id");
+      if (!runId || runId === "run-tiktok-failed-payload") {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "tiktok",
+            account_handle: "bravowwhl",
+            profile_url: "https://www.tiktok.com/@bravowwhl",
+            catalog_recent_runs: [
+              {
+                run_id: "run-tiktok-failed-payload",
+                status: "failed",
+                created_at: "2026-04-08T17:08:30.000Z",
+                completed_at: "2026-04-08T17:21:00.000Z",
+              },
+            ],
+          },
+          catalog_run_progress: {
+            run_id: "run-tiktok-failed-payload",
+            run_status: "failed",
+            run_state: "failed",
+            source_scope: "bravo",
+            last_error_code: "tiktok_discovery_empty_first_page",
+            stages: {},
+            per_handle: [],
+            recent_log: [],
+            alerts: [],
+            summary: {
+              total_jobs: 1,
+              completed_jobs: 0,
+              failed_jobs: 1,
+              active_jobs: 0,
+              items_found_total: 0,
+            },
+          },
+        });
+      }
+      if (runId === "run-tiktok-retry-queued") {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "tiktok",
+            account_handle: "bravowwhl",
+            profile_url: "https://www.tiktok.com/@bravowwhl",
+            catalog_recent_runs: [
+              {
+                run_id: "run-tiktok-retry-queued",
+                status: "queued",
+                created_at: "2026-04-08T17:30:00.000Z",
+              },
+            ],
+          },
+          catalog_run_progress: {
+            run_id: "run-tiktok-retry-queued",
+            run_status: "queued",
+            run_state: "queued",
+            source_scope: "bravo",
+            stages: {},
+            per_handle: [],
+            recent_log: [],
+            alerts: [],
+            summary: {
+              total_jobs: 1,
+              completed_jobs: 0,
+              failed_jobs: 0,
+              active_jobs: 1,
+              items_found_total: 0,
+            },
+          },
+        });
+      }
+      return jsonResponse({
+        summary: {
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravowwhl",
+          profile_url: "https://www.tiktok.com/@bravowwhl",
+          catalog_recent_runs: [],
+        },
+        catalog_run_progress: null,
+      });
+    }
+    if (url.pathname.includes("/catalog/backfill")) {
+      backfillBodies.push(JSON.parse(String(init?.body || "{}")));
+      return jsonResponse({
+        run_id: "run-tiktok-retry-queued",
+        status: "queued",
+      });
+    }
+    if (url.pathname.includes("/catalog/posts")) {
+      return jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+      });
+    }
+    if (url.pathname.includes("/catalog/review-queue")) {
+      return jsonResponse({ items: [] });
+    }
+    throw new Error(`Unhandled request: ${url}`);
+  });
+
+  render(<SocialAccountProfilePage platform="tiktok" handle="bravowwhl" activeTab="catalog" />);
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "View Details" })).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+  const retryButton = await screen.findByRole("button", { name: "Retry Locally" });
+  fireEvent.click(retryButton);
+
+  await waitFor(() => {
+    expect(backfillBodies).toEqual([
+      {
+        backfill_scope: "full_history",
+        allow_inline_dev_fallback: true,
+        execution_preference: "prefer_local_inline",
+      },
+    ]);
+  });
+});
+
+it("shows the direct fallback recovery copy for active TikTok recovery handoffs", async () => {
+  mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname.includes("/summary")) {
+      return jsonResponse({
+        ...baseSummary,
+        platform: "tiktok",
+        account_handle: "bravowwhl",
+        profile_url: "https://www.tiktok.com/@bravowwhl",
+        catalog_recent_runs: [
+          {
+            run_id: "run-tiktok-recovering",
+            status: "queued",
+            created_at: "2026-04-08T17:08:30.000Z",
+          },
+        ],
+      });
+    }
+    const runId = url.searchParams.get("run_id");
+    if (url.pathname.includes("/snapshot") && (!runId || runId === "run-tiktok-recovering")) {
+      return jsonResponse({
+        summary: {
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravowwhl",
+          profile_url: "https://www.tiktok.com/@bravowwhl",
+          catalog_recent_runs: [
+            {
+              run_id: "run-tiktok-recovering",
+              status: "queued",
+              created_at: "2026-04-08T17:08:30.000Z",
+            },
+          ],
+        },
+        catalog_run_progress: {
+          run_id: "run-tiktok-recovering",
+          run_status: "queued",
+          run_state: "recovering",
+          source_scope: "bravo",
+          stages: {
+            shared_account_posts: {
+              jobs_total: 1,
+              jobs_completed: 0,
+              jobs_failed: 0,
+              jobs_active: 1,
+              jobs_running: 0,
+              jobs_waiting: 1,
+              scraped_count: 0,
+              saved_count: 0,
+            },
+          },
+          per_handle: [],
+          recent_log: [],
+          recovery: {
+            status: "fallback_enqueued",
+            reason: "tiktok_empty_body_transport_failure",
+            stage: "shared_account_posts",
+            next_stage: "shared_account_posts",
+            transport: "public",
+            execution_backend: "local",
+          },
+          alerts: [],
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 0,
+          },
+        },
+      });
+    }
+    if (url.pathname.includes("/catalog/posts")) {
+      return jsonResponse({
+        items: [],
+        pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+      });
+    }
+    if (url.pathname.includes("/catalog/review-queue")) {
+      return jsonResponse({ items: [] });
+    }
+    throw new Error(`Unhandled request: ${url}`);
+  });
+
+  render(<SocialAccountProfilePage platform="tiktok" handle="bravowwhl" activeTab="catalog" />);
+
+  await waitFor(() => {
+    expect(screen.getByText("Falling back to direct catalog fetch")).toBeInTheDocument();
+  });
 });
 
 it("prefers terminal cancelled status labels over stale recovering state", async () => {

@@ -553,6 +553,8 @@ export type CatalogBackfillRequest = {
   date_start?: string | null;
   date_end?: string | null;
   backfill_scope: "full_history" | "bounded_window";
+  allow_inline_dev_fallback?: boolean;
+  execution_preference?: "auto" | "prefer_local_inline";
 };
 
 export type CatalogSyncRecentRequest = {
