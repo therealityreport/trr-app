@@ -60,6 +60,11 @@ jobs:
         run: pnpm run typecheck:fandom
       - name: Run unit tests with coverage (Node 24 full lane)
         if: matrix.lane == 'full'
+        # Bump V8 old-space so vitest + coverage instrumentation has enough
+        # heap on Node 24 (the defaults OOM'd at the end of the run even
+        # though all tests passed).
+        env:
+          NODE_OPTIONS: "--max-old-space-size=8192"
         run: pnpm run test:ci -- --coverage
       - name: Run smoke tests (Node 22 compatibility lane)
         if: matrix.lane == 'compat'
