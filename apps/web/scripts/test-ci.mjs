@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const DEFAULT_BATCH_SIZE = 4;
 const DEFAULT_HEAP_MB = 4096;
@@ -15,20 +17,30 @@ const heapMb = parsePositiveInt(process.env.TEST_CI_HEAP_MB, DEFAULT_HEAP_MB);
 const onlyBatch = parsePositiveInt(process.env.TEST_CI_ONLY_BATCH, 0);
 const extraArgs = process.argv.slice(2);
 
-const fileOutput = execFileSync(
-  'rg',
-  ['--files', 'tests', '-g', '*.test.ts', '-g', '*.test.tsx'],
-  {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  },
-);
+function collectTestFiles(rootDir) {
+  const pending = [rootDir];
+  const files = [];
 
-const testFiles = fileOutput
-  .split('\n')
-  .map((value) => value.trim())
-  .filter(Boolean)
-  .sort();
+  while (pending.length > 0) {
+    const currentDir = pending.pop();
+    const entries = readdirSync(currentDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const absolutePath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith('.test.ts') && !entry.name.endsWith('.test.tsx')) continue;
+      files.push(path.relative(process.cwd(), absolutePath));
+    }
+  }
+
+  return files.sort();
+}
+
+const testFiles = collectTestFiles(path.join(process.cwd(), 'tests'));
 
 if (testFiles.length === 0) {
   console.error('[test:ci] No test files found.');
