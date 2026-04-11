@@ -1424,6 +1424,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setHashtagTimeline(data);
   }, [fetchAdminWithAuth, handle, hashtagTimelineRequestKey, hashtagWindow, platform, user]);
 
+  // Keep stable refs to the loaders so the loadSummary effect below can call them
+  // without re-running every time their identity changes. Re-running would trigger
+  // duplicate summary fetches whenever e.g. `backgroundCatalogRunId` changes
+  // `fetchProfileSnapshot`'s identity mid-session.
+  const refreshSummaryRef = useRef(refreshSummary);
+  const fetchProfileSnapshotRef = useRef(fetchProfileSnapshot);
+  useEffect(() => {
+    refreshSummaryRef.current = refreshSummary;
+  }, [refreshSummary]);
+  useEffect(() => {
+    fetchProfileSnapshotRef.current = fetchProfileSnapshot;
+  }, [fetchProfileSnapshot]);
+
   useEffect(() => {
     if (checking || !user || !hasAccess) return;
     let cancelled = false;
@@ -1432,7 +1445,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setSummaryLoading(true);
       setSummaryError(null);
       try {
-        const snapshot = await fetchProfileSnapshot();
+        const snapshot = await fetchProfileSnapshotRef.current();
         if (snapshot.payload.summary) {
           setSummary(snapshot.payload.summary);
           setSummaryUninitialized(false);
@@ -1445,13 +1458,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         }
         if (cancelled) return;
         setSummaryError(null);
-      } catch (error) {
+      } catch (snapshotError) {
+        // Snapshot is a cache layer; if it fails, fall back to the live /summary endpoint
+        // so transient snapshot outages don't break the page.
         if (cancelled) return;
-        setSummaryUninitialized(false);
-        if (!isBackendSaturationError(error)) {
+        try {
+          await refreshSummaryRef.current();
+          if (cancelled) return;
           setSummarySaturationActive(false);
+        } catch (error) {
+          if (cancelled) return;
+          setSummaryUninitialized(false);
+          if (!isBackendSaturationError(error)) {
+            setSummarySaturationActive(false);
+          }
+          setSummaryError(
+            error instanceof Error ? error.message : "Failed to load social account profile summary",
+          );
         }
-        setSummaryError(error instanceof Error ? error.message : "Failed to load social account profile summary");
       } finally {
         if (!cancelled) setSummaryLoading(false);
       }
@@ -1461,7 +1485,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return () => {
       cancelled = true;
     };
-  }, [checking, fetchProfileSnapshot, handle, hasAccess, platform, user]);
+  }, [checking, handle, hasAccess, platform, user]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
@@ -2546,7 +2570,44 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     key: `social-account-profile-snapshot:${platform}:${handle}:${backgroundCatalogRunId ?? "none"}:${catalogProgressRequestNonce}`,
     shouldRun: !checking && Boolean(user) && hasAccess && supportsCatalog && Boolean(backgroundCatalogRunId),
     intervalMs: CATALOG_PROGRESS_POLL_INTERVAL_MS,
-    fetchData: async (signal, request) => await fetchProfileSnapshot({ signal, forceRefresh: request?.forceRefresh }),
+    fetchData: async (signal, request) => {
+      try {
+        return await fetchProfileSnapshot({ signal, forceRefresh: request?.forceRefresh });
+      } catch (snapshotError) {
+        // Fall back to the legacy direct catalog-progress endpoint so a degraded
+        // snapshot cache does not break live polling of a running catalog job.
+        if (!backgroundCatalogRunId || !user) throw snapshotError;
+        const normalizedRunId = String(backgroundCatalogRunId).trim();
+        if (!normalizedRunId) throw snapshotError;
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(normalizedRunId)}/progress?recent_log_limit=25`,
+          { signal },
+          { preferredUser: user },
+        );
+        const progressBody = (await response.json().catch(() => null)) as
+          | SocialAccountCatalogRunProgressSnapshot
+          | ProxyErrorPayload
+          | null;
+        if (!response.ok) {
+          // Propagate the real progress error so that saturation signals
+          // (code: BACKEND_SATURATED, retry_after_seconds) reach the polling
+          // backoff logic instead of being masked by the snapshot error.
+          throw buildSocialAccountRequestError(
+            toProxyErrorPayload(progressBody),
+            "Failed to load catalog run progress",
+          );
+        }
+        if (!progressBody) throw snapshotError;
+        return {
+          payload: {
+            summary: null,
+            catalog_run_progress: progressBody as SocialAccountCatalogRunProgressSnapshot,
+            generated_at: new Date().toISOString(),
+          } as SocialAccountProfileSnapshot,
+          cacheStatus: "fallback-direct",
+        };
+      }
+    },
   });
 
   useEffect(() => {
