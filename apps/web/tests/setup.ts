@@ -2,9 +2,37 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import React from 'react';
 import { afterEach, vi } from 'vitest';
+import { __resetSharedLiveResourceRegistryForTests } from '@/lib/admin/shared-live-resource';
+
+declare global {
+  // Global admin route caches are persisted on globalThis between test files.
+  // Clearing them here keeps dedupe/cache tests independent from suite order.
+  var __trrAdminRouteCache: Map<string, unknown> | undefined;
+  var __trrAdminRouteInFlight: Map<string, Promise<unknown>> | undefined;
+}
 
 afterEach(() => {
   cleanup();
+  __resetSharedLiveResourceRegistryForTests();
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  globalThis.__trrAdminRouteCache?.clear();
+  globalThis.__trrAdminRouteInFlight?.clear();
+  try {
+    window.localStorage.clear();
+  } catch {
+    // best-effort in jsdom
+  }
+  try {
+    window.sessionStorage.clear();
+  } catch {
+    // best-effort in jsdom
+  }
+  document.head.innerHTML = '';
 });
 
 vi.mock('next/image', () => ({
