@@ -37,6 +37,7 @@ export function usePersonSettingsController({
 }: UsePersonSettingsControllerOptions) {
   const [externalIdDrafts, setExternalIdDrafts] = useState<PersonExternalIdDraft[]>([]);
   const [externalIdsLoading, setExternalIdsLoading] = useState(false);
+  const [externalIdsInitialized, setExternalIdsInitialized] = useState(false);
   const [externalIdsSaving, setExternalIdsSaving] = useState(false);
   const [externalIdsError, setExternalIdsError] = useState<string | null>(null);
   const [externalIdsNotice, setExternalIdsNotice] = useState<string | null>(null);
@@ -60,6 +61,14 @@ export function usePersonSettingsController({
     setCanonicalSourceOrderNotice(null);
   }, [person]);
 
+  useEffect(() => {
+    setExternalIdDrafts([]);
+    setExternalIdsLoading(false);
+    setExternalIdsInitialized(false);
+    setExternalIdsError(null);
+    setExternalIdsNotice(null);
+  }, [personId]);
+
   const canonicalSourceOrderDirty = useMemo(
     () => canonicalSourceOrder.join("|") !== initialCanonicalSourceOrder.join("|"),
     [canonicalSourceOrder, initialCanonicalSourceOrder],
@@ -72,6 +81,7 @@ export function usePersonSettingsController({
       const fallbackPerson = options?.fallbackPerson ?? null;
       if (signal?.aborted) return;
       try {
+        setExternalIdsInitialized(true);
         setExternalIdsLoading(true);
         const headers = await getAuthHeaders();
         const response = await fetch(`/api/admin/trr-api/people/${personId}/external-ids`, {
@@ -100,6 +110,7 @@ export function usePersonSettingsController({
         );
         setExternalIdsError(err instanceof Error ? err.message : "Failed to load external IDs");
       } finally {
+        if (signal?.aborted) return;
         setExternalIdsLoading(false);
       }
     },
@@ -251,7 +262,15 @@ export function usePersonSettingsController({
 
   useEffect(() => {
     if (!settingsTabActive) return;
-    if (!hasAccess || !personId || externalIdsLoading || externalIdDrafts.length > 0) return;
+    if (
+      !hasAccess ||
+      !personId ||
+      externalIdsLoading ||
+      externalIdsInitialized ||
+      externalIdDrafts.length > 0
+    ) {
+      return;
+    }
     const controller = new AbortController();
     void runSecondaryRead(async () => {
       await fetchExternalIds({ signal: controller.signal, fallbackPerson: person });
@@ -261,6 +280,7 @@ export function usePersonSettingsController({
     };
   }, [
     externalIdDrafts.length,
+    externalIdsInitialized,
     externalIdsLoading,
     fetchExternalIds,
     hasAccess,

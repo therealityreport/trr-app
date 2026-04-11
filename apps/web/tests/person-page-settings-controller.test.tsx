@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PERSON_EXTERNAL_ID_SOURCES, type PersonExternalIdRecord } from "@/lib/admin/person-external-ids";
 import { usePersonSettingsController } from "@/lib/admin/person-page/use-person-settings-controller";
@@ -58,13 +58,13 @@ describe("usePersonSettingsController", () => {
         fetchPerson,
         getAuthHeaders,
         hasAccess: true,
-        settingsTabActive: true,
+        settingsTabActive: false,
         runSecondaryRead,
       }),
     );
 
-    await waitFor(() => {
-      expect(result.current.externalIdsLoading).toBe(false);
+    await act(async () => {
+      await result.current.fetchExternalIds({ fallbackPerson: person });
     });
 
     expect(result.current.externalIdDrafts).toEqual([
@@ -72,7 +72,8 @@ describe("usePersonSettingsController", () => {
       { source_id: "tmdb", external_id: "1686599" },
     ]);
     expect(result.current.externalIdsError).toBe("external ids exploded");
-    expect(runSecondaryRead).toHaveBeenCalledTimes(1);
+    expect(result.current.externalIdsLoading).toBe(false);
+    expect(runSecondaryRead).not.toHaveBeenCalled();
   });
 
   it("filters empty drafts when saving external ids and refreshes the person record", async () => {
@@ -103,10 +104,12 @@ describe("usePersonSettingsController", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    const person = buildPerson();
+
     const { result } = renderHook(() =>
       usePersonSettingsController({
         personId: PERSON_ID,
-        person: buildPerson(),
+        person,
         setPerson,
         fetchPerson,
         getAuthHeaders,
@@ -161,12 +164,14 @@ describe("usePersonSettingsController", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    const person = buildPerson({
+      canonical_profile_source_order: [...PERSON_EXTERNAL_ID_SOURCES.slice(0, 0)],
+    });
+
     const { result } = renderHook(() =>
       usePersonSettingsController({
         personId: PERSON_ID,
-        person: buildPerson({
-          canonical_profile_source_order: [...PERSON_EXTERNAL_ID_SOURCES.slice(0, 0)],
-        }),
+        person,
         setPerson,
         fetchPerson,
         getAuthHeaders,

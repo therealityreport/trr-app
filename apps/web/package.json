@@ -29,7 +29,7 @@
     "design-docs:integration-checks": "node scripts/design-docs/run-integration-checks.mjs",
     "test": "vitest run -c vitest.config.ts",
     "test:watch": "vitest -c vitest.config.ts",
-    "test:ci": "NODE_OPTIONS=--max-old-space-size=8192 vitest run -c vitest.config.ts --pool=forks --poolOptions.forks.singleFork --shard=1/4 && NODE_OPTIONS=--max-old-space-size=8192 vitest run -c vitest.config.ts --pool=forks --poolOptions.forks.singleFork --shard=2/4 && NODE_OPTIONS=--max-old-space-size=8192 vitest run -c vitest.config.ts --pool=forks --poolOptions.forks.singleFork --shard=3/4 && NODE_OPTIONS=--max-old-space-size=8192 vitest run -c vitest.config.ts --pool=forks --poolOptions.forks.singleFork --shard=4/4",
+    "test:ci": "node scripts/test-ci.mjs",
     "smoke:cast:preflight": "node scripts/cast-smoke-preflight.mjs",
     "smoke:cast:preflight:auth": "node scripts/cast-smoke-preflight.mjs --cookie-file \"${TRR_CAST_SMOKE_COOKIE_FILE:-}\"",
     "test:e2e": "playwright test -c playwright.config.ts",
