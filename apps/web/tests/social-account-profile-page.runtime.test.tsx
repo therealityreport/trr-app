@@ -4209,6 +4209,27 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("treats completed sync-newer runs as bounded progress instead of full-history coverage", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "tiktok",
+            total_posts: 10200,
+            live_total_posts: 10200,
+            catalog_recent_runs: [
+              {
+                run_id: "run-sync-newer-1",
+                status: "completed",
+                created_at: "2026-04-07T20:36:47.000Z",
+                catalog_action: "sync_newer",
+                catalog_action_scope: "head_gap",
+              },
+            ],
+          },
+          catalog_run_progress: null,
+          generated_at: "2026-04-09T03:00:00.000Z",
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -4251,6 +4272,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           post_progress: {
             completed_posts: 17,
             matched_posts: 16,
+            saved_posts: 16,
             total_posts: 10200,
           },
           summary: {
@@ -4276,7 +4298,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     await waitFor(() => {
       expect(screen.getByText("100%")).toBeInTheDocument();
       expect(screen.getByText("17 posts checked")).toBeInTheDocument();
-      expect(screen.getByText("16 matched")).toBeInTheDocument();
+      expect(screen.getByText("16 persisted")).toBeInTheDocument();
     });
 
     expect(screen.queryByText("17 / 10,200 posts checked")).not.toBeInTheDocument();
@@ -4288,6 +4310,26 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   it("shows at least 1% for full-history runs that checked some posts", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            total_posts: 10200,
+            live_total_posts: 10200,
+            catalog_recent_runs: [
+              {
+                run_id: "run-full-history-low-progress-1",
+                status: "completed",
+                created_at: "2026-04-07T20:36:47.000Z",
+                catalog_action: "backfill",
+                catalog_action_scope: "full_history",
+              },
+            ],
+          },
+          catalog_run_progress: null,
+          generated_at: "2026-04-09T03:00:00.000Z",
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -4350,6 +4392,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           post_progress: {
             completed_posts: 17,
             matched_posts: 16,
+            saved_posts: 16,
             total_posts: 10200,
           },
           summary: {
@@ -4375,7 +4418,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     await waitFor(() => {
       expect(screen.getByText("1%")).toBeInTheDocument();
       expect(screen.getByText("17 / 10,200 posts checked")).toBeInTheDocument();
-      expect(screen.getByText("16 matched")).toBeInTheDocument();
+      expect(screen.getByText("16 persisted")).toBeInTheDocument();
     });
   });
 

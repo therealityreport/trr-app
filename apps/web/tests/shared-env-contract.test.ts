@@ -30,7 +30,14 @@ describe("workspace shared env contract", () => {
 
     const envKeys = readEnvKeys(fs.readFileSync(envExamplePath, "utf-8"));
     expect(new Set(manifest.repo_validation["TRR-APP"].required_env_example_keys)).toEqual(
-      new Set(["TRR_API_URL", "TRR_DB_URL", "TRR_DB_FALLBACK_URL", "TRR_INTERNAL_ADMIN_SHARED_SECRET", "SCREENALYTICS_API_URL"]),
+      new Set([
+        "TRR_API_URL",
+        "TRR_DB_URL",
+        "TRR_DB_FALLBACK_URL",
+        "TRR_CORE_SUPABASE_URL",
+        "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY",
+        "TRR_INTERNAL_ADMIN_SHARED_SECRET",
+      ]),
     );
     for (const key of manifest.repo_validation["TRR-APP"].required_env_example_keys) {
       expect(envKeys.has(key), `missing ${key} in apps/web/.env.example`).toBe(true);

@@ -504,6 +504,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   post_progress?: {
     completed_posts?: number;
     matched_posts?: number;
+    saved_posts?: number;
     total_posts?: number | null;
   };
   source_total_posts_current?: number | null;

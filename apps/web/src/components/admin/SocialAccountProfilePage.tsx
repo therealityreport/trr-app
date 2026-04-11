@@ -2661,7 +2661,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             fetchScraped,
             hasFetchStageTelemetry ? 0 : Number(catalogProgressSummary.items ?? 0),
           );
-    const matched = Number(payload.matched_posts ?? 0);
+    const persisted =
+      payload.saved_posts != null ? Number(payload.saved_posts ?? 0) : Number(payload.matched_posts ?? 0);
     const fallbackTotal = Number(summary?.live_total_posts ?? summary?.total_posts ?? 0);
     const total = Number(payload.total_posts ?? 0) || fallbackTotal;
     const roundedCoveragePct = total > 0 ? Math.round((completed / total) * 100) : catalogProgressSummary.pct;
@@ -2675,7 +2676,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           : roundedCoveragePct;
     return {
       completed,
-      matched,
+      persisted,
       total,
       pct: Math.max(0, Math.min(100, pct)),
       hasTotal: total > 0,
@@ -3944,7 +3945,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">
                     {catalogPostProgress.hasTotal || catalogPostProgress.hasCompleted
-                      ? `${formatInteger(catalogPostProgress.matched)} matched`
+                      ? `${formatInteger(catalogPostProgress.persisted)} persisted`
                       : `${formatInteger(catalogProgressSummary.items)} scraped`}
                     {catalogProgressSummary.running > 0 ? ` · ${formatInteger(catalogProgressSummary.running)} running` : ""}
                     {catalogProgressSummary.waiting > 0 ? ` · ${formatInteger(catalogProgressSummary.waiting)} queued` : ""}
