@@ -58,6 +58,9 @@ jobs:
       - name: Run targeted fandom typecheck (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm run typecheck:fandom
+      - name: Install Playwright Chromium (Node 24 full lane)
+        if: matrix.lane == 'full'
+        run: pnpm exec playwright install chromium
       - name: Run unit tests (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm run test:ci
