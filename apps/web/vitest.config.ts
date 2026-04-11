@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig(async () => {
   const { default: tsconfigPaths } = await import('vite-tsconfig-paths');
+  const isCi = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+  const coverageReporters = isCi ? ['text', 'lcovonly'] : ['text', 'html', 'lcov'];
 
   return {
     plugins: [tsconfigPaths()],
@@ -23,7 +25,7 @@ export default defineConfig(async () => {
       include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
       coverage: {
         provider: 'v8',
-        reporter: ['text', 'html', 'lcov'],
+        reporter: coverageReporters,
         reportsDirectory: 'coverage',
         exclude: ['tests/**'],
       },
