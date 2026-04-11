@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fixtures from "./fixtures/brand-font-visual-similarity-fixtures.json";
 
 const execFileAsync = promisify(execFile);
-const projectRoot = resolve("/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web");
+const projectRoot = resolve(__dirname, "..");
 const tempDirs: string[] = [];
 
 afterEach(async () => {
