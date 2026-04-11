@@ -3203,7 +3203,11 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       expect(screen.getByText("Cancelled run cancelok.")).toBeInTheDocument();
     });
     expect(cancelCalls).toEqual([expect.stringContaining("/catalog/runs/cancelok1-run/cancel")]);
-    expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
+    // The button removal and the success banner may land in separate render
+    // cycles — wait for it instead of asserting synchronously.
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Cancel Run" })).not.toBeInTheDocument();
+    });
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 
