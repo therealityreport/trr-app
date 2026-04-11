@@ -832,7 +832,7 @@ function buildGeneratedTypescriptModule(inventory: AdminApiReferenceInventory): 
 
 export function buildAdminApiReferenceInventory(
   projectRoot: string,
-  options?: { generatedAt?: string },
+  options?: { generatedAt?: string; sourceCommitSha?: string },
 ): AdminApiReferenceInventory {
   const appRoot = join(projectRoot, "src");
   const adminPagesRoot = join(projectRoot, "src/app/admin");
@@ -1370,7 +1370,7 @@ export function buildAdminApiReferenceInventory(
     inventorySchemaVersion: ADMIN_API_REFERENCES_SCHEMA_VERSION,
     generatorVersion: ADMIN_API_REFERENCES_GENERATOR_VERSION,
     generatedAt: options?.generatedAt ?? new Date().toISOString(),
-    sourceCommitSha: resolveCommitSha(projectRoot),
+    sourceCommitSha: options?.sourceCommitSha ?? resolveCommitSha(projectRoot),
     overrideDigest: computeOverrideDigest(ADMIN_API_REFERENCE_OVERRIDES, [...manualIgnores.values()]),
     nodes: materializedNodes,
     edges: materializedEdges,
@@ -1393,7 +1393,7 @@ export function buildAdminApiReferenceInventory(
 
 export function renderGeneratedAdminApiReferenceInventoryModule(
   projectRoot: string,
-  options?: { generatedAt?: string },
+  options?: { generatedAt?: string; sourceCommitSha?: string },
 ): string {
   return buildGeneratedTypescriptModule(buildAdminApiReferenceInventory(projectRoot, options));
 }

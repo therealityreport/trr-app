@@ -10,9 +10,13 @@ describe("admin api references generator", () => {
     const artifactPath = join(projectRoot, "src/lib/admin/api-references/generated/inventory.ts");
     const artifactSource = readFileSync(artifactPath, "utf8");
     const generatedAt = artifactSource.match(/"generatedAt": "([^"]+)"/)?.[1];
+    const sourceCommitSha = artifactSource.match(/"sourceCommitSha": "([^"]+)"/)?.[1];
 
     expect(generatedAt).toBeTruthy();
-    expect(renderGeneratedAdminApiReferenceInventoryModule(projectRoot, { generatedAt })).toBe(artifactSource);
+    expect(sourceCommitSha).toBeTruthy();
+    expect(
+      renderGeneratedAdminApiReferenceInventoryModule(projectRoot, { generatedAt, sourceCommitSha }),
+    ).toBe(artifactSource);
   });
 
   it("includes freshness metadata and manual backend repository mappings", () => {
