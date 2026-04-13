@@ -78,7 +78,16 @@ describe("/api/admin/reddit/communities/[communityId]/episode-discussions/refres
       subreddit: "BravoRealHousewives",
       is_show_focused: false,
       episode_title_patterns: ["Live Episode Discussion"],
+      analysis_flairs: [],
       analysis_all_flairs: ["Salt Lake City"],
+      post_flair_assignments: {
+        "salt lake city": {
+          show_ids: [SHOW_ID],
+          season_ids: [],
+          episode_ids: [],
+          person_ids: [],
+        },
+      },
     });
     getSeasonByIdMock.mockResolvedValue({ id: SEASON_ID, show_id: SHOW_ID, season_number: 6 });
     getSeasonsByShowIdMock.mockResolvedValue([

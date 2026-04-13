@@ -331,4 +331,32 @@ describe("ImagePaletteLab", () => {
     });
     expect(screen.getByTitle("#222222 (marker 2)")).toBeInTheDocument();
   });
+
+  it("hydrates shared palette state without requiring a source modal flow", async () => {
+    render(
+      <ImagePaletteLab
+        title="Shared Palette Lab"
+        initialState={{
+          sourceType: "upload",
+          sourceImageUrl: null,
+          trrShowId: "11111111-1111-4111-8111-111111111111",
+          seasonNumber: 2,
+          colors: ["#111111", "#222222", "#333333"],
+          seed: 24,
+          markerPoints: [
+            { x: 0.2, y: 0.2, radius: 18 },
+            { x: 0.4, y: 0.4, radius: 18 },
+            { x: 0.6, y: 0.6, radius: 18 },
+          ],
+          selectedPaletteEntryId: "palette-1",
+        }}
+      />,
+    );
+
+    expect(await screen.findByText("Source: upload")).toBeInTheDocument();
+    expect(screen.getByText("Show: 11111111-1111-4111-8111-111111111111")).toBeInTheDocument();
+    expect(screen.getByText("Season: 2")).toBeInTheDocument();
+    expect(screen.getByText("Step 0 | Seed 24")).toBeInTheDocument();
+    expect(screen.getByTestId("export-panel")).toHaveTextContent("3");
+  });
 });

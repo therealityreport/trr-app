@@ -318,6 +318,7 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
         s6: {
           show_ids: ["show-1", "show-2"],
           season_ids: ["season-1"],
+          episode_ids: ["episode-1"],
           person_ids: ["person-1"],
         },
       },
@@ -330,6 +331,7 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
           "S6 ❄️": {
             show_ids: ["show-1", "show-2"],
             season_ids: ["season-1"],
+            episode_ids: ["episode-1"],
             person_ids: ["person-1"],
           },
         },
@@ -347,6 +349,7 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
       s6: {
         show_ids: ["show-1", "show-2"],
         season_ids: ["season-1"],
+        episode_ids: ["episode-1"],
         person_ids: ["person-1"],
       },
     });
@@ -358,7 +361,72 @@ describe("/api/admin/reddit/communities/[communityId] route", () => {
           s6: {
             show_ids: ["show-1", "show-2"],
             season_ids: ["season-1"],
+            episode_ids: ["episode-1"],
             person_ids: ["person-1"],
+          },
+        },
+      }),
+    );
+  });
+
+  it("normalizes missing episode_ids to an empty list when PATCH payload omits them", async () => {
+    updateRedditCommunityMock.mockResolvedValue({
+      id: COMMUNITY_ID,
+      subreddit: "realhousewivesofSLC",
+      analysis_flairs: [],
+      analysis_all_flairs: [],
+      is_show_focused: true,
+      network_focus_targets: [],
+      franchise_focus_targets: [],
+      episode_title_patterns: ["Live Episode Discussion"],
+      post_flair_assignments: {
+        s7: {
+          show_ids: ["show-1"],
+          season_ids: ["season-2"],
+          episode_ids: [],
+          person_ids: [],
+        },
+      },
+    });
+
+    const request = new NextRequest(`http://localhost/api/admin/reddit/communities/${COMMUNITY_ID}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        post_flair_assignments: {
+          "S7 ❄️": {
+            show_ids: ["show-1"],
+            season_ids: ["season-2"],
+            person_ids: [],
+          },
+        },
+      }),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await PATCH(request, {
+      params: Promise.resolve({ communityId: COMMUNITY_ID }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.community?.post_flair_assignments).toEqual({
+      s7: {
+        show_ids: ["show-1"],
+        season_ids: ["season-2"],
+        episode_ids: [],
+        person_ids: [],
+      },
+    });
+    expect(updateRedditCommunityMock).toHaveBeenCalledWith(
+      { firebaseUid: "admin-uid", isAdmin: true },
+      COMMUNITY_ID,
+      expect.objectContaining({
+        postFlairAssignments: {
+          s7: {
+            show_ids: ["show-1"],
+            season_ids: ["season-2"],
+            episode_ids: [],
+            person_ids: [],
           },
         },
       }),

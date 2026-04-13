@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeRedditFlairAssignments } from "@/lib/admin/reddit-flair-targeting";
 import { requireAdmin } from "@/lib/server/auth";
 import type { AuthContext } from "@/lib/server/postgres";
 import { invalidateRouteResponseCache } from "@/lib/server/admin/route-response-cache";
@@ -183,7 +184,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     let postFlairAssignments:
-      | Record<string, { show_ids: string[]; season_ids: string[]; person_ids: string[] }>
+      | Record<
+          string,
+          { show_ids: string[]; season_ids: string[]; episode_ids: string[]; person_ids: string[] }
+        >
       | undefined;
     if (body.post_flair_assignments !== undefined) {
       if (
@@ -206,7 +210,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         return next;
       };
 
-      const validated: Record<string, { show_ids: string[]; season_ids: string[]; person_ids: string[] }> = {};
+      const validated: Record<
+        string,
+        { show_ids: string[]; season_ids: string[]; episode_ids: string[]; person_ids: string[] }
+      > = {};
       for (const [rawKey, rawAssignment] of Object.entries(body.post_flair_assignments as Record<string, unknown>)) {
         if (typeof rawAssignment !== "object" || rawAssignment === null || Array.isArray(rawAssignment)) {
           return NextResponse.json(
@@ -224,13 +231,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         const assignment = rawAssignment as Record<string, unknown>;
         const showIds = validateIds("show_ids", assignment.show_ids);
         const seasonIds = validateIds("season_ids", assignment.season_ids);
+        const episodeIds = validateIds("episode_ids", assignment.episode_ids ?? []);
         const personIds = validateIds("person_ids", assignment.person_ids);
-        if (!showIds || !seasonIds || !personIds) {
+        if (!showIds || !seasonIds || !episodeIds || !personIds) {
           return NextResponse.json(
             {
               error:
                 `post_flair_assignments.${rawKey} must include string arrays for ` +
-                `"show_ids", "season_ids", and "person_ids"`,
+                `"show_ids", "season_ids", "episode_ids", and "person_ids"`,
             },
             { status: 400 },
           );
@@ -238,10 +246,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         validated[flairKey] = {
           show_ids: showIds,
           season_ids: seasonIds,
+          episode_ids: episodeIds,
           person_ids: personIds,
         };
       }
-      postFlairAssignments = validated;
+      postFlairAssignments = normalizeRedditFlairAssignments(validated);
     }
 
     if ("episode_required_flairs" in body) {

@@ -24,4 +24,13 @@ describe("color-lab export bundle", () => {
     expect(bundle.all).toContain("rgba(");
     expect(bundle.all).toMatch(/--[a-z0-9-]+:/);
   });
+
+  it("emits Tailwind color tokens", () => {
+    const bundle = buildPaletteExportBundle(PALETTE);
+
+    expect(bundle.tailwind).toContain("/* Tailwind Colors */");
+    expect(bundle.tailwind).toContain("theme.extend.colors");
+    expect(bundle.tailwind).toMatch(/[a-z0-9-]+:\s*["']#[0-9a-f]{8}["']/i);
+    expect(bundle.all).toContain("/* Tailwind Colors */");
+  });
 });

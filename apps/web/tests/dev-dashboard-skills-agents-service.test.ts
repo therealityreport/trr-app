@@ -143,15 +143,6 @@ description: TRR-Backend skill.
 `,
     );
     await writeTextFile(
-      path.join(workspaceRoot, "screenalytics/.claude/skills/screen-skill/SKILL.md"),
-      `---
-name: Screen Skill
-description: screenalytics skill.
----
-`,
-    );
-
-    await writeTextFile(
       path.join(workspaceRoot, ".codex/config.toml"),
       `[agents]
 max_threads = 6
@@ -184,7 +175,6 @@ enabled = true
       "Workspace Claude Project",
       "TRR-APP Repo",
       "TRR-Backend Repo",
-      "screenalytics Repo",
       "Claude User",
     ]);
 

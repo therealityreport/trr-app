@@ -834,7 +834,7 @@ describe("RedditSourcesManager", () => {
     expect(screen.queryByRole("button", { name: "Season 7" })).not.toBeInTheDocument();
     const heading = await screen.findByRole("heading", { name: "r/BravoRealHousewives" });
     expect(screen.getAllByText("The Real Housewives of Salt Lake City").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("0 all-post · 1 scan · 1 relevant flairs").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("0 all-post · 1 scan · 0 active for RHOSLC").length).toBeGreaterThan(0);
     expect(screen.getByText("Supabase Posts: 861")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Salt Lake City · 221" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "WWHL · 121" })).toBeInTheDocument();
@@ -1076,6 +1076,20 @@ describe("RedditSourcesManager", () => {
       post_flairs: ["Salt Lake City", "WWHL", "Bravo"],
       analysis_flairs: ["WWHL", "Bravo"],
       analysis_all_flairs: ["Salt Lake City"],
+      post_flair_assignments: {
+        wwhl: {
+          show_ids: ["show-1"],
+          season_ids: [],
+          episode_ids: [],
+          person_ids: [],
+        },
+        bravo: {
+          show_ids: ["show-1"],
+          season_ids: [],
+          episode_ids: [],
+          person_ids: [],
+        },
+      },
     };
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1294,6 +1308,7 @@ describe("RedditSourcesManager", () => {
         "angie k": {
           show_ids: ["show-1"],
           season_ids: [],
+          episode_ids: [],
           person_ids: ["person-angie"],
         },
       },
@@ -1307,7 +1322,7 @@ describe("RedditSourcesManager", () => {
         const payload = JSON.parse(String(init.body ?? "{}")) as {
           post_flair_assignments?: Record<
             string,
-            { show_ids?: string[]; season_ids?: string[]; person_ids?: string[] }
+            { show_ids?: string[]; season_ids?: string[]; episode_ids?: string[]; person_ids?: string[] }
           >;
         };
         return jsonResponse({
@@ -1388,13 +1403,14 @@ describe("RedditSourcesManager", () => {
     ) as {
       post_flair_assignments: Record<
         string,
-        { show_ids: string[]; season_ids: string[]; person_ids: string[] }
+        { show_ids: string[]; season_ids: string[]; episode_ids: string[]; person_ids: string[] }
       >;
     };
 
     expect(patchBody.post_flair_assignments.s6).toEqual({
       show_ids: ["show-1", "show-3"],
       season_ids: ["season-1"],
+      episode_ids: [],
       person_ids: ["person-angie"],
     });
 
@@ -4117,6 +4133,17 @@ describe("RedditSourcesManager", () => {
   });
 
   it("renders season mode as cards-only communities with badges, flairs, and per-card actions", async () => {
+    const networkCommunity = {
+      ...baseCommunity,
+      post_flair_assignments: {
+        "episode discussion": {
+          show_ids: ["show-1"],
+          season_ids: [],
+          episode_ids: [],
+          person_ids: [],
+        },
+      },
+    };
     const showFocusedCommunity = {
       ...baseCommunity,
       id: "community-3",
@@ -4139,10 +4166,10 @@ describe("RedditSourcesManager", () => {
         return jsonResponse(discoveryPayload);
       }
       if (url.includes("/flairs/refresh")) {
-        return jsonResponse({ community: baseCommunity, flairs: baseCommunity.post_flairs, source: "api" });
+        return jsonResponse({ community: networkCommunity, flairs: networkCommunity.post_flairs, source: "api" });
       }
       if (url.includes("/api/admin/reddit/communities")) {
-        return jsonResponse({ communities: [baseCommunity, showFocusedCommunity] });
+        return jsonResponse({ communities: [networkCommunity, showFocusedCommunity] });
       }
       if (url.includes("/api/admin/covered-shows")) return jsonResponse(coveredShowsPayload);
       throw new Error(`Unexpected URL ${url}`);
