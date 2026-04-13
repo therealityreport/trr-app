@@ -11,6 +11,11 @@ import {
   extractPaletteFromImageData,
 } from "@/lib/admin/color-lab/palette-extraction";
 import { clamp, normalizeHexColor } from "@/lib/admin/color-lab/color-math";
+import {
+  buildColorLabShareHref,
+  encodeColorLabShareState,
+  type ColorLabShareState,
+} from "@/lib/admin/color-lab/share-state";
 import type { PaletteLibraryEntry, PaletteLibrarySourceType, PaletteSamplePoint } from "@/lib/admin/color-lab/types";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 
@@ -24,6 +29,7 @@ interface ImagePaletteLabProps {
   defaultShowId?: string;
   defaultSeasonNumber?: number | null;
   onApplyPalette?: (colors: string[]) => void;
+  initialState?: ColorLabShareState | null;
 }
 
 const MIN_COLORS = 3;
@@ -46,12 +52,34 @@ function toImageProxyUrl(url: string): string {
   return `/api/admin/colors/image-proxy?url=${encodeURIComponent(url)}`;
 }
 
+function getInitialPaletteCount(initialState?: ColorLabShareState | null): number {
+  const desired = initialState?.colors.length ?? 5;
+  return Math.min(MAX_COLORS, Math.max(MIN_COLORS, desired));
+}
+
+function getSharedImageState(initialState?: ColorLabShareState | null): {
+  imageUrl: string | null;
+  imageIdentity: string | null;
+} {
+  if (!initialState?.sourceImageUrl) {
+    return { imageUrl: null, imageIdentity: null };
+  }
+
+  return {
+    imageUrl: toImageProxyUrl(initialState.sourceImageUrl),
+    imageIdentity: `shared:${initialState.sourceType}:${initialState.sourceImageUrl}:${initialState.seed}`,
+  };
+}
+
 export default function ImagePaletteLab({
   title = "Image Palette Lab",
   defaultShowId,
   defaultSeasonNumber = null,
   onApplyPalette,
+  initialState = null,
 }: ImagePaletteLabProps) {
+  const sharedImageState = getSharedImageState(initialState);
+  const initialStateSignature = initialState ? encodeColorLabShareState(initialState) : null;
   const imageStageRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const sampledImageDataRef = useRef<ImageData | null>(null);
@@ -59,21 +87,26 @@ export default function ImagePaletteLab({
 
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
 
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [imageIdentity, setImageIdentity] = useState<string | null>(null);
-  const [imageSourceType, setImageSourceType] = useState<PaletteLibrarySourceType>("upload");
-  const [sourceImageUrl, setSourceImageUrl] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(sharedImageState.imageUrl);
+  const [imageIdentity, setImageIdentity] = useState<string | null>(sharedImageState.imageIdentity);
+  const [imageSourceType, setImageSourceType] = useState<PaletteLibrarySourceType>(initialState?.sourceType ?? "upload");
+  const [sourceImageUrl, setSourceImageUrl] = useState<string | null>(initialState?.sourceImageUrl ?? null);
 
-  const [showId, setShowId] = useState<string | null>(defaultShowId ?? null);
-  const [seasonNumber, setSeasonNumber] = useState<number | null>(defaultSeasonNumber ?? null);
+  const [showId, setShowId] = useState<string | null>(initialState?.trrShowId ?? defaultShowId ?? null);
+  const [seasonNumber, setSeasonNumber] = useState<number | null>(initialState?.seasonNumber ?? defaultSeasonNumber ?? null);
 
   const [seedStep, setSeedStep] = useState(0);
-  const [seed, setSeed] = useState(0);
-  const [paletteCount, setPaletteCount] = useState(5);
-  const [colors, setColors] = useState<string[]>([]);
-  const [markerPoints, setMarkerPoints] = useState<PaletteSamplePoint[]>([]);
+  const [seed, setSeed] = useState(initialState?.seed ?? 0);
+  const [paletteCount, setPaletteCount] = useState(() => getInitialPaletteCount(initialState));
+  const [colors, setColors] = useState<string[]>(() => normalizeColors(initialState?.colors ?? []));
+  const [markerPoints, setMarkerPoints] = useState<PaletteSamplePoint[]>(
+    () => initialState?.markerPoints.slice(0, getInitialPaletteCount(initialState)) ?? [],
+  );
   const [activeMarkerIndex, setActiveMarkerIndex] = useState<number | null>(null);
   const [imageViewport, setImageViewport] = useState<ImageViewport | null>(null);
+  const [selectedPaletteEntryId, setSelectedPaletteEntryId] = useState<string | null>(
+    initialState?.selectedPaletteEntryId ?? null,
+  );
 
   const [imageReady, setImageReady] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -87,7 +120,9 @@ export default function ImagePaletteLab({
   const [seasonOptionsLoading, setSeasonOptionsLoading] = useState(false);
 
   const [saveName, setSaveName] = useState("");
-  const [saveSeasonScope, setSaveSeasonScope] = useState<string>(defaultSeasonNumber ? String(defaultSeasonNumber) : "all");
+  const [saveSeasonScope, setSaveSeasonScope] = useState<string>(
+    initialState?.seasonNumber ? String(initialState.seasonNumber) : defaultSeasonNumber ? String(defaultSeasonNumber) : "all",
+  );
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -104,15 +139,6 @@ export default function ImagePaletteLab({
     };
   }, [colors]);
 
-  useEffect(() => {
-    setShowId(defaultShowId ?? null);
-  }, [defaultShowId]);
-
-  useEffect(() => {
-    setSeasonNumber(defaultSeasonNumber ?? null);
-    setSaveSeasonScope(defaultSeasonNumber ? String(defaultSeasonNumber) : "all");
-  }, [defaultSeasonNumber]);
-
   const revokePreviousUploadUrl = useCallback((nextImageUrl: string | null) => {
     const previous = uploadObjectUrlRef.current;
     if (previous && previous !== nextImageUrl) {
@@ -122,6 +148,64 @@ export default function ImagePaletteLab({
       uploadObjectUrlRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (initialStateSignature) return;
+    setShowId(defaultShowId ?? null);
+  }, [defaultShowId, initialStateSignature]);
+
+  useEffect(() => {
+    if (initialStateSignature) return;
+    setSeasonNumber(defaultSeasonNumber ?? null);
+    setSaveSeasonScope(defaultSeasonNumber ? String(defaultSeasonNumber) : "all");
+  }, [defaultSeasonNumber, initialStateSignature]);
+
+  useEffect(() => {
+    if (!initialState || !initialStateSignature) return;
+
+    revokePreviousUploadUrl(sharedImageState.imageUrl);
+    uploadObjectUrlRef.current = null;
+
+    const initialColors = normalizeColors(initialState.colors).slice(0, MAX_COLORS);
+    setImageUrl(sharedImageState.imageUrl);
+    setImageIdentity(sharedImageState.imageIdentity);
+    setImageSourceType(initialState.sourceType);
+    setSourceImageUrl(initialState.sourceImageUrl);
+    setShowId(initialState.trrShowId ?? defaultShowId ?? null);
+    setSeasonNumber(initialState.seasonNumber ?? defaultSeasonNumber ?? null);
+    setSeed(initialState.seed);
+    setPaletteCount(Math.min(MAX_COLORS, Math.max(MIN_COLORS, initialColors.length)));
+    setColors(initialColors);
+    setMarkerPoints(initialState.markerPoints.slice(0, initialColors.length));
+    setSelectedPaletteEntryId(initialState.selectedPaletteEntryId ?? null);
+    setSeedStep(0);
+    setImageReady(false);
+    setActiveMarkerIndex(null);
+    setImageViewport(null);
+    setExtractError(null);
+    setSaveError(null);
+    setSaveSuccess(
+      initialState.sourceImageUrl
+        ? "Shared palette restored."
+        : "Shared palette restored without the original source image.",
+    );
+    setSaveSeasonScope(
+      initialState.seasonNumber !== null && initialState.seasonNumber !== undefined
+        ? String(initialState.seasonNumber)
+        : defaultSeasonNumber
+          ? String(defaultSeasonNumber)
+          : "all",
+    );
+    sampledImageDataRef.current = null;
+  }, [
+    defaultSeasonNumber,
+    defaultShowId,
+    initialState,
+    initialStateSignature,
+    revokePreviousUploadUrl,
+    sharedImageState.imageIdentity,
+    sharedImageState.imageUrl,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -377,6 +461,7 @@ export default function ImagePaletteLab({
             ? String(defaultSeasonNumber)
             : "all",
       );
+      setSelectedPaletteEntryId(null);
       setSeedStep(0);
       setImageReady(false);
       setExtractError(null);
@@ -404,6 +489,7 @@ export default function ImagePaletteLab({
     setSeedStep(0);
     setShowId(entry.trr_show_id);
     setSeasonNumber(entry.season_number);
+    setSelectedPaletteEntryId(entry.id);
     setSaveSeasonScope(entry.season_number === null ? "all" : String(entry.season_number));
 
     if (entry.source_image_url) {
@@ -414,9 +500,21 @@ export default function ImagePaletteLab({
       setImageReady(false);
       setImageViewport(null);
       sampledImageDataRef.current = null;
+    } else {
+      setImageUrl(null);
+      setImageIdentity(null);
+      setImageSourceType(entry.source_type);
+      setSourceImageUrl(null);
+      setImageReady(false);
+      setImageViewport(null);
+      sampledImageDataRef.current = null;
     }
 
-    setSaveSuccess(`Loaded palette '${entry.name}'.`);
+    setSaveSuccess(
+      entry.source_image_url
+        ? `Loaded palette '${entry.name}'.`
+        : `Loaded palette '${entry.name}' without the original source image.`,
+    );
     setSaveError(null);
   }, []);
 
@@ -431,6 +529,7 @@ export default function ImagePaletteLab({
           throw new Error(payload.error ?? "Failed to delete palette.");
         }
         setPaletteEntries((prev) => prev.filter((entry) => entry.id !== entryId));
+        setSelectedPaletteEntryId((prev) => (prev === entryId ? null : prev));
       } catch (error) {
         setPaletteEntriesError(error instanceof Error ? error.message : "Failed to delete palette.");
       }
@@ -508,6 +607,7 @@ export default function ImagePaletteLab({
         const deduped = prev.filter((entry) => entry.id !== payload.entry!.id);
         return [payload.entry!, ...deduped];
       });
+      setSelectedPaletteEntryId(payload.entry.id);
       setSaveSuccess(`Saved '${trimmedName}' to palette library.`);
       setSaveName("");
     } catch (error) {
@@ -528,6 +628,28 @@ export default function ImagePaletteLab({
   ]);
 
   const canOpenLab = Boolean(imageUrl);
+  const shareUrl = useMemo(() => {
+    if (colors.length < MIN_COLORS || markerPoints.length !== colors.length) {
+      return null;
+    }
+
+    const href = buildColorLabShareHref({
+      sourceType: imageSourceType,
+      sourceImageUrl,
+      trrShowId: showId,
+      seasonNumber,
+      colors,
+      seed,
+      markerPoints,
+      selectedPaletteEntryId,
+    });
+
+    if (typeof window === "undefined") {
+      return href;
+    }
+
+    return new URL(href, window.location.origin).toString();
+  }, [colors, imageSourceType, markerPoints, seasonNumber, seed, selectedPaletteEntryId, showId, sourceImageUrl]);
 
   return (
     <section className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4">
@@ -757,7 +879,7 @@ export default function ImagePaletteLab({
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),23rem]">
         <ShadeThemePanels colors={colors} />
-        <PaletteExportPanel colors={colors} />
+        <PaletteExportPanel colors={colors} shareUrl={shareUrl} />
       </div>
 
       <section className="rounded-xl border border-zinc-200 bg-white p-4">
@@ -788,7 +910,12 @@ export default function ImagePaletteLab({
         ) : (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {paletteEntries.map((entry) => (
-              <article key={entry.id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+              <article
+                key={entry.id}
+                className={`rounded-lg border bg-zinc-50 p-3 ${
+                  entry.id === selectedPaletteEntryId ? "border-blue-400 ring-1 ring-blue-200" : "border-zinc-200"
+                }`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-zinc-900">{entry.name}</p>

@@ -120,11 +120,6 @@ const REPOS: RepoConfig[] = [
     path: "/Users/thomashulihan/Projects/TRR/TRR-APP",
     githubRemote: "therealityreport/trr-app",
   },
-  {
-    name: "screenalytics",
-    path: "/Users/thomashulihan/Projects/TRR/screenalytics",
-    githubRemote: "therealityreport/screenalytics",
-  },
 ];
 
 function clipError(text: string, maxLen = 400) {

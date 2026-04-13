@@ -464,7 +464,6 @@ async function collectSkillAgentInterfaces(
       const repoLabel = (() => {
         if (skillFile.startsWith(`${context.workspaceRoot}/TRR-APP/`)) return "TRR-APP";
         if (skillFile.startsWith(`${context.workspaceRoot}/TRR-Backend/`)) return "TRR-Backend";
-        if (skillFile.startsWith(`${context.workspaceRoot}/screenalytics/`)) return "screenalytics";
         return null;
       })();
 
@@ -640,12 +639,6 @@ export async function getDevDashboardSkillsAgentsData(
       label: "TRR-Backend Repo",
       repoLabel: "TRR-Backend",
       roots: [join(context.workspaceRoot, "TRR-Backend", ".agents", "skills")],
-    },
-    {
-      key: "screenalytics-repo",
-      label: "screenalytics Repo",
-      repoLabel: "screenalytics",
-      roots: [join(context.workspaceRoot, "screenalytics", ".claude", "skills")],
     },
     {
       key: "claude-user",

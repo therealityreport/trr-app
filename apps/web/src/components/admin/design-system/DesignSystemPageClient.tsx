@@ -24,6 +24,7 @@ import {
   DESIGN_SYSTEM_BASE_COLORS,
   DESIGN_SYSTEM_COLORS_STORAGE_KEY,
 } from "@/lib/admin/design-system-tokens";
+import type { ColorLabShareState } from "@/lib/admin/color-lab/types";
 import {
   buildHostedFontAssetPath,
   buildHostedFontUrl,
@@ -1775,9 +1776,10 @@ const COLOR_FAMILIES: ColorFamily[] = [
 interface DesignSystemPageContentProps {
   activeTab: DesignSystemTabId;
   activeSubtab: DesignSystemSubtabId | null;
+  initialColorLabState?: ColorLabShareState | null;
 }
 
-function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageContentProps) {
+function DesignSystemPageContent({ activeTab, activeSubtab, initialColorLabState = null }: DesignSystemPageContentProps) {
   const router = useRouter();
   const { user, checking, hasAccess } = useAdminGuard();
   const [previewText, setPreviewText] = useState(
@@ -2430,7 +2432,7 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
             </section>
 
             <section className="mt-6">
-              <ImagePaletteLab title="Image Palette Lab (Global)" />
+              <ImagePaletteLab title="Image Palette Lab (Global)" initialState={initialColorLabState} />
             </section>
           </>
         )}
@@ -2741,12 +2743,21 @@ function DesignSystemPageContent({ activeTab, activeSubtab }: DesignSystemPageCo
 interface DesignSystemPageClientProps {
   activeTab: DesignSystemTabId;
   activeSubtab: DesignSystemSubtabId | null;
+  initialColorLabState?: ColorLabShareState | null;
 }
 
-export default function DesignSystemPageClient({ activeTab, activeSubtab }: DesignSystemPageClientProps) {
+export default function DesignSystemPageClient({
+  activeTab,
+  activeSubtab,
+  initialColorLabState = null,
+}: DesignSystemPageClientProps) {
   return (
     <Suspense fallback={<div className="py-12 text-center text-sm text-zinc-500">Loading...</div>}>
-      <DesignSystemPageContent activeTab={activeTab} activeSubtab={activeSubtab} />
+      <DesignSystemPageContent
+        activeTab={activeTab}
+        activeSubtab={activeSubtab}
+        initialColorLabState={initialColorLabState}
+      />
     </Suspense>
   );
 }

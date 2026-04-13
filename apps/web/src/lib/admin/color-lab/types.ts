@@ -47,6 +47,7 @@ export interface ExportBundle {
   scssHsl: string;
   scssRgb: string;
   scssGradient: string;
+  tailwind: string;
   all: string;
 }
 
@@ -54,4 +55,15 @@ export interface PaletteExtractionResult {
   seed: number;
   points: PaletteSamplePoint[];
   colors: string[];
+}
+
+export interface ColorLabShareState {
+  sourceType: PaletteLibrarySourceType;
+  sourceImageUrl: string | null;
+  trrShowId: string | null;
+  seasonNumber: number | null;
+  colors: string[];
+  seed: number;
+  markerPoints: PaletteSamplePoint[];
+  selectedPaletteEntryId: string | null;
 }

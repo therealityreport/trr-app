@@ -4,9 +4,9 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-11T22:35:30.935Z",
-  "sourceCommitSha": "a4b6bf8e2fa80e51dadc7ef60426bacb3595ece1",
-  "overrideDigest": "cd33b0d4820665f26f884f9b8e2bdcf58830698e9e330137142d9281bbd23fb9",
+  "generatedAt": "2026-04-13T12:30:56.960Z",
+  "sourceCommitSha": "48704b47e55732bb43bffc7d8ada2997116882a8",
+  "overrideDigest": "a29b267e3edd1915ce8b856036892160e0fbd1171e516987d38acd697ee8676b",
   "nodes": [
     {
       "id": "backend:DELETE:/api/v1/admin/brands/logos/options/saved/[assetId]",
@@ -6258,7 +6258,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "DELETE",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/route.ts",
       "sourceLocator": {
-        "line": 308,
+        "line": 317,
         "symbol": "DELETE"
       },
       "provenance": "static_scan",
@@ -7900,7 +7900,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/route.ts",
       "sourceLocator": {
-        "line": 28,
+        "line": 29,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -7968,7 +7968,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/discover/route.ts",
       "sourceLocator": {
-        "line": 808,
+        "line": 809,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -8002,7 +8002,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/episode-discussions/refresh/route.ts",
       "sourceLocator": {
-        "line": 297,
+        "line": 298,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12527,7 +12527,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PATCH",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/route.ts",
       "sourceLocator": {
-        "line": 78,
+        "line": 79,
         "symbol": "PATCH"
       },
       "provenance": "static_scan",
@@ -18590,7 +18590,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/design-system/DesignSystemPageClient.tsx",
       "sourceLocator": {
-        "line": 1829,
+        "line": 1831,
         "matchedText": "\"/api/admin/design-system/typography\""
       },
       "provenance": "static_scan",

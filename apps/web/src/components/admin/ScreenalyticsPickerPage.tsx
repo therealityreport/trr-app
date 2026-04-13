@@ -131,7 +131,8 @@ export default function ScreenalyticsPickerPage() {
           <h1 className="text-3xl font-bold text-zinc-900">Screenalytics</h1>
           <p className="mt-1 text-sm text-zinc-600">
             Pick a show, then jump into its admin workspace for screen-time and related review flows. This picker lives
-            in TRR-APP and is separate from the retiring legacy screenalytics repo UI.
+            in TRR-APP, remains the canonical admin label for this workflow, and is separate from the retired legacy
+            screenalytics repo UI.
           </p>
         </div>
 

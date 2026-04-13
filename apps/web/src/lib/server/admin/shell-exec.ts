@@ -14,18 +14,15 @@ const ALLOWED_COMMANDS = new Set(["git", "gh", "grep", "find"]);
 const WORKSPACE_ROOT = "/Users/thomashulihan/Projects/TRR";
 const TRR_BACKEND_DIR = "/Users/thomashulihan/Projects/TRR/TRR-Backend";
 const TRR_APP_DIR = "/Users/thomashulihan/Projects/TRR/TRR-APP";
-const SCREENALYTICS_DIR = "/Users/thomashulihan/Projects/TRR/screenalytics";
 
-const ALLOWED_DIRS = new Set(
-  [WORKSPACE_ROOT, TRR_BACKEND_DIR, TRR_APP_DIR, SCREENALYTICS_DIR].map((dir) => resolve(dir)),
-);
+const ALLOWED_DIRS = new Set([WORKSPACE_ROOT, TRR_BACKEND_DIR, TRR_APP_DIR].map((dir) => resolve(dir)));
 
 export function getWorkspaceRoot() {
   return WORKSPACE_ROOT;
 }
 
 export function getAllowedRepoDirs() {
-  return [TRR_BACKEND_DIR, TRR_APP_DIR, SCREENALYTICS_DIR];
+  return [TRR_BACKEND_DIR, TRR_APP_DIR];
 }
 
 function validateCommand(command: string) {
@@ -78,4 +75,3 @@ export async function safeExec(
     );
   });
 }
-

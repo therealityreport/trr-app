@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveEpisodeRequiredFlairs } from "@/lib/admin/reddit-flair-targeting";
 import { requireAdmin } from "@/lib/server/auth";
 import {
   RedditDiscoveryError,
@@ -436,13 +437,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         } => episode !== null,
       );
 
+    const episodeFlairTargets = resolveEpisodeRequiredFlairs(community, {
+      activeShowId: community.trr_show_id,
+      seasonId: resolvedSeason.id,
+    });
+
     const resolvedRules = resolveEpisodeDiscussionRules({
       subreddit: community.subreddit,
       showName: show.name,
       showAliases: show.alternative_names,
       isShowFocused: community.is_show_focused,
       episodeTitlePatterns: community.episode_title_patterns,
-      analysisAllFlairs: community.analysis_all_flairs,
+      analysisAllFlairs: episodeFlairTargets.requiredFlairs,
     });
 
     const discovery = await discoverEpisodeDiscussionThreads({
@@ -451,8 +457,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       showAliases: show.alternative_names,
       seasonNumber: resolvedSeason.season_number,
       seasonEpisodes,
+      resolvedSeasonId: resolvedSeason.id,
       episodeTitlePatterns: resolvedRules.effectiveEpisodeTitlePatterns,
       episodeRequiredFlairs: resolvedRules.effectiveRequiredFlairs,
+      episodeFlairAssignments: episodeFlairTargets.episodeFlairAssignments,
       isShowFocused: community.is_show_focused,
       periodStart: parsedPeriodStart.value,
       periodEnd: parsedPeriodEnd.value,

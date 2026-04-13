@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
+import { resolveCommunityFlairModes } from "@/lib/admin/reddit-flair-targeting";
 import { requireAdmin } from "@/lib/server/auth";
 import { getCastNamesByShowId, getShowById } from "@/lib/server/trr-api/trr-shows-repository";
 import {
@@ -883,10 +884,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         ? rawMode
         : undefined;
     const forceFlairOnlyMode = forceIncludeFlairs.length > 0;
-    const analysisFlairs = forceFlairOnlyMode ? [] : community.analysis_flairs ?? [];
+    const resolvedFlairModes = resolveCommunityFlairModes(community, community.trr_show_id);
+    const analysisFlairs = forceFlairOnlyMode ? [] : resolvedFlairModes.analysisFlairs;
     const analysisAllFlairs = forceFlairOnlyMode
       ? forceIncludeFlairs
-      : community.analysis_all_flairs ?? [];
+      : resolvedFlairModes.analysisAllFlairs;
 
     const periodKeyInput = {
       communityId,

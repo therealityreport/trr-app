@@ -2,6 +2,7 @@ import {
   normalizeRedditFlairLabel,
   sanitizeRedditFlairList,
 } from "@/lib/server/admin/reddit-flair-normalization";
+import { isEpisodeFlairAssignmentMatch } from "@/lib/admin/reddit-flair-targeting";
 import { toCanonicalFlairKey } from "@/lib/reddit/flair-key";
 import {
   EPISODE_DISCUSSION_TYPE_ALIASES,
@@ -146,9 +147,11 @@ export interface DiscoverEpisodeDiscussionThreadsInput {
   showName: string;
   showAliases?: string[] | null;
   seasonNumber: number;
-  seasonEpisodes?: Array<{ episode_number: number; air_date: string | null }> | null;
+  resolvedSeasonId?: string | null;
+  seasonEpisodes?: Array<{ id?: string | null; episode_number: number; air_date: string | null }> | null;
   episodeTitlePatterns?: string[] | null;
   episodeRequiredFlairs?: string[] | null;
+  episodeFlairAssignments?: Record<string, { season_ids: string[]; episode_ids: string[] }> | null;
   isShowFocused?: boolean;
   periodStart?: string | null;
   periodEnd?: string | null;
@@ -1625,6 +1628,9 @@ const collectEpisodeDiscussionCandidates = (input: {
   titlePatterns: string[];
   seasonNumber: number;
   requiredFlairKeys: Set<string>;
+  episodeFlairAssignments: Record<string, { season_ids: string[]; episode_ids: string[] }>;
+  resolvedSeasonId: string | null;
+  episodeIdByNumber: Map<number, string>;
   isShowFocused: boolean;
   periodStartDate: Date | null;
   periodEndDate: Date | null;
@@ -1675,9 +1681,17 @@ const collectEpisodeDiscussionCandidates = (input: {
     const normalizedThreadFlair = thread.link_flair_text
       ? normalizeRedditFlairLabel(input.subreddit, thread.link_flair_text)
       : null;
+    const flairKey = normalizedThreadFlair ? toCanonicalFlairKey(normalizedThreadFlair) : "";
     if (!input.isShowFocused && input.requiredFlairKeys.size > 0) {
-      const flairKey = normalizedThreadFlair?.toLowerCase() ?? null;
       if (!flairKey || !input.requiredFlairKeys.has(flairKey)) {
+        continue;
+      }
+      if (
+        !isEpisodeFlairAssignmentMatch(input.episodeFlairAssignments[flairKey], {
+          seasonId: input.resolvedSeasonId,
+          episodeId: input.episodeIdByNumber.get(episodeNumber) ?? null,
+        })
+      ) {
         continue;
       }
     }
@@ -1738,6 +1752,7 @@ export async function discoverEpisodeDiscussionThreads(
   const titlePatterns = sanitizeEpisodeTitlePatterns(input.episodeTitlePatterns ?? []);
   const requiredFlairs = sanitizeRedditFlairList(subreddit, input.episodeRequiredFlairs ?? []);
   const requiredFlairKeys = new Set(requiredFlairs.map((flair) => flair.toLowerCase()));
+  const episodeFlairAssignments = input.episodeFlairAssignments ?? {};
   const isShowFocused = input.isShowFocused ?? false;
   const periodStartDate = parseIsoDate(input.periodStart);
   const periodEndDate = parseIsoDate(input.periodEnd);
@@ -1792,6 +1807,16 @@ export async function discoverEpisodeDiscussionThreads(
 
   const expectedEpisodeNumbers = normalizeExpectedEpisodeNumbers(input.seasonEpisodes);
   const expectedEpisodeNumberSet = new Set(expectedEpisodeNumbers);
+  const episodeIdByNumber = new Map<number, string>();
+  for (const episode of input.seasonEpisodes ?? []) {
+    if (!episode || !Number.isFinite(episode.episode_number) || typeof episode.id !== "string") {
+      continue;
+    }
+    const episodeNumber = Math.floor(episode.episode_number);
+    const episodeId = episode.id.trim();
+    if (episodeNumber <= 0 || !episodeId || episodeIdByNumber.has(episodeNumber)) continue;
+    episodeIdByNumber.set(episodeNumber, episodeId);
+  }
   const expectedSlots = expectedDiscussionSlots(expectedEpisodeNumbers);
   const expectedSlotKeys = new Set(
     expectedSlots.map((slot) => slotKey(slot.episode_number, slot.discussion_type)),
@@ -1840,6 +1865,9 @@ export async function discoverEpisodeDiscussionThreads(
     titlePatterns,
     seasonNumber,
     requiredFlairKeys,
+    episodeFlairAssignments,
+    resolvedSeasonId: input.resolvedSeasonId ?? null,
+    episodeIdByNumber,
     isShowFocused,
     periodStartDate,
     periodEndDate,
@@ -1902,6 +1930,9 @@ export async function discoverEpisodeDiscussionThreads(
         titlePatterns,
         seasonNumber,
         requiredFlairKeys,
+        episodeFlairAssignments,
+        resolvedSeasonId: input.resolvedSeasonId ?? null,
+        episodeIdByNumber,
         isShowFocused,
         periodStartDate,
         periodEndDate,
