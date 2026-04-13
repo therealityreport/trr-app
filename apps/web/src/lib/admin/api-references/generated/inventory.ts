@@ -4,8 +4,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-13T12:30:56.960Z",
-  "sourceCommitSha": "48704b47e55732bb43bffc7d8ada2997116882a8",
+  "generatedAt": "2026-04-13T12:44:16.912Z",
+  "sourceCommitSha": "c223ce7b65b3ad992f5a8bb0f8db40f62d15bfee",
   "overrideDigest": "a29b267e3edd1915ce8b856036892160e0fbd1171e516987d38acd697ee8676b",
   "nodes": [
     {
