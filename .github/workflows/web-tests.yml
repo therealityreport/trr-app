@@ -49,7 +49,7 @@ jobs:
         run: |
           python3 scripts/check_env_example.py \
             --file apps/web/.env.example \
-            --required TRR_API_URL SCREENALYTICS_API_URL TRR_INTERNAL_ADMIN_SHARED_SECRET
+            --required TRR_API_URL TRR_INTERNAL_ADMIN_SHARED_SECRET
         working-directory: .
       - name: Install deps
         run: pnpm install --frozen-lockfile
