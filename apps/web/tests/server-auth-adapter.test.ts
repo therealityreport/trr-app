@@ -6,14 +6,14 @@ const {
   verifySessionCookieMock,
   createClientMock,
   getUserMock,
-  warnSpy,
 } = vi.hoisted(() => ({
   verifyIdTokenMock: vi.fn(),
   verifySessionCookieMock: vi.fn(),
   createClientMock: vi.fn(),
   getUserMock: vi.fn(),
-  warnSpy: vi.spyOn(console, "warn").mockImplementation(() => {}),
 }));
+
+let warnSpy: ReturnType<typeof vi.spyOn<typeof console, "warn">>;
 
 vi.mock("@/lib/firebaseAdmin", () => ({
   adminAuth: {
@@ -45,7 +45,7 @@ describe("server auth adapter", () => {
     verifySessionCookieMock.mockReset();
     createClientMock.mockReset();
     getUserMock.mockReset();
-    warnSpy.mockClear();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     process.env.TRR_AUTH_PROVIDER = "firebase";
     process.env.TRR_AUTH_SHADOW_MODE = "false";

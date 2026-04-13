@@ -7,8 +7,12 @@ describe("reddit sources manager backfill polling wiring", () => {
     const filePath = path.resolve(__dirname, "../src/components/admin/reddit-sources-manager.tsx");
     const contents = fs.readFileSync(filePath, "utf8");
 
-    expect(contents).toContain("document.addEventListener(\"visibilitychange\", handleVisibilityChange)");
-    expect(contents).toContain("document.visibilityState === \"hidden\"");
-    expect(contents).toContain("scheduleNextPoll();");
+    // Visibility handler is wired into the document.
+    expect(contents).toContain("document.addEventListener(\"visibilitychange\", handleVisibility)");
+    // Handler maps the current visibility to the isTabVisible React state.
+    expect(contents).toContain("setIsTabVisible(document.visibilityState === \"visible\")");
+    // At least one effect bails early when the tab is not visible, which pauses
+    // the work that would otherwise enqueue the next poll.
+    expect(contents).toContain("if (!isTabVisible) return;");
   });
 });

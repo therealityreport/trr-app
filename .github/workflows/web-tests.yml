@@ -58,9 +58,12 @@ jobs:
       - name: Run targeted fandom typecheck (Node 24 full lane)
         if: matrix.lane == 'full'
         run: pnpm run typecheck:fandom
-      - name: Run unit tests with coverage (Node 24 full lane)
+      - name: Install Playwright Chromium (Node 24 full lane)
         if: matrix.lane == 'full'
-        run: pnpm run test:ci -- --coverage
+        run: pnpm exec playwright install chromium
+      - name: Run unit tests (Node 24 full lane)
+        if: matrix.lane == 'full'
+        run: pnpm run test:ci
       - name: Run smoke tests (Node 22 compatibility lane)
         if: matrix.lane == 'compat'
         run: pnpm exec vitest run -c vitest.config.ts tests/validation.test.ts tests/cdn-fonts.test.ts

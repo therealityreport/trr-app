@@ -10,10 +10,12 @@ import {
 } from "@/lib/admin/design-docs-pipeline-validators";
 
 const articleDetailPath = resolve(
-  "/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-docs/ArticleDetailPage.tsx",
+  __dirname,
+  "../src/components/admin/design-docs/ArticleDetailPage.tsx",
 );
 const chartDataPath = resolve(
-  "/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/components/admin/design-docs/chart-data.ts",
+  __dirname,
+  "../src/components/admin/design-docs/chart-data.ts",
 );
 
 describe("design docs pipeline validators", () => {

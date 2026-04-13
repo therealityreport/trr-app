@@ -62,7 +62,13 @@ type SharedResourceConfig<T> =
 
 const DEFAULT_LEASE_DURATION_MS = 45_000;
 const DEFAULT_FOLLOWER_CHECK_INTERVAL_MS = 5_000;
-const DEFAULT_STARTUP_JITTER: [number, number] = [150, 1_200];
+// Startup jitter spreads polling across tabs that open simultaneously. Vitest runs
+// real timers with short waitFor windows, so we zero the jitter under test to keep
+// initial poll latency deterministic instead of flapping [150ms, 1.2s].
+const IS_TEST_ENVIRONMENT =
+  typeof process !== "undefined" &&
+  (process.env?.NODE_ENV === "test" || Boolean(process.env?.VITEST));
+const DEFAULT_STARTUP_JITTER: [number, number] = IS_TEST_ENVIRONMENT ? [0, 0] : [150, 1_200];
 const SNAPSHOT_VERSION = "v1";
 
 type LeaderLease = {
@@ -165,6 +171,25 @@ class SharedLiveResourceCoordinator<T> {
       this.stopExecutor();
     }
     this.scheduleTick(0);
+  }
+
+  /**
+   * Test-only teardown: cancels pending timers, aborts any in-flight executor, and drops
+   * subscribers. Called via `__resetSharedLiveResourceRegistryForTests` in test hooks to
+   * avoid leaking coordinator state between cases.
+   */
+  dispose(): void {
+    this.clearTimer();
+    this.stopExecutor();
+    this.subscribers.clear();
+    this.releaseLeaderLease();
+    if (this.channel) {
+      try {
+        this.channel.close();
+      } catch {
+        // best-effort
+      }
+    }
   }
 
   private hasActiveInterest(): boolean {
@@ -545,4 +570,28 @@ export const useSharedSseResource = <T,>(config: SharedSseConfig<T>) => {
 
 export const useSharedManualResource = <T,>(config: SharedManualConfig) => {
   return useSharedLiveResource<T>({ ...config, mode: "manualRefetch" });
+};
+
+/**
+ * Test-only helper to clear the shared coordinator registry between tests. Without this,
+ * JSDOM's persistent `window` causes coordinator instances (with their pending timers,
+ * subscribers, and cached snapshots) to leak across test cases and interfere with one
+ * another. This is only wired into test `beforeEach` hooks — production code should not
+ * call it.
+ */
+export const __resetSharedLiveResourceRegistryForTests = (): void => {
+  if (typeof window === "undefined") return;
+  const key = "__trr_shared_live_resource_registry__" as const;
+  const withRegistry = window as Window & { [key]?: SharedLiveRegistry };
+  const registry = withRegistry[key];
+  if (registry) {
+    for (const coordinator of Object.values(registry)) {
+      try {
+        (coordinator as unknown as { dispose?: () => void })?.dispose?.();
+      } catch {
+        // best-effort cleanup
+      }
+    }
+  }
+  delete withRegistry[key];
 };

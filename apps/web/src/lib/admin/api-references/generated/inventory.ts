@@ -4,9 +4,9 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-07T01:23:44.820Z",
-  "sourceCommitSha": "a9ba1d7d959b106dbf0e11daf3961b5cceb5bb43",
-  "overrideDigest": "db240684665979b1f5001ee6a725aaa8e2f358915451f21036188bbac9fdbf3c",
+  "generatedAt": "2026-04-11T22:35:30.935Z",
+  "sourceCommitSha": "a4b6bf8e2fa80e51dadc7ef60426bacb3595ece1",
+  "overrideDigest": "cd33b0d4820665f26f884f9b8e2bdcf58830698e9e330137142d9281bbd23fb9",
   "nodes": [
     {
       "id": "backend:DELETE:/api/v1/admin/brands/logos/options/saved/[assetId]",
@@ -1190,6 +1190,37 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "high"
+    },
+    {
+      "id": "backend:GET:/api/v1/admin/socials/live-status/stream",
+      "kind": "backend_endpoint",
+      "title": "GET /api/v1/admin/socials/live-status/stream",
+      "pathPattern": "/api/v1/admin/socials/live-status/stream",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/stream/route.ts",
+      "sourceLocator": {
+        "line": 11,
+        "matchedText": "\"/admin/socials/live-status/stream\""
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ],
+      "usageTier": "continuous",
+      "polls": true,
+      "pollCadenceMs": null,
+      "automatic": true,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [],
+      "staticOnly": false,
+      "payloadRisk": "medium",
       "fanoutRisk": "high"
     },
     {
@@ -3204,7 +3235,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/links/discover/stream/route.ts",
       "sourceLocator": {
-        "line": 196,
+        "line": 268,
         "matchedText": "`/admin/shows/${showId}/links/discover/stream`"
       },
       "provenance": "static_scan",
@@ -3307,7 +3338,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/refresh/stream/route.ts",
       "sourceLocator": {
-        "line": 204,
+        "line": 207,
         "matchedText": "`/admin/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",
@@ -3332,6 +3363,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "staticOnly": false,
       "payloadRisk": "high",
       "fanoutRisk": "high"
+    },
+    {
+      "id": "backend:POST:/api/v1/admin/shows/[showId]/refresh/target/[target]/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type",
+      "kind": "backend_endpoint",
+      "title": "POST /api/v1/admin/shows/[showId]/refresh/target/[target]/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type",
+      "pathPattern": "/api/v1/admin/shows/[showId]/refresh/target/[target]/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry/route.ts",
+      "sourceLocator": {
+        "line": 49,
+        "matchedText": "`/admin/shows/${showId}/refresh/target/${target}/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type\""
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
     },
     {
       "id": "backend:POST:/api/v1/admin/shows/[showId]/roles",
@@ -4892,6 +4957,41 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "page:/admin/social/reddit",
+      "kind": "ui_surface",
+      "title": "Admin / Social / Reddit",
+      "pathPattern": "/admin/social/reddit",
+      "symbol": "page",
+      "sourceFile": "src/app/admin/social/reddit/page.tsx",
+      "sourceLocator": {
+        "line": 1,
+        "symbol": "page"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:admin_page",
+        "derived:static_only_page"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": true,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "page:/admin/social/reddit/[communitySlug]",
       "kind": "ui_surface",
       "title": "Admin / Social / Reddit / CommunitySlug",
@@ -5668,7 +5768,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 1496,
+        "line": 1410,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -5699,7 +5799,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 8048,
+        "line": 7767,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -5730,7 +5830,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7065,
+        "line": 7151,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -5761,7 +5861,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7073,
+        "line": 7159,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -6158,7 +6258,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "DELETE",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/route.ts",
       "sourceLocator": {
-        "line": 243,
+        "line": 308,
         "symbol": "DELETE"
       },
       "provenance": "static_scan",
@@ -7800,7 +7900,41 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/route.ts",
       "sourceLocator": {
-        "line": 27,
+        "line": 28,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/reddit/communities/[communityId]/backfill/snapshot",
+      "kind": "api_route",
+      "title": "GET /api/admin/reddit/communities/[communityId]/backfill/snapshot",
+      "pathPattern": "/api/admin/reddit/communities/[communityId]/backfill/snapshot",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/backfill/snapshot/route.ts",
+      "sourceLocator": {
+        "line": 25,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10644,6 +10778,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/snapshot",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/snapshot",
+      "pathPattern": "/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/snapshot",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/snapshot/route.ts",
+      "sourceLocator": {
+        "line": 32,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": true,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": true,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "high"
+    },
+    {
       "id": "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]",
       "kind": "api_route",
       "title": "GET /api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]",
@@ -10710,6 +10878,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "staticOnly": false,
       "payloadRisk": "high",
       "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/snapshot",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/snapshot",
+      "pathPattern": "/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/snapshot",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/snapshot/route.ts",
+      "sourceLocator": {
+        "line": 29,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": true,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": true,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "high"
     },
     {
       "id": "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/summary",
@@ -11528,6 +11730,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/trr-api/social-growth/cast-comparison/snapshot",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social-growth/cast-comparison/snapshot",
+      "pathPattern": "/api/admin/trr-api/social-growth/cast-comparison/snapshot",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social-growth/cast-comparison/snapshot/route.ts",
+      "sourceLocator": {
+        "line": 36,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": true,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "high"
+    },
+    {
       "id": "route:GET:/api/admin/trr-api/social/ingest/health-dot",
       "kind": "api_route",
       "title": "GET /api/admin/trr-api/social/ingest/health-dot",
@@ -11557,6 +11793,68 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "staticOnly": false,
       "payloadRisk": "low",
       "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/social/ingest/live-status",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/ingest/live-status",
+      "pathPattern": "/api/admin/trr-api/social/ingest/live-status",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/route.ts",
+      "sourceLocator": {
+        "line": 19,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/social/ingest/live-status/stream",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/ingest/live-status/stream",
+      "pathPattern": "/api/admin/trr-api/social/ingest/live-status/stream",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/stream/route.ts",
+      "sourceLocator": {
+        "line": 8,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "continuous",
+      "polls": true,
+      "pollCadenceMs": null,
+      "automatic": true,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [],
+      "staticOnly": false,
+      "payloadRisk": "medium",
+      "fanoutRisk": "high"
     },
     {
       "id": "route:GET:/api/admin/trr-api/social/ingest/queue-status",
@@ -11826,6 +12124,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "high",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags",
       "kind": "api_route",
       "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags",
@@ -11923,6 +12254,73 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot/route.ts",
+      "sourceLocator": {
+        "line": 29,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": true,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/route.ts",
+      "sourceLocator": {
+        "line": 15,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -12129,7 +12527,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PATCH",
       "sourceFile": "src/app/api/admin/reddit/communities/[communityId]/route.ts",
       "sourceLocator": {
-        "line": 77,
+        "line": 78,
         "symbol": "PATCH"
       },
       "provenance": "static_scan",
@@ -15356,7 +15754,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/links/discover/stream/route.ts",
       "sourceLocator": {
-        "line": 175,
+        "line": 247,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15494,7 +15892,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/refresh/stream/route.ts",
       "sourceLocator": {
-        "line": 175,
+        "line": 178,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -15519,6 +15917,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "staticOnly": false,
       "payloadRisk": "high",
       "fanoutRisk": "high"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry",
+      "pathPattern": "/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry/route.ts",
+      "sourceLocator": {
+        "line": 36,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
     },
     {
       "id": "route:POST:/api/admin/trr-api/shows/[showId]/roles",
@@ -16032,6 +16464,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/snapshots/invalidate",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/snapshots/invalidate",
+      "pathPattern": "/api/admin/trr-api/snapshots/invalidate",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/snapshots/invalidate/route.ts",
+      "sourceLocator": {
+        "line": 35,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:POST:/api/admin/trr-api/social-growth/refresh-batch",
       "kind": "api_route",
       "title": "POST /api/admin/trr-api/social-growth/refresh-batch",
@@ -16261,6 +16726,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {
@@ -16502,6 +17001,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-newer",
       "kind": "api_route",
       "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-newer",
@@ -16567,6 +17100,72 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh/route.ts",
+      "sourceLocator": {
+        "line": 15,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -17559,7 +18158,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 1496,
+        "line": 1410,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -17577,7 +18176,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 8048,
+        "line": 7767,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -17595,7 +18194,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7065,
+        "line": 7151,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -17613,7 +18212,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7073,
+        "line": 7159,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -17631,26 +18230,8 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2437,
+        "line": 2351,
         "matchedText": "`/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=8`"
-      },
-      "provenance": "static_scan",
-      "confidence": "high",
-      "verificationStatus": "verified",
-      "basis": [
-        "static_scan:ui_request_call"
-      ]
-    },
-    {
-      "id": "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:GET:/api/admin/trr-api/people/[personId]/external-ids",
-      "kind": "originates_request",
-      "from": "component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage",
-      "to": "route:GET:/api/admin/trr-api/people/[personId]/external-ids",
-      "title": null,
-      "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
-      "sourceLocator": {
-        "line": 5662,
-        "matchedText": "`/api/admin/trr-api/people/${personId}/external-ids`"
       },
       "provenance": "static_scan",
       "confidence": "high",
@@ -17667,26 +18248,8 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6244,
+        "line": 5963,
         "matchedText": "`/api/admin/trr-api/people/${personId}/fandom${showIdQuery}`"
-      },
-      "provenance": "static_scan",
-      "confidence": "high",
-      "verificationStatus": "verified",
-      "basis": [
-        "static_scan:ui_request_call"
-      ]
-    },
-    {
-      "id": "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PATCH:/api/admin/trr-api/people/[personId]",
-      "kind": "originates_request",
-      "from": "component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage",
-      "to": "route:PATCH:/api/admin/trr-api/people/[personId]",
-      "title": null,
-      "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
-      "sourceLocator": {
-        "line": 5770,
-        "matchedText": "`/api/admin/trr-api/people/${personId}`"
       },
       "provenance": "static_scan",
       "confidence": "high",
@@ -17703,7 +18266,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2927,
+        "line": 2841,
         "matchedText": "`/api/admin/trr-api/people/${photo.person_id}/gallery/${photo.link_id}/facebank-seed`"
       },
       "provenance": "static_scan",
@@ -17721,7 +18284,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10418,
+        "line": 10104,
         "matchedText": "\"/api/admin/trr-api/assets/archive\""
       },
       "provenance": "static_scan",
@@ -17739,7 +18302,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10490,
+        "line": 10176,
         "matchedText": "\"/api/admin/trr-api/assets/content-type\""
       },
       "provenance": "static_scan",
@@ -17757,7 +18320,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10447,
+        "line": 10133,
         "matchedText": "\"/api/admin/trr-api/assets/star\""
       },
       "provenance": "static_scan",
@@ -17775,7 +18338,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2763,
+        "line": 2677,
         "matchedText": "`/api/admin/trr-api/cast-photos/${photo.id}/mirror`"
       },
       "provenance": "static_scan",
@@ -17793,7 +18356,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2888,
+        "line": 2802,
         "matchedText": "`/api/admin/trr-api/media-assets/${photo.media_asset_id}/mirror`"
       },
       "provenance": "static_scan",
@@ -17811,7 +18374,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6310,
+        "line": 6029,
         "matchedText": "`/api/admin/trr-api/people/${personId}/import-fandom/commit`"
       },
       "provenance": "static_scan",
@@ -17829,7 +18392,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6277,
+        "line": 5996,
         "matchedText": "`/api/admin/trr-api/people/${personId}/import-fandom/preview`"
       },
       "provenance": "static_scan",
@@ -17847,7 +18410,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7532,
+        "line": 7251,
         "matchedText": "`/api/admin/trr-api/people/${personId}/images/refresh`"
       },
       "provenance": "static_scan",
@@ -17865,7 +18428,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7898,
+        "line": 7617,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`"
       },
       "provenance": "static_scan",
@@ -17883,7 +18446,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 8069,
+        "line": 7788,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -17901,7 +18464,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 9094,
+        "line": 8809,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -17919,7 +18482,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10368,
+        "line": 10054,
         "matchedText": "`/api/admin/images/cast/${reassignModalImage.imageId}/reassign`"
       },
       "provenance": "static_scan",
@@ -17937,26 +18500,8 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6863,
+        "line": 6582,
         "matchedText": "`/api/admin/trr-api/people/${personId}/cover-photo`"
-      },
-      "provenance": "static_scan",
-      "confidence": "high",
-      "verificationStatus": "verified",
-      "basis": [
-        "static_scan:ui_request_call"
-      ]
-    },
-    {
-      "id": "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PUT:/api/admin/trr-api/people/[personId]/external-ids",
-      "kind": "originates_request",
-      "from": "component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage",
-      "to": "route:PUT:/api/admin/trr-api/people/[personId]/external-ids",
-      "title": null,
-      "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
-      "sourceLocator": {
-        "line": 5701,
-        "matchedText": "`/api/admin/trr-api/people/${personId}/external-ids`"
       },
       "provenance": "static_scan",
       "confidence": "high",
@@ -17973,7 +18518,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2965,
+        "line": 2879,
         "matchedText": "`/api/admin/trr-api/people/${photo.person_id}/photos/${photo.id}/thumbnail-crop`"
       },
       "provenance": "static_scan",
@@ -18225,7 +18770,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 5067,
+        "line": 5078,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
@@ -18362,24 +18907,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       ]
     },
     {
-      "id": "originates_request:page:/admin/trr-shows/[showId]:route:GET:/api/admin/covered-shows/[showId]",
-      "kind": "originates_request",
-      "from": "page:/admin/trr-shows/[showId]",
-      "to": "route:GET:/api/admin/covered-shows/[showId]",
-      "title": null,
-      "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
-      "sourceLocator": {
-        "line": 7920,
-        "matchedText": "`/api/admin/covered-shows/${requestShowId}`"
-      },
-      "provenance": "static_scan",
-      "confidence": "high",
-      "verificationStatus": "verified",
-      "basis": [
-        "static_scan:ui_request_call"
-      ]
-    },
-    {
       "id": "originates_request:page:/admin/trr-shows/[showId]:route:POST:/api/admin/trr-api/people/[personId]/refresh-images",
       "kind": "originates_request",
       "from": "page:/admin/trr-shows/[showId]",
@@ -18387,7 +18914,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3963,
+        "line": 3862,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images`"
       },
       "provenance": "static_scan",
@@ -18405,7 +18932,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3877,
+        "line": 3776,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -18423,7 +18950,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3674,
+        "line": 3573,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-profile/stream`"
       },
       "provenance": "static_scan",
@@ -18441,7 +18968,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 4047,
+        "line": 3946,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -18459,7 +18986,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 10069,
+        "line": 9765,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`"
       },
       "provenance": "static_scan",
@@ -18477,7 +19004,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 7035,
+        "line": 6785,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/import-bravo/preview/stream`"
       },
       "provenance": "static_scan",
@@ -18495,7 +19022,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 11002,
+        "line": 10725,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",
@@ -18513,7 +19040,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4050,
+        "line": 4058,
         "matchedText": "`/api/admin/trr-api/media-assets/${assetId}`"
       },
       "provenance": "static_scan",
@@ -18531,7 +19058,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2136,
+        "line": 2134,
         "matchedText": "`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`"
       },
       "provenance": "static_scan",
@@ -18549,7 +19076,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3749,
+        "line": 3757,
         "matchedText": "`/api/admin/trr-api/seasons/${season.id}/unassigned-backdrops`"
       },
       "provenance": "static_scan",
@@ -18567,7 +19094,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2088,
+        "line": 2086,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}`"
       },
       "provenance": "static_scan",
@@ -18585,7 +19112,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1689,
+        "line": 1687,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/cast?limit=500&photo_fallback=none&exclude_zero_episode_members=1`"
       },
       "provenance": "static_scan",
@@ -18603,7 +19130,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1718,
+        "line": 1716,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/credits`"
       },
       "provenance": "static_scan",
@@ -18621,7 +19148,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2089,
+        "line": 2087,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50`"
       },
       "provenance": "static_scan",
@@ -18639,7 +19166,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2137,
+        "line": 2135,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500&include_archive_only=true`"
       },
       "provenance": "static_scan",
@@ -18657,7 +19184,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1981,
+        "line": 1979,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/fandom`"
       },
       "provenance": "static_scan",
@@ -18675,7 +19202,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1535,
+        "line": 1533,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
@@ -18693,7 +19220,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4069,
+        "line": 4077,
         "matchedText": "\"/api/admin/trr-api/assets/archive\""
       },
       "provenance": "static_scan",
@@ -18711,7 +19238,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4171,
+        "line": 4179,
         "matchedText": "\"/api/admin/trr-api/assets/content-type\""
       },
       "provenance": "static_scan",
@@ -18729,7 +19256,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4135,
+        "line": 4143,
         "matchedText": "\"/api/admin/trr-api/assets/star\""
       },
       "provenance": "static_scan",
@@ -18747,7 +19274,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4714,
+        "line": 4711,
         "matchedText": "`/api/admin/trr-api/media-assets/${asset.id}/detect-text-overlay`"
       },
       "provenance": "static_scan",
@@ -18765,7 +19292,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3278,
+        "line": 3286,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -18783,7 +19310,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3387,
+        "line": 3395,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -18801,7 +19328,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3781,
+        "line": 3789,
         "matchedText": "`/api/admin/trr-api/seasons/${season.id}/assign-backdrops`"
       },
       "provenance": "static_scan",
@@ -18819,7 +19346,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2616,
+        "line": 2629,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`"
       },
       "provenance": "static_scan",
@@ -18837,7 +19364,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2904,
+        "line": 2912,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",
@@ -18855,7 +19382,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2467,
+        "line": 2480,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets/batch-jobs/stream`"
       },
       "provenance": "static_scan",
@@ -18873,7 +19400,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2044,
+        "line": 2042,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/import-fandom/commit`"
       },
       "provenance": "static_scan",
@@ -18891,7 +19418,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2011,
+        "line": 2009,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/import-fandom/preview`"
       },
       "provenance": "static_scan",
@@ -19523,6 +20050,24 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "sourceLocator": {
         "line": 20,
         "matchedText": "`/admin/shows/${showId}/seasons/${seasonNumber}/fandom`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ]
+    },
+    {
+      "id": "proxies_to:route:GET:/api/admin/trr-api/social/ingest/live-status/stream:backend:GET:/api/v1/admin/socials/live-status/stream",
+      "kind": "proxies_to",
+      "from": "route:GET:/api/admin/trr-api/social/ingest/live-status/stream",
+      "to": "backend:GET:/api/v1/admin/socials/live-status/stream",
+      "title": null,
+      "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/stream/route.ts",
+      "sourceLocator": {
+        "line": 11,
+        "matchedText": "\"/admin/socials/live-status/stream\""
       },
       "provenance": "static_scan",
       "confidence": "high",
@@ -20637,7 +21182,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/links/discover/stream/route.ts",
       "sourceLocator": {
-        "line": 196,
+        "line": 268,
         "matchedText": "`/admin/shows/${showId}/links/discover/stream`"
       },
       "provenance": "static_scan",
@@ -20709,8 +21254,26 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/refresh/stream/route.ts",
       "sourceLocator": {
-        "line": 204,
+        "line": 207,
         "matchedText": "`/admin/shows/${showId}/refresh/stream`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ]
+    },
+    {
+      "id": "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry:backend:POST:/api/v1/admin/shows/[showId]/refresh/target/[target]/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type",
+      "kind": "proxies_to",
+      "from": "route:POST:/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry",
+      "to": "backend:POST:/api/v1/admin/shows/[showId]/refresh/target/[target]/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type",
+      "title": null,
+      "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry/route.ts",
+      "sourceLocator": {
+        "line": 49,
+        "matchedText": "`/admin/shows/${showId}/refresh/target/${target}/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type\""
       },
       "provenance": "static_scan",
       "confidence": "high",
@@ -20962,6 +21525,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "page:/admin/social",
         "page:/admin/social/bravo-content",
         "page:/admin/social/creator-content",
+        "page:/admin/social/reddit",
         "page:/admin/social/reddit/[communitySlug]",
         "page:/admin/social/reddit/[communitySlug]/[showSlug]",
         "page:/admin/social/reddit/[communitySlug]/[showSlug]/[windowKey]",
@@ -21045,6 +21609,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/reddit/analytics/community/[communityId]/summary",
         "route:GET:/api/admin/reddit/communities",
         "route:GET:/api/admin/reddit/communities/[communityId]",
+        "route:GET:/api/admin/reddit/communities/[communityId]/backfill/snapshot",
         "route:GET:/api/admin/reddit/communities/[communityId]/discover",
         "route:GET:/api/admin/reddit/communities/[communityId]/episode-discussions/refresh",
         "route:GET:/api/admin/reddit/communities/[communityId]/posts/[postId]/details",
@@ -21128,8 +21693,10 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/comments-coverage",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/mirror-coverage",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/posts/[platform]/[sourceId]",
+        "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/snapshot",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/live-health",
+        "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/snapshot",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/analytics/week/[weekIndex]/summary",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/export",
         "route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/social/ingest/worker-health",
@@ -21154,7 +21721,10 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/trr-api/shows/[showId]/social-posts",
         "route:GET:/api/admin/trr-api/shows/[showId]/surveys",
         "route:GET:/api/admin/trr-api/shows/resolve-slug",
+        "route:GET:/api/admin/trr-api/social-growth/cast-comparison/snapshot",
         "route:GET:/api/admin/trr-api/social/ingest/health-dot",
+        "route:GET:/api/admin/trr-api/social/ingest/live-status",
+        "route:GET:/api/admin/trr-api/social/ingest/live-status/stream",
         "route:GET:/api/admin/trr-api/social/ingest/queue-status",
         "route:GET:/api/admin/trr-api/social/ingest/workers/[workerId]/detail",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/gap-analysis",
@@ -21163,9 +21733,12 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/progress",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/verification",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/collaborators-tags",
+        "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags/timeline",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/posts",
+        "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot",
+        "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/summary",
         "route:GET:/api/admin/trr-api/social/shared/review-queue",
         "route:GET:/api/admin/trr-api/social/shared/runs",
@@ -21272,6 +21845,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/shows/[showId]/refresh",
         "route:POST:/api/admin/trr-api/shows/[showId]/refresh-photos/stream",
         "route:POST:/api/admin/trr-api/shows/[showId]/refresh/stream",
+        "route:POST:/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry",
         "route:POST:/api/admin/trr-api/shows/[showId]/roles",
         "route:POST:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/batch-jobs/stream",
         "route:POST:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/commit",
@@ -21287,6 +21861,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/shows/[showId]/social-posts",
         "route:POST:/api/admin/trr-api/shows/[showId]/surveys",
         "route:POST:/api/admin/trr-api/shows/sync-from-lists",
+        "route:POST:/api/admin/trr-api/snapshots/invalidate",
         "route:POST:/api/admin/trr-api/social-growth/refresh-batch",
         "route:POST:/api/admin/trr-api/social/ingest/active-jobs/cancel",
         "route:POST:/api/admin/trr-api/social/ingest/jobs/[jobId]/debug",
@@ -21294,6 +21869,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/ingest/reset-health",
         "route:POST:/api/admin/trr-api/social/ingest/stuck-jobs/cancel",
         "route:POST:/api/admin/trr-api/social/ingest/workers/purge-inactive",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/apify-backfill",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/backfill",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/freshness",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/gap-analysis/run",
@@ -21301,8 +21877,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/review-queue/[itemId]/resolve",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/cancel",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/dismiss",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-newer",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-recent",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
         "route:POST:/api/admin/trr-api/social/shared/ingest",
         "route:POST:/api/admin/trr-api/social/shared/review-queue/[itemId]/resolve",
         "route:PUT:/api/admin/design-system/typography/assignments",
@@ -21369,6 +21948,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "backend:GET:/api/v1/admin/shows/[showKey]/icons",
         "backend:GET:/api/v1/admin/shows/networks-streaming/overrides",
         "backend:GET:/api/v1/admin/social-posts/[postId]",
+        "backend:GET:/api/v1/admin/socials/live-status/stream",
         "backend:PATCH:/api/v1/admin/brands/families/[familyId]",
         "backend:PATCH:/api/v1/admin/brands/families/[familyId]/links/[ruleId]`,\n    );\n    if (!backendUrl) return NextResponse.json({ error: \"Backend API not configured\" }, { status: 500 });\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) return NextResponse.json({ error: \"Backend auth not configured\" }, { status: 500 });\n\n    const body =\n      request.headers.get(\"content-type",
         "backend:PATCH:/api/v1/admin/shows/[showId]/links/[linkId]",
@@ -21432,6 +22012,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "backend:POST:/api/v1/admin/shows/[showId]/refresh",
         "backend:POST:/api/v1/admin/shows/[showId]/refresh-photos/stream",
         "backend:POST:/api/v1/admin/shows/[showId]/refresh/stream",
+        "backend:POST:/api/v1/admin/shows/[showId]/refresh/target/[target]/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type",
         "backend:POST:/api/v1/admin/shows/[showId]/roles",
         "backend:POST:/api/v1/admin/shows/[showId]/seasons/[seasonNumber]/assets/batch-jobs/stream",
         "backend:POST:/api/v1/admin/shows/[showId]/seasons/[seasonNumber]/import-fandom/commit",
@@ -21458,9 +22039,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
     "edgeIdsByKind": {
       "originates_request": [
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:GET:/api/admin/trr-api/people",
-        "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:GET:/api/admin/trr-api/people/[personId]/external-ids",
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:GET:/api/admin/trr-api/people/[personId]/fandom",
-        "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PATCH:/api/admin/trr-api/people/[personId]",
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PATCH:/api/admin/trr-api/people/[personId]/gallery/[linkId]/facebank-seed",
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:POST:/api/admin/trr-api/assets/archive",
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:POST:/api/admin/trr-api/assets/content-type",
@@ -21475,7 +22054,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:POST:/api/admin/trr-api/people/[personId]/reprocess-images/stream",
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PUT:/api/admin/images/[imageType]/[imageId]/reassign",
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PUT:/api/admin/trr-api/people/[personId]/cover-photo",
-        "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PUT:/api/admin/trr-api/people/[personId]/external-ids",
         "originates_request:component:src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx::PersonProfilePage:route:PUT:/api/admin/trr-api/people/[personId]/photos/[photoId]/thumbnail-crop",
         "originates_request:component:src/components/admin/AdminGlobalSearch.tsx::AdminGlobalSearch:route:GET:/api/admin/trr-api/search",
         "originates_request:component:src/components/admin/BravotvImageRunPanel.tsx::BravotvImageRunPanel:route:GET:/api/admin/trr-api/bravotv/images/runs/[runId]/artifacts/[...artifactName]",
@@ -21498,7 +22076,6 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "originates_request:page:/admin/survey-responses:route:GET:/api/admin/surveys/[surveyKey]/export",
         "originates_request:page:/admin/survey-responses:route:GET:/api/admin/surveys/[surveyKey]/responses",
         "originates_request:page:/admin/survey-responses:route:GET:/api/admin/surveys/[surveyKey]/responses/[responseId]",
-        "originates_request:page:/admin/trr-shows/[showId]:route:GET:/api/admin/covered-shows/[showId]",
         "originates_request:page:/admin/trr-shows/[showId]:route:POST:/api/admin/trr-api/people/[personId]/refresh-images",
         "originates_request:page:/admin/trr-shows/[showId]:route:POST:/api/admin/trr-api/people/[personId]/refresh-images/stream",
         "originates_request:page:/admin/trr-shows/[showId]:route:POST:/api/admin/trr-api/people/[personId]/refresh-profile/stream",
@@ -21572,6 +22149,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "proxies_to:route:GET:/api/admin/trr-api/shows/[showId]/news:backend:GET:/api/v1/admin/shows/[showId]/news",
         "proxies_to:route:GET:/api/admin/trr-api/shows/[showId]/roles:backend:GET:/api/v1/admin/shows/[showId]/roles",
         "proxies_to:route:GET:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/fandom:backend:GET:/api/v1/admin/shows/[showId]/seasons/[seasonNumber]/fandom",
+        "proxies_to:route:GET:/api/admin/trr-api/social/ingest/live-status/stream:backend:GET:/api/v1/admin/socials/live-status/stream",
         "proxies_to:route:PATCH:/api/admin/networks-streaming/overrides/[id]:backend:PATCH:/api/v1/admin/shows/networks-streaming/overrides/[id]",
         "proxies_to:route:PATCH:/api/admin/trr-api/brands/families/[familyId]:backend:PATCH:/api/v1/admin/brands/families/[familyId]",
         "proxies_to:route:PATCH:/api/admin/trr-api/brands/families/[familyId]/links/[ruleId]:backend:PATCH:/api/v1/admin/brands/families/[familyId]/links/[ruleId]`,\n    );\n    if (!backendUrl) return NextResponse.json({ error: \"Backend API not configured\" }, { status: 500 });\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) return NextResponse.json({ error: \"Backend auth not configured\" }, { status: 500 });\n\n    const body =\n      request.headers.get(\"content-type",
@@ -21638,6 +22216,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/refresh-photos/stream:backend:POST:/api/v1/admin/shows/[showId]/refresh-photos/stream",
         "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/refresh:backend:POST:/api/v1/admin/shows/[showId]/refresh",
         "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/refresh/stream:backend:POST:/api/v1/admin/shows/[showId]/refresh/stream",
+        "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/refresh/target/[target]/retry:backend:POST:/api/v1/admin/shows/[showId]/refresh/target/[target]/retry`,\n    );\n    if (!backendUrl) {\n      return NextResponse.json(\n        { error: \"Backend API not configured\" },\n        { status: 500 },\n      );\n    }\n\n    const serviceRoleKey = getInternalAdminBearerToken();\n    if (!serviceRoleKey) {\n      return NextResponse.json(\n        { error: \"Backend auth not configured\" },\n        { status: 500 },\n      );\n    }\n\n    let body: Record<string, unknown> = {};\n    if (request.headers.get(\"content-type",
         "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/roles:backend:POST:/api/v1/admin/shows/[showId]/roles",
         "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/batch-jobs/stream:backend:POST:/api/v1/admin/shows/[showId]/seasons/[seasonNumber]/assets/batch-jobs/stream",
         "proxies_to:route:POST:/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/import-fandom/commit:backend:POST:/api/v1/admin/shows/[showId]/seasons/[seasonNumber]/import-fandom/commit",
@@ -21656,27 +22235,27 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 518,
-      "totalEdges": 188,
+      "totalNodes": 536,
+      "totalEdges": 186,
       "nodesByKind": {
-        "ui_surface": 57,
-        "api_route": 346,
-        "backend_endpoint": 109,
+        "ui_surface": 58,
+        "api_route": 361,
+        "backend_endpoint": 111,
         "repository_surface": 2,
         "polling_loop": 4
       },
       "edgesByKind": {
-        "originates_request": 71,
+        "originates_request": 67,
         "contains_polling": 4,
         "calls": 0,
-        "proxies_to": 109,
+        "proxies_to": 111,
         "touches_repository": 4,
         "renders_view": 0
       },
-      "automaticNodes": 35,
-      "pollingNodes": 35,
+      "automaticNodes": 37,
+      "pollingNodes": 37,
       "directPostgresNodes": 2,
-      "indirectPostgresNodes": 131
+      "indirectPostgresNodes": 133
     }
   }
 } satisfies AdminApiReferenceInventory;

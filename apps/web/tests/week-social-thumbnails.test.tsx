@@ -3894,7 +3894,9 @@ describe("WeekDetailPage thumbnails", () => {
     render(<WeekDetailPage />);
     await waitForWeekDetailReady();
 
-    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(true);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(true);
+    });
   });
 
   it("keeps the posts summary metric aligned with authoritative week summary totals", async () => {
