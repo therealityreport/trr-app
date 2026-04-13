@@ -11,7 +11,7 @@ import { DevDashboardShell } from "./_components/DevDashboardShell";
 // Types (duplicated from server service; keep additive + compatible)
 // ============================================================================
 
-type RepoName = "TRR-Backend" | "TRR-APP" | "screenalytics";
+type RepoName = "TRR-Backend" | "TRR-APP";
 
 interface BranchInfo {
   name: string;
@@ -162,7 +162,7 @@ interface AuthStatusPayload {
 // Helpers
 // ============================================================================
 
-const REPO_TABS: RepoName[] = ["TRR-Backend", "TRR-APP", "screenalytics"];
+const REPO_TABS: RepoName[] = ["TRR-Backend", "TRR-APP"];
 
 function formatRelativeTime(isoDate: string) {
   const date = new Date(isoDate);

@@ -61,7 +61,14 @@ export function buildPaletteExportBundle(colors: string[]): ExportBundle {
     `$gradient-radial: radial-gradient(${gradientStops});`,
   ]);
 
-  const all = joinLines([cssHex, "", cssHsl, "", scssHex, "", scssHsl, "", scssRgb, "", scssGradient]);
+  const tailwind = joinLines([
+    "/* Tailwind Colors */",
+    "theme.extend.colors = {",
+    ...names.map((name, index) => `  ${name}: "${hexWithAlpha[index]?.toLowerCase() ?? "#000000ff"}",`),
+    "};",
+  ]);
+
+  const all = joinLines([cssHex, "", cssHsl, "", scssHex, "", scssHsl, "", scssRgb, "", scssGradient, "", tailwind]);
 
   return {
     cssHex,
@@ -70,6 +77,7 @@ export function buildPaletteExportBundle(colors: string[]): ExportBundle {
     scssHsl,
     scssRgb,
     scssGradient,
+    tailwind,
     all,
   };
 }

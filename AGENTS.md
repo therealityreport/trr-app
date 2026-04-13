@@ -25,7 +25,7 @@ Read `../AGENTS.md` first for workspace policy. Use this file for app-local rule
 - Keep server-only code under `apps/web/src/lib/server/` and preserve clear server/client boundaries.
 - Prefer Server Components; add `"use client"` only when interaction requires it.
 - Preserve Firebase allowlist and admin-secret flows with `ADMIN_EMAIL_ALLOWLIST`, `ADMIN_DISPLAYNAME_ALLOWLIST`, and `TRR_INTERNAL_ADMIN_SHARED_SECRET`.
-- For shared changes, app updates land after backend and any affected screenalytics work.
+- For shared changes, app updates land after backend contract changes.
 
 ## Repo Layout and Package Managers
 - `apps/web` uses `pnpm`.

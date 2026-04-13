@@ -38,7 +38,7 @@ export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
     title: "Screenalytics",
     href: "/screenalytics" as Route,
     description:
-      "TRR-APP admin entry for screen-time workflows. Pick a show here, then continue into its /<show> workspace.",
+      "Canonical TRR-APP admin entry for screen-time workflows. Pick a show here, then continue into its /<show> workspace.",
     badge: "Screen",
     activeMatchPrefixes: ["/screenalytics", "/screenlaytics", "/admin/screenalytics", "/admin/screenlaytics", "/admin/trr-shows"],
   },

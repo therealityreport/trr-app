@@ -44,12 +44,12 @@ export const ADMIN_API_REFERENCE_IGNORE_CATALOG: readonly AdminApiReferenceIgnor
   {
     id: "page:/admin/screenalytics",
     reason: "duplicate_alias",
-    note: "Legacy screenalytics entry alias kept for compatibility.",
+    note: "Legacy Screenalytics admin-area alias kept for compatibility.",
   },
   {
     id: "page:/admin/screenlaytics",
     reason: "duplicate_alias",
-    note: "Historical typo alias for screenalytics kept for compatibility; the canonical spelling remains /screenalytics.",
+    note: "Historical typo alias for the Screenalytics admin area kept for compatibility; the canonical spelling remains /screenalytics.",
   },
   {
     id: "page:/admin/social-media",

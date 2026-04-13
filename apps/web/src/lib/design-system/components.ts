@@ -230,9 +230,9 @@ export const COMPONENT_INVENTORY: ComponentEntry[] = [
     name: "Badge",
     shadcnEquivalent: "Badge",
     status: "partial",
-    paths: ["screenalytics/web/components/ui/badge.tsx"],
+    paths: [],
     variants: ["default", "secondary", "destructive", "outline", "success", "warning", "info"],
-    notes: "Exists in Screenalytics with 7 variants. NOT yet in TRR-APP — need to port or create.",
+    notes: "Legacy donor implementation existed in the retired Screenalytics repo. TRR-APP still needs a local Badge primitive.",
     figmaPage: "data-display",
   },
   {
@@ -277,12 +277,9 @@ export const COMPONENT_INVENTORY: ComponentEntry[] = [
     name: "Toast",
     shadcnEquivalent: "Toast",
     status: "exists",
-    paths: [
-      "src/components/ToastHost.tsx",
-      "screenalytics/web/components/toast.tsx",
-    ],
+    paths: ["src/components/ToastHost.tsx"],
     variants: ["default", "error"],
-    notes: "Both projects have toast implementations. Screenalytics uses Radix-based toast.",
+    notes: "TRR-APP has a live toast implementation; the retired Screenalytics donor implementation is no longer part of the active workspace.",
     figmaPage: "feedback",
   },
   {
@@ -300,12 +297,9 @@ export const COMPONENT_INVENTORY: ComponentEntry[] = [
     name: "Dialog",
     shadcnEquivalent: "Dialog",
     status: "partial",
-    paths: [
-      "screenalytics/web/components/ui/dialog.tsx",
-      "src/components/admin/AdminModal.tsx",
-    ],
+    paths: ["src/components/admin/AdminModal.tsx"],
     variants: ["default"],
-    notes: "Screenalytics has Radix Dialog. TRR-APP has AdminModal (custom). Need unified Dialog primitive.",
+    notes: "TRR-APP has AdminModal (custom). A unified Dialog primitive is still needed locally.",
     figmaPage: "overlays",
   },
   {
@@ -340,9 +334,9 @@ export const COMPONENT_INVENTORY: ComponentEntry[] = [
     name: "FeaturesModal",
     shadcnEquivalent: null,
     status: "exists",
-    paths: ["screenalytics/web/components/screenalytics/features-modal.tsx"],
+    paths: [],
     variants: ["default"],
-    notes: "Screenalytics documentation/features modal.",
+    notes: "Legacy donor modal from the retired Screenalytics repo. No active TRR-APP implementation is tracked here.",
     figmaPage: "overlays",
   },
 
@@ -392,12 +386,11 @@ export const COMPONENT_INVENTORY: ComponentEntry[] = [
     shadcnEquivalent: "Tabs",
     status: "exists",
     paths: [
-      "screenalytics/web/components/ui/tabs.tsx",
       "src/components/admin/show-tabs/ShowTabsNav.tsx",
       "src/components/admin/season-tabs/SeasonTabsNav.tsx",
     ],
     variants: ["default"],
-    notes: "Screenalytics has Radix Tabs. TRR-APP uses custom tab navigation. Multiple domain-specific tab sets.",
+    notes: "TRR-APP uses custom tab navigation across multiple domain-specific tab sets.",
     figmaPage: "navigation",
   },
   {

@@ -1,6 +1,6 @@
 # TRR-APP Model Governance
 
-TRR-APP does not host primary AI model inference defaults. It consumes/proxies data from TRR-Backend and screenalytics.
+TRR-APP does not host primary AI model inference defaults. It consumes/proxies data from TRR-Backend.
 
 ## Current Policy (Pinned This Wave)
 
@@ -8,7 +8,6 @@ TRR-APP does not host primary AI model inference defaults. It consumes/proxies d
 2. Keep backend-facing contracts stable while SDK/runtime/tooling updates land.
 3. Treat model-default changes as backend/pipeline concerns and track them in:
 - `/Users/thomashulihan/Projects/TRR/TRR-Backend/docs/ai/MODEL_GOVERNANCE.md`
-- `/Users/thomashulihan/Projects/TRR/screenalytics/docs/ai/MODEL_GOVERNANCE.md`
 
 ## Promotion and Rollback Expectations for App Integrations
 

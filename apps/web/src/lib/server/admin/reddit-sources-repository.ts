@@ -1,6 +1,10 @@
 import "server-only";
 
 import { buildRedditDetailSlugBase } from "@/lib/admin/reddit-detail-slug";
+import {
+  normalizeRedditFlairAssignments,
+  type RedditFlairAssignment,
+} from "@/lib/admin/reddit-flair-targeting";
 import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
 import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
 import {
@@ -10,13 +14,6 @@ import {
 import {
   sanitizeEpisodeTitlePatterns,
 } from "@/lib/server/admin/reddit-episode-rules";
-import { toCanonicalFlairKey } from "@/lib/reddit/flair-key";
-
-export interface RedditFlairAssignment {
-  show_ids: string[];
-  season_ids: string[];
-  person_ids: string[];
-}
 
 export interface RedditCommunityRow {
   id: string;
@@ -211,36 +208,8 @@ const toFlairCategoriesMap = (value: unknown): Record<string, string> => {
   return out;
 };
 
-const toStringIdList = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const normalized = entry.trim();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    out.push(normalized);
-  }
-  return out;
-};
-
 const toFlairAssignmentsMap = (value: unknown): Record<string, RedditFlairAssignment> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  const raw = value as Record<string, unknown>;
-  const out: Record<string, RedditFlairAssignment> = {};
-  for (const [key, entry] of Object.entries(raw)) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
-    const flairKey = toCanonicalFlairKey(key);
-    if (!flairKey) continue;
-    const assignment = entry as Record<string, unknown>;
-    out[flairKey] = {
-      show_ids: toStringIdList(assignment.show_ids),
-      season_ids: toStringIdList(assignment.season_ids),
-      person_ids: toStringIdList(assignment.person_ids),
-    };
-  }
-  return out;
+  return normalizeRedditFlairAssignments(value);
 };
 
 const toNumberOrZero = (value: number | null | undefined): number => {
