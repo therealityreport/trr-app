@@ -2,6 +2,7 @@ import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import PersonPage from "@/app/admin/trr-shows/people/[personId]/PersonPageClient";
+import { resetAdminGetCoordinatorForTests } from "@/lib/admin/admin-fetch";
 
 const mocks = vi.hoisted(() => {
   const personId = "11111111-2222-3333-4444-555555555555";
@@ -96,6 +97,8 @@ const jsonResponse = (body: unknown, status = 200): Response =>
   });
 
 type FetchOverrides = {
+  resolvePersonSlug?: (url: string) => Response | Promise<Response>;
+  resolveShowSlug?: (url: string) => Response | Promise<Response>;
   person?: (url: string) => Response;
   credits?: (url: string) => Response;
   fandom?: (url: string) => Response;
@@ -115,6 +118,28 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
           ? input.toString()
           : String(input);
 
+    if (url.startsWith("/api/admin/trr-api/people/resolve-slug?")) {
+      if (overrides.resolvePersonSlug) return await overrides.resolvePersonSlug(url);
+      return jsonResponse({
+        resolved: {
+          person_id: PERSON_ID,
+          canonical_slug: "andy-cohen",
+          slug: "andy-cohen",
+        },
+        show_id: SHOW_ID,
+      });
+    }
+    if (url.startsWith("/api/admin/trr-api/shows/resolve-slug?")) {
+      if (overrides.resolveShowSlug) return await overrides.resolveShowSlug(url);
+      return jsonResponse({
+        resolved: {
+          show_id: SHOW_ID,
+          canonical_slug: "the-real-housewives",
+          slug: "the-real-housewives",
+          show_name: "The Real Housewives",
+        },
+      });
+    }
     if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)) {
       if (overrides.credits) return overrides.credits(url);
       return jsonResponse({ credits: [] });
@@ -199,8 +224,23 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
     return jsonResponse({ error: "not mocked" }, 404);
   });
 
+const waitForPersonHeading = async (name: string) => {
+  const headings = await screen.findAllByRole("heading", { name });
+  expect(headings.length).toBeGreaterThan(0);
+  return headings[0];
+};
+
+const waitForPrimaryGalleryBootstrap = async (fetchMock: ReturnType<typeof vi.fn>) => {
+  await waitFor(() => {
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`)),
+    ).toBe(true);
+  });
+};
+
 describe("people page tab runtime behavior", () => {
   beforeEach(() => {
+    resetAdminGetCoordinatorForTests();
     mocks.params.personId = PERSON_ID;
     mocks.pathname = `/people/${PERSON_ID}/overview`;
     mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}&tab=overview`);
@@ -219,7 +259,7 @@ describe("people page tab runtime behavior", () => {
 
     render(<PersonPage />);
 
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
 
     const requestedUrls = fetchMock.mock.calls.map(([url]) => String(url));
     expect(
@@ -254,7 +294,7 @@ describe("people page tab runtime behavior", () => {
 
     render(<PersonPage />);
 
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
     expect(screen.getByRole("button", { name: "Refresh Info & Credits" })).toBeInTheDocument();
     expect(screen.getByText("Alternative Names")).toBeInTheDocument();
     expect(screen.getByText("Andrew Cohen")).toBeInTheDocument();
@@ -352,7 +392,7 @@ describe("people page tab runtime behavior", () => {
 
     render(<PersonPage />);
 
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
     await screen.findByRole("button", { name: "Instagram · @andycohen" });
 
     expect(screen.getByRole("link", { name: "Open account page" })).toHaveAttribute(
@@ -440,7 +480,7 @@ describe("people page tab runtime behavior", () => {
 
     render(<PersonPage />);
 
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
     const savedTotal = await screen.findByText("Saved total: 347 photos");
     expect(savedTotal).toBeInTheDocument();
     expect(savedTotal.parentElement).toHaveTextContent(/0 filtered,\s*1\+ loaded/i);
@@ -493,7 +533,7 @@ describe("people page tab runtime behavior", () => {
 
     render(<PersonPage />);
 
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
     expect(screen.queryByText("Loading person data...")).not.toBeInTheDocument();
 
     const photosRequest = fetchMock.mock.calls.find(([url]) =>
@@ -531,6 +571,267 @@ describe("people page tab runtime behavior", () => {
     });
   });
 
+  it("serializes slug credits bootstrap as resolve person -> person detail -> gallery -> credits", async () => {
+    mocks.params.personId = "casey-allan";
+    mocks.pathname = "/people/casey-allan/credits";
+    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}`);
+
+    let resolvePersonSlug: ((response: Response) => void) | null = null;
+    let resolvePerson: ((response: Response) => void) | null = null;
+    let resolvePhotos: ((response: Response) => void) | null = null;
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : String(input);
+
+      if (url.startsWith("/api/admin/trr-api/people/resolve-slug?")) {
+        return await new Promise<Response>((resolve) => {
+          resolvePersonSlug = resolve;
+        });
+      }
+      if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`)) {
+        return await new Promise<Response>((resolve) => {
+          resolvePhotos = resolve;
+        });
+      }
+      if (url.startsWith(`/api/admin/trr-api/people/${PERSON_ID}`) && !url.includes("/photos") && !url.includes("/cover-photo")) {
+        return await new Promise<Response>((resolve) => {
+          resolvePerson = resolve;
+        });
+      }
+      if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)) {
+        return jsonResponse({ credits: [] });
+      }
+      if (url.includes(`/api/admin/trr-api/people/${PERSON_ID}/cover-photo`)) {
+        return jsonResponse({ coverPhoto: null });
+      }
+      return jsonResponse({ error: "not mocked" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/admin/trr-api/people/resolve-slug?")),
+      ).toBe(true);
+    });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`)),
+    ).toBe(false);
+
+    resolvePersonSlug?.(
+      jsonResponse({
+        resolved: {
+          person_id: PERSON_ID,
+          canonical_slug: "casey-allan",
+          slug: "casey-allan",
+        },
+        show_id: SHOW_ID,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) =>
+            String(url).startsWith(`/api/admin/trr-api/people/${PERSON_ID}`) &&
+            !String(url).includes("/photos") &&
+            !String(url).includes("/cover-photo"),
+        ),
+      ).toBe(true);
+    });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`)),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)),
+    ).toBe(false);
+
+    resolvePerson?.(
+      jsonResponse({
+        person: {
+          id: PERSON_ID,
+          full_name: "Casey Allan",
+          known_for: null,
+          external_ids: {},
+          alternative_names: {},
+          created_at: "2026-02-24T00:00:00.000Z",
+          updated_at: "2026-02-24T00:00:00.000Z",
+        },
+      }),
+    );
+
+    await waitForPersonHeading("Casey Allan");
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/photos`))).toBe(
+        true,
+      );
+    });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)),
+    ).toBe(false);
+
+    resolvePhotos?.(
+      jsonResponse({
+        photos: [],
+        pagination: {
+          limit: 48,
+          offset: 0,
+          count: 0,
+          total_count: 0,
+          total_count_status: "exact",
+          next_offset: 0,
+          has_more: false,
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`))).toBe(
+        true,
+      );
+    });
+  });
+
+  it("waits for show slug resolution before the first credits fetch so credits only load once", async () => {
+    mocks.params.personId = "casey-allan";
+    mocks.pathname = "/people/casey-allan/credits";
+    mocks.searchParams = new URLSearchParams("showId=rhoslc");
+
+    let resolveShowSlug: ((response: Response) => void) | null = null;
+    const fetchMock = createFetchMock({
+      resolvePersonSlug: async () =>
+        jsonResponse({
+          resolved: {
+            person_id: PERSON_ID,
+            canonical_slug: "casey-allan",
+            slug: "casey-allan",
+          },
+          show_id: null,
+        }),
+      resolveShowSlug: async () =>
+        await new Promise<Response>((resolve) => {
+          resolveShowSlug = resolve;
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+
+    await waitForPersonHeading("Andy Cohen");
+    await waitForPrimaryGalleryBootstrap(fetchMock);
+
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)).length,
+    ).toBe(0);
+
+    resolveShowSlug?.(
+      jsonResponse({
+        resolved: {
+          show_id: SHOW_ID,
+          canonical_slug: "rhoslc",
+          slug: "rhoslc",
+          show_name: "The Real Housewives of Salt Lake City",
+        },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)).length,
+      ).toBe(1);
+    });
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)).length,
+    ).toBe(1);
+  });
+
+  it("keeps retryable credits saturation hidden while a follow-up retry is still in flight", async () => {
+    mocks.pathname = `/people/${PERSON_ID}/credits`;
+    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}`);
+
+    let creditsAttempts = 0;
+    let resolveRetrySuccess: ((response: Response) => void) | null = null;
+    const fetchMock = createFetchMock({
+      credits: async () => {
+        creditsAttempts += 1;
+        if (creditsAttempts === 1) {
+          return jsonResponse(
+            {
+              error: "Database service unavailable. Check runtime DB connectivity and pool sizing.",
+              code: "DATABASE_SERVICE_UNAVAILABLE",
+              reason: "pool_capacity",
+              retryable: true,
+              retry_after_ms: 1,
+            },
+            503,
+          );
+        }
+        return await new Promise<Response>((resolve) => {
+          resolveRetrySuccess = resolve;
+        });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { container } = render(<PersonPage />);
+
+    await waitForPersonHeading("Andy Cohen");
+    await waitForPrimaryGalleryBootstrap(fetchMock);
+
+    await waitFor(() => {
+      expect(creditsAttempts).toBe(2);
+    });
+    expect(
+      screen.queryByText("Database service unavailable. Check runtime DB connectivity and pool sizing."),
+    ).not.toBeInTheDocument();
+
+    resolveRetrySuccess?.(
+      jsonResponse({
+        credits: [
+          {
+            id: "credit-1",
+            show_id: SHOW_ID,
+            person_id: PERSON_ID,
+            show_name: "The Real Housewives of Salt Lake City",
+            role: "Producer",
+            billing_order: 1,
+            credit_category: "Producers",
+            source_type: "fullcredits_html",
+            external_imdb_id: null,
+            external_url: null,
+            metadata: null,
+          },
+        ],
+        credits_by_show: [
+          {
+            show_id: SHOW_ID,
+            show_name: "The Real Housewives of Salt Lake City",
+            cast_groups: [],
+            crew_groups: [],
+            cast_non_episodic: [],
+            crew_non_episodic: [],
+          },
+        ],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(container.textContent ?? "").toContain("Credits (1)");
+    });
+    expect(
+      screen.queryByText("Database service unavailable. Check runtime DB connectivity and pool sizing."),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps news data available even when videos fetch fails", async () => {
     const fetchMock = createFetchMock({
       videos: () => jsonResponse({ error: "videos boom" }, 500),
@@ -558,7 +859,7 @@ describe("people page tab runtime behavior", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<PersonPage />);
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
 
     fireEvent.click(screen.getByRole("button", { name: /^Videos/i }));
     await screen.findByText(/videos boom|failed to fetch person videos/i);
@@ -572,7 +873,7 @@ describe("people page tab runtime behavior", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<PersonPage />);
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
 
     expect(screen.queryByRole("heading", { name: "External IDs" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Canonical Profile" })).not.toBeInTheDocument();
@@ -610,7 +911,8 @@ describe("people page tab runtime behavior", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<PersonPage />);
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    await waitForPersonHeading("Andy Cohen");
+    await waitForPrimaryGalleryBootstrap(fetchMock);
 
     fireEvent.click(screen.getByRole("button", { name: /^Fandom/i }));
     await waitFor(() => {
@@ -629,6 +931,8 @@ describe("people page tab runtime behavior", () => {
   });
 
   it("renders credits show -> season -> episode accordion content", async () => {
+    mocks.pathname = `/people/${PERSON_ID}/credits`;
+    mocks.searchParams = new URLSearchParams(`showId=${SHOW_ID}`);
     const fetchMock = createFetchMock({
       credits: () =>
         jsonResponse({
@@ -702,14 +1006,24 @@ describe("people page tab runtime behavior", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<PersonPage />);
-    await screen.findByRole("heading", { name: "Andy Cohen" });
+    const { container } = render(<PersonPage />);
+    await waitForPersonHeading("Andy Cohen");
+    await waitForPrimaryGalleryBootstrap(fetchMock);
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).includes(`/api/admin/trr-api/people/${PERSON_ID}/credits`)),
+      ).toBe(true);
+      expect(container.querySelectorAll("details").length).toBeGreaterThan(0);
+    });
 
-    fireEvent.click(screen.getByRole("button", { name: /^Credits/i }));
-    await screen.findByText("Cast");
-    const showHeaders = await screen.findAllByText(/Real Housewives of Salt Lake City/i);
-    expect(showHeaders.length).toBeGreaterThan(0);
-    await screen.findByText(/Season\s+1\s+•\s+1 episode/i);
-    await screen.findByText("S1E01 • Pilot");
+    for (const detail of Array.from(container.querySelectorAll("details"))) {
+      detail.setAttribute("open", "");
+    }
+
+    await waitFor(() => {
+      expect(container.textContent ?? "").toContain("Host");
+      expect(container.textContent ?? "").toContain("Season 1");
+      expect(container.textContent ?? "").toContain("S1E01 • Pilot");
+    });
   });
 });

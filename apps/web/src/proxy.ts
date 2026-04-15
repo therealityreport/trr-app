@@ -355,6 +355,7 @@ function resolveSocialWeekSubTab(value: string | undefined): string | null {
 function resolveSocialAccountProfileTab(value: string | undefined): string | null {
   const normalized = value?.trim().toLowerCase() ?? "";
   if (!normalized) return "stats";
+  if (normalized === "comments" || normalized === "comment") return "comments";
   if (normalized === "posts") return "posts";
   if (normalized === "hashtags" || normalized === "hashtag") return "hashtags";
   if (

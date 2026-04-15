@@ -180,6 +180,9 @@ import {
 } from "./refresh-progress";
 
 const GETTY_RESULTS_PER_PAGE = 60;
+const CREDITS_READ_MAX_ATTEMPTS = 2;
+const CREDITS_READ_FALLBACK_RETRY_MS = 250;
+const CREDITS_READ_MAX_RETRY_MS = 1_000;
 
 function estimateGettyPageTotal(siteImageTotal: number | null | undefined): number {
   if (typeof siteImageTotal !== "number" || !Number.isFinite(siteImageTotal) || siteImageTotal <= 0) {
@@ -1142,6 +1145,46 @@ const isSignalAbortedWithoutReasonError = (error: unknown): boolean => {
 const isAdminRequestTimeoutError = (error: unknown): boolean =>
   error instanceof AdminRequestError &&
   (error.code === "REQUEST_TIMEOUT" || error.status === 408);
+
+const isRetryableCreditsReadError = (error: unknown): error is AdminRequestError =>
+  error instanceof AdminRequestError &&
+  (isAdminRequestTimeoutError(error) ||
+    (error.retryable &&
+      (error.code === "DATABASE_SERVICE_UNAVAILABLE" ||
+        error.reason === "pool_capacity" ||
+        error.reason === "session_pool_capacity" ||
+        error.reason === "queue_pressure")));
+
+const resolveCreditsRetryDelayMs = (error: AdminRequestError): number => {
+  const retryAfterMs =
+    typeof error.retryAfterMs === "number" && Number.isFinite(error.retryAfterMs)
+      ? error.retryAfterMs
+      : CREDITS_READ_FALLBACK_RETRY_MS;
+  return Math.max(1, Math.min(retryAfterMs, CREDITS_READ_MAX_RETRY_MS));
+};
+
+const waitForCreditsRetry = async (
+  retryDelayMs: number,
+  signal?: AbortSignal,
+): Promise<void> =>
+  await new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve();
+    }, retryDelayMs);
+
+    const handleAbort = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", handleAbort);
+      reject(createNamedError("AbortError", "Credits retry aborted"));
+    };
+
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
 
 const createNamedError = (name: string, message: string): Error => {
   const error = new Error(message);
@@ -3552,6 +3595,7 @@ export default function PersonProfilePage() {
   const photosNextOffsetRef = useRef(photosNextOffset);
   const photosRequestKeyRef = useRef<string | null>(null);
   const photosInFlightRef = useRef<Promise<TrrPersonPhoto[]> | null>(null);
+  const creditsBootstrapRequestKeyRef = useRef<string | null>(null);
   const secondaryReadQueueRef = useRef<Array<() => void>>([]);
   const secondaryReadsInFlightRef = useRef(0);
   const showBrokenPhotoRefetchInitializedRef = useRef(false);
@@ -4446,6 +4490,7 @@ export default function PersonProfilePage() {
   }, [personRouteState.tab]);
 
   useEffect(() => {
+    setPrimaryGalleryReady(false);
     setBravoVideos([]);
     setBravoVideosLoaded(false);
     setBravoVideosError(null);
@@ -4482,8 +4527,11 @@ export default function PersonProfilePage() {
     setFandomLoading(false);
     setCredits([]);
     setShowScopedCredits(null);
+    setCreditsByShow([]);
     setCreditsError(null);
     setCreditsLoading(false);
+    creditsBootstrapRequestKeyRef.current = null;
+    showBrokenPhotoRefetchInitializedRef.current = false;
   }, [personId, showIdForApi]);
 
   useEffect(
@@ -5312,12 +5360,29 @@ export default function PersonProfilePage() {
     runSecondaryRead,
   });
 
-  usePersonProfileLoad({
+  const { personProfileReady } = usePersonProfileLoad({
     hasAccess,
     personId,
     fetchPerson,
     setLoading,
   });
+  const showRouteIdentifiersReady = !showIdParam || looksLikeUuid(showIdParam) || Boolean(showIdForApi);
+  const personBootstrapPhase = useMemo(() => {
+    if (!hasAccess) return "unauthorized";
+    if (!personRouteParam) return "missing_person";
+    if (!personId) return "resolving_person_slug";
+    if (!showRouteIdentifiersReady) return "resolving_show_slug";
+    if (!personProfileReady || !person) return "loading_person";
+    if (!primaryGalleryReady) return "loading_gallery";
+    return "ready";
+  }, [hasAccess, person, personId, personProfileReady, personRouteParam, primaryGalleryReady, showRouteIdentifiersReady]);
+  const personBootstrapReady =
+    Boolean(personId) && showRouteIdentifiersReady && personProfileReady && Boolean(person) && primaryGalleryReady;
+  const buildPersonPageReadDiagnosticMessage = useCallback(
+    (message: string) =>
+      `${message} [bootstrap=${personBootstrapPhase} tab=${activeTab} person=${personId || personRouteParam || "missing"} show=${showIdForApi ?? showIdParam ?? "none"}]`,
+    [activeTab, personBootstrapPhase, personId, personRouteParam, showIdForApi, showIdParam],
+  );
 
   const fetchBestActivePersonPipelineOperation = useCallback(
     async (operationTypes?: readonly PersonPipelineOperationType[]) => {
@@ -5832,62 +5897,102 @@ export default function PersonProfilePage() {
     });
     try {
       setCreditsLoading(true);
+      setCreditsError(null);
       const headers = await getAuthHeaders();
       const params = new URLSearchParams();
       params.set("limit", "500");
       if (showIdForApi) {
         params.set("showId", showIdForApi);
       }
-      const data = await adminGetJson<{
-        credits?: TrrPersonCredit[];
-        show_scope?: PersonCreditShowScope;
-        credits_by_show?: PersonCreditsByShow[];
-      }>(`/api/admin/trr-api/people/${personId}/credits?${params.toString()}`, {
-        headers,
-        externalSignal: signal,
-        requestRole: "secondary",
-        dedupeKey: `person:${personId}:credits:${params.toString()}`,
-      });
-      if (signal?.aborted) return;
-      setCredits(Array.isArray(data.credits) ? data.credits : []);
-      setShowScopedCredits(
-        data.show_scope && typeof data.show_scope === "object"
-          ? (data.show_scope as PersonCreditShowScope)
-          : null
-      );
-      setCreditsByShow(Array.isArray(data.credits_by_show) ? data.credits_by_show : []);
-      setCreditsError(null);
-      logAdminPageReadDiagnostic({
-        pageFamily: "people-gallery",
-        resource: "credits",
-        requestRole: "secondary",
-        phase: "success",
-        durationMs: Date.now() - startedAt,
-        payloadBytes: measurePayloadBytes({
-          credits: Array.isArray(data.credits) ? data.credits : [],
-          show_scope: data.show_scope ?? null,
-          credits_by_show: Array.isArray(data.credits_by_show) ? data.credits_by_show : [],
-        }),
-      });
-    } catch (err) {
-      if (signal?.aborted || isAbortError(err) || isSignalAbortedWithoutReasonError(err)) return;
-      setCredits([]);
-      setShowScopedCredits(null);
-      setCreditsByShow([]);
-      setCreditsError(err instanceof Error ? err.message : "Failed to fetch credits");
-      logAdminPageReadDiagnostic({
-        pageFamily: "people-gallery",
-        resource: "credits",
-        requestRole: "secondary",
-        phase: "error",
-        durationMs: Date.now() - startedAt,
-        message: err instanceof Error ? err.message : "Failed to fetch credits",
-      });
-      console.error("Failed to fetch credits:", err);
+
+      for (let attempt = 1; attempt <= CREDITS_READ_MAX_ATTEMPTS; attempt += 1) {
+        try {
+          const data = await adminGetJson<{
+            credits?: TrrPersonCredit[];
+            show_scope?: PersonCreditShowScope;
+            credits_by_show?: PersonCreditsByShow[];
+          }>(`/api/admin/trr-api/people/${personId}/credits?${params.toString()}`, {
+            headers,
+            externalSignal: signal,
+            requestRole: "secondary",
+            dedupeKey: `person:${personId}:credits:${params.toString()}`,
+          });
+          if (signal?.aborted) return;
+          setCredits(Array.isArray(data.credits) ? data.credits : []);
+          setShowScopedCredits(
+            data.show_scope && typeof data.show_scope === "object"
+              ? (data.show_scope as PersonCreditShowScope)
+              : null
+          );
+          setCreditsByShow(Array.isArray(data.credits_by_show) ? data.credits_by_show : []);
+          setCreditsError(null);
+          logAdminPageReadDiagnostic({
+            pageFamily: "people-gallery",
+            resource: "credits",
+            requestRole: "secondary",
+            phase: "success",
+            durationMs: Date.now() - startedAt,
+            payloadBytes: measurePayloadBytes({
+              credits: Array.isArray(data.credits) ? data.credits : [],
+              show_scope: data.show_scope ?? null,
+              credits_by_show: Array.isArray(data.credits_by_show) ? data.credits_by_show : [],
+            }),
+          });
+          return;
+        } catch (err) {
+          if (signal?.aborted || isAbortError(err) || isSignalAbortedWithoutReasonError(err)) return;
+          if (isRetryableCreditsReadError(err) && attempt < CREDITS_READ_MAX_ATTEMPTS) {
+            setCredits([]);
+            setShowScopedCredits(null);
+            setCreditsByShow([]);
+            logAdminPageReadDiagnostic({
+              pageFamily: "people-gallery",
+              resource: "credits",
+              requestRole: "secondary",
+              phase: "error",
+              durationMs: Date.now() - startedAt,
+              message: buildPersonPageReadDiagnosticMessage(
+                `Retrying transient credits read failure (attempt ${attempt}/${CREDITS_READ_MAX_ATTEMPTS}): ${err.message}`,
+              ),
+            });
+            try {
+              await waitForCreditsRetry(resolveCreditsRetryDelayMs(err), signal);
+            } catch (retryErr) {
+              if (
+                signal?.aborted ||
+                isAbortError(retryErr) ||
+                isSignalAbortedWithoutReasonError(retryErr) ||
+                (retryErr instanceof Error && retryErr.name === "AbortError")
+              ) {
+                return;
+              }
+              throw retryErr;
+            }
+            continue;
+          }
+
+          setCredits([]);
+          setShowScopedCredits(null);
+          setCreditsByShow([]);
+          setCreditsError(err instanceof Error ? err.message : "Failed to fetch credits");
+          logAdminPageReadDiagnostic({
+            pageFamily: "people-gallery",
+            resource: "credits",
+            requestRole: "secondary",
+            phase: "error",
+            durationMs: Date.now() - startedAt,
+            message: buildPersonPageReadDiagnosticMessage(
+              err instanceof Error ? err.message : "Failed to fetch credits",
+            ),
+          });
+          console.error("Failed to fetch credits:", err);
+          return;
+        }
+      }
     } finally {
       setCreditsLoading(false);
     }
-  }, [personId, getAuthHeaders, showIdForApi]);
+  }, [buildPersonPageReadDiagnosticMessage, getAuthHeaders, personId, showIdForApi]);
 
   // Fetch cover photo
   const fetchCoverPhoto = useCallback(async (options?: { signal?: AbortSignal }) => {
@@ -9854,8 +9959,7 @@ export default function PersonProfilePage() {
   useEffect(() => {
     if (!hasAccess) return;
     if (!personId) return;
-    setPrimaryGalleryReady(false);
-    showBrokenPhotoRefetchInitializedRef.current = false;
+    if (!person) return;
     let cancelled = false;
     const controller = new AbortController();
     const { signal } = controller;
@@ -9873,6 +9977,15 @@ export default function PersonProfilePage() {
         });
       } catch (err) {
         if (signal.aborted) return;
+        logAdminPageReadDiagnostic({
+          pageFamily: "people-gallery",
+          resource: "bootstrap-gallery",
+          requestRole: "primary",
+          phase: "error",
+          message: buildPersonPageReadDiagnosticMessage(
+            err instanceof Error ? err.message : "Failed to load person gallery bootstrap",
+          ),
+        });
         console.error("Failed to load person page data:", err);
       } finally {
         if (!cancelled && !signal.aborted) {
@@ -9887,11 +10000,14 @@ export default function PersonProfilePage() {
       controller.abort();
       secondaryReadQueueRef.current = [];
     };
-  }, [hasAccess, fetchCoverPhoto, fetchPhotos, personId, runSecondaryRead]);
+  }, [buildPersonPageReadDiagnosticMessage, hasAccess, fetchCoverPhoto, fetchPhotos, person, personId, runSecondaryRead]);
 
   useEffect(() => {
     if (activeTab !== "credits") return;
-    if (!hasAccess || !personId || creditsLoading || credits.length > 0) return;
+    if (!hasAccess || !personBootstrapReady || credits.length > 0) return;
+    const creditsRequestKey = `${personId}:${showIdForApi ?? showIdParam ?? "none"}`;
+    if (creditsBootstrapRequestKeyRef.current === creditsRequestKey) return;
+    creditsBootstrapRequestKeyRef.current = creditsRequestKey;
     const controller = new AbortController();
     void runSecondaryRead(async () => {
       await fetchCredits({ signal: controller.signal });
@@ -9899,11 +10015,21 @@ export default function PersonProfilePage() {
     return () => {
       controller.abort();
     };
-  }, [activeTab, credits.length, creditsLoading, fetchCredits, hasAccess, personId, runSecondaryRead]);
+  }, [
+    activeTab,
+    credits.length,
+    fetchCredits,
+    hasAccess,
+    personBootstrapReady,
+    personId,
+    runSecondaryRead,
+    showIdForApi,
+    showIdParam,
+  ]);
 
   useEffect(() => {
     if (activeTab !== "videos") return;
-    if (!showIdForApi || bravoVideosLoaded) return;
+    if (!personBootstrapReady || !showIdForApi || bravoVideosLoaded) return;
     const controller = new AbortController();
     void runSecondaryRead(async () => {
       await fetchBravoVideos({ signal: controller.signal });
@@ -9911,7 +10037,7 @@ export default function PersonProfilePage() {
     return () => {
       controller.abort();
     };
-  }, [activeTab, bravoVideosLoaded, fetchBravoVideos, runSecondaryRead, showIdForApi]);
+  }, [activeTab, bravoVideosLoaded, fetchBravoVideos, personBootstrapReady, runSecondaryRead, showIdForApi]);
 
   useEffect(() => {
     if (!hasAccess || !personId) return;
@@ -9950,7 +10076,7 @@ export default function PersonProfilePage() {
 
   useEffect(() => {
     if (activeTab !== "news") return;
-    if (!showIdForApi || !personId) return;
+    if (!personBootstrapReady || !showIdForApi || !personId) return;
     const controller = new AbortController();
     void runSecondaryRead(async () => {
       await loadUnifiedNews();
@@ -9958,11 +10084,11 @@ export default function PersonProfilePage() {
     return () => {
       controller.abort();
     };
-  }, [activeTab, loadUnifiedNews, personId, runSecondaryRead, showIdForApi]);
+  }, [activeTab, loadUnifiedNews, personBootstrapReady, personId, runSecondaryRead, showIdForApi]);
 
   useEffect(() => {
     if (activeTab !== "fandom") return;
-    if (!hasAccess || fandomLoaded) return;
+    if (!hasAccess || !personBootstrapReady || fandomLoaded) return;
     const controller = new AbortController();
     void runSecondaryRead(async () => {
       await fetchFandomData({ signal: controller.signal });
@@ -9970,7 +10096,7 @@ export default function PersonProfilePage() {
     return () => {
       controller.abort();
     };
-  }, [activeTab, fandomLoaded, fetchFandomData, hasAccess, runSecondaryRead]);
+  }, [activeTab, fandomLoaded, fetchFandomData, hasAccess, personBootstrapReady, runSecondaryRead]);
 
   const newsSourceOptions = useMemo(
     () => newsFacets.sources,

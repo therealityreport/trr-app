@@ -70,6 +70,7 @@ export type SocialAccountProfileSummary = {
   last_catalog_run_at?: string | null;
   last_catalog_run_status?: string | null;
   catalog_recent_runs?: SocialAccountCatalogRun[];
+  comments_coverage?: SocialAccountCommentsCoverage | null;
   per_show_counts: SocialAccountProfileShowBucket[];
   per_season_counts: SocialAccountProfileSeasonBucket[];
   top_hashtags: SocialAccountProfileHashtag[];
@@ -172,6 +173,76 @@ export type SocialAccountProfilePost = {
     quotes?: number | null;
     engagement?: number | null;
   };
+};
+
+export type SocialAccountCommentsCoverage = {
+  available_posts?: number | null;
+  eligible_posts: number;
+  stale_posts: number;
+  missing_posts: number;
+  last_comments_run_at?: string | null;
+  last_comments_run_status?: string | null;
+};
+
+export type SocialAccountProfileComment = {
+  id: string;
+  comment_id: string;
+  post_id?: string | null;
+  post_source_id?: string | null;
+  post_url?: string | null;
+  username?: string | null;
+  text?: string | null;
+  likes?: number | null;
+  is_reply?: boolean;
+  created_at?: string | null;
+  parent_comment_id?: string | null;
+};
+
+export type SocialAccountProfileCommentsResponse = {
+  items: SocialAccountProfileComment[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+    total_pages: number;
+  };
+};
+
+export type SocialAccountCommentsScrapeRequest =
+  | {
+      mode: "profile";
+      source_scope?: string;
+      max_posts?: number;
+      max_comments_per_post?: number;
+      refresh_policy?: "stale_or_missing";
+      allow_inline_dev_fallback?: boolean;
+    }
+  | {
+      mode: "single_post";
+      source_id: string;
+      max_comments_per_post?: number;
+      allow_inline_dev_fallback?: boolean;
+    };
+
+export type SocialAccountCommentsScrapeResponse = {
+  run_id: string;
+  status?: string | null;
+  detail?: string | null;
+};
+
+export type SocialAccountCommentsRunProgress = {
+  run_id: string;
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  run_status: string;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  summary?: Record<string, unknown> | null;
+  job_status?: string | null;
+  job_metadata?: Record<string, unknown> | null;
+  error_message?: string | null;
+  target_source_ids?: string[];
 };
 
 export type SocialAccountCatalogPost = SocialAccountProfilePost & {
@@ -647,6 +718,7 @@ export const SOCIAL_ACCOUNT_PROFILE_TAB_LABELS: Record<SocialAccountProfileTab, 
   stats: "Stats",
   socialblade: "SocialBlade",
   catalog: "Catalog",
+  comments: "Comments",
   posts: "Posts",
   hashtags: "Hashtags",
   "collaborators-tags": "Collaborators / Tags",

@@ -81,6 +81,15 @@ const setWindowLocation = (url: string): void => {
 
 const formatLocalDateTime = (value: string): string => new Date(value).toLocaleString();
 
+const installClipboardMock = () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  return writeText;
+};
+
 const baseSummary = {
   platform: "instagram",
   account_handle: "bravotv",
@@ -96,6 +105,14 @@ const baseSummary = {
   last_catalog_run_at: "2026-03-17T12:00:00.000Z",
   last_catalog_run_status: "completed",
   catalog_recent_runs: [],
+  comments_coverage: {
+    available_posts: 12,
+    eligible_posts: 12,
+    missing_posts: 3,
+    stale_posts: 2,
+    last_comments_run_at: "2026-03-17T11:00:00.000Z",
+    last_comments_run_status: "completed",
+  },
   per_show_counts: [
     {
       show_id: "show-rhoslc",
@@ -240,7 +257,7 @@ describe("SocialAccountProfilePage", () => {
         "Backfill Posts scans the full catalog and updates saved posts. If a saved older frontier exists, Backfill Posts resumes it automatically before continuing full-history fetches. Run Gap Analysis before using targeted repairs like Sync Newer.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Cataloged / Profile total")).toBeInTheDocument();
+    expect(screen.getByText("Saved / Account total")).toBeInTheDocument();
     expect(screen.getByText("Pending Review")).toBeInTheDocument();
     expect(screen.queryByText("Catalog Actions Unavailable In V1")).not.toBeInTheDocument();
   });
@@ -264,7 +281,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Cataloged / Profile total")).toBeInTheDocument();
+      expect(screen.getByText("Saved / Account total")).toBeInTheDocument();
     });
 
     expect(screen.getByText("45 / 124,619")).toBeInTheDocument();
@@ -310,6 +327,296 @@ describe("SocialAccountProfilePage", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("link", { name: "SocialBlade" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows the Comments tab only for Instagram profiles", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({ ...baseSummary, platform: url.includes("/tiktok/") ? "tiktok" : "instagram" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    const { rerender } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Comments" })).toBeInTheDocument();
+    });
+
+    rerender(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "Comments" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("queues a profile comments scrape from the comments tab", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/comments?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments/scrape")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(
+          JSON.stringify({
+            mode: "profile",
+            source_scope: "bravo",
+            refresh_policy: "stale_or_missing",
+            max_posts: 50,
+            max_comments_per_post: 200,
+          }),
+        );
+        return jsonResponse({ run_id: "comments-run-12345678", status: "queued" });
+      }
+      if (url.includes("/comments/runs/comments-run-12345678/progress")) {
+        return jsonResponse({
+          run_id: "comments-run-12345678",
+          platform: "instagram",
+          account_handle: "bravotv",
+          run_status: "completed",
+          job_status: "completed",
+          target_source_ids: ["C123"],
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByText("Available Posts")).toBeInTheDocument();
+    expect(screen.getByText("Commentable now: 12")).toBeInTheDocument();
+
+    const button = await screen.findByRole("button", { name: "Scrape Comments" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("Comments scrape completed. Run comments.")).toBeInTheDocument();
+    });
+  });
+
+  it("sources comments panel `Available Posts` from saved-post inventory, not the commentable subset", async () => {
+    // P0-1 regression lock: before the fix, `Available Posts` was wired to
+    // `comments_coverage.available_posts` (the smaller commentable subset), so it
+    // showed ~1,099 for an account with 16,200 saved posts. The headline figure must
+    // match the saved-post total shown by the Posts card (`live_catalog_total_posts`
+    // with `catalog_total_posts` fallback). `Commentable now` stays on the smaller
+    // `coverage.eligible_posts` value.
+    const divergentSummary = {
+      ...baseSummary,
+      total_posts: 16737,
+      live_total_posts: 16737,
+      catalog_total_posts: 16200,
+      live_catalog_total_posts: 16200,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        available_posts: 1099, // stale backend field — UI must ignore
+        eligible_posts: 1099,
+      },
+    };
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(divergentSummary);
+      }
+      if (url.includes("/comments?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByText("Available Posts")).toBeInTheDocument();
+    // Saved-post total (16,200), NOT coverage.available_posts (1,099).
+    expect(screen.getByText("16,200")).toBeInTheDocument();
+    // Commentable subset stays on coverage.eligible_posts.
+    expect(screen.getByText("Commentable now: 1,099")).toBeInTheDocument();
+  });
+
+  it("falls back to catalog_total_posts when live_catalog_total_posts is absent", async () => {
+    // P0-1 fallback path: `live_catalog_total_posts` is the preferred source; when the
+    // live counter is missing, the component must fall back to `catalog_total_posts`.
+    const fallbackSummary = {
+      ...baseSummary,
+      total_posts: 16737,
+      live_total_posts: 16737,
+      catalog_total_posts: 16200,
+      live_catalog_total_posts: undefined,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        available_posts: 1099,
+        eligible_posts: 1099,
+      },
+    };
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(fallbackSummary);
+      }
+      if (url.includes("/comments?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByText("Available Posts")).toBeInTheDocument();
+    expect(screen.getByText("16,200")).toBeInTheDocument();
+    expect(screen.getByText("Commentable now: 1,099")).toBeInTheDocument();
+  });
+
+  it("shows actionable copy when the comments worker lane is offline", async () => {
+    // P2-7: When the backend returns 503 with detail.code=SOCIAL_WORKER_UNAVAILABLE,
+    // the admin proxy extracts it as `upstream_detail_code`. The UI must surface
+    // a specific message with the launch command, not a generic 503.
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/comments?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments/scrape") && init?.method === "POST") {
+        return jsonResponse(
+          {
+            error: "No healthy instagram_comments_scrapling social ingest workers are reporting heartbeats.",
+            code: "UPSTREAM_ERROR",
+            upstream_status: 503,
+            upstream_detail_code: "SOCIAL_WORKER_UNAVAILABLE",
+          },
+          503,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const button = await screen.findByRole("button", { name: "Scrape Comments" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      // The component's readErrorMessage surfaces the actionable runbook pointer.
+      expect(screen.getByText(/No Instagram comments worker is online/i)).toBeInTheDocument();
+    });
+  });
+
+  it("queues a per-post comments scrape from the posts tab", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "catalog-post-1",
+              source_id: "C123",
+              platform: "instagram",
+              account_handle: "bravotv",
+              title: "Bravo post",
+              content: "Caption text.",
+              url: "https://www.instagram.com/p/C123/",
+              posted_at: "2026-03-22T12:00:00Z",
+              show_name: "The Real Housewives of Beverly Hills",
+              season_number: 14,
+              match_mode: "owner",
+              source_surface: "catalog",
+              metrics: {
+                engagement: 1250,
+                views: 9000,
+                comments_count: 42,
+              },
+            },
+          ],
+          pagination: {
+            page: 1,
+            page_size: 25,
+            total: 1,
+            total_pages: 1,
+          },
+        });
+      }
+      if (url.includes("/comments/scrape")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(
+          JSON.stringify({
+            mode: "single_post",
+            source_id: "C123",
+            max_comments_per_post: 500,
+          }),
+        );
+        return jsonResponse({ run_id: "comments-run-post-1", status: "queued" });
+      }
+      if (url.includes("/comments/runs/comments-run-post-1/progress")) {
+        return jsonResponse({
+          run_id: "comments-run-post-1",
+          platform: "instagram",
+          account_handle: "bravotv",
+          run_status: "completed",
+          job_status: "completed",
+          target_source_ids: ["C123"],
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="posts" />);
+
+    const button = await screen.findByRole("button", { name: "Scrape Comments" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("Comments refreshed.")).toBeInTheDocument();
+    });
+  });
+
+  it("surfaces comments scrape worker errors on the comments tab", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/comments?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments/scrape")) {
+        return jsonResponse({ detail: "Instagram comments worker unavailable" }, 503);
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const button = await screen.findByRole("button", { name: "Scrape Comments" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("Instagram comments worker unavailable")).toBeInTheDocument();
     });
   });
 
@@ -516,6 +823,287 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
     });
+  });
+
+  it("renders fill-missing and backfill copy buttons on catalog-enabled platforms", async () => {
+    const writeText = installClipboardMock();
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "twitter",
+          account_handle: "bravotv",
+          profile_url: "https://x.com/BravoTV",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="twitter" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("button", { name: "Fill Missing Photos" })).toBeInTheDocument();
+
+    const copyButtons = screen.getAllByRole("button", { name: "Copy terminal command" });
+    expect(copyButtons).toHaveLength(2);
+
+    fireEvent.click(copyButtons[0]!);
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        "cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/local_catalog_action.py --platform twitter --account bravotv --action backfill",
+      );
+    });
+
+    fireEvent.click(copyButtons[1]!);
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(
+        "cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/local_catalog_action.py --platform twitter --account bravotv --action fill_missing_photos",
+      );
+    });
+  });
+
+  it("routes Fill Missing Photos to sync-newer for head gaps", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravotv",
+          profile_url: "https://www.tiktok.com/@bravotv",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "tiktok",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-head-1",
+          stale: false,
+          result: {
+            platform: "tiktok",
+            account_handle: "bravotv",
+            gap_type: "head_gap",
+            recommended_action: "sync_newer",
+            repair_window_start: null,
+            repair_window_end: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/sync-newer")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
+        return jsonResponse({ run_id: "catalog-run-head-1", status: "queued" });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "tiktok",
+            account_handle: "bravotv",
+            profile_url: "https://www.tiktok.com/@bravotv",
+          },
+          catalog_run_progress: null,
+          generated_at: "2026-04-15T12:00:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    const button = await screen.findByRole("button", { name: "Fill Missing Photos" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("Sync newer posts queued (catalog-).")).toBeInTheDocument();
+    });
+  });
+
+  it("routes Fill Missing Photos to full-history backfill for tail gaps", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "threads",
+          account_handle: "bravotv",
+          profile_url: "https://www.threads.net/@bravotv",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "threads",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-tail-1",
+          stale: false,
+          result: {
+            platform: "threads",
+            account_handle: "bravotv",
+            gap_type: "tail_gap",
+            recommended_action: "backfill_posts",
+            repair_window_start: null,
+            repair_window_end: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ backfill_scope: "full_history" }));
+        return jsonResponse({ run_id: "catalog-run-tail-2", status: "queued" });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "threads",
+            account_handle: "bravotv",
+            profile_url: "https://www.threads.net/@bravotv",
+          },
+          catalog_run_progress: null,
+          generated_at: "2026-04-15T12:00:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="threads" handle="bravotv" activeTab="catalog" />);
+
+    const button = await screen.findByRole("button", { name: "Fill Missing Photos" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
+    });
+  });
+
+  it("routes Fill Missing Photos to bounded-window backfill for interior gaps", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "facebook",
+          account_handle: "bravotv",
+          profile_url: "https://www.facebook.com/bravotv",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "facebook",
+          account_handle: "bravotv",
+          status: "completed",
+          operation_id: "gap-op-window-1",
+          stale: false,
+          result: {
+            platform: "facebook",
+            account_handle: "bravotv",
+            gap_type: "interior_gaps",
+            recommended_action: "bounded_window_backfill",
+            repair_window_start: "2026-04-01T00:00:00Z",
+            repair_window_end: "2026-04-03T23:59:59Z",
+          },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(
+          JSON.stringify({
+            backfill_scope: "bounded_window",
+            date_start: "2026-04-01T00:00:00Z",
+            date_end: "2026-04-03T23:59:59Z",
+          }),
+        );
+        return jsonResponse({ run_id: "catalog-run-window-1", status: "queued" });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "facebook",
+            account_handle: "bravotv",
+            profile_url: "https://www.facebook.com/bravotv",
+          },
+          catalog_run_progress: null,
+          generated_at: "2026-04-15T12:00:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="facebook" handle="bravotv" activeTab="catalog" />);
+
+    const button = await screen.findByRole("button", { name: "Fill Missing Photos" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("Post backfill queued (catalog-).")).toBeInTheDocument();
+    });
+  });
+
+  it("does not start another catalog action when Fill Missing Photos resolves to none", async () => {
+    let backfillCalled = false;
+    let syncNewerCalled = false;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "youtube",
+          account_handle: "bravo",
+          profile_url: "https://www.youtube.com/@bravo",
+        });
+      }
+      if (url.includes("/catalog/gap-analysis/run")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          platform: "youtube",
+          account_handle: "bravo",
+          status: "completed",
+          operation_id: "gap-op-none-1",
+          stale: false,
+          result: {
+            platform: "youtube",
+            account_handle: "bravo",
+            gap_type: "complete",
+            recommended_action: "none",
+            repair_window_start: null,
+            repair_window_end: null,
+          },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        backfillCalled = true;
+        return jsonResponse({ run_id: "unexpected-backfill", status: "queued" });
+      }
+      if (url.includes("/catalog/sync-newer")) {
+        syncNewerCalled = true;
+        return jsonResponse({ run_id: "unexpected-sync-newer", status: "queued" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="youtube" handle="bravo" activeTab="catalog" />);
+
+    const button = await screen.findByRole("button", { name: "Fill Missing Photos" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("No missing posts to fill right now.")).toBeInTheDocument();
+    });
+
+    expect(backfillCalled).toBe(false);
+    expect(syncNewerCalled).toBe(false);
   });
 
   it("shows tail-gap guidance and queues backfill posts from the integrity banner", async () => {

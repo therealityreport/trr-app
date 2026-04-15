@@ -4,9 +4,9 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-14T03:54:15.360Z",
-  "sourceCommitSha": "23227b232d514e14b4c772a010dfdd46fab3807b",
-  "overrideDigest": "a29b267e3edd1915ce8b856036892160e0fbd1171e516987d38acd697ee8676b",
+  "generatedAt": "2026-04-15T11:36:50.007Z",
+  "sourceCommitSha": "b510b22e068c42cbc2c4b6a33d84556ab760cbdf",
+  "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
     {
       "id": "backend:DELETE:/api/v1/admin/brands/logos/options/saved/[assetId]",
@@ -5768,7 +5768,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 1410,
+        "line": 1453,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -5799,7 +5799,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7767,
+        "line": 7872,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -12124,6 +12124,73 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/comments",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/progress",
+      "kind": "api_route",
+      "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/progress",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/progress",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/progress/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health",
       "kind": "api_route",
       "title": "GET /api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health",
@@ -17103,6 +17170,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape/route.ts",
+      "sourceLocator": {
+        "line": 14,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
       "kind": "api_route",
       "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
@@ -18158,7 +18258,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 1410,
+        "line": 1453,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -18176,7 +18276,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7767,
+        "line": 7872,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -18230,7 +18330,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2351,
+        "line": 2394,
         "matchedText": "`/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=8`"
       },
       "provenance": "static_scan",
@@ -18248,7 +18348,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 5963,
+        "line": 6068,
         "matchedText": "`/api/admin/trr-api/people/${personId}/fandom${showIdQuery}`"
       },
       "provenance": "static_scan",
@@ -18266,7 +18366,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2841,
+        "line": 2884,
         "matchedText": "`/api/admin/trr-api/people/${photo.person_id}/gallery/${photo.link_id}/facebank-seed`"
       },
       "provenance": "static_scan",
@@ -18284,7 +18384,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10104,
+        "line": 10230,
         "matchedText": "\"/api/admin/trr-api/assets/archive\""
       },
       "provenance": "static_scan",
@@ -18302,7 +18402,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10176,
+        "line": 10302,
         "matchedText": "\"/api/admin/trr-api/assets/content-type\""
       },
       "provenance": "static_scan",
@@ -18320,7 +18420,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10133,
+        "line": 10259,
         "matchedText": "\"/api/admin/trr-api/assets/star\""
       },
       "provenance": "static_scan",
@@ -18338,7 +18438,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2677,
+        "line": 2720,
         "matchedText": "`/api/admin/trr-api/cast-photos/${photo.id}/mirror`"
       },
       "provenance": "static_scan",
@@ -18356,7 +18456,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2802,
+        "line": 2845,
         "matchedText": "`/api/admin/trr-api/media-assets/${photo.media_asset_id}/mirror`"
       },
       "provenance": "static_scan",
@@ -18374,7 +18474,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6029,
+        "line": 6134,
         "matchedText": "`/api/admin/trr-api/people/${personId}/import-fandom/commit`"
       },
       "provenance": "static_scan",
@@ -18392,7 +18492,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 5996,
+        "line": 6101,
         "matchedText": "`/api/admin/trr-api/people/${personId}/import-fandom/preview`"
       },
       "provenance": "static_scan",
@@ -18410,7 +18510,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7251,
+        "line": 7356,
         "matchedText": "`/api/admin/trr-api/people/${personId}/images/refresh`"
       },
       "provenance": "static_scan",
@@ -18428,7 +18528,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7617,
+        "line": 7722,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`"
       },
       "provenance": "static_scan",
@@ -18446,7 +18546,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7788,
+        "line": 7893,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -18464,7 +18564,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 8809,
+        "line": 8914,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -18482,7 +18582,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10054,
+        "line": 10180,
         "matchedText": "`/api/admin/images/cast/${reassignModalImage.imageId}/reassign`"
       },
       "provenance": "static_scan",
@@ -18500,7 +18600,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6582,
+        "line": 6687,
         "matchedText": "`/api/admin/trr-api/people/${personId}/cover-photo`"
       },
       "provenance": "static_scan",
@@ -18518,7 +18618,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2879,
+        "line": 2922,
         "matchedText": "`/api/admin/trr-api/people/${photo.person_id}/photos/${photo.id}/thumbnail-crop`"
       },
       "provenance": "static_scan",
@@ -21733,6 +21833,8 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/progress",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/verification",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/collaborators-tags",
+        "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments",
+        "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/progress",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/health",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags",
         "route:GET:/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags/timeline",
@@ -21880,6 +21982,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-newer",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-recent",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
         "route:POST:/api/admin/trr-api/social/shared/ingest",
@@ -22235,11 +22338,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 536,
+      "totalNodes": 539,
       "totalEdges": 186,
       "nodesByKind": {
         "ui_surface": 58,
-        "api_route": 361,
+        "api_route": 364,
         "backend_endpoint": 111,
         "repository_surface": 2,
         "polling_loop": 4

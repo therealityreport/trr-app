@@ -55,6 +55,7 @@ export type SocialAccountProfileTab =
   | "stats"
   | "socialblade"
   | "catalog"
+  | "comments"
   | "posts"
   | "hashtags"
   | "collaborators-tags";
@@ -648,6 +649,7 @@ const toSocialAccountProfileTab = (value: string | null | undefined): SocialAcco
   if (!normalized) return "stats";
   if (normalized === "socialblade" || normalized === "social-blade") return "socialblade";
   if (normalized === "catalog") return "catalog";
+  if (normalized === "comments" || normalized === "comment") return "comments";
   if (normalized === "posts") return "posts";
   if (normalized === "hashtags" || normalized === "hashtag") return "hashtags";
   if (
@@ -693,10 +695,15 @@ export function buildSocialAccountProfileUrl(input: {
     return appendQuery(ADMIN_SOCIAL_PATH, buildCanonicalQuery(input.query, { removeSocialView: true }));
   }
   const tab = input.tab ?? "stats";
+  // P0-1b: The comments tab migrated to the `/social/...` canonical URL tree.
+  // Other tabs still build under the legacy `/admin/social/...` prefix until a
+  // broader URL migration lands (explicitly out of scope here).
   const path =
-    tab === "stats"
-      ? `${ADMIN_SOCIAL_PATH}/${platform}/${handle}`
-      : `${ADMIN_SOCIAL_PATH}/${platform}/${handle}/${tab}`;
+    tab === "comments"
+      ? `/social/${platform}/${handle}/comments`
+      : tab === "stats"
+        ? `${ADMIN_SOCIAL_PATH}/${platform}/${handle}`
+        : `${ADMIN_SOCIAL_PATH}/${platform}/${handle}/${tab}`;
   const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
   nextQuery.delete("social_platform");
   nextQuery.delete("season_id");
