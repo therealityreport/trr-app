@@ -74,6 +74,12 @@ type PostgresPoolSizing = {
 };
 
 const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app-server";
+// Transaction-local search_path applied to every explicit transaction. Pinning
+// prevents a prior caller's `SET search_path` from leaking through the pooled
+// connection. Single-statement `query()` calls run under pg's default behavior
+// (autocommit per statement) and remain schema-qualified in the codebase, so
+// the server default is acceptable there.
+const DEFAULT_TRANSACTION_SEARCH_PATH = "public, core, firebase_surveys";
 
 const classifyHostClass = (connectionString: string): CandidateDetail["hostClass"] => {
   const host = parseConnectionHostname(connectionString);
@@ -243,6 +249,16 @@ const getMaxConcurrentOperations = (): number => {
   return resolvePostgresPoolSizing(connectionString, process.env).maxConcurrentOperations;
 };
 
+const emitStructured = (event: string, fields: Record<string, unknown>): void => {
+  try {
+    // Log drains (Vercel/Better Stack) key on stable JSON keys. Keep this a
+    // single line so parsers don't break on multi-line messages.
+    console.info(JSON.stringify({ event, source: "postgres.ts", ...fields }));
+  } catch {
+    // Never let telemetry block the caller.
+  }
+};
+
 const acquireOperationSlot = async (): Promise<void> => {
   const maxConcurrentOperations = getMaxConcurrentOperations();
   if (activeOperationCount < maxConcurrentOperations) {
@@ -250,6 +266,11 @@ const acquireOperationSlot = async (): Promise<void> => {
     return;
   }
 
+  emitStructured("postgres_pool_queue_depth", {
+    waiting: waitingOperationResolvers.length + 1,
+    active: activeOperationCount,
+    max_concurrent_operations: maxConcurrentOperations,
+  });
   await new Promise<void>((resolve) => {
     waitingOperationResolvers.push(resolve);
   });
@@ -295,7 +316,10 @@ const getPool = (): Pool => {
   const idleTimeoutMillis =
     parsePositiveInt(process.env.POSTGRES_POOL_IDLE_TIMEOUT_MS) ??
     (isSessionPooler ? 5_000 : isDevelopment ? 10_000 : 30_000);
-  const maxUses = parsePositiveInt(process.env.POSTGRES_POOL_MAX_USES) ?? (isDevelopment ? 1 : undefined);
+  // No default maxUses: the prior `isDevelopment ? 1 : undefined` pessimism forced
+  // a full TCP+TLS handshake per query locally, which hurt dev velocity without a
+  // documented reason. Keep the env var as an explicit escape hatch.
+  const maxUses = parsePositiveInt(process.env.POSTGRES_POOL_MAX_USES);
   const applicationName = (process.env.POSTGRES_APPLICATION_NAME ?? DEFAULT_POSTGRES_APPLICATION_NAME).trim();
 
   const pool = new Pool({
@@ -316,9 +340,21 @@ const getPool = (): Pool => {
     pool,
   };
   if (selectedCandidate) {
-    console.info(
-      `[postgres] winner_source=${selectedCandidate.source} host_class=${selectedCandidate.hostClass} connection_class=${selectedCandidate.connectionClass} pool_max=${max} pool_max_source=${process.env.POSTGRES_POOL_MAX ? "env:POSTGRES_POOL_MAX" : "default"} max_concurrent_operations=${getMaxConcurrentOperations()} max_concurrent_operations_source=${process.env.POSTGRES_MAX_CONCURRENT_OPERATIONS ? "env:POSTGRES_MAX_CONCURRENT_OPERATIONS" : "default"} application_name=${applicationName} application_name_source=${process.env.POSTGRES_APPLICATION_NAME ? "env:POSTGRES_APPLICATION_NAME" : "default"}`,
-    );
+    emitStructured("postgres_pool_init", {
+      winner_source: selectedCandidate.source,
+      host_class: selectedCandidate.hostClass,
+      connection_class: selectedCandidate.connectionClass,
+      pool_max: max,
+      pool_max_source: process.env.POSTGRES_POOL_MAX ? "env:POSTGRES_POOL_MAX" : "default",
+      max_concurrent_operations: getMaxConcurrentOperations(),
+      max_concurrent_operations_source: process.env.POSTGRES_MAX_CONCURRENT_OPERATIONS
+        ? "env:POSTGRES_MAX_CONCURRENT_OPERATIONS"
+        : "default",
+      application_name: applicationName,
+      application_name_source: process.env.POSTGRES_APPLICATION_NAME
+        ? "env:POSTGRES_APPLICATION_NAME"
+        : "default",
+    });
   }
   return poolState.pool;
 };
@@ -395,6 +431,13 @@ async function withPoolRetry<T>(operation: (pool: Pool) => Promise<T>): Promise<
 
       const nextCandidateIndex =
         activeCandidateIndex + 1 < candidates.length ? activeCandidateIndex + 1 : activeCandidateIndex;
+      emitStructured("postgres_pool_fallback", {
+        attempt,
+        from_candidate_index: activeCandidateIndex,
+        to_candidate_index: nextCandidateIndex,
+        transient: true,
+        error_message: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+      });
       activeCandidateIndex = nextCandidateIndex;
       await closePoolState();
       if (attempt + 1 < maxAttempts) {
@@ -419,6 +462,7 @@ export async function withTransaction<T>(callback: (client: PoolClient) => Promi
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await client.query(`SET LOCAL search_path = ${DEFAULT_TRANSACTION_SEARCH_PATH}`);
         const result = await callback(client);
         await client.query("COMMIT");
         return result;
@@ -476,6 +520,9 @@ export async function withAuthTransaction<T>(
         await client.query("SELECT set_config('app.is_admin', $1, true)", [
           authContext.isAdmin ? "true" : "false",
         ]);
+        // Pin search_path transaction-locally for the same pooled-connection
+        // leakage reason as the identity session vars above.
+        await client.query(`SET LOCAL search_path = ${DEFAULT_TRANSACTION_SEARCH_PATH}`);
 
         const result = await callback(client);
         await client.query("COMMIT");
