@@ -11,10 +11,11 @@ Purpose: active-work index for multi-turn AI agent sessions in `TRR-APP`. Keep t
 - None.
 
 ## Recent Completions
-- `Show Page Parity Reddit And Streaming` | last updated `2026-04-07` | current phase `show page TMDb availability buckets landed` | next action `Use as reference while related admin show parity work continues.` | details `local-status/show-page-parity-reddit-and-streaming.md`
+- None.
 
 ## Older Plans
 - `TASK26 Concerns remediation and Screenalytics contract lock` | last updated `2026-04-09` | current phase `gallery adoption and test cleanup landed` | next action `continue extracting admin-page logic out of monolith page files` | details `../cross-collab/TASK26/STATUS.md`
+- `Show Page Parity Reddit And Streaming` | last updated `2026-04-07` | current phase `show page TMDb availability buckets landed` | next action `Use as reference while related admin show parity work continues.` | details `local-status/show-page-parity-reddit-and-streaming.md`
 - `TASK23 Final Supabase connection audit and donor transition inventory` | last updated `2026-04-03` | current phase `phase 4 screentime operator cutover recorded` | next action `preserve the admin screentime surface while Phase 5 removes the remaining Screenalytics runtime dependency` | details `../cross-collab/TASK23/STATUS.md`
 - `Cast Screentime Phase 5 Operator Continuity` | last updated `2026-04-03` | current phase `phase 5 operator continuity captured` | next action `Use the existing admin path while backend-only screentime runtime receives one live parity sanity run.` | details `local-status/cast-screentime-phase5-operator-continuity.md`
 - `Cast Screentime Phase 4 Operator Cutover` | last updated `2026-04-03` | current phase `phase 4 app operator cutover implemented` | next action `Keep the screentime admin page stable while Phase 5 removes the rollback-only Screenalytics dependency.` | details `local-status/cast-screentime-phase4-operator-cutover.md`
@@ -23,7 +24,6 @@ Purpose: active-work index for multi-turn AI agent sessions in `TRR-APP`. Keep t
 - `TASK24 TRR-APP Supabase Simplification and Index Hardening` | last updated `2026-04-02` | current phase `app cleanup complete` | next action `carry forward the recorded repo-wide warning/test drift; Flashback gameplay remains disabled until a future auth redesign` | details `../cross-collab/TASK24/STATUS.md`
 - `TASK20 Follow-up validation and regression hardening` | last updated `2026-03-31` | current phase `validated` | next action `Await backend full-suite closure, then final handoff sync` | details `../cross-collab/TASK20/STATUS.md`
 - `TASK14 Supabase runtime contract cleanup` | last updated `2026-03-30` | current phase `deploy environment cleanup complete` | next action `monitor future env changes; no additional app deploy cleanup is required in this task` | details `../cross-collab/TASK14/STATUS.md`
-- `Social Instagram Tab Reddit Summary Guard` | last updated `2026-03-26` | current phase `instagram tab reddit-summary regression fixed in season social analytics` | next action `reload /rhoslc/social/s6/instagram and confirm the overview still shows Reddit cards while the Instagram tab does not` | details `local-status/social-instagram-tab-reddit-summary-guard.md`
 
 ## Archives / Canonical Links
 - History archive: `archive/HANDOFF-legacy-2026-03-16.md`

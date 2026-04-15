@@ -77,7 +77,7 @@ for (const [index, batch] of batches.entries()) {
       '-c',
       'vitest.config.ts',
       '--pool=forks',
-      '--poolOptions.forks.singleFork',
+      '--poolOptions.forks.singleFork=true',
       ...extraArgs,
       ...batch,
     ],

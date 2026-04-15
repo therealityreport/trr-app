@@ -44,11 +44,82 @@ export interface ExtractionPlan {
   skip: string[];
 }
 
+export type FidelitySeverity = "blocking" | "degraded";
+
 export interface PublisherClassification {
   techInventory: TechInventory;
   layoutFamily: LayoutFamily;
   taxonomyMapping: TaxonomyMapping;
   extractionPlan: ExtractionPlan;
+  bespokeInteractive: boolean;
+  requiresVisualContract: boolean;
+  classificationSignals: string[];
+}
+
+export interface HeaderFidelityRequirements {
+  headlineText?: string;
+  headlineStyle?: string;
+  deckBehavior?: "render" | "source-only" | "omit";
+  bylineLayout?: "inline" | "stacked" | "centered";
+  noteTextOrder?: string[];
+}
+
+export interface TypographyFidelityVariant {
+  role: string;
+  sampleText: string;
+  styleSignature: string;
+  severity: FidelitySeverity;
+}
+
+export interface BarChartVisualContract {
+  rendererKind: "bar-chart";
+  requiresDedicatedComponent: boolean;
+  requiredTitle?: string;
+  requiredNote?: string;
+  requiresAxis: boolean;
+  requiresLegend: boolean;
+  requiresFaces: boolean;
+}
+
+export interface BubbleChartVisualContract {
+  rendererKind: "bubble-chart";
+  requiresDedicatedComponent: boolean;
+  requiredTitle?: string;
+  requiredNote?: string;
+  requiresFaces: boolean;
+  requiresTopicLabels: boolean;
+}
+
+export interface GenericVisualChartContract {
+  rendererKind: string;
+  rawEvidence: Record<string, unknown>;
+}
+
+export type VisualChartContract =
+  | BarChartVisualContract
+  | BubbleChartVisualContract
+  | GenericVisualChartContract;
+
+export interface VisualAssetContractEntry {
+  kind: "icon" | "image" | "portrait" | "social-image";
+  name: string;
+  required: boolean;
+  sourceUrl?: string;
+  resolvedUrl?: string;
+  provenance?: string;
+}
+
+export interface ArticleVisualContract {
+  chrome: HeaderFidelityRequirements;
+  typography: {
+    variants: TypographyFidelityVariant[];
+  };
+  charts: VisualChartContract[];
+  assets: VisualAssetContractEntry[];
+  severitySummary: {
+    blocking: number;
+    degraded: number;
+  };
 }
 
 export interface NavigationLink {
@@ -167,6 +238,8 @@ export interface MergedExtractionOutput {
   extractionOutputs: Record<string, unknown>;
   blockCompleteness?: number | null;
   techInventory: TechInventory;
+  visualContract?: ArticleVisualContract | null;
+  legacyFidelityMode: boolean;
 }
 
 export interface AuditCheckResult {
@@ -182,6 +255,20 @@ export interface AuditResult {
   checks: AuditCheckResult[];
   blockingErrors: string[];
   warnings: string[];
+}
+
+export interface SourceFidelityFinding {
+  severity: FidelitySeverity;
+  area: "chrome" | "typography" | "charts" | "assets" | "general";
+  message: string;
+}
+
+export interface SourceFidelityResult {
+  articleId: string;
+  passed: boolean;
+  legacyMode: boolean;
+  blockingFindings: SourceFidelityFinding[];
+  degradedFindings: SourceFidelityFinding[];
 }
 
 export interface A11yAuditFinding {

@@ -45,6 +45,8 @@ import FilterCardTracker from "./FilterCardTracker";
 import InteractiveTariffTable from "./InteractiveTariffTable";
 import InteractiveTariffRateArrowChart from "./InteractiveTariffRateArrowChart";
 import InteractiveTariffRateTable from "./InteractiveTariffRateTable";
+import InteractiveDebateSpeakingTimeChart from "./InteractiveDebateSpeakingTimeChart";
+import InteractiveDebateTopicBubbleChart from "./InteractiveDebateTopicBubbleChart";
 import NytInteractiveShell, { NytStorylineRail } from "./NytInteractiveShell";
 import { NFL_FREE_AGENTS_2026 } from "./free-agent-data";
 import type { BarChartData } from "./InteractiveBarChart";
@@ -216,6 +218,76 @@ type ArticleSocialImage = {
   desc?: string;
 };
 
+type ArticleIconAsset = {
+  name: string;
+  file?: string;
+  url?: string;
+  size?: string;
+  fill?: string;
+  usage?: string;
+  element?: string;
+};
+
+type ArticleImageAsset = {
+  name: string;
+  url: string;
+  category?: string;
+  width?: number;
+  ratio?: string;
+  desc?: string;
+};
+
+type ArticleCssInfo = {
+  styleRules: string;
+  cssFile: string;
+  stylesheets: string;
+  loadTime: string;
+};
+
+type TypographySample = {
+  label: string;
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  lineHeight: string;
+  color: string;
+  fontStyle?: React.CSSProperties["fontStyle"];
+  textAlign?: React.CSSProperties["textAlign"];
+  textTransform?: React.CSSProperties["textTransform"];
+  letterSpacing?: string;
+};
+
+type ArticleTypographyGroup = {
+  label: string;
+  families: readonly string[];
+  weightCount: number;
+  styleCount: number;
+  samples: readonly TypographySample[];
+};
+
+type CategorizedColor = {
+  name: string;
+  hex: string;
+  note?: string;
+};
+
+type ArticleColorCategory = {
+  label: string;
+  colors: readonly CategorizedColor[];
+};
+
+type ArticleFeaturedImage = ArticleImageAsset & {
+  sectionLabel?: string;
+};
+
+type DebateChartAccessibilityLabels = {
+  timelineRowTemplate?: string;
+  timelinePortraitTemplate?: string;
+  bubbleTemplate?: string;
+};
+
+const DEBATE_SPEAKING_TIME_ARTICLE_ID = "debate-speaking-time";
 const TRUMP_TARIFFS_REACTION_ARTICLE_ID = "trump-tariffs-reaction";
 const TRUMP_TARIFFS_US_IMPORTS_ARTICLE_ID = "trump-tariffs-us-imports";
 
@@ -237,6 +309,25 @@ function formatArticleDisplayDate(date: string) {
     year: "numeric",
     timeZone: "UTC",
   }).format(parsed);
+}
+
+function formatNytShortDate(date: string) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  const month = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  }).format(parsed);
+  const monthWithPeriod = month.endsWith(".") ? month : `${month}.`;
+  const day = new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+  const year = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+
+  return `${monthWithPeriod} ${day}, ${year}`;
 }
 
 function extractTextFromHtml(html: string) {
@@ -383,6 +474,8 @@ function getArticleBlockBaseLabel(block: ContentBlock) {
     case "tariff-country-table":
     case "tariff-rate-arrow-chart":
     case "tariff-rate-table":
+    case "debate-speaking-time-chart":
+    case "debate-topic-bubble-chart":
       return block.title;
     case "subhed":
       return block.text;
@@ -949,24 +1042,30 @@ function getSpecimenText(
   articleDate?: string,
   articleSection?: string,
   articleTags?: readonly string[],
+  articleBodyText?: string,
 ): string {
   /* Map element class to actual article text for realistic specimens */
   const cl = (className || "").toLowerCase();
   if (cl.includes("headline") || cl.includes("heading")) return articleTitle || "Article Headline Text";
   if (cl.includes("summary") || cl.includes("description") || cl.includes("deck")) return articleDescription || "Article summary description text.";
   if (cl.includes("byline") || cl.includes("author")) return `By ${(articleAuthors || []).join(", ") || "Author Name"}`;
-  if (cl.includes("timestamp") || cl.includes("date")) return articleDate || "March 23, 2025";
+  if (cl.includes("timestamp") || cl.includes("date")) return articleDate ? formatNytShortDate(articleDate) : "March 23, 2025";
   if (cl.includes("sectionlabel") || cl.includes("sectionkicker")) return (articleSection || "The Upshot").toUpperCase();
   if (cl.includes("topictag") || cl.includes("tag")) return (articleTags || ["Topic"]).slice(0, 3).join(" · ");
-  if (cl.includes("bodytext") || cl.includes("body")) return "In most states, playing slot machines online for real money is illegal. But a group of companies known as sweepstakes casinos has found a way around the law.";
-  if (cl.includes("bodylink")) return "a legal loophole that complicates the states' ability to take action";
+  if (cl.includes("bodylink")) return "Bernie Sanders of Vermont";
+  if (cl.includes("bodytext") || cl.includes("body")) return articleBodyText || articleDescription || "Article body copy preview";
   if (cl.includes("caption")) return "Cross-country skiing is part of Norway's culture and was a source of many of its medals.";
   if (cl.includes("credit")) return "Vincent Alban/The New York Times";
+  if (cl.includes("legend")) return "Electability";
+  if (cl.includes("candidate-total") || cl.includes("timetext")) return "15:28";
+  if (cl.includes("candidate-name") || cl.includes("candname") || cl.includes("yaxis")) return "Sanders";
+  if (cl.includes("topic-label") || cl.includes("timeline-axis")) return "Foreign policy";
+  if (cl.includes("chart-note")) return "Note: Each bar segment represents the approximate length of a candidate’s response to a question.";
   if (cl.includes("source") || cl.includes("chartsource") || cl.includes("note")) return "Source: Bureau of Labor Statistics. The New York Times";
   if (cl.includes("badge") || cl.includes("promisebadge")) return "HASN'T HAPPENED";
   if (cl.includes("quotecitation") || cl.includes("citation") || cl.includes("promise")) return "TRUMP CAMPAIGN PROMISE";
   if (cl.includes("quote")) return "\u201CI will lower food prices on day one.\u201D";
-  if (cl.includes("charttitle")) return "Breakdown of tax revenue from online casino and sports gambling";
+  if (cl.includes("charttitle")) return "How Long Each Candidate Spoke";
   if (cl.includes("subhed") || cl.includes("subheading")) return "Playing Whac-a-Mole";
   if (cl.includes("sharebutton") || cl.includes("share")) return "Share full article";
   if (cl.includes("audio")) return "Listen · 7:15 min";
@@ -1033,12 +1132,31 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
   const hasAi2htmlArtboards = !!publicAssets?.ai2htmlArtboards;
   const hasQuoteSections = quoteSections.length > 0;
   const hasChartTypes = article.chartTypes.length > 0;
+  const hasChartSourceUrls = article.chartTypes.some(
+    (chartType) => "url" in chartType && Boolean(chartType.url),
+  );
   const isInteractive = article.type === "interactive";
   const isAthletic = isAthleticArticle(article);
+  const isDebateSpeakingTimeArticle =
+    article.id === DEBATE_SPEAKING_TIME_ARTICLE_ID;
   const articleIndexPath = isAthletic
     ? buildDesignDocsPath("athletic-articles")
     : buildDesignDocsPath("nyt-articles");
-  const athleticIcons = isAthletic ? (a.architecture?.publicAssets?.icons ?? []) : [];
+  const articleIcons: readonly ArticleIconAsset[] =
+    (a.architecture?.publicAssets?.icons as
+      | readonly ArticleIconAsset[]
+      | undefined) ?? [];
+  const articleCssInfo =
+    (a.cssInfo as ArticleCssInfo | undefined) ?? null;
+  const articleTypographyGroups: readonly ArticleTypographyGroup[] =
+    (a.typographyGroups as readonly ArticleTypographyGroup[] | undefined) ?? [];
+  const articleColorCategories: readonly ArticleColorCategory[] =
+    (a.colorCategories as readonly ArticleColorCategory[] | undefined) ?? [];
+  const articleFeaturedImage =
+    (a.featuredImage as ArticleFeaturedImage | undefined) ?? null;
+  const debateChartAccessibilityLabels =
+    (a.chartAccessibilityLabels as DebateChartAccessibilityLabels | undefined) ??
+    null;
   const contentBlocks = (a.contentBlocks as readonly ContentBlock[] | undefined) ?? [];
   const blockSections = buildArticleBlockSections(contentBlocks);
   const isTrumpTariffsReaction =
@@ -1058,6 +1176,25 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
             },
           ]
         : [];
+  const articleImageAssetsBase: readonly ArticleImageAsset[] =
+    (publicAssets?.images as readonly ArticleImageAsset[] | undefined) ?? [];
+  const articleImageAssets: readonly ArticleImageAsset[] =
+    articleFeaturedImage &&
+    !articleImageAssetsBase.some((image) => image.url === articleFeaturedImage.url)
+      ? [articleFeaturedImage, ...articleImageAssetsBase]
+      : articleImageAssetsBase;
+  const firstBodyCopyText = extractFirstSentence(
+    extractTextFromHtml(
+      (
+        contentBlocks.find(
+          (
+            block,
+          ): block is Extract<ContentBlock, { type: "body-copy"; html: string }> =>
+            block.type === "body-copy",
+        )?.html ?? ""
+      ),
+    ),
+  );
   const siteHeaderShellBlock = contentBlocks.find(
     (block): block is Extract<ContentBlock, { type: "site-header-shell" }> =>
       block.type === "site-header-shell",
@@ -1488,11 +1625,15 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           css={[
             isAthletic
               ? `h1.Article_Headline__ou0D2.Article_Featured__tTXwK: nyt-cheltenham 40px/400/44px italic #121212`
+              : isDebateSpeakingTimeArticle
+                ? "#interactive-heading: centered nyt-cheltenham 27/38/47px 500 with no visible deck in the saved source"
               : isTrumpTariffsReaction
                 ? "Birdkit interactive header: nyt-cheltenham italic 36px/500/40px on a 600px text column"
                 : `text-align: ${isInteractive ? "center" : "left"} (${isInteractive ? "Birdkit g-header inherits to g-heading" : "standard vi-story layout"})`,
             isAthletic
               ? `div.Article_HeadlineContainer__PR98W.Article_FeaturedHeadlineContainer__WPinJ`
+              : isDebateSpeakingTimeArticle
+                ? "header max-width follows the interactive shell; title balances over two lines in the saved capture"
               : isTrumpTariffsReaction
                 ? "g-header-container.g-theme-news.g-style-bolditalic with text-wrap: balance"
                 : isTrumpTariffsImports
@@ -1500,6 +1641,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   : `font-family: nyt-cheltenham; font-size: ${isInteractive ? "45px" : "31px (1.9375rem)"}; font-weight: ${isInteractive ? "800" : "700"}; font-style: ${isInteractive ? "normal" : "italic"}`,
             isAthletic
               ? `p (description): nyt-imperial 20px/400/30px #121212 (inside .Article_ContentContainer)`
+              : isDebateSpeakingTimeArticle
+                ? "No visible deck under the headline; the original summary copy only exists in metadata/share surfaces"
               : isTrumpTariffsReaction
                 ? "No visible deck on this source page; heading is left-aligned despite the global interactive shell"
                 : isTrumpTariffsImports
@@ -1601,9 +1744,38 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 />
               </div>
             </div>
+          ) : isDebateSpeakingTimeArticle ? (
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 1024,
+                margin: "0 auto",
+              }}
+            >
+              <h1
+                style={{
+                  width: "100%",
+                  maxWidth: "calc(100% - 40px)",
+                  margin: "0 auto",
+                  fontFamily:
+                    'nyt-cheltenham, cheltenham-fallback-georgia, cheltenham-fallback-noto, georgia, "times new roman", times, serif',
+                  fontSize: "clamp(27px, 4.6vw, 47px)",
+                  fontWeight: 500,
+                  fontStyle: "normal",
+                  lineHeight: "clamp(32px, 5.2vw, 54px)",
+                  color: "#121212",
+                  textAlign: "center",
+                  textWrap: "balance",
+                  textRendering: "optimizeLegibility",
+                  fontFeatureSettings: '"kern"',
+                }}
+              >
+                {article.title}
+              </h1>
+            </div>
           ) : (
             <>
-              {!isTrumpTariffsImports ? (
+              {!isTrumpTariffsImports && !isDebateSpeakingTimeArticle ? (
                 <div
                   style={{
                     fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
@@ -1650,7 +1822,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
               >
                 {article.title}
               </h1>
-              {!isTrumpTariffsImports ? (
+              {!isTrumpTariffsImports && !isDebateSpeakingTimeArticle ? (
                 <p
                   style={isAthletic ? {
                     fontFamily: '"nyt-imperial", georgia, "times new roman", times, serif',
@@ -1692,6 +1864,10 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
               "a (author name): nyt-franklin 14px/700/16.8px #121212 underlined",
               "time: nyt-franklin 13px/500/17px #121212",
               "headshot: 40px border-radius: 20px (circular)",
+            ] : isDebateSpeakingTimeArticle ? [
+              "#interactive-byline: nyt-franklin 14px/700/18px centered #121212",
+              "#interactive-dateline: nyt-franklin 13px/500/18px centered #121212",
+              "No author headshot in the saved interactive header",
             ] : isTrumpTariffsReaction ? [
               "p.g-byline: nyt-franklin 14px/700/18px #363636 with linked author names",
               "time.g-interactive-timestamp: nyt-franklin 13px/500/18px #363636",
@@ -1748,6 +1924,61 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                 dateTime={`${article.date}T00:00:00Z`}
               >
                 {formatArticleDisplayDate(article.date)}
+              </time>
+            </div>
+          ) : isDebateSpeakingTimeArticle ? (
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 1024,
+                margin: "0 auto",
+                textAlign: "center",
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  lineHeight: "18px",
+                  color: "#121212",
+                }}
+              >
+                <span style={{ marginRight: 4 }}>By</span>
+                {article.authors.map((author, index) => (
+                  <span key={author}>
+                    <a
+                      href={buildNytAuthorHref(author)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: "#121212",
+                        textDecoration: "underline",
+                        textUnderlineOffset: 2,
+                        textDecorationThickness: "1px",
+                      }}
+                    >
+                      {author}
+                    </a>
+                    {index < article.authors.length - 2 ? ", " : null}
+                    {index === article.authors.length - 2 ? " and " : null}
+                  </span>
+                ))}
+              </p>
+              <time
+                style={{
+                  display: "block",
+                  marginTop: 2,
+                  fontFamily: '"nyt-franklin", helvetica, arial, sans-serif',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  lineHeight: "18px",
+                  color: "#121212",
+                }}
+                dateTime={`${article.date}T00:00:00Z`}
+              >
+                {formatNytShortDate(article.date)}
               </time>
             </div>
           ) : (
@@ -2096,6 +2327,58 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   <InteractiveHorizontalBarChart data={STATE_TAX_GAMBLING_DATA} />
                 </div>
               </BlockAnnotation>
+            );
+          }
+
+          if (block.type === "debate-speaking-time-chart") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="debate-speaking-time-chart"
+                  css={[
+                    "Legacy NYT D3.js timeline bar chart reconstructed from saved SVG segment positions",
+                    "Candidate rows preserve original speaking-order timing across the full debate",
+                  ]}
+                  show={showCss}
+                >
+                  <InteractiveDebateSpeakingTimeChart
+                    title={block.title}
+                    note={block.note}
+                    accessibilityLabels={debateChartAccessibilityLabels}
+                  />
+                </BlockAnnotation>
+              </ArticleBlockSection>
+            );
+          }
+
+          if (block.type === "debate-topic-bubble-chart") {
+            return (
+              <ArticleBlockSection
+                key={`cb-${bi}`}
+                id={section.id}
+                label={section.label}
+                showHeading={showBlockStructure}
+              >
+                <BlockAnnotation
+                  type="debate-topic-bubble-chart"
+                  css={[
+                    "Legacy NYT D3.js bubble matrix reconstructed from saved positioned div circles",
+                    "Topic columns and candidate rows preserve the original comparative speaking-time grid",
+                  ]}
+                  show={showCss}
+                >
+                  <InteractiveDebateTopicBubbleChart
+                    title={block.title}
+                    note={block.note}
+                    accessibilityLabels={debateChartAccessibilityLabels}
+                  />
+                </BlockAnnotation>
+              </ArticleBlockSection>
             );
           }
 
@@ -3570,8 +3853,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         );
       })}
 
-      {/* ── 6b. Icons & SVGs (Athletic article icons) ── */}
-      {athleticIcons.length > 0 && (
+      {/* ── 6b. Icons & SVGs ── */}
+      {articleIcons.length > 0 && (
         <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16, marginBottom: 32 }}>
           <h3
             style={{
@@ -3585,121 +3868,180 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           >
             Icons &amp; SVGs
           </h3>
-          {/* SVG icons (UI chrome) */}
-          <div style={{
-            fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
-            fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-            color: "var(--dd-brand-section-label)", marginBottom: 8,
-          }}>
-            UI Icons (inline SVG)
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
-            {athleticIcons
-              .filter((icon: { file: string }) => icon.file.endsWith(".svg"))
-              .map((icon: { name: string; file: string; size: string; fill: string; usage: string; element: string }) => {
-                const isWhiteFill = icon.fill.includes("#FFF") || icon.fill.includes("white") || icon.name === "wordmark";
+          {isAthletic ? (
+            <>
+              <div style={{
+                fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
+                fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
+                color: "var(--dd-brand-section-label)", marginBottom: 8,
+              }}>
+                UI Icons (inline SVG)
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
+                {articleIcons
+                  .filter((icon) => (icon.file ?? "").endsWith(".svg"))
+                  .map((icon) => {
+                    const previewSrc = icon.file ?? icon.url ?? "";
+                    const isWhiteFill =
+                      (icon.fill ?? "").includes("#FFF") ||
+                      (icon.fill ?? "").includes("white") ||
+                      icon.name === "wordmark";
+                    return (
+                      <div
+                        key={icon.name}
+                        className="dd-brand-card"
+                        style={{
+                          padding: 12,
+                          display: "flex", flexDirection: "column",
+                          alignItems: "center", gap: 8,
+                        }}
+                      >
+                        <div style={{
+                          width: 48, height: 48, display: "flex", alignItems: "center",
+                          justifyContent: "center", borderRadius: 6,
+                          background: isWhiteFill ? "#121212" : "var(--dd-brand-surface)",
+                        }}>
+                          <img src={previewSrc} alt={icon.name} style={{
+                            maxWidth: icon.name === "wordmark" ? 42 : 24, maxHeight: 24,
+                            filter: isWhiteFill ? "invert(1)" : "none",
+                          }} />
+                        </div>
+                        <div style={{ textAlign: "center", width: "100%" }}>
+                          <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "var(--dd-brand-text-primary)" }}>
+                            {icon.name}
+                          </div>
+                          <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "var(--dd-brand-text-muted)", marginTop: 2 }}>
+                            {icon.size}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              <div style={{
+                fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
+                fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
+                color: "var(--dd-brand-section-label)", marginBottom: 8,
+              }}>
+                League &amp; Feature Logos (PNG)
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
+                {articleIcons
+                  .filter((icon) => (icon.file ?? "").endsWith(".png") && !(icon.file ?? "").includes("/teams/"))
+                  .map((icon) => {
+                    const previewSrc = icon.file ?? icon.url ?? "";
+                    return (
+                      <div key={icon.name} className="dd-brand-card" style={{
+                        padding: 12,
+                        display: "flex", flexDirection: "column",
+                        alignItems: "center", gap: 8, width: 120,
+                      }}>
+                        <div style={{
+                          width: 48, height: 48, display: "flex", alignItems: "center",
+                          justifyContent: "center", borderRadius: 6, background: "var(--dd-brand-surface)",
+                        }}>
+                          <img src={previewSrc} alt={icon.name} style={{ maxWidth: 40, maxHeight: 40, objectFit: "contain" }} />
+                        </div>
+                        <div style={{ textAlign: "center" }}>
+                          <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "var(--dd-brand-text-primary)" }}>
+                            {icon.name}
+                          </div>
+                          <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "var(--dd-brand-text-muted)", marginTop: 2 }}>
+                            {icon.size}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              <div style={{
+                fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
+                fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
+                color: "var(--dd-brand-section-label)", marginBottom: 8,
+              }}>
+                Team Logos (72×72 PNG — 14 tagged teams)
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 8 }}>
+                {articleIcons
+                  .filter((icon) => (icon.file ?? "").includes("/teams/"))
+                  .map((icon) => {
+                    const previewSrc = icon.file ?? icon.url ?? "";
+                    return (
+                      <div key={icon.name} className="dd-brand-card" style={{
+                        padding: 8,
+                        display: "flex", flexDirection: "column",
+                        alignItems: "center", gap: 4,
+                      }}>
+                        <div style={{
+                          width: 36, height: 36, display: "flex", alignItems: "center",
+                          justifyContent: "center",
+                        }}>
+                          <img src={previewSrc} alt={icon.name} style={{ width: 36, height: 36, objectFit: "contain" }} />
+                        </div>
+                        <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, fontWeight: 600, color: "var(--dd-brand-text-primary)", textAlign: "center" }}>
+                          {icon.name}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+              {articleIcons.map((icon) => {
+                const previewSrc = icon.file ?? icon.url ?? "";
                 return (
                   <div
                     key={icon.name}
                     className="dd-brand-card"
                     style={{
                       padding: 12,
-                      display: "flex", flexDirection: "column",
-                      alignItems: "center", gap: 8,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 8,
                     }}
                   >
-                    <div style={{
-                      width: 48, height: 48, display: "flex", alignItems: "center",
-                      justifyContent: "center", borderRadius: 6,
-                      background: isWhiteFill ? "#121212" : "var(--dd-brand-surface)",
-                    }}>
-                      <img src={icon.file} alt={icon.name} style={{
-                        maxWidth: icon.name === "wordmark" ? 42 : 24, maxHeight: 24,
-                        filter: isWhiteFill ? "invert(1)" : "none",
-                      }} />
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 999,
+                        background: "var(--dd-brand-surface)",
+                        border: "1px solid var(--dd-brand-border)",
+                      }}
+                    >
+                      <img
+                        src={previewSrc}
+                        alt={icon.name}
+                        style={{ maxWidth: 24, maxHeight: 24, objectFit: "contain" }}
+                      />
                     </div>
                     <div style={{ textAlign: "center", width: "100%" }}>
                       <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "var(--dd-brand-text-primary)" }}>
                         {icon.name}
                       </div>
                       <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "var(--dd-brand-text-muted)", marginTop: 2 }}>
-                        {icon.size}
+                        {[icon.size, icon.element, icon.usage].filter(Boolean).join(" · ")}
                       </div>
                     </div>
                   </div>
                 );
               })}
-          </div>
-
-          {/* League + Puzzle logos (raster PNG) */}
-          <div style={{
-            fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
-            fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-            color: "var(--dd-brand-section-label)", marginBottom: 8,
-          }}>
-            League &amp; Feature Logos (PNG)
-          </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
-            {athleticIcons
-              .filter((icon: { file: string; name: string }) => icon.file.endsWith(".png") && !icon.file.includes("/teams/"))
-              .map((icon: { name: string; file: string; size: string; usage: string }) => (
-                <div key={icon.name} className="dd-brand-card" style={{
-                  padding: 12,
-                  display: "flex", flexDirection: "column",
-                  alignItems: "center", gap: 8, width: 120,
-                }}>
-                  <div style={{
-                    width: 48, height: 48, display: "flex", alignItems: "center",
-                    justifyContent: "center", borderRadius: 6, background: "var(--dd-brand-surface)",
-                  }}>
-                    <img src={icon.file} alt={icon.name} style={{ maxWidth: 40, maxHeight: 40, objectFit: "contain" }} />
-                  </div>
-                  <div style={{ textAlign: "center" }}>
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 10, fontWeight: 600, color: "var(--dd-brand-text-primary)" }}>
-                      {icon.name}
-                    </div>
-                    <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, color: "var(--dd-brand-text-muted)", marginTop: 2 }}>
-                      {icon.size}
-                    </div>
-                  </div>
-                </div>
-              ))}
-          </div>
-
-          {/* Team logos (raster PNG, 72×72) */}
-          <div style={{
-            fontFamily: "var(--dd-font-ui, sans-serif)", fontSize: 11,
-            fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-            color: "var(--dd-brand-section-label)", marginBottom: 8,
-          }}>
-            Team Logos (72×72 PNG — 14 tagged teams)
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 8 }}>
-            {athleticIcons
-              .filter((icon: { file: string }) => icon.file.includes("/teams/"))
-              .map((icon: { name: string; file: string }) => (
-                <div key={icon.name} className="dd-brand-card" style={{
-                  padding: 8,
-                  display: "flex", flexDirection: "column",
-                  alignItems: "center", gap: 4,
-                }}>
-                  <div style={{
-                    width: 36, height: 36, display: "flex", alignItems: "center",
-                    justifyContent: "center",
-                  }}>
-                    <img src={icon.file} alt={icon.name} style={{ width: 36, height: 36, objectFit: "contain" }} />
-                  </div>
-                  <div style={{ fontFamily: "var(--dd-font-mono, monospace)", fontSize: 9, fontWeight: 600, color: "var(--dd-brand-text-primary)", textAlign: "center" }}>
-                    {icon.name}
-                  </div>
-                </div>
-              ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* ── 7a. Typography (fonts used in this article) ── */}
-      {article.fonts.length > 0 && (
+      {(article.fonts.length > 0 ||
+        articleTypographyGroups.length > 0 ||
+        articleCssInfo) && (
         <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16, marginBottom: 32 }}>
           <h3
             style={{
@@ -3713,6 +4055,166 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           >
             Typography
           </h3>
+          {articleTypographyGroups.length > 0 && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: 16,
+                marginBottom: 20,
+              }}
+            >
+              {articleTypographyGroups.map((group) => (
+                <div
+                  key={group.label}
+                  className="dd-brand-card"
+                  style={{ padding: 16 }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
+                      gap: 12,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-headline, Georgia, serif)",
+                        fontSize: 20,
+                        fontWeight: 600,
+                        color: "var(--dd-brand-text-primary)",
+                      }}
+                    >
+                      {group.label}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-mono, monospace)",
+                        fontSize: 10,
+                        color: "var(--dd-brand-text-muted)",
+                        textAlign: "right",
+                      }}
+                    >
+                      {group.weightCount} weights · {group.styleCount} text styles
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--dd-font-ui, sans-serif)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "var(--dd-brand-accent)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {group.families.join(" · ")}
+                  </div>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {group.samples.map((sample) => (
+                      <div
+                        key={`${group.label}-${sample.label}`}
+                        style={{
+                          border: "1px solid var(--dd-brand-border)",
+                          borderRadius: 4,
+                          background: "var(--dd-brand-surface)",
+                          padding: 12,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontFamily: "var(--dd-font-mono, monospace)",
+                            fontSize: 10,
+                            color: "var(--dd-brand-text-muted)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          {sample.label}
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: sample.fontFamily,
+                            fontSize: sample.fontSize,
+                            fontWeight: sample.fontWeight,
+                            lineHeight: sample.lineHeight,
+                            color: sample.color,
+                            fontStyle: sample.fontStyle,
+                            textAlign: sample.textAlign,
+                            textTransform: sample.textTransform,
+                            letterSpacing: sample.letterSpacing,
+                          }}
+                        >
+                          {sample.text}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {articleCssInfo && (
+            <div style={{ marginBottom: 20 }}>
+              <div
+                style={{
+                  fontFamily: "var(--dd-font-ui, sans-serif)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--dd-brand-accent)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  marginBottom: 10,
+                }}
+              >
+                CSS Information
+              </div>
+              <div
+                className="dd-brand-card"
+                style={{
+                  padding: 16,
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                {[
+                  { label: "Style Rules", value: articleCssInfo.styleRules },
+                  { label: "CSS file", value: articleCssInfo.cssFile },
+                  { label: "Stylesheets", value: articleCssInfo.stylesheets },
+                  { label: "Load Time", value: articleCssInfo.loadTime },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-ui, sans-serif)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--dd-brand-text-secondary)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                        marginBottom: 4,
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--dd-font-headline, Georgia, serif)",
+                        fontSize: 22,
+                        fontWeight: 600,
+                        color: "var(--dd-brand-text-primary)",
+                      }}
+                    >
+                      {item.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             {article.fonts.map((f) => (
               <div
@@ -3811,6 +4313,7 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                                     article.date,
                                     article.section,
                                     article.tags,
+                                    firstBodyCopyText,
                                   )}
                                 </div>
                               </div>
@@ -3829,11 +4332,18 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
       )}
 
       {/* ── 7b. Colors (ALL colors from this article) ── */}
-      {(a.colors || hasChartTypes) && (() => {
+      {(articleColorCategories.length > 0 || a.colors || hasChartTypes) && (() => {
         /* Build a complete color inventory from the article's colors config */
         const colorGroups: { label: string; colors: { name: string; hex: string; note?: string }[] }[] = [];
 
-        if (a.colors && typeof a.colors === "object") {
+        if (articleColorCategories.length > 0) {
+          colorGroups.push(
+            ...articleColorCategories.map((group) => ({
+              label: group.label,
+              colors: [...group.colors],
+            })),
+          );
+        } else if (a.colors && typeof a.colors === "object") {
           const colorsObj = a.colors as Record<string, unknown>;
           /* Walk each color category (page, header, footer, darkMode, borders, datawrapperTheme, etc.) */
           for (const [groupKey, groupVal] of Object.entries(colorsObj)) {
@@ -3975,6 +4485,9 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                   <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "var(--dd-brand-text-secondary)" }}>Tool</th>
                   <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "var(--dd-brand-text-secondary)" }}>Type</th>
                   <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "var(--dd-brand-text-secondary)" }}>Topic</th>
+                  {hasChartSourceUrls ? (
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, fontSize: 11, textTransform: "uppercase" as const, letterSpacing: "0.04em", color: "var(--dd-brand-text-secondary)" }}>Source</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -3999,6 +4512,22 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
                     <td style={{ padding: "8px 12px", color: "var(--dd-brand-text-muted)" }}>
                       {ct.topic}
                     </td>
+                    {hasChartSourceUrls ? (
+                      <td style={{ padding: "8px 12px", color: "var(--dd-brand-text-muted)" }}>
+                        {"url" in ct && ct.url ? (
+                          <a
+                            href={ct.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: "var(--dd-brand-link)", textDecoration: "underline" }}
+                          >
+                            External source
+                          </a>
+                        ) : (
+                          "Saved source bundle"
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -4007,8 +4536,8 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
         </BlockAnnotation>
       )}
 
-      {/* ── 8. Images — ai2html comparisons + Social/OG ── */}
-      {(socialImages.length > 0 || hasReportCard || hasAi2htmlArtboards) && (
+      {/* ── 8. Images — ai2html comparisons + Social/OG + article assets ── */}
+      {(socialImages.length > 0 || articleImageAssets.length > 0 || hasReportCard || hasAi2htmlArtboards) && (
         <div style={{ borderTop: "1px solid var(--dd-brand-border)", paddingTop: 24, marginTop: 16 }}>
           <h3
             style={{
@@ -4022,6 +4551,71 @@ export default function ArticleDetailPage({ articleId }: ArticleDetailPageProps)
           >
             Images
           </h3>
+
+          {articleImageAssets.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{
+                fontFamily: "var(--dd-font-ui, sans-serif)",
+                fontSize: 11,
+                fontWeight: 700,
+                color: "var(--dd-brand-accent)",
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.05em",
+                marginBottom: 10,
+              }}>
+                Article Assets
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+                  gap: 16,
+                }}
+              >
+                {articleImageAssets.map((img) => {
+                  const ext =
+                    (img.url.match(/\.([a-zA-Z]+)(?:\?|$)/) || [])[1]?.toUpperCase() ||
+                    "IMG";
+                  return (
+                    <div key={img.name}>
+                      <ClickableImage
+                        src={img.url}
+                        alt={`${img.name}${img.category ? ` · ${img.category}` : ""}`}
+                        style={{
+                          width: "100%",
+                          maxHeight: 120,
+                          objectFit: "contain",
+                          border: "1px solid var(--dd-brand-border)",
+                          borderRadius: 4,
+                          display: "block",
+                          background: "var(--dd-brand-surface)",
+                        }}
+                      />
+                      <div
+                        style={{
+                          fontFamily: "var(--dd-font-mono, monospace)",
+                          fontSize: 10,
+                          color: "var(--dd-brand-text-muted)",
+                          marginTop: 4,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: "var(--dd-brand-text-secondary)" }}>
+                          {img.name}
+                        </span>
+                        {img.category ? ` · ${img.category}` : ""}
+                        {img.width ? ` · ${img.width}px` : ""}
+                        {img.ratio ? ` · ${img.ratio}` : ""}
+                        {" · "}
+                        <span style={{ textTransform: "uppercase" as const }}>{ext}</span>
+                        {img.desc ? <><br />{img.desc}</> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ai2html Report Card comparison (Trump article) */}
           {/* Blank artboard images (ai2html source PNGs) */}

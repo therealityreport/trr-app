@@ -1,3 +1,13 @@
+/**
+ * Auth flow module — the single intentional consumer of `@supabase/supabase-js`
+ * in TRR-APP server code.
+ *
+ * Data access rule: all server-side database reads/writes flow through the
+ * `pg`-based helpers in `./postgres.ts` (`query`, `withTransaction`,
+ * `withAuthTransaction`, `queryWithAuth`). The Supabase JS SDK is reserved
+ * here for GoTrue/auth operations (token shadow-checking, provider wiring),
+ * not for application data access. See TRR-APP/CLAUDE.md for the full rule.
+ */
 import "server-only";
 import { Buffer } from "node:buffer";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
