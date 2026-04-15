@@ -7,6 +7,7 @@ import {
   auditGeneratedConfigIntegrity,
   auditResponsiveAccessibility,
   runDesignDocsIntegrationChecks,
+  verifySourceFidelity,
 } from "@/lib/admin/design-docs-pipeline-validators";
 
 const articleDetailPath = resolve(
@@ -41,6 +42,9 @@ describe("design docs pipeline validators", () => {
       "content block union coverage",
       "chart data bindings",
       "social image coverage",
+      "required article assets",
+      "typography specimen fidelity",
+      "chart source-link policy",
       "reusable primitive coverage",
       "required fields",
       "page background contract",
@@ -90,6 +94,26 @@ describe("design docs pipeline validators", () => {
     expect(result.passed).toBe(true);
     expect(result.failedTests).toBe(0);
     expect(result.totalTests).toBeGreaterThan(0);
+  });
+
+  it("verifies debate-speaking-time against the built-in bespoke fidelity fixture", () => {
+    const result = verifySourceFidelity({
+      articleId: "debate-speaking-time",
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.legacyMode).toBe(false);
+    expect(result.blockingFindings).toHaveLength(0);
+  });
+
+  it("falls back to legacy mode for articles without a bespoke visual contract fixture", () => {
+    const result = verifySourceFidelity({
+      articleId: "nfl-playoff-coaches-fourth-down",
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.legacyMode).toBe(true);
+    expect(result.blockingFindings).toHaveLength(0);
   });
 
   it("fails integrity when reusable NYT chrome is inlined instead of referencing primitives and social images are missing", async () => {
@@ -167,7 +191,7 @@ describe("design docs pipeline validators", () => {
 
     expect(result.passed).toBe(false);
     expect(result.checks.map((entry) => entry.name)).toEqual(
-      expect.arrayContaining(["social image coverage", "reusable primitive coverage"]),
+      expect.arrayContaining(["social image coverage", "required article assets", "reusable primitive coverage"]),
     );
     expect(result.blockingErrors.join("\n")).toContain("primitive");
     expect(result.blockingErrors.join("\n")).toContain("socialImages");
