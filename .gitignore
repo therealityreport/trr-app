@@ -30,3 +30,6 @@ apps/web/.cache/
 # Build artifacts
 .artifacts/
 .next.buildbak*/
+
+# Git worktrees
+/.worktrees/
