@@ -1162,8 +1162,6 @@ const EMPTY_NEWS_FACETS: UnifiedNewsFacets = {
   topics: [],
   seasons: [],
 };
-// Dev cold starts can spend tens of seconds compiling API routes before the first response.
-const SHOW_CORE_LOAD_TIMEOUT_MS = process.env.NODE_ENV === "development" ? 60_000 : 15_000;
 const SHOW_CAST_LOAD_TIMEOUT_MS = 90_000;
 const SHOW_CAST_LOAD_MAX_ATTEMPTS = 2;
 const SHOW_CAST_LOAD_RETRY_BACKOFF_MS = 250;
@@ -1176,7 +1174,6 @@ const SETTINGS_MUTATION_TIMEOUT_MS = 30_000;
 // Settings read path may be slow on cold starts / large environments in local dev.
 const SETTINGS_READ_TIMEOUT_MS = process.env.NODE_ENV === "development" ? 60_000 : 30_000;
 const CAST_MATRIX_SYNC_TIMEOUT_MS = 90_000;
-const COVERAGE_MUTATION_TIMEOUT_MS = 20_000;
 
 const CAST_REFRESH_PHASE_TIMEOUTS: Record<CastRefreshPhaseId, number> = {
   credits_sync: 6 * 60 * 1000,
@@ -2987,8 +2984,8 @@ export default function TrrShowDetailPage() {
   const [scrapeDrawerContext, setScrapeDrawerContext] = useState<EntityContext | null>(null);
 
   // Refresh images state
-  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshNotice] = useState<string | null>(null);
+  const [refreshError] = useState<string | null>(null);
   const [castRefreshPipelineRunning, setCastRefreshPipelineRunning] = useState(false);
   const [castRefreshCanceling, setCastRefreshCanceling] = useState(false);
   const [castRefreshPhaseStates, setCastRefreshPhaseStates] = useState<CastRefreshPhaseState[]>(
@@ -2999,10 +2996,7 @@ export default function TrrShowDetailPage() {
   const [castMediaEnrichError, setCastMediaEnrichError] = useState<string | null>(null);
   const [castRunFailedMembers, setCastRunFailedMembers] = useState<CastRunFailedMember[]>([]);
   const [castFailedMembersOpen, setCastFailedMembersOpen] = useState(false);
-  const [refreshingPersonIds, setRefreshingPersonIds] = useState<Record<string, boolean>>({});
-  const [refreshingPersonProgress, setRefreshingPersonProgress] = useState<
-    Record<string, RefreshProgressState>
-  >({});
+  const [refreshingPersonIds] = useState<Record<string, boolean>>({});
   const castRefreshAbortControllerRef = useRef<AbortController | null>(null);
   const castMediaEnrichAbortControllerRef = useRef<AbortController | null>(null);
   const castLoadAbortControllerRef = useRef<AbortController | null>(null);
@@ -4472,7 +4466,7 @@ export default function TrrShowDetailPage() {
         setShow(nextShow);
       }
     },
-    [getAuthHeaders, showId]
+    [getAuthHeaders, setShow, showId]
   );
 
   const fetchSeasonEpisodeSummaries = useCallback(
@@ -4556,7 +4550,7 @@ export default function TrrShowDetailPage() {
         setSeasonSummariesLoading(false);
       }
     },
-    [getAuthHeaders]
+    [getAuthHeaders, setSeasonEpisodeSummaries, setSeasonSummariesLoading]
   );
 
   // Fetch cast
@@ -7946,7 +7940,7 @@ export default function TrrShowDetailPage() {
     setGoogleNewsNotice(null);
     setGoogleNewsError(null);
     setDetailsEditing(false);
-  }, [abortInFlightPersonRefreshRuns, abortSyncBravoPreviewStream, showId]);
+  }, [abortInFlightPersonRefreshRuns, abortSyncBravoPreviewStream, setDetailsEditing, showId]);
 
   useEffect(() => {
     if (activeTab === "cast") return;
@@ -7984,7 +7978,7 @@ export default function TrrShowDetailPage() {
       return;
     }
     setSeasonSummariesLoading(false);
-  }, [activeTab, seasons, fetchSeasonEpisodeSummaries]);
+  }, [activeTab, fetchSeasonEpisodeSummaries, seasons, setSeasonSummariesLoading]);
 
   const formatDate = (value: string | null) =>
     value ? new Date(value).toLocaleDateString() : "TBD";
@@ -8215,7 +8209,6 @@ export default function TrrShowDetailPage() {
     castMaxEpisodeCount,
     castMinEpisodeCount,
     castRoleAndCreditFilters,
-    castRoleMembers.length,
     castRoleMemberByPersonId,
     castRoleMembersLoadedOnce,
     castSearchQueryDeferred,
@@ -9670,7 +9663,7 @@ export default function TrrShowDetailPage() {
         setFeaturedLogoSavingAssetId(null);
       }
     },
-    [fetchShow, getAuthHeaders, loadGalleryAssets, selectedGallerySeason, showId]
+    [fetchShow, getAuthHeaders, loadGalleryAssets, selectedGallerySeason, setShow, showId]
   );
 
   const selectFeaturedLogoVariant = useCallback(
@@ -10863,6 +10856,7 @@ export default function TrrShowDetailPage() {
     fetchShow,
     getAuthHeaders,
     loadBravoData,
+    loadUnifiedNews,
     refreshShow,
     refreshingShowAll,
     showId,
@@ -11366,83 +11360,6 @@ export default function TrrShowDetailPage() {
       loadGalleryAssets("all");
     }
   }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
-
-  const handleRefreshCastMember = useCallback(
-    async (personId: string, label: string) => {
-      if (!personId) return;
-      if (
-        castRefreshPipelineRunning ||
-        castMediaEnriching ||
-        castMatrixSyncLoading ||
-        refreshingTargets.cast_credits
-      ) {
-        return;
-      }
-
-      personRefreshAbortControllersRef.current[personId]?.abort();
-      const runController = new AbortController();
-      personRefreshAbortControllersRef.current[personId] = runController;
-
-      setRefreshingPersonIds((prev) => ({ ...prev, [personId]: true }));
-      setRefreshingPersonProgress((prev) => ({
-        ...prev,
-        [personId]: {
-          stage: "Initializing",
-          message: `Refreshing cast media for ${label}...`,
-          current: 0,
-          total: null,
-        },
-      }));
-      setRefreshNotice(null);
-      setRefreshError(null);
-
-      try {
-        await refreshPersonImages(
-          personId,
-          (progress) => {
-            setRefreshingPersonProgress((prev) => ({
-              ...prev,
-              [personId]: progress,
-            }));
-          },
-          { signal: runController.signal, personName: label }
-        );
-        await fetchCast();
-        setRefreshNotice(`Refreshed person for ${label}.`);
-      } catch (err) {
-        if (runController.signal.aborted) {
-          setRefreshError(null);
-          return;
-        }
-        console.error("Failed to refresh person images:", err);
-        setRefreshError(
-          err instanceof Error ? err.message : "Failed to refresh images"
-        );
-      } finally {
-        if (personRefreshAbortControllersRef.current[personId] === runController) {
-          delete personRefreshAbortControllersRef.current[personId];
-        }
-        setRefreshingPersonIds((prev) => {
-          const next = { ...prev };
-          delete next[personId];
-          return next;
-        });
-        setRefreshingPersonProgress((prev) => {
-          const next = { ...prev };
-          delete next[personId];
-          return next;
-        });
-      }
-    },
-    [
-      castMatrixSyncLoading,
-      castMediaEnriching,
-      castRefreshPipelineRunning,
-      fetchCast,
-      refreshPersonImages,
-      refreshingTargets.cast_credits,
-    ]
-  );
 
   // Open lightbox for gallery asset
   const openAssetLightbox = (
@@ -12036,13 +11953,6 @@ export default function TrrShowDetailPage() {
   const hasPersonRefreshInFlight = Object.keys(refreshingPersonIds).length > 0;
   const isShowRefreshBusy =
     refreshingShowAll || Object.values(refreshingTargets).some((value) => value);
-  const castAnyJobRunning =
-    castRefreshPipelineRunning ||
-    castMediaEnriching ||
-    castMatrixSyncLoading ||
-    Boolean(refreshingTargets.cast_credits) ||
-    hasReconnectableCreditsRun ||
-    hasPersonRefreshInFlight;
   const isCastRefreshBusy =
     isShowRefreshBusy ||
     castMatrixSyncLoading ||

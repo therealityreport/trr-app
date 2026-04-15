@@ -186,6 +186,61 @@ function buildSocialImages() {
   return images;
 }
 
+function buildArticleImages() {
+  const images: { name: string; url: string; category: string; article: string }[] = [];
+  for (const article of nytArticles) {
+    const arch = article.architecture as {
+      publicAssets?: {
+        images?: readonly {
+          name: string;
+          url: string;
+          category?: string;
+        }[];
+      };
+    } | undefined;
+    if (!arch?.publicAssets?.images) continue;
+    const title = shortTitle(article.title);
+    for (const img of arch.publicAssets.images) {
+      images.push({
+        name: img.name,
+        url: img.url,
+        category: img.category ?? "Article asset",
+        article: title,
+      });
+    }
+  }
+  return images;
+}
+
+function buildIconAssets() {
+  const icons: { name: string; src: string; usage: string; article: string }[] = [];
+  for (const article of nytArticles) {
+    const arch = article.architecture as {
+      publicAssets?: {
+        icons?: readonly {
+          name: string;
+          file?: string;
+          url?: string;
+          usage?: string;
+        }[];
+      };
+    } | undefined;
+    if (!arch?.publicAssets?.icons) continue;
+    const title = shortTitle(article.title);
+    for (const icon of arch.publicAssets.icons) {
+      const src = icon.file ?? icon.url;
+      if (!src) continue;
+      icons.push({
+        name: icon.name,
+        src,
+        usage: icon.usage ?? "UI icon",
+        article: title,
+      });
+    }
+  }
+  return icons;
+}
+
 function buildCssFiles() {
   const files: { file: string; article: string }[] = [];
   for (const article of nytArticles) {
@@ -229,6 +284,8 @@ export default function BrandNYTResources() {
   const datawrapperUrls = buildDatawrapperUrls();
   const ai2htmlArtboards = buildAi2htmlArtboards();
   const socialImages = buildSocialImages();
+  const articleImages = buildArticleImages();
+  const iconAssets = buildIconAssets();
   const cssFiles = buildCssFiles();
   const authorHeadshots = buildAuthorHeadshots();
 
@@ -237,7 +294,7 @@ export default function BrandNYTResources() {
       <div className="dd-section-label">Brand Reference</div>
       <h2 className="dd-section-title">NYT Resources</h2>
       <p className="dd-section-desc">
-        Quick links, external assets, CSS inventory, and author headshots
+        Quick links, external assets, article image inventories, icon inventories, CSS inventory, and author headshots
         from {nytArticles.length} NYT articles.
       </p>
 
@@ -401,6 +458,92 @@ export default function BrandNYTResources() {
             </tbody>
           </table>
         </div>
+      )}
+
+      <SubSectionLabel>Article Image Assets</SubSectionLabel>
+      {articleImages.length > 0 ? (
+        <div className="dd-brand-card p-4 mb-6 overflow-x-auto">
+          <table
+            className="w-full text-left"
+            style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+          >
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
+                <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Name</th>
+                <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Category</th>
+                <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Article</th>
+                <th className="py-1 font-semibold" style={{ color: "var(--dd-ink-black)" }}>URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {articleImages.map((img, i) => (
+                <tr key={`${img.url}-${i}`} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
+                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}>{img.name}</td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{img.category}</td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{img.article}</td>
+                  <td className="py-1.5">
+                    <a
+                      href={img.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono"
+                      style={{ fontSize: 10, color: "var(--dd-brand-accent)", textDecoration: "underline", wordBreak: "break-all" }}
+                    >
+                      {img.url}
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p style={{ fontFamily: "var(--dd-font-sans)", fontSize: 12, color: "var(--dd-ink-faint)", marginBottom: 12 }}>
+          No article image assets found in publicAssets.
+        </p>
+      )}
+
+      <SubSectionLabel>Icon Assets</SubSectionLabel>
+      {iconAssets.length > 0 ? (
+        <div className="dd-brand-card p-4 mb-6 overflow-x-auto">
+          <table
+            className="w-full text-left"
+            style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+          >
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
+                <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Name</th>
+                <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Usage</th>
+                <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Article</th>
+                <th className="py-1 font-semibold" style={{ color: "var(--dd-ink-black)" }}>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {iconAssets.map((icon, i) => (
+                <tr key={`${icon.src}-${i}`} style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}>
+                  <td className="py-1.5 pr-4 font-mono" style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}>{icon.name}</td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{icon.usage}</td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>{icon.article}</td>
+                  <td className="py-1.5">
+                    <a
+                      href={icon.src}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono"
+                      style={{ fontSize: 10, color: "var(--dd-brand-accent)", textDecoration: "underline", wordBreak: "break-all" }}
+                    >
+                      {icon.src}
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p style={{ fontFamily: "var(--dd-font-sans)", fontSize: 12, color: "var(--dd-ink-faint)", marginBottom: 12 }}>
+          No icon assets found in publicAssets.
+        </p>
       )}
 
       {/* ── 3. CSS File Inventory ─────────────────────────────── */}

@@ -92,6 +92,10 @@ const COMPONENT_TYPE_DESCRIPTIONS: Record<string, string> = {
     "Tier 2 facsimile of NYT action chrome with share, save, gift, and more buttons",
   "body-copy":
     "Inline article paragraph block with Franklin body text and source-preserved anchor links",
+  "debate-speaking-time-chart":
+    "Legacy D3 timeline chart showing candidate speaking segments across the full debate runtime",
+  "debate-topic-bubble-chart":
+    "Legacy D3 bubble matrix comparing total speaking time by topic and candidate",
   "tariff-rate-arrow-chart":
     "Custom tariff-rate comparison chart for top import partners with delta bars and source credits",
   "tariff-rate-table":
