@@ -13,8 +13,11 @@ import { getReusableUiPrimitive } from "./design-docs-ui-primitives";
 import type {
   A11yAuditFinding,
   A11yAuditResult,
+  ArticleVisualContract,
   AuditCheckResult,
   AuditResult,
+  SourceFidelityFinding,
+  SourceFidelityResult,
   IntegrationFailure,
   IntegrationTestResult,
 } from "./design-docs-pipeline-types.ts";
@@ -35,6 +38,7 @@ type DesignDocsRecord = {
   date: string;
   section: string;
   type: string;
+  description?: string;
   ogImage?: string;
   fonts?: ReadonlyArray<{ name: string; usedIn?: unknown; weights?: unknown }>;
   colors?: Record<string, unknown>;
@@ -51,6 +55,7 @@ type AuditInput = {
   articleDetailPageSource?: string;
   chartDataSource?: string;
   typecheckRunner?: () => Promise<{ passed: boolean; details: string[] }>;
+  visualContract?: ArticleVisualContract | null;
 };
 
 type A11yAuditInput = {
@@ -64,6 +69,14 @@ type IntegrationInput = {
   articleDetailPageSource?: string;
   chartDataSource?: string;
   sectionSourceOverrides?: Record<string, string>;
+};
+
+type PublicAssetEntry = {
+  name?: string;
+  url?: string;
+  file?: string;
+  desc?: string;
+  category?: string;
 };
 
 function createCheck(
@@ -104,6 +117,114 @@ function getSocialImages(article: DesignDocsRecord) {
     | { publicAssets?: { socialImages?: readonly unknown[] } }
     | undefined;
   return architecture?.publicAssets?.socialImages ?? [];
+}
+
+function getPublicAssetEntries(article: DesignDocsRecord, key: "icons" | "images" | "portraits" | "socialImages") {
+  const architecture = article.architecture as
+    | {
+        publicAssets?: {
+          icons?: readonly PublicAssetEntry[];
+          images?: readonly PublicAssetEntry[];
+          portraits?: readonly PublicAssetEntry[];
+          socialImages?: readonly PublicAssetEntry[];
+        };
+      }
+    | undefined;
+  return architecture?.publicAssets?.[key] ?? [];
+}
+
+function getLayoutTokens(article: DesignDocsRecord) {
+  const architecture = article.architecture as
+    | { layoutTokens?: Record<string, unknown> }
+    | undefined;
+  return architecture?.layoutTokens ?? {};
+}
+
+function flattenStringValues(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => flattenStringValues(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).flatMap((entry) => flattenStringValues(entry));
+  }
+  return [];
+}
+
+function hasSpecimenLikeText(value: string) {
+  return value.length >= 10 && !/placeholder|lorem ipsum|sample text|example/i.test(value);
+}
+
+function getBuiltInVisualContract(articleId: string): ArticleVisualContract | null {
+  if (articleId !== "debate-speaking-time") {
+    return null;
+  }
+
+  return {
+    chrome: {
+      headlineText: "Which Candidates Got the Most Speaking Time in the Democratic Debate",
+      headlineStyle: "Centered Cheltenham headline",
+      deckBehavior: "source-only",
+      bylineLayout: "centered",
+      noteTextOrder: [
+        "Note: Each bar segment represents the approximate length of a candidate’s response to a question.",
+        "Note: The size of each circle represents the total length of a candidate’s responses to a topic.",
+      ],
+    },
+    typography: {
+      variants: [
+        {
+          role: "headline",
+          sampleText: "Which Candidates Got the Most Speaking Time in the Democratic Debate",
+          styleSignature: "nyt-cheltenham-500-centered",
+          severity: "blocking",
+        },
+        {
+          role: "body",
+          sampleText: "Sanders, Bloomberg and Klobuchar led the seven candidates onstage.",
+          styleSignature: "nyt-imperial-body",
+          severity: "degraded",
+        },
+        {
+          role: "chart-note",
+          sampleText: "Note: Each bar segment represents the approximate length of a candidate’s response to a question.",
+          styleSignature: "nyt-franklin-note",
+          severity: "degraded",
+        },
+      ],
+    },
+    charts: [
+      {
+        rendererKind: "bar-chart",
+        requiresDedicatedComponent: true,
+        requiredTitle: "How Long Each Candidate Spoke",
+        requiredNote: "Note: Each bar segment represents the approximate length of a candidate’s response to a question.",
+        requiresAxis: true,
+        requiresLegend: true,
+        requiresFaces: true,
+      },
+      {
+        rendererKind: "bubble-chart",
+        requiresDedicatedComponent: true,
+        requiredTitle: "Speaking Time by Topic",
+        requiredNote: "Note: The size of each circle represents the total length of a candidate’s responses to a topic.",
+        requiresFaces: true,
+        requiresTopicLabels: true,
+      },
+    ],
+    assets: [
+      { kind: "icon", name: "sharetools", required: true, provenance: "fixture" },
+      { kind: "image", name: "timeline-portraits", required: true, provenance: "fixture" },
+      { kind: "portrait", name: "bubble-portraits", required: true, provenance: "fixture" },
+      { kind: "social-image", name: "social-share-set", required: true, provenance: "fixture" },
+    ],
+    severitySummary: {
+      blocking: 2,
+      degraded: 2,
+    },
+  };
 }
 
 function extractRendererBlockTypes(source: string): Set<string> {
@@ -195,6 +316,8 @@ function getInteractiveBlockCount(contentBlocks: readonly ContentBlock[]) {
     "tariff-rate-arrow-chart",
     "tariff-rate-table",
     "tariff-country-table",
+    "debate-speaking-time-chart",
+    "debate-topic-bubble-chart",
   ]);
 
   return contentBlocks.filter((block) => interactiveTypes.has(block.type)).length;
@@ -261,6 +384,158 @@ async function defaultTypecheckRunner() {
   }
 }
 
+function createFidelityFinding(
+  severity: SourceFidelityFinding["severity"],
+  area: SourceFidelityFinding["area"],
+  message: string,
+): SourceFidelityFinding {
+  return { severity, area, message };
+}
+
+function hasRequiredAssetCategory(article: DesignDocsRecord, kind: "icon" | "image" | "portrait" | "social-image") {
+  if (kind === "icon") {
+    return getPublicAssetEntries(article, "icons").length > 0;
+  }
+  if (kind === "image") {
+    return getPublicAssetEntries(article, "images").length > 0;
+  }
+  if (kind === "portrait") {
+    const portraitEntries = getPublicAssetEntries(article, "portraits");
+    return portraitEntries.length > 0 || getPublicAssetEntries(article, "images").some((entry) => /portrait/i.test(entry.category ?? entry.name ?? ""));
+  }
+  return getPublicAssetEntries(article, "socialImages").length > 0;
+}
+
+function getFidelityContract(articleId: string, visualContract?: ArticleVisualContract | null) {
+  return visualContract ?? getBuiltInVisualContract(articleId);
+}
+
+export function verifySourceFidelity({
+  articleId,
+  articles,
+  visualContract,
+}: {
+  articleId: string;
+  articles?: readonly DesignDocsRecord[];
+  visualContract?: ArticleVisualContract | null;
+}): SourceFidelityResult {
+  const article = findArticleById(articleId, articles);
+  if (!article) {
+    return {
+      articleId,
+      passed: false,
+      legacyMode: false,
+      blockingFindings: [createFidelityFinding("blocking", "general", `Unable to locate article "${articleId}" in design-docs config`)],
+      degradedFindings: [],
+    };
+  }
+
+  const contract = getFidelityContract(articleId, visualContract);
+  if (!contract) {
+    return {
+      articleId,
+      passed: true,
+      legacyMode: true,
+      blockingFindings: [],
+      degradedFindings: [],
+    };
+  }
+
+  const blockingFindings: SourceFidelityFinding[] = [];
+  const degradedFindings: SourceFidelityFinding[] = [];
+  const layoutTokens = getLayoutTokens(article);
+  const layoutTokenText = flattenStringValues(layoutTokens).join(" ").toLowerCase();
+  const fontTexts = flattenStringValues(article.fonts?.map((font) => font.usedIn) ?? []).join(" ");
+
+  if (
+    contract.chrome.deckBehavior === "source-only" &&
+    !/no visible deck|source-only/i.test(layoutTokenText)
+  ) {
+    blockingFindings.push(
+      createFidelityFinding("blocking", "chrome", `${articleId} must encode source-only deck behavior in layout tokens`),
+    );
+  }
+
+  if (contract.chrome.bylineLayout === "centered" && !/center/i.test(layoutTokenText)) {
+    degradedFindings.push(
+      createFidelityFinding("degraded", "chrome", `${articleId} should describe centered byline/date behavior in layout tokens`),
+    );
+  }
+
+  for (const variant of contract.typography.variants) {
+    const articleTextPool = [article.title, article.description, fontTexts].filter(Boolean).join(" ");
+    if (!articleTextPool.includes(variant.sampleText)) {
+      const finding = createFidelityFinding(
+        variant.severity,
+        "typography",
+        `${articleId} is missing specimen-ready typography text for "${variant.role}"`,
+      );
+      if (variant.severity === "blocking") {
+        blockingFindings.push(finding);
+      } else {
+        degradedFindings.push(finding);
+      }
+    }
+  }
+
+  const contentBlocks = article.contentBlocks ?? [];
+  for (const chart of contract.charts) {
+    if (chart.rendererKind === "bar-chart") {
+      const block = contentBlocks.find((entry) => entry.type === "debate-speaking-time-chart");
+      if (!block) {
+        blockingFindings.push(createFidelityFinding("blocking", "charts", `${articleId} is missing the bespoke debate bar-chart block`));
+        continue;
+      }
+      if ("requiredTitle" in chart && chart.requiredTitle && block.title !== chart.requiredTitle) {
+        blockingFindings.push(createFidelityFinding("blocking", "charts", `${articleId} bar-chart title drifted from the source contract`));
+      }
+      if ("requiredNote" in chart && chart.requiredNote && block.note !== chart.requiredNote) {
+        blockingFindings.push(createFidelityFinding("blocking", "charts", `${articleId} bar-chart note text drifted from the source contract`));
+      }
+    }
+
+    if (chart.rendererKind === "bubble-chart") {
+      const block = contentBlocks.find((entry) => entry.type === "debate-topic-bubble-chart");
+      if (!block) {
+        blockingFindings.push(createFidelityFinding("blocking", "charts", `${articleId} is missing the bespoke debate bubble-chart block`));
+        continue;
+      }
+      if ("requiredTitle" in chart && chart.requiredTitle && block.title !== chart.requiredTitle) {
+        blockingFindings.push(createFidelityFinding("blocking", "charts", `${articleId} bubble-chart title drifted from the source contract`));
+      }
+      if ("requiredNote" in chart && chart.requiredNote && block.note !== chart.requiredNote) {
+        blockingFindings.push(createFidelityFinding("blocking", "charts", `${articleId} bubble-chart note text drifted from the source contract`));
+      }
+    }
+  }
+
+  for (const asset of contract.assets) {
+    if (!asset.required) {
+      continue;
+    }
+    if (!hasRequiredAssetCategory(article, asset.kind)) {
+      const finding = createFidelityFinding(
+        asset.kind === "portrait" ? "degraded" : "blocking",
+        "assets",
+        `${articleId} is missing required ${asset.kind} coverage for "${asset.name}"`,
+      );
+      if (finding.severity === "blocking") {
+        blockingFindings.push(finding);
+      } else {
+        degradedFindings.push(finding);
+      }
+    }
+  }
+
+  return {
+    articleId,
+    passed: blockingFindings.length === 0,
+    legacyMode: false,
+    blockingFindings,
+    degradedFindings,
+  };
+}
+
 export async function auditGeneratedConfigIntegrity({
   articleId,
   articles,
@@ -268,6 +543,7 @@ export async function auditGeneratedConfigIntegrity({
   articleDetailPageSource,
   chartDataSource,
   typecheckRunner = defaultTypecheckRunner,
+  visualContract,
 }: AuditInput): Promise<AuditResult> {
   const checks: AuditCheckResult[] = [];
   const blockingErrors: string[] = [];
@@ -394,6 +670,83 @@ export async function auditGeneratedConfigIntegrity({
     ),
   );
   blockingErrors.push(...socialImageCoverageIssues);
+
+  const fidelityContract = getFidelityContract(articleId, visualContract);
+  const requiredAssetIssues: string[] = [];
+  if (fidelityContract) {
+    for (const asset of fidelityContract.assets) {
+      if (!asset.required) {
+        continue;
+      }
+      if (!hasRequiredAssetCategory(article, asset.kind)) {
+        requiredAssetIssues.push(`${article.id} is missing required ${asset.kind} coverage for "${asset.name}"`);
+      }
+    }
+  }
+
+  checks.push(
+    createCheck(
+      "required article assets",
+      requiredAssetIssues.length === 0 ? "pass" : "fail",
+      requiredAssetIssues.length === 0
+        ? "Required bespoke article asset categories are populated"
+        : "Required bespoke article assets are missing",
+      requiredAssetIssues,
+    ),
+  );
+  blockingErrors.push(...requiredAssetIssues);
+
+  const typographySpecimenIssues: string[] = [];
+  for (const font of article.fonts ?? []) {
+    const usedInValues = flattenStringValues(font.usedIn);
+    if (usedInValues.length === 0) {
+      typographySpecimenIssues.push(`${article.id} font "${font.name}" is missing specimen-ready usedIn values`);
+      continue;
+    }
+    for (const specimen of usedInValues) {
+      if (!hasSpecimenLikeText(specimen)) {
+        typographySpecimenIssues.push(`${article.id} font "${font.name}" contains placeholder or underspecified specimen text`);
+        break;
+      }
+    }
+  }
+
+  checks.push(
+    createCheck(
+      "typography specimen fidelity",
+      typographySpecimenIssues.length === 0 ? "pass" : "fail",
+      typographySpecimenIssues.length === 0
+        ? "Typography specimens are source-ready and non-placeholder"
+        : "Typography specimen issues detected",
+      typographySpecimenIssues,
+    ),
+  );
+  blockingErrors.push(...typographySpecimenIssues);
+
+  const chartSourcePolicyIssues: string[] = [];
+  for (const chartType of article.chartTypes ?? []) {
+    const sourceUrl =
+      chartType && typeof chartType === "object" && "sourceUrl" in chartType
+        ? (chartType as { sourceUrl?: string }).sourceUrl
+        : undefined;
+    if (sourceUrl && article.id === "debate-speaking-time") {
+      chartSourcePolicyIssues.push(
+        `${article.id} should not expose chart sourceUrl for source-bundle reconstructions without external dataset evidence`,
+      );
+    }
+  }
+
+  checks.push(
+    createCheck(
+      "chart source-link policy",
+      chartSourcePolicyIssues.length === 0 ? "pass" : "fail",
+      chartSourcePolicyIssues.length === 0
+        ? "Chart source links follow the saved-bundle versus external-source policy"
+        : "Chart source-link policy violations detected",
+      chartSourcePolicyIssues,
+    ),
+  );
+  blockingErrors.push(...chartSourcePolicyIssues);
 
   const reusablePrimitiveCoverageIssues: string[] = [];
   for (const block of getContentBlockArray(article)) {
@@ -772,6 +1125,21 @@ export async function runDesignDocsIntegrationChecks({
     if (article.url.includes("/athletic/") && !article.architecture?.layoutTokens) {
       failures.push(createFailure("article.architecture.layoutTokens", "defined for Athletic article", "missing", article.id));
     }
+
+    const fidelity = verifySourceFidelity({
+      articleId: article.id,
+      articles: allRecords,
+    });
+    for (const finding of fidelity.blockingFindings) {
+      failures.push(
+        createFailure(
+          "source fidelity",
+          "no blocking findings",
+          `${finding.area}: ${finding.message}`,
+          article.id,
+        ),
+      );
+    }
   }
 
   const articleSpecificExpectations: Array<{
@@ -852,6 +1220,36 @@ export async function runDesignDocsIntegrationChecks({
             : createFailure("reaction storyline primitive", "nyt.storyline.tariffs-and-trade.standard", "missing", article?.id),
       ],
     },
+    {
+      id: "debate-speaking-time",
+      checks: [
+        (article) => article?.type === "interactive" ? null : createFailure("debate type", "interactive", String(article?.type), article?.id),
+        (article) =>
+          article?.contentBlocks?.some(
+            (block) =>
+              block.type === "debate-speaking-time-chart" &&
+              block.title === "How Long Each Candidate Spoke" &&
+              block.note === "Note: Each bar segment represents the approximate length of a candidate’s response to a question.",
+          )
+            ? null
+            : createFailure("debate timeline chart", "source-faithful debate bar chart block", "missing or drifted", article?.id),
+        (article) =>
+          article?.contentBlocks?.some(
+            (block) =>
+              block.type === "debate-topic-bubble-chart" &&
+              block.title === "Speaking Time by Topic" &&
+              block.note === "Note: The size of each circle represents the total length of a candidate’s responses to a topic.",
+          )
+            ? null
+            : createFailure("debate bubble chart", "source-faithful debate bubble chart block", "missing or drifted", article?.id),
+        (article) => getPublicAssetEntries(article ?? ({} as DesignDocsRecord), "icons").length > 0
+          ? null
+          : createFailure("debate icons", "icons present", "missing", article?.id),
+        (article) => getPublicAssetEntries(article ?? ({} as DesignDocsRecord), "images").length >= 7
+          ? null
+          : createFailure("debate images", "candidate images present", String(getPublicAssetEntries(article ?? ({} as DesignDocsRecord), "images").length), article?.id),
+      ],
+    },
   ];
 
   for (const expectation of articleSpecificExpectations) {
@@ -884,7 +1282,7 @@ export async function runDesignDocsIntegrationChecks({
     }
   }
 
-  const totalTests = allRecords.length * 10 + articleSpecificExpectations.reduce((sum, entry) => sum + entry.checks.length, 0) + brandSections.length * 4;
+  const totalTests = allRecords.length * 11 + articleSpecificExpectations.reduce((sum, entry) => sum + entry.checks.length, 0) + brandSections.length * 4;
   return {
     passed: failures.length === 0,
     totalTests,

@@ -8,7 +8,7 @@ import ClientOnly from "@/components/ClientOnly";
 // import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 // import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 // import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
-import { ADMIN_DESIGN_DOCS_PATH, ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
+import { ADMIN_ROOT_PATH } from "@/lib/admin/admin-route-paths";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import {
   getBrandScopeClass,
@@ -31,8 +31,77 @@ const VotingDeadlinesArticle = dynamic(() => import("./VotingDeadlinesArticle"),
   loading: LoadingFallback,
 });
 
-const load = (path: string) =>
-  dynamic(() => import(`./sections/${path}`), { loading: LoadingFallback });
+const sectionImporters = {
+  OverviewSection: () => import("./sections/OverviewSection"),
+  AppStylesSection: () => import("./sections/AppStylesSection"),
+  Gpt54DelightfulFrontendsSection: () => import("./sections/Gpt54DelightfulFrontendsSection"),
+  HeroesSection: () => import("./sections/HeroesSection"),
+  TypographySection: () => import("./sections/TypographySection"),
+  FontsShowcaseSection: () => import("./sections/FontsShowcaseSection"),
+  ColorsSection: () => import("./sections/ColorsSection"),
+  ShapesSection: () => import("./sections/ShapesSection"),
+  IconsSection: () => import("./sections/IconsSection"),
+  IllustrationsSection: () => import("./sections/IllustrationsSection"),
+  GalleriesSection: () => import("./sections/GalleriesSection"),
+  CarouselsSection: () => import("./sections/CarouselsSection"),
+  ChartsSection: () => import("./sections/ChartsSection"),
+  MapsSection: () => import("./sections/MapsSection"),
+  CardsSection: () => import("./sections/CardsSection"),
+  TablesDataSection: () => import("./sections/TablesDataSection"),
+  FormsSection: () => import("./sections/FormsSection"),
+  NavigationSection: () => import("./sections/NavigationSection"),
+  InteractiveElementsSection: () => import("./sections/InteractiveElementsSection"),
+  AnimationsSection: () => import("./sections/AnimationsSection"),
+  ComponentsSection: () => import("./sections/ComponentsSection"),
+  LayoutSection: () => import("./sections/LayoutSection"),
+  GridsDeepSection: () => import("./sections/GridsDeepSection"),
+  ResponsiveSection: () => import("./sections/ResponsiveSection"),
+  NewslettersSection: () => import("./sections/NewslettersSection"),
+  PatternsSection: () => import("./sections/PatternsSection"),
+  BrandNYTSection: () => import("./sections/BrandNYTSection"),
+  BrandNYTGamesSection: () => import("./sections/BrandNYTGamesSection"),
+  BrandNYTMagazineSection: () => import("./sections/BrandNYTMagazineSection"),
+  BrandWirecutterSection: () => import("./sections/BrandWirecutterSection"),
+  BrandTheAthleticSection: () => import("./sections/BrandTheAthleticSection"),
+  BrandNYTOpinionSection: () => import("./sections/BrandNYTOpinionSection"),
+  BrandNYTCookingSection: () => import("./sections/BrandNYTCookingSection"),
+  BrandNYTStyleSection: () => import("./sections/BrandNYTStyleSection"),
+  BrandNYTStoreSection: () => import("./sections/BrandNYTStoreSection"),
+  BrandNYMagSection: () => import("./sections/BrandNYMagSection"),
+  AthleticArticlesSection: () => import("./sections/AthleticArticlesSection"),
+  NYTArticlesSection: () => import("./sections/NYTArticlesSection"),
+  NytTechStackSection: () => import("./sections/NytTechStackSection"),
+  NYTGamesArticlesSection: () => import("./sections/NYTGamesArticlesSection"),
+  "brand-nyt/BrandNYTTypography": () => import("./sections/brand-nyt/BrandNYTTypography"),
+  "brand-nyt/BrandNYTColors": () => import("./sections/brand-nyt/BrandNYTColors"),
+  "brand-nyt/BrandNYTLayout": () => import("./sections/brand-nyt/BrandNYTLayout"),
+  "brand-nyt/BrandNYTArchitecture": () => import("./sections/brand-nyt/BrandNYTArchitecture"),
+  "brand-nyt/BrandNYTCharts": () => import("./sections/brand-nyt/BrandNYTCharts"),
+  "brand-nyt/BrandNYTComponents": () => import("./sections/brand-nyt/BrandNYTComponents"),
+  "brand-nyt/BrandNYTResources": () => import("./sections/brand-nyt/BrandNYTResources"),
+  "brand-athletic/BrandAthleticTypography": () =>
+    import("./sections/brand-athletic/BrandAthleticTypography"),
+  "brand-athletic/BrandAthleticColors": () => import("./sections/brand-athletic/BrandAthleticColors"),
+  "brand-athletic/BrandAthleticComponents": () =>
+    import("./sections/brand-athletic/BrandAthleticComponents"),
+  "brand-athletic/BrandAthleticIcons": () => import("./sections/brand-athletic/BrandAthleticIcons"),
+  "brand-athletic/BrandAthleticLayouts": () =>
+    import("./sections/brand-athletic/BrandAthleticLayouts"),
+  "brand-athletic/BrandAthleticLayout": () => import("./sections/brand-athletic/BrandAthleticLayout"),
+  "brand-athletic/BrandAthleticShapes": () => import("./sections/brand-athletic/BrandAthleticShapes"),
+  "brand-athletic/BrandAthleticResources": () =>
+    import("./sections/brand-athletic/BrandAthleticResources"),
+  "brand-nymag/BrandNYMagTypography": () => import("./sections/brand-nymag/BrandNYMagTypography"),
+  "brand-nymag/BrandNYMagColors": () => import("./sections/brand-nymag/BrandNYMagColors"),
+  "brand-nymag/BrandNYMagComponents": () => import("./sections/brand-nymag/BrandNYMagComponents"),
+  "brand-nymag/BrandNYMagLayout": () => import("./sections/brand-nymag/BrandNYMagLayout"),
+  "brand-nymag/BrandNYMagShapes": () => import("./sections/brand-nymag/BrandNYMagShapes"),
+  "brand-nymag/BrandNYMagResources": () => import("./sections/brand-nymag/BrandNYMagResources"),
+} as const;
+
+type SectionImporterKey = keyof typeof sectionImporters;
+
+const load = (path: SectionImporterKey) => dynamic(sectionImporters[path], { loading: LoadingFallback });
 
 /* Brand tab components — dynamically imported per tab */
 const nytTabComponents: Record<string, ComponentType> = {
@@ -152,7 +221,6 @@ export default function DesignDocsPageClient({ activeSection, articleSlug, brand
   return (
     <ClientOnly>
       {/* NYT web fonts */}
-      {/* eslint-disable-next-line @next/next/no-css-tags */}
       <link
         rel="stylesheet"
         href="https://g1.nyt.com/fonts/css/web-fonts.c851560786173ad206e1f76c1901be7e096e8f8b.css"

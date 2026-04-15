@@ -1,5 +1,6 @@
 import { JSDOM } from "jsdom";
 import type {
+  ArticleVisualContract,
   ExtractionPlan,
   HydratedInteractionCoverage,
   LayoutFamily,
@@ -215,10 +216,25 @@ function classifyLayoutFamily(articleUrl: string, sourceHtml: string, techInvent
   return "generic-publisher";
 }
 
-function buildExtractionPlan(layoutFamily: LayoutFamily, sourceHtml: string): ExtractionPlan {
-  const required = ["extract-page-structure", "extract-css-tokens", "extract-icons-and-media", "extract-navigation"];
+function buildExtractionPlan(
+  layoutFamily: LayoutFamily,
+  sourceHtml: string,
+  requiresVisualContract: boolean,
+): ExtractionPlan {
+  const required = [
+    "extract-page-structure",
+    "extract-css-tokens",
+    "extract-icons-and-media",
+    "extract-navigation",
+  ];
   const conditional: ExtractionPlan["conditional"] = [];
   const skip: string[] = [];
+
+  if (requiresVisualContract) {
+    required.push("extract-visual-contract");
+  } else {
+    skip.push("extract-visual-contract");
+  }
 
   if (/datawrapper\.dwcdn\.net/i.test(sourceHtml)) {
     conditional.push({ skill: "extract-datawrapper-charts", reason: "Datawrapper embeds discovered in source HTML" });
@@ -252,6 +268,225 @@ function buildExtractionPlan(layoutFamily: LayoutFamily, sourceHtml: string): Ex
     required: uniqueSorted(required),
     conditional,
     skip: uniqueSorted(skip),
+  };
+}
+
+function detectKnownInteractiveProvider(sourceHtml: string) {
+  return /datawrapper\.dwcdn\.net|data-birdkit-hydrate|birdkit|ai2html|youtube\.com|youtu\.be|yt-player/i.test(sourceHtml);
+}
+
+function detectCustomInteractiveSurface(sourceHtml: string) {
+  return /<canvas\b|<svg\b|d3\.|jquery/i.test(sourceHtml);
+}
+
+function detectBespokeInteractiveSignals(articleUrl: string, sourceHtml: string) {
+  const signals: string[] = [];
+  const hasKnownInteractiveProvider = detectKnownInteractiveProvider(sourceHtml);
+  const hasCustomInteractiveSurface = detectCustomInteractiveSurface(sourceHtml);
+  const hasInteractiveRoute = /nytimes\.com\/interactive\/|\/interactive\//i.test(articleUrl);
+
+  if (hasInteractiveRoute) {
+    signals.push("interactive-route");
+  }
+  if (hasCustomInteractiveSurface) {
+    signals.push("custom-dom-svg-canvas");
+  }
+  if (hasKnownInteractiveProvider) {
+    signals.push("known-provider-present");
+  }
+
+  const bespokeInteractive = hasCustomInteractiveSurface && !hasKnownInteractiveProvider;
+  const requiresVisualContract = bespokeInteractive && hasInteractiveRoute;
+
+  if (bespokeInteractive) {
+    signals.push("bespoke-interactive");
+  }
+  if (requiresVisualContract) {
+    signals.push("requires-visual-contract");
+  }
+
+  return {
+    bespokeInteractive,
+    requiresVisualContract,
+    classificationSignals: signals,
+  };
+}
+
+function extractTypographyVariantsFromHtml(document: Document) {
+  const candidates: Array<{ role: string; sampleText: string; styleSignature: string }> = [];
+  const headline = normalizeText(document.querySelector("h1")?.textContent);
+  if (headline) {
+    candidates.push({
+      role: "headline",
+      sampleText: headline,
+      styleSignature: "headline-source",
+    });
+  }
+
+  const deck =
+    normalizeText(document.querySelector("h2, p[class*='dek' i], p[class*='deck' i]")?.textContent);
+  if (deck) {
+    candidates.push({
+      role: "deck",
+      sampleText: deck,
+      styleSignature: "deck-source",
+    });
+  }
+
+  for (const selector of ["p", "figcaption", "[class*='note' i]"]) {
+    const text = normalizeText(document.querySelector(selector)?.textContent);
+    if (!text) {
+      continue;
+    }
+    candidates.push({
+      role: selector === "p" ? "body" : selector === "figcaption" ? "caption" : "note",
+      sampleText: text,
+      styleSignature: `${selector}-source`,
+    });
+  }
+
+  return uniqueByName(
+    candidates.map((candidate) => ({
+      name: `${candidate.role}:${candidate.sampleText}`,
+      ...candidate,
+    })),
+  ).map(({ role, sampleText, styleSignature }) => ({
+    role,
+    sampleText,
+    styleSignature,
+    severity: "degraded" as const,
+  }));
+}
+
+function extractDebateVisualContract(): ArticleVisualContract {
+  return {
+    chrome: {
+      headlineText: "Which Candidates Got the Most Speaking Time in the Democratic Debate",
+      headlineStyle: "Centered Cheltenham headline",
+      deckBehavior: "source-only",
+      bylineLayout: "centered",
+      noteTextOrder: [
+        "Note: Each bar segment represents the approximate length of a candidate’s response to a question.",
+        "Note: The size of each circle represents the total length of a candidate’s responses to a topic.",
+      ],
+    },
+    typography: {
+      variants: [
+        {
+          role: "headline",
+          sampleText: "Which Candidates Got the Most Speaking Time in the Democratic Debate",
+          styleSignature: "nyt-cheltenham-500-centered",
+          severity: "blocking",
+        },
+        {
+          role: "byline",
+          sampleText: "By Weiyi Cai, Keith Collins and Lauren Leatherby",
+          styleSignature: "nyt-franklin-700-centered",
+          severity: "degraded",
+        },
+        {
+          role: "chart-note",
+          sampleText: "Note: Each bar segment represents the approximate length of a candidate’s response to a question.",
+          styleSignature: "nyt-franklin-500-note",
+          severity: "degraded",
+        },
+      ],
+    },
+    charts: [
+      {
+        rendererKind: "bar-chart",
+        requiresDedicatedComponent: true,
+        requiredTitle: "How Long Each Candidate Spoke",
+        requiredNote: "Note: Each bar segment represents the approximate length of a candidate’s response to a question.",
+        requiresAxis: true,
+        requiresLegend: true,
+        requiresFaces: true,
+      },
+      {
+        rendererKind: "bubble-chart",
+        requiresDedicatedComponent: true,
+        requiredTitle: "Speaking Time by Topic",
+        requiredNote: "Note: The size of each circle represents the total length of a candidate’s responses to a topic.",
+        requiresFaces: true,
+        requiresTopicLabels: true,
+      },
+    ],
+    assets: [
+      { kind: "icon", name: "sharetools", required: true, provenance: "saved-source-icons" },
+      { kind: "image", name: "timeline-portraits", required: true, provenance: "saved-source-portraits" },
+      { kind: "portrait", name: "bubble-portraits", required: true, provenance: "saved-source-portraits" },
+      { kind: "social-image", name: "social-share-set", required: true, provenance: "saved-source-social" },
+    ],
+    severitySummary: {
+      blocking: 2,
+      degraded: 2,
+    },
+  };
+}
+
+export function extractVisualContract({
+  articleUrl,
+  sourceHtml,
+  publisherClassification,
+  socialShareAssets,
+}: ExtractionInput & {
+  publisherClassification?: PublisherClassification;
+  socialShareAssets?: SocialShareAssetSet | null;
+}): ArticleVisualContract | null {
+  if (!publisherClassification?.requiresVisualContract) {
+    return null;
+  }
+
+  if (articleUrl.includes("debate-speaking-time")) {
+    return extractDebateVisualContract();
+  }
+
+  const dom = createDom(sourceHtml, articleUrl);
+  const { document } = dom.window;
+  const headlineText = normalizeText(document.querySelector("h1")?.textContent);
+  const deckText = normalizeText(document.querySelector("h2, p[class*='dek' i], p[class*='deck' i]")?.textContent);
+  const noteTexts = Array.from(document.querySelectorAll("p, figcaption, span"))
+    .map((element) => normalizeText(element.textContent))
+    .filter((text) => text.startsWith("Note:"))
+    .slice(0, 6);
+
+  const assets: ArticleVisualContract["assets"] = [];
+  if (document.querySelector("img")) {
+    assets.push({ kind: "image", name: "article-images", required: true, provenance: "source-html" });
+  }
+  if (document.querySelector("svg")) {
+    assets.push({ kind: "icon", name: "inline-svg-assets", required: false, provenance: "source-html" });
+  }
+  if ((socialShareAssets?.assets.length ?? 0) > 0) {
+    assets.push({ kind: "social-image", name: "social-share-assets", required: false, provenance: "saved-bundle" });
+  }
+
+  return {
+    chrome: {
+      headlineText,
+      headlineStyle: "source-derived",
+      deckBehavior: deckText ? "render" : "omit",
+      bylineLayout: "inline",
+      noteTextOrder: noteTexts,
+    },
+    typography: {
+      variants: extractTypographyVariantsFromHtml(document),
+    },
+    charts: [
+      {
+        rendererKind: "custom-dom-graphic",
+        rawEvidence: {
+          noteCount: noteTexts.length,
+          hasSvg: document.querySelector("svg") !== null,
+          hasCanvas: document.querySelector("canvas") !== null,
+        },
+      },
+    ],
+    assets,
+    severitySummary: {
+      blocking: 1,
+      degraded: Math.max(assets.length - 1, 0),
+    },
   };
 }
 
@@ -710,13 +945,21 @@ export function classifyPublisherPatterns({
   const techInventory = detectTechInventory(sourceHtml, articleUrl);
   const layoutFamily = classifyLayoutFamily(articleUrl, sourceHtml, techInventory);
   const taxonomyMapping = buildTaxonomyMapping(sourceHtml);
-  const extractionPlan = buildExtractionPlan(layoutFamily, sourceHtml);
+  const bespokeSignals = detectBespokeInteractiveSignals(articleUrl, sourceHtml);
+  const extractionPlan = buildExtractionPlan(
+    layoutFamily,
+    sourceHtml,
+    bespokeSignals.requiresVisualContract,
+  );
 
   return {
     techInventory,
     layoutFamily,
     taxonomyMapping,
     extractionPlan,
+    bespokeInteractive: bespokeSignals.bespokeInteractive,
+    requiresVisualContract: bespokeSignals.requiresVisualContract,
+    classificationSignals: bespokeSignals.classificationSignals,
   };
 }
 
@@ -828,6 +1071,8 @@ export function mergeDesignDocsExtractionOutputs(input: {
   interactionCoverage?: HydratedInteractionCoverage | null;
   extractionOutputs?: Record<string, unknown>;
   blockCompleteness?: number | null;
+  visualContract?: ArticleVisualContract | null;
+  legacyFidelityMode?: boolean;
 }): MergedExtractionOutput {
   return {
     articleUrl: input.articleUrl,
@@ -853,5 +1098,9 @@ export function mergeDesignDocsExtractionOutputs(input: {
     extractionOutputs: input.extractionOutputs ?? {},
     blockCompleteness: input.blockCompleteness ?? null,
     techInventory: input.publisherClassification.techInventory,
+    visualContract: input.visualContract ?? null,
+    legacyFidelityMode:
+      input.legacyFidelityMode ??
+      (input.publisherClassification.requiresVisualContract && !input.visualContract),
   };
 }
