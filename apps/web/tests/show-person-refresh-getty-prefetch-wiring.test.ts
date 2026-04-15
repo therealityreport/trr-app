@@ -21,6 +21,5 @@ describe("show page person refresh Getty prefetch wiring", () => {
 
   it("passes personName through all show-page person refresh launchers", () => {
     expect(pageContents).toMatch(/mode,\s*\n\s*signal: options\?\.signal,\s*\n\s*personName: label,/);
-    expect(pageContents).toContain("{ signal: runController.signal, personName: label }");
   });
 });

@@ -11953,6 +11953,13 @@ export default function TrrShowDetailPage() {
   const hasPersonRefreshInFlight = Object.keys(refreshingPersonIds).length > 0;
   const isShowRefreshBusy =
     refreshingShowAll || Object.values(refreshingTargets).some((value) => value);
+  const castAnyJobRunning =
+    castRefreshPipelineRunning ||
+    castMediaEnriching ||
+    castMatrixSyncLoading ||
+    Boolean(refreshingTargets.cast_credits) ||
+    hasReconnectableCreditsRun ||
+    hasPersonRefreshInFlight;
   const isCastRefreshBusy =
     isShowRefreshBusy ||
     castMatrixSyncLoading ||
