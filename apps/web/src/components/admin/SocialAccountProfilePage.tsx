@@ -7,6 +7,8 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import SocialAccountProfileHashtagTimelineChart from "@/components/admin/SocialAccountProfileHashtagTimelineChart";
+import InstagramCommentsPanel from "@/components/admin/instagram/InstagramCommentsPanel";
+import PostScrapeCommentsButton from "@/components/admin/instagram/PostScrapeCommentsButton";
 import SocialGrowthSection from "@/components/admin/social-growth-section";
 import {
   type SocialAccountCatalogGapAnalysis,
@@ -235,6 +237,13 @@ const formatDateTime = (value?: string | null): string => {
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
 };
+
+const buildLocalCatalogCommand = (
+  platform: SocialPlatformSlug,
+  handle: string,
+  action: "backfill" | "fill_missing_photos",
+): string =>
+  `cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/local_catalog_action.py --platform ${platform} --account ${handle} --action ${action}`;
 
 const formatDiagnosticToken = (value?: string | null): string => {
   const normalized = String(value || "").trim();
@@ -977,7 +986,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogFilter, setCatalogFilter] = useState<"all" | "assigned" | "unassigned" | "ambiguous" | "needs_review">("all");
   const [catalogActionMessage, setCatalogActionMessage] = useState<string | null>(null);
-  const [runningCatalogAction, setRunningCatalogAction] = useState<"backfill" | "repair_auth" | "sync_recent" | "sync_newer" | null>(null);
+  const [runningCatalogAction, setRunningCatalogAction] = useState<
+    "backfill" | "fill_missing_photos" | "repair_auth" | "sync_recent" | "sync_newer" | null
+  >(null);
   const [reviewQueue, setReviewQueue] = useState<SocialAccountCatalogReviewItem[]>([]);
   const [reviewQueueLoading, setReviewQueueLoading] = useState(false);
   const [reviewQueueError, setReviewQueueError] = useState<string | null>(null);
@@ -1040,6 +1051,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
 
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
+  const supportsComments = platform === "instagram";
   const supportsSocialBlade = SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS.includes(platform);
   const hasSummary = summary !== null;
   const shouldDeferSecondaryCatalogReads =
@@ -1086,9 +1098,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const visibleTabs = useMemo(
     () =>
       (Object.keys(SOCIAL_ACCOUNT_PROFILE_TAB_LABELS) as SocialAccountProfileTab[]).filter(
-        (tab) => tab !== "socialblade" || supportsSocialBlade,
+        (tab) => (tab !== "socialblade" || supportsSocialBlade) && (tab !== "comments" || supportsComments),
       ),
-    [supportsSocialBlade],
+    [supportsComments, supportsSocialBlade],
   );
   const isLocalDevHost = useMemo(() => {
     return typeof window !== "undefined" && isLocalDevHostname(window.location.hostname);
@@ -1806,6 +1818,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return supportsCatalog && displayTotalPosts !== displayCatalogTotalPosts;
   }, [displayCatalogTotalPosts, displayTotalPosts, supportsCatalog]);
 
+  const postsSummaryLabel = useMemo(() => {
+    // All catalog-supporting platforms use "Saved / Account total" after the
+    // label refresh. The narrow Instagram-only condition was a pre-existing
+    // Codex inconsistency vs. the runtime test at line ~284 (twitter case).
+    if (supportsCatalog) {
+      return "Saved / Account total";
+    }
+    return "Cataloged / Profile total";
+  }, [supportsCatalog]);
+
   const applyCatalogGapAnalysisStatus = useCallback(
     (payload: CatalogGapAnalysisStatusPayload) => {
       const normalizedStatus = payload.status ?? "idle";
@@ -2393,7 +2415,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   const catalogGapAnalysisPresentation = useMemo(() => {
     if (!catalogGapAnalysis) return null;
-    const sampleIds = catalogGapAnalysis.sample_missing_source_ids.slice(0, 5).join(", ");
+    const sampleIds = (catalogGapAnalysis.sample_missing_source_ids ?? []).slice(0, 5).join(", ");
     if (catalogGapAnalysis.gap_type === "tail_gap") {
       return {
         tone: "border-amber-200 bg-amber-50 text-amber-900",
@@ -3252,6 +3274,113 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
   };
 
+  const copyLocalCatalogCommand = async (action: "backfill" | "fill_missing_photos") => {
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) {
+      setCatalogActionMessage("Clipboard copy is unavailable in this browser.");
+      return;
+    }
+    try {
+      await clipboard.writeText(buildLocalCatalogCommand(platform, handle, action));
+      setCatalogActionMessage(
+        action === "backfill"
+          ? "Copied Backfill Posts terminal command."
+          : "Copied Fill Missing Photos terminal command.",
+      );
+    } catch (error) {
+      setCatalogActionMessage(error instanceof Error ? error.message : "Failed to copy terminal command.");
+    }
+  };
+
+  const runFillMissingPhotos = async () => {
+    if (!user) return;
+    setRunningCatalogAction("fill_missing_photos");
+    setCatalogActionMessage(null);
+    setCatalogGapAnalysisError(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/gap-analysis/run`,
+        { method: "POST" },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as CatalogGapAnalysisStatusPayload;
+      if (!response.ok) {
+        throw buildSocialAccountRequestError(data, "Failed to start social account catalog gap analysis");
+      }
+
+      applyCatalogGapAnalysisStatus(data);
+
+      let result = data.result ?? null;
+      let status = data.status ?? "idle";
+      let attempts = 0;
+
+      while (!result && (status === "queued" || status === "running") && attempts < 30) {
+        attempts += 1;
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, CATALOG_GAP_ANALYSIS_POLL_INTERVAL_MS);
+        });
+        const statusResponse = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/gap-analysis`,
+          undefined,
+          { preferredUser: user },
+        );
+        const statusData = (await statusResponse.json().catch(() => ({}))) as CatalogGapAnalysisStatusPayload;
+        if (!statusResponse.ok) {
+          throw buildSocialAccountRequestError(statusData, "Failed to fetch social account catalog gap analysis");
+        }
+        applyCatalogGapAnalysisStatus(statusData);
+        result = statusData.result ?? null;
+        status = statusData.status ?? "idle";
+      }
+
+      if (!result) {
+        if (status === "failed") {
+          throw new Error("Failed to analyze social account catalog gaps");
+        }
+        throw new Error("Catalog gap analysis did not return a repair recommendation.");
+      }
+
+      if (result.recommended_action === "sync_newer") {
+        await runCatalogAction("sync_newer", {
+          source_scope: activeCatalogSourceScope,
+        });
+        return;
+      }
+
+      if (result.recommended_action === "backfill_posts") {
+        await runCatalogAction("backfill", {
+          backfill_scope: "full_history",
+        });
+        return;
+      }
+
+      if (result.recommended_action === "bounded_window_backfill") {
+        if (!result.repair_window_start || !result.repair_window_end) {
+          throw new Error("Gap analysis requested a bounded repair window without dates.");
+        }
+        await runCatalogAction("backfill", {
+          backfill_scope: "bounded_window",
+          date_start: result.repair_window_start,
+          date_end: result.repair_window_end,
+        });
+        return;
+      }
+
+      if (result.recommended_action === "wait_for_active_run") {
+        setCatalogActionMessage("A catalog run is already active. Wait for it to finish before filling missing posts.");
+        return;
+      }
+
+      setCatalogActionMessage("No missing posts to fill right now.");
+    } catch (error) {
+      setCatalogActionMessage(
+        error instanceof Error ? error.message : "Failed to analyze social account catalog gaps",
+      );
+    } finally {
+      setRunningCatalogAction((current) => (current === "fill_missing_photos" ? null : current));
+    }
+  };
+
   const runCatalogRepairAuth = async (runId: string, requestBody: CatalogRepairAuthRequest = {}) => {
     const normalizedRunId = runId.trim();
     if (!user || !normalizedRunId) return;
@@ -3484,22 +3613,38 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       >
                         {runningCatalogAction === "backfill" ? "Queueing Backfill…" : "Backfill Posts"}
                       </button>
-                      {platform === "instagram" ? (
-                        <button
-                          type="button"
-                          title="Copy direct backfill command for terminal"
-                          onClick={() => {
-                            const cmd = `cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/instagram/direct_catalog_backfill.py --account ${handle}`;
-                            void navigator.clipboard.writeText(cmd);
-                          }}
-                          className="inline-flex items-center rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                            <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z" />
-                            <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.44A1.5 1.5 0 0 0 8.378 6H4.5Z" />
-                          </svg>
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        aria-label="Copy terminal command"
+                        title="Copy Backfill Posts terminal command"
+                        onClick={() => void copyLocalCatalogCommand("backfill")}
+                        className="inline-flex items-center rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                          <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z" />
+                          <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.44A1.5 1.5 0 0 0 8.378 6H4.5Z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void runFillMissingPhotos()}
+                        disabled={catalogActionsBlocked}
+                        className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-900 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {runningCatalogAction === "fill_missing_photos" ? "Analyzing Gaps…" : "Fill Missing Photos"}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Copy terminal command"
+                        title="Copy Fill Missing Photos terminal command"
+                        onClick={() => void copyLocalCatalogCommand("fill_missing_photos")}
+                        className="inline-flex items-center rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                          <path d="M7 3.5A1.5 1.5 0 0 1 8.5 2h3.879a1.5 1.5 0 0 1 1.06.44l3.122 3.12A1.5 1.5 0 0 1 17 6.622V12.5a1.5 1.5 0 0 1-1.5 1.5h-1v-3.379a3 3 0 0 0-.879-2.121L10.5 5.379A3 3 0 0 0 8.379 4.5H7v-1Z" />
+                          <path d="M4.5 6A1.5 1.5 0 0 0 3 7.5v9A1.5 1.5 0 0 0 4.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L9.44 6.44A1.5 1.5 0 0 0 8.378 6H4.5Z" />
+                        </svg>
+                      </button>
                       {platform !== "instagram" ? (
                         <button
                           type="button"
@@ -3726,7 +3871,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       <p className="mt-2 text-2xl font-bold leading-tight text-zinc-900">
                         {formatInteger(displayCatalogTotalPosts)} / {formatInteger(displayTotalPosts)}
                       </p>
-                      <p className="mt-1 text-xs text-zinc-500">Cataloged / Profile total</p>
+                      <p className="mt-1 text-xs text-zinc-500">{postsSummaryLabel}</p>
                     </>
                   ) : (
                     <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayTotalPosts)}</p>
@@ -4612,6 +4757,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             )
           ) : null}
 
+          {hasSummary && activeTab === "comments" && supportsComments ? (
+            <InstagramCommentsPanel
+              platform={platform}
+              handle={handle}
+              summary={summary}
+              onSummaryRefresh={async () => {
+                await refreshSummary();
+              }}
+            />
+          ) : null}
+
           {hasSummary && activeTab === "posts" ? (
             <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
@@ -4637,13 +4793,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <th className="pb-3 pr-4">Show</th>
                           <th className="pb-3 pr-4">Season</th>
                           <th className="pb-3 pr-4">Metrics</th>
+                          {supportsComments ? <th className="pb-3 pr-4">Comments Lane</th> : null}
                           <th className="pb-3">Published</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100">
                         {(posts?.items ?? []).length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="py-6 text-sm text-zinc-500">
+                            <td colSpan={supportsComments ? 6 : 5} className="py-6 text-sm text-zinc-500">
                               No posts found for this account.
                             </td>
                           </tr>
@@ -4680,6 +4837,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   <div>{formatInteger(item.metrics.comments_count)} comments</div>
                                 </div>
                               </td>
+                              {supportsComments ? (
+                                <td className="py-4 pr-4 align-top text-zinc-700">
+                                  <PostScrapeCommentsButton
+                                    platform={platform}
+                                    handle={handle}
+                                    sourceId={item.source_id}
+                                    onCompleted={async () => {
+                                      await refreshSummary();
+                                    }}
+                                  />
+                                </td>
+                              ) : null}
                               <td className="py-4 align-top text-xs text-zinc-500">{formatDateTime(item.posted_at)}</td>
                             </tr>
                           ))

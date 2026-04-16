@@ -179,6 +179,17 @@ describe("show-admin-routes", () => {
       }),
     ).toBe("/admin/social/instagram/bravotv/catalog");
 
+    // P0-1b: The comments tab migrated to the `/social/...` canonical tree.
+    // Other tabs still build under `/admin/social/...` until a broader URL
+    // migration lands (explicitly out of scope).
+    expect(
+      buildSocialAccountProfileUrl({
+        platform: "instagram",
+        handle: "@BravoTV",
+        tab: "comments",
+      }),
+    ).toBe("/social/instagram/bravotv/comments");
+
     expect(
       buildSocialAccountProfileUrl({
         platform: "instagram",
@@ -220,6 +231,21 @@ describe("show-admin-routes", () => {
       handle: "bravotv",
       tab: "catalog",
       canonicalPath: "/admin/social/instagram/bravotv/catalog",
+    });
+
+    // P0-1b: Parsing a legacy `/admin/social/.../comments` URL must return the
+    // canonical `/social/.../comments` path so callers redirect to the new home.
+    expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/comments")).toMatchObject({
+      platform: "instagram",
+      handle: "bravotv",
+      tab: "comments",
+      canonicalPath: "/social/instagram/bravotv/comments",
+    });
+    expect(parseSocialAccountProfilePath("/social/instagram/bravotv/comments")).toMatchObject({
+      platform: "instagram",
+      handle: "bravotv",
+      tab: "comments",
+      canonicalPath: "/social/instagram/bravotv/comments",
     });
   });
 
