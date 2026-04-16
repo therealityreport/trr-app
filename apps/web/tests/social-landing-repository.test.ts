@@ -439,7 +439,7 @@ describe("social landing repository", () => {
         expect.objectContaining({
           platform: "instagram",
           handle: "bravowwhl",
-          href: "/admin/social/instagram/bravowwhl",
+          href: "/social/instagram/bravowwhl",
         }),
         expect.objectContaining({
           platform: "youtube",
