@@ -29,7 +29,7 @@ Environment Variables (Preview + Production)
 - `NEXT_PUBLIC_ENABLE_APPLE` (optional)
 - `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=false`
 - `FIREBASE_SERVICE_ACCOUNT` (full JSON)
-- `TRR_AUTH_PROVIDER` (`firebase` default; `supabase` for migration stages)
+- `TRR_AUTH_PROVIDER` (`firebase` default; `supabase` is diagnostics-only today and durable login/session paths fail closed)
 - `TRR_AUTH_SHADOW_MODE` (`true` to run secondary-provider parity checks)
 - `TRR_AUTH_CUTOVER_MIN_SHADOW_CHECKS` (default `50`)
 - `TRR_AUTH_CUTOVER_MAX_SHADOW_FAILURES` (default `0`)

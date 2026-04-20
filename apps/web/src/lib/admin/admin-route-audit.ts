@@ -130,21 +130,34 @@ const ADMIN_HOME_ENTRY_CONFIG: Record<string, AdminHomeEntryConfig> = {
     notes: ["Survey editing and drill-in flows stay inside the /surveys path family."],
   },
   "social-media": {
-    canonicalPathSteps: ["/admin/social", "/admin/social/[platform]/[handle]"],
-    finalStatePath: "/admin/social/[platform]/[handle]",
+    canonicalPathSteps: ["/social", "/social/[platform]/[handle]"],
+    finalStatePath: "/social/[platform]/[handle]",
     variantPaths: [
       {
         path: "/admin/social-media",
         status: "legacy_alias",
-        note: "Old section name that now forwards to /admin/social.",
+        note: "Old section name that now forwards to /social.",
       },
       {
         path: "/social-media",
         status: "legacy_alias",
-        note: "Host-level compatibility path that still resolves into admin social.",
+        note: "Legacy host-level compatibility path; forwards to /social.",
+      },
+      {
+        path: "/admin/social",
+        status: "legacy_alias",
+        note: "Pre-migration admin entry path; proxy redirects to /social.",
+      },
+      {
+        path: "/admin/social/[platform]/[handle]",
+        status: "legacy_alias",
+        note: "Pre-migration account-profile admin path; canonical form is /social/[platform]/[handle].",
       },
     ],
-    notes: ["Social remains the one major admin tool whose canonical entry path still keeps the /admin namespace."],
+    notes: [
+      "Social-account-profile tabs (stats/comments/posts/hashtags/collaborators-tags) render at the canonical /social/[platform]/[handle] family.",
+      "The catalog and socialblade tabs remain under /admin/social/... until a follow-up migration moves them.",
+    ],
   },
   "networks-streaming": {
     canonicalPathSteps: ["/brands", "/brands/[brand]"],

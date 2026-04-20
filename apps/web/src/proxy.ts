@@ -380,7 +380,6 @@ function parseSocialAccountProfilePath(pathname: string): {
   handle: string;
   tab: string;
   canonicalPath: string;
-  rewritePath: string;
 } | null {
   const segments = toPathSegments(pathname);
   if (segments.length === 0) return null;
@@ -411,10 +410,6 @@ function parseSocialAccountProfilePath(pathname: string): {
       tab === "stats"
         ? `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`
         : `/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/${tab}`,
-    rewritePath:
-      tab === "stats"
-        ? `/admin/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}`
-        : `/admin/social/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/${tab}`,
   };
 }
 
@@ -751,8 +746,13 @@ function mapCanonicalAdminUiRewrite(pathname: string): string | null {
 
   const socialAccountProfilePath = parseSocialAccountProfilePath(pathname);
   if (socialAccountProfilePath) {
+    // All 5 account-profile tabs (stats/comments/posts/hashtags/collaborators-tags)
+    // render at the canonical /social/... path. Canonical visit → no rewrite,
+    // NextResponse.next() serves the page. Legacy /admin/social/... visits are
+    // redirected upstream by NESTED_ADMIN_SECTION_CANONICAL_PREFIXES; returning
+    // canonicalPath here is defense-in-depth.
     return pathname === socialAccountProfilePath.canonicalPath
-      ? socialAccountProfilePath.rewritePath
+      ? null
       : socialAccountProfilePath.canonicalPath;
   }
 

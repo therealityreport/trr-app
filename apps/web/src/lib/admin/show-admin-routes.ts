@@ -683,6 +683,18 @@ export function parseSocialAccountProfilePath(pathname: string): ParsedSocialAcc
   };
 }
 
+// The five profile tabs (stats/comments/posts/hashtags/collaborators-tags)
+// render at canonical `/social/...` paths. `catalog` and `socialblade` remain
+// under `/admin/social/...` until a broader migration moves them — a future
+// migration must delete the admin redirect shim AND add the tab here.
+const MIGRATED_SOCIAL_ACCOUNT_PROFILE_TABS: ReadonlySet<SocialAccountProfileTab> = new Set([
+  "stats",
+  "comments",
+  "posts",
+  "hashtags",
+  "collaborators-tags",
+]);
+
 export function buildSocialAccountProfileUrl(input: {
   platform: string | null | undefined;
   handle: string | null | undefined;
@@ -695,15 +707,11 @@ export function buildSocialAccountProfileUrl(input: {
     return appendQuery(ADMIN_SOCIAL_PATH, buildCanonicalQuery(input.query, { removeSocialView: true }));
   }
   const tab = input.tab ?? "stats";
-  // P0-1b: The comments tab migrated to the `/social/...` canonical URL tree.
-  // Other tabs still build under the legacy `/admin/social/...` prefix until a
-  // broader URL migration lands (explicitly out of scope here).
+  const basePath = MIGRATED_SOCIAL_ACCOUNT_PROFILE_TABS.has(tab) ? "/social" : ADMIN_SOCIAL_PATH;
   const path =
-    tab === "comments"
-      ? `/social/${platform}/${handle}/comments`
-      : tab === "stats"
-        ? `${ADMIN_SOCIAL_PATH}/${platform}/${handle}`
-        : `${ADMIN_SOCIAL_PATH}/${platform}/${handle}/${tab}`;
+    tab === "stats"
+      ? `${basePath}/${platform}/${handle}`
+      : `${basePath}/${platform}/${handle}/${tab}`;
   const nextQuery = buildCanonicalQuery(input.query, { removeSocialView: true });
   nextQuery.delete("social_platform");
   nextQuery.delete("season_id");

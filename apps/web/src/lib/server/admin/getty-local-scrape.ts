@@ -50,6 +50,12 @@ export type GettyLocalScrapePayload = {
   first_editorial_ids?: string[];
   session_validated?: boolean;
   session_truncated?: boolean;
+  getty_transport_mode?: string | null;
+  getty_proxy_fingerprint?: string | null;
+  getty_runtime_probe_status?: string | null;
+  getty_runtime_probe_reason?: string | null;
+  getty_fallback_invoked?: boolean;
+  getty_primary_failure_reason?: string | null;
   job_pid?: number;
 };
 
@@ -79,7 +85,23 @@ export type GettyPrefetchState = GettyLocalScrapePayload & {
   first_editorial_ids?: string[];
   session_validated?: boolean;
   session_truncated?: boolean;
+  getty_transport_mode?: string | null;
+  getty_proxy_fingerprint?: string | null;
+  getty_runtime_probe_status?: string | null;
+  getty_runtime_probe_reason?: string | null;
+  getty_fallback_invoked?: boolean;
+  getty_primary_failure_reason?: string | null;
   job_pid?: number | null;
+};
+
+export type GettyRemoteReadiness = {
+  ready: boolean;
+  status: "healthy" | "blocked" | "disabled" | "unknown";
+  reason: string | null;
+  transportMode: string | null;
+  proxyFingerprint: string | null;
+  queries: Array<Record<string, unknown>>;
+  checkedAt: string;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -334,6 +356,11 @@ const normalizeGettyPrefetchExecutionState = (
   copyNullableString("termination_reason");
   copyNullableString("page_classification");
   copyNullableString("page_signature");
+  copyNullableString("getty_transport_mode");
+  copyNullableString("getty_proxy_fingerprint");
+  copyNullableString("getty_runtime_probe_status");
+  copyNullableString("getty_runtime_probe_reason");
+  copyNullableString("getty_primary_failure_reason");
   if (Array.isArray(record.first_editorial_ids)) {
     normalized.first_editorial_ids = record.first_editorial_ids.filter(
       (value): value is string => typeof value === "string" && value.trim().length > 0
@@ -344,6 +371,9 @@ const normalizeGettyPrefetchExecutionState = (
   }
   if (typeof record.session_truncated === "boolean") {
     normalized.session_truncated = record.session_truncated;
+  }
+  if (typeof record.getty_fallback_invoked === "boolean") {
+    normalized.getty_fallback_invoked = record.getty_fallback_invoked;
   }
   const activeQuery = asRecord(record.active_query);
   if (activeQuery) {
@@ -399,6 +429,19 @@ export const compactGettyPrefetchPayload = (
         : undefined,
     session_validated: payload.session_validated === true,
     session_truncated: payload.session_truncated === true,
+    getty_transport_mode:
+      typeof payload.getty_transport_mode === "string" ? payload.getty_transport_mode : undefined,
+    getty_proxy_fingerprint:
+      typeof payload.getty_proxy_fingerprint === "string" ? payload.getty_proxy_fingerprint : undefined,
+    getty_runtime_probe_status:
+      typeof payload.getty_runtime_probe_status === "string" ? payload.getty_runtime_probe_status : undefined,
+    getty_runtime_probe_reason:
+      typeof payload.getty_runtime_probe_reason === "string" ? payload.getty_runtime_probe_reason : undefined,
+    getty_fallback_invoked: payload.getty_fallback_invoked === true,
+    getty_primary_failure_reason:
+      typeof payload.getty_primary_failure_reason === "string"
+        ? payload.getty_primary_failure_reason
+        : undefined,
     deferred_editorial_ids: Array.isArray(payload.deferred_editorial_ids)
       ? payload.deferred_editorial_ids
           .map((value) => (typeof value === "string" ? value.trim() : ""))
@@ -434,6 +477,10 @@ const getScraperAuthHeaders = (): Record<string, string> => {
   const secret = (process.env.TRR_GETTY_SCRAPER_SECRET ?? "").trim();
   return secret ? { "x-scraper-secret": secret } : {};
 };
+
+let gettyRemoteReadinessCache:
+  | { expiresAt: number; payload: GettyRemoteReadiness }
+  | null = null;
 
 const resolveBackendDir = async (): Promise<string | null> => {
   const explicit = process.env.TRR_BACKEND_DIR?.trim();
@@ -477,7 +524,8 @@ const runSubprocess = (
   scriptPath: string,
   personName: string,
   showName?: string | null,
-  mode: "discovery" | "full" = "full"
+  mode: "discovery" | "full" = "full",
+  transportMode?: string | null
 ): Promise<{ stdout: string; stderr: string }> =>
   new Promise((resolve, reject) => {
     const args = [scriptPath, personName];
@@ -485,6 +533,9 @@ const runSubprocess = (
       args.push("--show-name", showName.trim());
     }
     args.push("--mode", mode);
+    if (typeof transportMode === "string" && transportMode.trim().length > 0) {
+      args.push("--transport-mode", transportMode.trim());
+    }
     const child = execFile(
       python,
       args,
@@ -514,7 +565,8 @@ const runSubprocess = (
 const tryLocalServer = async (
   personName: string,
   showName?: string | null,
-  mode: "discovery" | "full" = "full"
+  mode: "discovery" | "full" = "full",
+  transportMode?: string | null
 ): Promise<GettyLocalScrapePayload | null> => {
   const gettyLocalUrl = getGettyLocalUrl();
   try {
@@ -533,6 +585,10 @@ const tryLocalServer = async (
       person_name: personName,
       show_name: typeof showName === "string" && showName.trim().length > 0 ? showName.trim() : undefined,
       mode,
+      transport_mode:
+        typeof transportMode === "string" && transportMode.trim().length > 0
+          ? transportMode.trim()
+          : undefined,
     }),
     signal: AbortSignal.timeout(SCRAPE_TIMEOUT_MS),
   });
@@ -546,7 +602,7 @@ const tryLocalServer = async (
 export const scrapeGettyLocallyForPerson = async (
   personName: string,
   showName?: string | null,
-  options?: { mode?: "discovery" | "full" }
+  options?: { mode?: "discovery" | "full"; transportMode?: string | null }
 ): Promise<GettyLocalScrapePayload> => {
   const normalizedPersonName = personName.trim();
   const mode = options?.mode === "discovery" ? "discovery" : "full";
@@ -554,7 +610,12 @@ export const scrapeGettyLocallyForPerson = async (
     throw new Error("person_name is required");
   }
 
-  const serverResult = await tryLocalServer(normalizedPersonName, showName, mode);
+  const transportMode =
+    typeof options?.transportMode === "string" && options.transportMode.trim().length > 0
+      ? options.transportMode.trim()
+      : undefined;
+
+  const serverResult = await tryLocalServer(normalizedPersonName, showName, mode, transportMode);
   if (serverResult) {
     return compactGettyPrefetchPayload(serverResult);
   }
@@ -568,7 +629,14 @@ export const scrapeGettyLocallyForPerson = async (
 
   const python = await resolvePython(backendDir);
   const scriptPath = path.join(backendDir, "scripts/getty_scrape_json.py");
-  const { stdout, stderr } = await runSubprocess(python, scriptPath, normalizedPersonName, showName, mode);
+  const { stdout, stderr } = await runSubprocess(
+    python,
+    scriptPath,
+    normalizedPersonName,
+    showName,
+    mode,
+    transportMode,
+  );
   if (stderr) {
     console.log("[getty-local/scrape] subprocess stderr:\n", stderr.slice(-2000));
   }
@@ -687,7 +755,7 @@ const createGettyPrefetchJobState = (
 export const createGettyPrefetchJob = async (
   personName: string,
   showName?: string | null,
-  options?: { mode?: "discovery" | "full"; prefetchToken?: string | null }
+  options?: { mode?: "discovery" | "full"; prefetchToken?: string | null; transportMode?: string | null }
 ): Promise<{ token: string; state: GettyPrefetchState }> => {
   await mkdir(GETTY_PREFETCH_TMP_DIR, { recursive: true });
   const mode = options?.mode === "full" ? "full" : "discovery";
@@ -697,6 +765,9 @@ export const createGettyPrefetchJob = async (
       : "";
   const token = requestedToken || randomUUID();
   const state = createGettyPrefetchJobState(token, personName.trim(), showName, mode);
+  if (typeof options?.transportMode === "string" && options.transportMode.trim().length > 0) {
+    state.getty_transport_mode = options.transportMode.trim();
+  }
   await writeFile(
     path.join(GETTY_PREFETCH_TMP_DIR, `${token}.json`),
     JSON.stringify(state),
@@ -709,7 +780,7 @@ export const startGettyPrefetchJob = async (
   token: string,
   personName: string,
   showName?: string | null,
-  options?: { mode?: "discovery" | "full" }
+  options?: { mode?: "discovery" | "full"; transportMode?: string | null }
 ): Promise<GettyPrefetchState> => {
   const normalizedToken = token.trim();
   if (!normalizedToken) {
@@ -725,9 +796,16 @@ export const startGettyPrefetchJob = async (
   const scriptPath = path.join(backendDir, "scripts/getty_scrape_job.py");
   const statePath = path.join(GETTY_PREFETCH_TMP_DIR, `${normalizedToken}.json`);
   const mode = options?.mode === "full" ? "full" : "discovery";
+  const transportMode =
+    typeof options?.transportMode === "string" && options.transportMode.trim().length > 0
+      ? options.transportMode.trim()
+      : "";
   const args = [scriptPath, personName.trim(), "--state-file", statePath, "--mode", mode];
   if (typeof showName === "string" && showName.trim().length > 0) {
     args.push("--show-name", showName.trim());
+  }
+  if (transportMode) {
+    args.push("--transport-mode", transportMode);
   }
   const child = spawn(python, args, {
     detached: true,
@@ -744,6 +822,94 @@ export const startGettyPrefetchJob = async (
     throw new Error("Getty prefetch job state disappeared before launch completed.");
   }
   return nextState;
+};
+
+export const getGettyRemoteReadiness = async (): Promise<GettyRemoteReadiness> => {
+  const now = Date.now();
+  if (gettyRemoteReadinessCache && gettyRemoteReadinessCache.expiresAt > now) {
+    return gettyRemoteReadinessCache.payload;
+  }
+
+  const backendDir = await resolveBackendDir();
+  if (!backendDir) {
+    const payload: GettyRemoteReadiness = {
+      ready: false,
+      status: "unknown",
+      reason: "backend_dir_unavailable",
+      transportMode: "decodo_remote",
+      proxyFingerprint: null,
+      queries: [],
+      checkedAt: new Date().toISOString(),
+    };
+    gettyRemoteReadinessCache = { expiresAt: now + 30_000, payload };
+    return payload;
+  }
+
+  const python = await resolvePython(backendDir);
+  const scriptPath = path.join(backendDir, "scripts/modal/verify_modal_readiness.py");
+  try {
+    const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFile(
+        python,
+        [scriptPath, "--json", "--probe-getty-remote-access"],
+        {
+          timeout: 60_000,
+          maxBuffer: SUBPROCESS_MAX_BUFFER,
+          env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve({
+            stdout: typeof stdout === "string" ? stdout : "",
+            stderr: typeof stderr === "string" ? stderr : "",
+          });
+        },
+      );
+    });
+    const summary = JSON.parse(stdout || "{}") as {
+      getty_remote_probe?: Record<string, unknown>;
+    };
+    const probe = summary.getty_remote_probe ?? {};
+    const ready = probe.ready === true;
+    const payload: GettyRemoteReadiness = {
+      ready,
+      status:
+        typeof probe.reason === "string" && probe.reason.trim() === "proxy_unconfigured"
+          ? "disabled"
+          : ready
+            ? "healthy"
+            : "blocked",
+      reason: typeof probe.reason === "string" ? probe.reason : null,
+      transportMode:
+        typeof probe.transport_mode === "string" ? probe.transport_mode : "decodo_remote",
+      proxyFingerprint:
+        typeof probe.proxy_fingerprint === "string" ? probe.proxy_fingerprint : null,
+      queries: Array.isArray(probe.queries)
+        ? probe.queries.filter(
+            (entry): entry is Record<string, unknown> =>
+              Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+          )
+        : [],
+      checkedAt: new Date().toISOString(),
+    };
+    gettyRemoteReadinessCache = { expiresAt: now + 30_000, payload };
+    return payload;
+  } catch {
+    const payload: GettyRemoteReadiness = {
+      ready: false,
+      status: "unknown",
+      reason: "probe_unavailable",
+      transportMode: "decodo_remote",
+      proxyFingerprint: null,
+      queries: [],
+      checkedAt: new Date().toISOString(),
+    };
+    gettyRemoteReadinessCache = { expiresAt: now + 15_000, payload };
+    return payload;
+  }
 };
 
 export const deleteGettyPrefetchPayload = async (token: string): Promise<void> => {
@@ -812,6 +978,21 @@ export const hydrateGettyPrefetchPayload = async (
     typeof stored.auth_mode === "string" ? stored.auth_mode : undefined;
   parsed.getty_prefetch_auth_warning =
     typeof stored.auth_warning === "string" ? stored.auth_warning : undefined;
+  parsed.getty_transport_mode =
+    typeof stored.getty_transport_mode === "string" ? stored.getty_transport_mode : undefined;
+  parsed.getty_proxy_fingerprint =
+    typeof stored.getty_proxy_fingerprint === "string" ? stored.getty_proxy_fingerprint : undefined;
+  parsed.getty_runtime_probe_status =
+    typeof stored.getty_runtime_probe_status === "string" ? stored.getty_runtime_probe_status : undefined;
+  parsed.getty_runtime_probe_reason =
+    typeof stored.getty_runtime_probe_reason === "string" ? stored.getty_runtime_probe_reason : undefined;
+  parsed.getty_fallback_invoked = stored.getty_fallback_invoked === true;
+  parsed.getty_primary_failure_reason =
+    typeof stored.getty_primary_failure_reason === "string"
+      ? stored.getty_primary_failure_reason
+      : undefined;
+  parsed.getty_session_validated = stored.session_validated === true;
+  parsed.getty_session_truncated = stored.session_truncated === true;
   parsed.getty_prefetch_mode = prefetchMode || undefined;
   parsed.getty_deferred_enrichment = stored.enrichment_status === "pending";
   parsed.getty_deferred_editorial_ids = Array.isArray(

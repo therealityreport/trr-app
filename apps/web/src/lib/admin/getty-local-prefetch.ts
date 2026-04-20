@@ -6,6 +6,14 @@ export type GettyLocalPrefetchBodyPatch = {
   getty_prefetch_mode?: string;
   getty_deferred_enrichment?: boolean;
   getty_deferred_editorial_ids?: string[];
+  getty_transport_mode?: string;
+  getty_proxy_fingerprint?: string;
+  getty_runtime_probe_status?: string;
+  getty_runtime_probe_reason?: string;
+  getty_fallback_invoked?: boolean;
+  getty_primary_failure_reason?: string;
+  getty_session_validated?: boolean;
+  getty_session_truncated?: boolean;
 };
 
 export type GettyLocalPrefetchProgressState = {
@@ -36,6 +44,12 @@ export type GettyLocalPrefetchProgressState = {
   authWarning: string | null;
   sessionValidated: boolean;
   sessionTruncated: boolean;
+  transportMode: string | null;
+  proxyFingerprint: string | null;
+  runtimeProbeStatus: string | null;
+  runtimeProbeReason: string | null;
+  fallbackInvoked: boolean;
+  primaryFailureReason: string | null;
   querySummariesLive: Array<Record<string, unknown>>;
   lastError: string | null;
   lastErrorCode: string | null;
@@ -51,10 +65,28 @@ export type GettyLocalPrefetchResult = {
   querySummaries: Array<Record<string, unknown>>;
   authMode: string | null;
   authWarning: string | null;
+  transportMode: string | null;
+  proxyFingerprint: string | null;
+  runtimeProbeStatus: string | null;
+  runtimeProbeReason: string | null;
+  fallbackInvoked: boolean;
+  primaryFailureReason: string | null;
+  sessionValidated: boolean;
+  sessionTruncated: boolean;
   elapsedSeconds: number | null;
   prefetchMode: string | null;
   discoveryReady: boolean;
   enrichmentPending: boolean;
+};
+
+export type GettyRemoteReadiness = {
+  ready: boolean;
+  status: "healthy" | "blocked" | "disabled" | "unknown";
+  reason: string | null;
+  transportMode: string | null;
+  proxyFingerprint: string | null;
+  queries: Array<Record<string, unknown>>;
+  checkedAt: string;
 };
 
 export class GettyLocalPrefetchError extends Error {
@@ -109,6 +141,12 @@ type GettyLocalPrefetchStatusResponse = {
   auth_warning?: string | null;
   session_validated?: boolean;
   session_truncated?: boolean;
+  getty_transport_mode?: string | null;
+  getty_proxy_fingerprint?: string | null;
+  getty_runtime_probe_status?: string | null;
+  getty_runtime_probe_reason?: string | null;
+  getty_fallback_invoked?: boolean;
+  getty_primary_failure_reason?: string | null;
   elapsed_seconds?: number;
   prefetch_mode?: string | null;
   discovery_ready?: boolean;
@@ -158,6 +196,12 @@ const mapStatusToProgress = (
   authWarning: asNullableString(payload.auth_warning),
   sessionValidated: payload.session_validated === true,
   sessionTruncated: payload.session_truncated === true,
+  transportMode: asNullableString(payload.getty_transport_mode),
+  proxyFingerprint: asNullableString(payload.getty_proxy_fingerprint),
+  runtimeProbeStatus: asNullableString(payload.getty_runtime_probe_status),
+  runtimeProbeReason: asNullableString(payload.getty_runtime_probe_reason),
+  fallbackInvoked: payload.getty_fallback_invoked === true,
+  primaryFailureReason: asNullableString(payload.getty_primary_failure_reason),
   querySummariesLive: Array.isArray(payload.query_summaries_live)
     ? payload.query_summaries_live.filter(
         (entry): entry is Record<string, unknown> =>
@@ -174,6 +218,7 @@ export async function prefetchGettyLocallyForPerson(
   options?: {
     mode?: "discovery" | "full";
     prefetchToken?: string | null;
+    transportMode?: "auto" | "decodo_remote" | "local_browser" | "cookies_only";
     onProgress?: (progress: GettyLocalPrefetchProgressState) => void;
   }
 ): Promise<GettyLocalPrefetchResult> {
@@ -197,6 +242,10 @@ export async function prefetchGettyLocallyForPerson(
         prefetch_token:
           typeof options?.prefetchToken === "string" && options.prefetchToken.trim().length > 0
             ? options.prefetchToken.trim()
+            : undefined,
+        transport_mode:
+          typeof options?.transportMode === "string" && options.transportMode.trim().length > 0
+            ? options.transportMode.trim()
             : undefined,
       }),
       signal: AbortSignal.timeout(GETTY_LOCAL_PREFETCH_TIMEOUT_MS),
@@ -286,6 +335,25 @@ export async function prefetchGettyLocallyForPerson(
               (value): value is string => typeof value === "string" && value.trim().length > 0
             )
           : undefined,
+        getty_transport_mode:
+          typeof gettyData.getty_transport_mode === "string" ? gettyData.getty_transport_mode : undefined,
+        getty_proxy_fingerprint:
+          typeof gettyData.getty_proxy_fingerprint === "string" ? gettyData.getty_proxy_fingerprint : undefined,
+        getty_runtime_probe_status:
+          typeof gettyData.getty_runtime_probe_status === "string"
+            ? gettyData.getty_runtime_probe_status
+            : undefined,
+        getty_runtime_probe_reason:
+          typeof gettyData.getty_runtime_probe_reason === "string"
+            ? gettyData.getty_runtime_probe_reason
+            : undefined,
+        getty_fallback_invoked: gettyData.getty_fallback_invoked === true,
+        getty_primary_failure_reason:
+          typeof gettyData.getty_primary_failure_reason === "string"
+            ? gettyData.getty_primary_failure_reason
+            : undefined,
+        getty_session_validated: gettyData.session_validated === true,
+        getty_session_truncated: gettyData.session_truncated === true,
       },
       mergedAssetCount,
       mergedEventCount,
@@ -307,6 +375,25 @@ export async function prefetchGettyLocallyForPerson(
         : [],
       authMode: typeof gettyData.auth_mode === "string" ? gettyData.auth_mode : null,
       authWarning: typeof gettyData.auth_warning === "string" ? gettyData.auth_warning : null,
+      transportMode:
+        typeof gettyData.getty_transport_mode === "string" ? gettyData.getty_transport_mode : null,
+      proxyFingerprint:
+        typeof gettyData.getty_proxy_fingerprint === "string" ? gettyData.getty_proxy_fingerprint : null,
+      runtimeProbeStatus:
+        typeof gettyData.getty_runtime_probe_status === "string"
+          ? gettyData.getty_runtime_probe_status
+          : null,
+      runtimeProbeReason:
+        typeof gettyData.getty_runtime_probe_reason === "string"
+          ? gettyData.getty_runtime_probe_reason
+          : null,
+      fallbackInvoked: gettyData.getty_fallback_invoked === true,
+      primaryFailureReason:
+        typeof gettyData.getty_primary_failure_reason === "string"
+          ? gettyData.getty_primary_failure_reason
+          : null,
+      sessionValidated: gettyData.session_validated === true,
+      sessionTruncated: gettyData.session_truncated === true,
       elapsedSeconds:
         typeof gettyData.elapsed_seconds === "number" ? gettyData.elapsed_seconds : null,
       prefetchMode: typeof gettyData.prefetch_mode === "string" ? gettyData.prefetch_mode : mode,
@@ -327,4 +414,45 @@ export async function prefetchGettyLocallyForPerson(
       isTimeout ? "TIMEOUT" : "UNREACHABLE"
     );
   }
+}
+
+export async function getGettyRemoteReadiness(): Promise<GettyRemoteReadiness> {
+  const response = await fetch("/api/admin/getty-local/remote-readiness", {
+    method: "GET",
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!response.ok) {
+    return {
+      ready: false,
+      status: "unknown",
+      reason: `HTTP_${response.status}`,
+      transportMode: "decodo_remote",
+      proxyFingerprint: null,
+      queries: [],
+      checkedAt: new Date().toISOString(),
+    };
+  }
+  const payload = (await response.json()) as Partial<GettyRemoteReadiness>;
+  return {
+    ready: payload.ready === true,
+    status:
+      payload.status === "healthy" ||
+      payload.status === "blocked" ||
+      payload.status === "disabled" ||
+      payload.status === "unknown"
+        ? payload.status
+        : "unknown",
+    reason: typeof payload.reason === "string" ? payload.reason : null,
+    transportMode: typeof payload.transportMode === "string" ? payload.transportMode : "decodo_remote",
+    proxyFingerprint:
+      typeof payload.proxyFingerprint === "string" ? payload.proxyFingerprint : null,
+    queries: Array.isArray(payload.queries)
+      ? payload.queries.filter(
+          (entry): entry is Record<string, unknown> =>
+            Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+        )
+      : [],
+    checkedAt:
+      typeof payload.checkedAt === "string" ? payload.checkedAt : new Date().toISOString(),
+  };
 }

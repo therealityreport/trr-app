@@ -2,9 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/admin/social/tiktok/bravotv",
+  usePathname: () => "/social/tiktok/bravotv",
   notFound: () => {
     throw new Error("NOT_FOUND");
+  },
+  redirect: (url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
   },
 }));
 
@@ -21,7 +24,10 @@ describe("social account profile stats page", () => {
   ])(
     "normalizes valid $platform params before rendering the shared profile page",
     async ({ platform, handle, expectedPlatform, expectedHandle }) => {
-      const page = await import("@/app/admin/social/[platform]/[handle]/page");
+      // Canonical stats page moved from /admin/social/[platform]/[handle] to
+      // /social/[platform]/[handle]. The page lowercases and strips leading
+      // `@` inline, so "@BravoTV" renders directly without a redirect hop.
+      const page = await import("@/app/social/[platform]/[handle]/page");
       const element = await page.default({
         params: Promise.resolve({
           platform,
