@@ -4,8 +4,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-15T11:36:50.007Z",
-  "sourceCommitSha": "b510b22e068c42cbc2c4b6a33d84556ab760cbdf",
+  "generatedAt": "2026-04-20T19:14:45.804Z",
+  "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
     {
@@ -5768,7 +5768,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 1453,
+        "line": 1454,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -5799,7 +5799,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7872,
+        "line": 7907,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -7243,6 +7243,37 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "viewKinds": [],
       "staticOnly": false,
       "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:GET:/api/admin/getty-local/remote-readiness",
+      "kind": "api_route",
+      "title": "GET /api/admin/getty-local/remote-readiness",
+      "pathPattern": "/api/admin/getty-local/remote-readiness",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/getty-local/remote-readiness/route.ts",
+      "sourceLocator": {
+        "line": 8,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [],
+      "staticOnly": false,
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -18258,7 +18289,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 1453,
+        "line": 1454,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -18276,7 +18307,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7872,
+        "line": 7907,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -18330,7 +18361,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2394,
+        "line": 2395,
         "matchedText": "`/api/admin/trr-api/people?q=${encodeURIComponent(trimmed)}&limit=8`"
       },
       "provenance": "static_scan",
@@ -18348,7 +18379,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6068,
+        "line": 6069,
         "matchedText": "`/api/admin/trr-api/people/${personId}/fandom${showIdQuery}`"
       },
       "provenance": "static_scan",
@@ -18366,7 +18397,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2884,
+        "line": 2885,
         "matchedText": "`/api/admin/trr-api/people/${photo.person_id}/gallery/${photo.link_id}/facebank-seed`"
       },
       "provenance": "static_scan",
@@ -18384,7 +18415,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10230,
+        "line": 10265,
         "matchedText": "\"/api/admin/trr-api/assets/archive\""
       },
       "provenance": "static_scan",
@@ -18402,7 +18433,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10302,
+        "line": 10337,
         "matchedText": "\"/api/admin/trr-api/assets/content-type\""
       },
       "provenance": "static_scan",
@@ -18420,7 +18451,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10259,
+        "line": 10294,
         "matchedText": "\"/api/admin/trr-api/assets/star\""
       },
       "provenance": "static_scan",
@@ -18438,7 +18469,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2720,
+        "line": 2721,
         "matchedText": "`/api/admin/trr-api/cast-photos/${photo.id}/mirror`"
       },
       "provenance": "static_scan",
@@ -18456,7 +18487,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2845,
+        "line": 2846,
         "matchedText": "`/api/admin/trr-api/media-assets/${photo.media_asset_id}/mirror`"
       },
       "provenance": "static_scan",
@@ -18474,7 +18505,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6134,
+        "line": 6135,
         "matchedText": "`/api/admin/trr-api/people/${personId}/import-fandom/commit`"
       },
       "provenance": "static_scan",
@@ -18492,7 +18523,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6101,
+        "line": 6102,
         "matchedText": "`/api/admin/trr-api/people/${personId}/import-fandom/preview`"
       },
       "provenance": "static_scan",
@@ -18510,7 +18541,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7356,
+        "line": 7357,
         "matchedText": "`/api/admin/trr-api/people/${personId}/images/refresh`"
       },
       "provenance": "static_scan",
@@ -18528,7 +18559,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7722,
+        "line": 7757,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`"
       },
       "provenance": "static_scan",
@@ -18546,7 +18577,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 7893,
+        "line": 7928,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -18564,7 +18595,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 8914,
+        "line": 8949,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -18582,7 +18613,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 10180,
+        "line": 10215,
         "matchedText": "`/api/admin/images/cast/${reassignModalImage.imageId}/reassign`"
       },
       "provenance": "static_scan",
@@ -18600,7 +18631,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 6687,
+        "line": 6688,
         "matchedText": "`/api/admin/trr-api/people/${personId}/cover-photo`"
       },
       "provenance": "static_scan",
@@ -18618,7 +18649,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/people/[personId]/PersonPageClient.tsx",
       "sourceLocator": {
-        "line": 2922,
+        "line": 2923,
         "matchedText": "`/api/admin/trr-api/people/${photo.person_id}/photos/${photo.id}/thumbnail-crop`"
       },
       "provenance": "static_scan",
@@ -19014,7 +19045,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3856,
+        "line": 3876,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images`"
       },
       "provenance": "static_scan",
@@ -19032,7 +19063,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3770,
+        "line": 3790,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -19050,7 +19081,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3567,
+        "line": 3568,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-profile/stream`"
       },
       "provenance": "static_scan",
@@ -19068,7 +19099,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3940,
+        "line": 3960,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -19086,7 +19117,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 9758,
+        "line": 9778,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`"
       },
       "provenance": "static_scan",
@@ -19104,7 +19135,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 6779,
+        "line": 6799,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/import-bravo/preview/stream`"
       },
       "provenance": "static_scan",
@@ -19122,7 +19153,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 10718,
+        "line": 10738,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",
@@ -19140,7 +19171,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4058,
+        "line": 4078,
         "matchedText": "`/api/admin/trr-api/media-assets/${assetId}`"
       },
       "provenance": "static_scan",
@@ -19158,7 +19189,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2134,
+        "line": 2135,
         "matchedText": "`/api/admin/trr-api/seasons/${foundSeason.id}/episodes?limit=500`"
       },
       "provenance": "static_scan",
@@ -19176,7 +19207,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3757,
+        "line": 3777,
         "matchedText": "`/api/admin/trr-api/seasons/${season.id}/unassigned-backdrops`"
       },
       "provenance": "static_scan",
@@ -19194,7 +19225,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2086,
+        "line": 2087,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}`"
       },
       "provenance": "static_scan",
@@ -19212,7 +19243,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1687,
+        "line": 1688,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/cast?limit=500&photo_fallback=none&exclude_zero_episode_members=1`"
       },
       "provenance": "static_scan",
@@ -19230,7 +19261,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1716,
+        "line": 1717,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/credits`"
       },
       "provenance": "static_scan",
@@ -19248,7 +19279,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2087,
+        "line": 2088,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}/seasons?limit=50`"
       },
       "provenance": "static_scan",
@@ -19266,7 +19297,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2135,
+        "line": 2136,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/cast?limit=500&include_archive_only=true`"
       },
       "provenance": "static_scan",
@@ -19284,7 +19315,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1979,
+        "line": 1980,
         "matchedText": "`/api/admin/trr-api/shows/${requestShowId}/seasons/${requestSeasonNumber}/fandom`"
       },
       "provenance": "static_scan",
@@ -19302,7 +19333,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 1533,
+        "line": 1534,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
@@ -19320,7 +19351,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4077,
+        "line": 4097,
         "matchedText": "\"/api/admin/trr-api/assets/archive\""
       },
       "provenance": "static_scan",
@@ -19338,7 +19369,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4179,
+        "line": 4199,
         "matchedText": "\"/api/admin/trr-api/assets/content-type\""
       },
       "provenance": "static_scan",
@@ -19356,7 +19387,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4143,
+        "line": 4163,
         "matchedText": "\"/api/admin/trr-api/assets/star\""
       },
       "provenance": "static_scan",
@@ -19374,7 +19405,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 4711,
+        "line": 4731,
         "matchedText": "`/api/admin/trr-api/media-assets/${asset.id}/detect-text-overlay`"
       },
       "provenance": "static_scan",
@@ -19392,7 +19423,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3286,
+        "line": 3306,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -19410,7 +19441,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3395,
+        "line": 3415,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -19428,7 +19459,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 3789,
+        "line": 3809,
         "matchedText": "`/api/admin/trr-api/seasons/${season.id}/assign-backdrops`"
       },
       "provenance": "static_scan",
@@ -19446,7 +19477,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2629,
+        "line": 2630,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh-photos/stream`"
       },
       "provenance": "static_scan",
@@ -19464,7 +19495,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2912,
+        "line": 2913,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",
@@ -19482,7 +19513,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2480,
+        "line": 2481,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/assets/batch-jobs/stream`"
       },
       "provenance": "static_scan",
@@ -19500,7 +19531,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2042,
+        "line": 2043,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/import-fandom/commit`"
       },
       "provenance": "static_scan",
@@ -19518,7 +19549,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/seasons/[seasonNumber]/page.tsx",
       "sourceLocator": {
-        "line": 2009,
+        "line": 2010,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/seasons/${seasonNumber}/import-fandom/preview`"
       },
       "provenance": "static_scan",
@@ -21689,6 +21720,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/flashback/quizzes",
         "route:GET:/api/admin/flashback/quizzes/[quizId]/events",
         "route:GET:/api/admin/games/problem-reports",
+        "route:GET:/api/admin/getty-local/remote-readiness",
         "route:GET:/api/admin/getty-local/scrape",
         "route:GET:/api/admin/images/[imageType]/[imageId]",
         "route:GET:/api/admin/nbcumv/talent-bios",
@@ -22338,11 +22370,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 539,
+      "totalNodes": 540,
       "totalEdges": 186,
       "nodesByKind": {
         "ui_surface": 58,
-        "api_route": 364,
+        "api_route": 365,
         "backend_endpoint": 111,
         "repository_surface": 2,
         "polling_loop": 4
