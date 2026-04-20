@@ -46,11 +46,13 @@ describe("season cast tab quality wiring", () => {
     expect(contents).toMatch(/onClick=\{cancelSeasonCastRefresh\}/);
   });
 
-  it("requires local Getty prefetch for season cast member refresh", () => {
+  it("supports Getty remote-probe gating with local fallback for season cast member refresh", () => {
     expect(contents).toMatch(/prefetchGettyLocallyForPerson\(personName,\s*show\?\.name \?\? undefined\)/);
+    expect(contents).toMatch(/getGettyRemoteReadiness\(\)/);
     expect(contents).toMatch(/getty_prefetch_attempted: true/);
     expect(contents).toMatch(/Object\.assign\(requestBody, gettyPrefetch\.bodyPatch\)/);
-    expect(contents).toMatch(/Getty\/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty\./);
+    expect(contents).toMatch(/Getty remote probe healthy\. Starting backend refresh without local prefetch\./);
+    expect(contents).toMatch(/Getty\/NBCUMV refresh could not start after local Getty fallback\./);
     expect(contents).toMatch(/Getty\/NBCUMV refresh was not started\./);
     expect(contents).toMatch(/\{ signal: runController\.signal, personName: label \}/);
   });

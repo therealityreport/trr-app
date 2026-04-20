@@ -35,10 +35,31 @@ export interface AuthenticatedUser {
   token: AuthTokenClaims;
 }
 
+type SupabaseVerificationClient = {
+  auth: {
+    getUser: (token: string) => Promise<{
+      data: {
+        user: {
+          id: string;
+          email?: string | null;
+          user_metadata?: Record<string, unknown> | null;
+          app_metadata?: Record<string, unknown> | null;
+          identities?: unknown[] | null;
+        } | null;
+      };
+      error: unknown;
+    }>;
+  };
+};
+
 const DEV_ADMIN_BYPASS_UID = "dev-admin-bypass";
 const DEV_ADMIN_BYPASS_EMAIL = "codex@thereality.report";
 const DEFAULT_DEV_ADMIN_ALLOWED_HOSTS = ["admin.localhost", "localhost", "127.0.0.1", "[::1]", "::1"];
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const FIREBASE_AUTH_PROVIDER: AuthProvider = "firebase";
+const SUPABASE_AUTH_PROVIDER: AuthProvider = "supabase";
+const UNSUPPORTED_SUPABASE_DURABLE_SESSION_MESSAGE =
+  "Durable session auth is unsupported when TRR_AUTH_PROVIDER=supabase; Firebase must issue __session cookies.";
 
 type TokenKind = "id" | "session";
 type ShadowMismatchField = "uid" | "email" | "name";
@@ -100,6 +121,7 @@ const authDiagnosticsCounters: AuthDiagnosticsCounters = {
   fallbackSuccesses: 0,
 };
 let authDiagnosticsLoaded = false;
+let supabaseVerificationClientPromise: Promise<SupabaseVerificationClient | null> | null = null;
 
 function _buildAuthDiagnosticsState(): PersistedAuthDiagnosticsState {
   return {
@@ -200,20 +222,9 @@ async function verifyFirebaseToken(token: string, kind: TokenKind): Promise<Auth
 }
 
 async function verifySupabaseToken(token: string): Promise<AuthTokenClaims | null> {
-  let supabaseUrl: string;
-  let supabaseServiceRoleKey: string;
+  const client = await getSupabaseVerificationClient();
+  if (!client) return null;
   try {
-    supabaseUrl = getTrrAdminUrl();
-    supabaseServiceRoleKey = getTrrAdminServiceKey();
-  } catch {
-    return null;
-  }
-
-  try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const client = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
     const { data, error } = await client.auth.getUser(token);
     if (error || !data.user) {
       return null;
@@ -239,6 +250,36 @@ async function verifySupabaseToken(token: string): Promise<AuthTokenClaims | nul
     console.error("[auth] Failed Supabase token verification", error);
     return null;
   }
+}
+
+async function getSupabaseVerificationClient(): Promise<SupabaseVerificationClient | null> {
+  if (supabaseVerificationClientPromise) {
+    return supabaseVerificationClientPromise;
+  }
+
+  supabaseVerificationClientPromise = (async () => {
+    let supabaseUrl: string;
+    let supabaseServiceRoleKey: string;
+    try {
+      supabaseUrl = getTrrAdminUrl();
+      supabaseServiceRoleKey = getTrrAdminServiceKey();
+    } catch {
+      return null;
+    }
+
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      return createClient(supabaseUrl, supabaseServiceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      }) as SupabaseVerificationClient;
+    } catch (error) {
+      console.error("[auth] Failed to create Supabase verification client", error);
+      supabaseVerificationClientPromise = null;
+      return null;
+    }
+  })();
+
+  return supabaseVerificationClientPromise;
 }
 
 async function verifyIdTokenWithoutAdmin(token: string): Promise<AuthTokenClaims | null> {
@@ -292,17 +333,6 @@ async function verifyIdTokenWithoutAdmin(token: string): Promise<AuthTokenClaims
   }
 }
 
-async function verifyWithProvider(
-  provider: AuthProvider,
-  token: string,
-  kind: TokenKind,
-): Promise<AuthTokenClaims | null> {
-  if (provider === "supabase") {
-    return verifySupabaseToken(token);
-  }
-  return verifyFirebaseToken(token, kind);
-}
-
 function _normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -344,15 +374,24 @@ async function verifyToken(
   if (!token) return null;
   _loadAuthDiagnosticsStateIfNeeded();
 
-  const primary = AUTH_PROVIDER;
-  const secondary: AuthProvider = primary === "firebase" ? "supabase" : "firebase";
+  if (kind === "session" && AUTH_PROVIDER === SUPABASE_AUTH_PROVIDER) {
+    console.warn("[auth] Unsupported durable auth configuration", {
+      configuredProvider: AUTH_PROVIDER,
+      kind,
+      message: UNSUPPORTED_SUPABASE_DURABLE_SESSION_MESSAGE,
+    });
+    return null;
+  }
 
-  const primaryClaims = await verifyWithProvider(primary, token, kind);
+  const primary = FIREBASE_AUTH_PROVIDER;
+  const secondary = SUPABASE_AUTH_PROVIDER;
+
+  const primaryClaims = await verifyFirebaseToken(token, kind);
   if (primaryClaims?.uid) {
-    if (AUTH_SHADOW_MODE) {
+    if (AUTH_SHADOW_MODE && kind === "id") {
       authDiagnosticsCounters.shadowChecks += 1;
       markAuthDiagnosticsObservedNow();
-      const shadowClaims = await verifyWithProvider(secondary, token, kind);
+      const shadowClaims = await verifySupabaseToken(token);
       if (!shadowClaims?.uid) {
         authDiagnosticsCounters.shadowFailures += 1;
         markAuthDiagnosticsObservedNow();
@@ -377,14 +416,6 @@ async function verifyToken(
       }
     }
     return { provider: primary, claims: primaryClaims };
-  }
-
-  const fallbackClaims = await verifyWithProvider(secondary, token, kind);
-  if (fallbackClaims?.uid) {
-    authDiagnosticsCounters.fallbackSuccesses += 1;
-    markAuthDiagnosticsObservedNow();
-    console.warn("[auth] Auth provider fallback succeeded", { primary, secondary, kind });
-    return { provider: secondary, claims: fallbackClaims };
   }
 
   return null;

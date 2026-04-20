@@ -9,13 +9,15 @@ describe("show page person refresh Getty prefetch wiring", () => {
   );
   const pageContents = fs.readFileSync(pagePath, "utf8");
 
-  it("attempts local Getty prefetch before full person refresh runs", () => {
+  it("supports Getty remote-probe gating with local prefetch fallback before full person refresh runs", () => {
     expect(pageContents).toContain("prefetchGettyLocallyForPerson");
+    expect(pageContents).toContain("getGettyRemoteReadiness()");
     expect(pageContents).toContain("show?.name ?? undefined");
     expect(pageContents).toContain("getty_prefetch_attempted: true");
     expect(pageContents).toContain("getty_prefetch_succeeded: false");
     expect(pageContents).toContain("Object.assign(body, gettyPrefetch.bodyPatch)");
-    expect(pageContents).toContain("Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.");
+    expect(pageContents).toContain("Getty remote probe healthy. Starting backend refresh without local prefetch.");
+    expect(pageContents).toContain("Getty/NBCUMV refresh could not start after local Getty fallback.");
     expect(pageContents).toContain("Getty/NBCUMV refresh was not started.");
   });
 

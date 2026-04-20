@@ -83,6 +83,7 @@ describe("person refresh request-id diagnostics wiring", () => {
 
   it("records Getty local prefetch metadata before sending the refresh request", () => {
     expect(pageContents).toContain("prefetchGettyLocallyForPerson(");
+    expect(pageContents).toContain("getGettyRemoteReadiness()");
     expect(pageContents).toContain("effectiveGalleryImportContext.showName ?? undefined");
     expect(pageContents).toContain("getty_prefetch_attempted: true");
     expect(pageContents).toContain("getty_prefetch_succeeded: false");
@@ -90,7 +91,8 @@ describe("person refresh request-id diagnostics wiring", () => {
     expect(pageContents).toContain("gettyPrefetch.candidateManifestTotal");
     expect(pageContents).toContain("gettyPrefetch.querySummaries.length");
     expect(pageContents).toContain("gettyErr instanceof GettyLocalPrefetchError ? gettyErr.code : \"UNREACHABLE\"");
-    expect(pageContents).toContain("Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.");
+    expect(pageContents).toContain("Getty remote probe healthy. Starting backend refresh without local prefetch.");
+    expect(pageContents).toContain("Getty remote probe is blocked or unavailable. Falling back to local Getty discovery.");
     expect(pageContents).toContain("Getty/NBCUMV refresh was not started.");
   });
 

@@ -69,6 +69,8 @@ export async function POST(request: NextRequest) {
       : "full";
   const prefetchToken =
     typeof body.prefetch_token === "string" ? body.prefetch_token.trim() : "";
+  const transportMode =
+    typeof body.transport_mode === "string" ? body.transport_mode.trim() : "";
   if (!personName) {
     return Response.json(
       { error: "person_name is required" },
@@ -80,9 +82,11 @@ export async function POST(request: NextRequest) {
     const { token, state } = await createGettyPrefetchJob(personName, showName || undefined, {
       mode,
       prefetchToken: prefetchToken || undefined,
+      transportMode: transportMode || undefined,
     });
     const runningState = await startGettyPrefetchJob(token, personName, showName || undefined, {
       mode,
+      transportMode: transportMode || undefined,
     });
     return Response.json({
       prefetch_token: token,

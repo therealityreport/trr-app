@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
 import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import {
+  readInstagramCommentsErrorMessage,
+  type InstagramCommentsProxyErrorPayload,
+} from "@/components/admin/instagram/comments-scrape-error";
 import type {
   SocialAccountCommentsRunProgress,
   SocialAccountCommentsScrapeRequest,
@@ -18,34 +22,12 @@ type Props = {
   onCompleted?: () => Promise<void> | void;
 };
 
-type ProxyErrorPayload = {
-  error?: string;
-  detail?: string;
-  // P2-7: Extracted by the admin proxy from FastAPI's `detail.code`. The
-  // button branches on this to show actionable copy for known failure modes.
-  upstream_detail_code?: string;
-  upstream_status?: number;
-};
+type ProxyErrorPayload = InstagramCommentsProxyErrorPayload;
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running"]);
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 // P2-8: Match the 2s cadence used elsewhere in the admin via `useSharedPollingResource`.
 const COMMENTS_PROGRESS_POLL_INTERVAL_MS = 2_000;
-
-const readErrorMessage = (payload: ProxyErrorPayload | null | undefined, fallback: string): string => {
-  // P2-7: Map structured backend codes to actionable operator copy so the
-  // per-post button shows specific guidance, not a generic 400/503.
-  const code = typeof payload?.upstream_detail_code === "string" ? payload.upstream_detail_code : "";
-  if (code === "SOCIAL_WORKER_UNAVAILABLE") {
-    return "No comments worker online — start it, then retry.";
-  }
-  if (code === "instagram_comments_auth_failed") {
-    return "Instagram session expired — refresh cookies, then retry.";
-  }
-  if (typeof payload?.error === "string" && payload.error.trim()) return payload.error;
-  if (typeof payload?.detail === "string" && payload.detail.trim()) return payload.detail;
-  return fallback;
-};
 
 const normalizeRunStatus = (value?: string | null): string => String(value || "").trim().toLowerCase();
 
@@ -81,7 +63,7 @@ export default function PostScrapeCommentsButton({ platform, handle, sourceId, o
       );
       const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsRunProgress & ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readErrorMessage(data, "Failed to load comments scrape progress"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to load comments scrape progress"));
       }
       return data;
     },
@@ -138,7 +120,7 @@ export default function PostScrapeCommentsButton({ platform, handle, sourceId, o
       );
       const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsScrapeResponse & ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readErrorMessage(data, "Failed to start comments scrape"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start comments scrape"));
       }
       const runId = String(data.run_id || "").trim();
       setScrapeRunId(runId || null);

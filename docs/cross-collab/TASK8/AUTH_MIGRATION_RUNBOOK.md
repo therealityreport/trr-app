@@ -1,18 +1,19 @@
-# TRR-APP Auth Migration Runbook (Firebase -> Supabase)
+# TRR-APP Auth Diagnostics Runbook (Firebase + Supabase Shadow Verification)
 
 Last updated: February 17, 2026
 
 ## Objective
 
-Execute staged migration of TRR-APP server auth verification from Firebase to Supabase with a rollback-safe path.
+Keep Firebase as the real authentication and durable session issuer while using
+Supabase verification in shadow mode for diagnostics and parity tracking.
 
 ## Current Stage (Implemented)
 
-Stage 1 is complete:
-- Dual-provider server auth adapter is live in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/auth.ts`.
-- Primary provider is controlled by `TRR_AUTH_PROVIDER` (`firebase` default).
-- Optional shadow verification is controlled by `TRR_AUTH_SHADOW_MODE`.
-- Session login route supports provider-aware behavior in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/session/login/route.ts`.
+Current behavior:
+- Firebase is the only provider that can authenticate requests and mint durable `__session` cookies.
+- `TRR_AUTH_PROVIDER` remains `firebase` by default. Setting it to `supabase` does not enable durable session auth and those login/session paths fail closed.
+- Optional Supabase shadow verification is controlled by `TRR_AUTH_SHADOW_MODE`.
+- Session login route rejects unsupported durable Supabase session mode in `/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/app/api/session/login/route.ts`.
 
 ## Stage 2: Shadow Mode Rollout
 
@@ -34,32 +35,21 @@ Keep Firebase as primary, run Supabase verification in shadow mode, and measure 
 ### Exit criteria
 - 3-7 day stable shadow window with no critical parity regressions.
 
-## Stage 3: Primary Cutover
+## Unsupported Durable Supabase Mode
 
-### Goal
-Switch primary verification to Supabase while retaining Firebase fallback for rollback safety.
+### Behavior
+`TRR_AUTH_PROVIDER=supabase` is diagnostics-only in the current architecture.
+It must not be used as a durable login/session cutover flag.
 
-### Required env configuration
-- `TRR_AUTH_PROVIDER=supabase`
-- `TRR_AUTH_SHADOW_MODE=true` (recommended during first cutover window)
+### Current outcome
+1. Bearer-token request auth still uses Firebase verification.
+2. Supabase may run in shadow mode for parity comparison only.
+3. Durable login/session routes fail closed instead of storing raw Supabase access tokens in `__session`.
 
-### Validation gates
-1. Protected route success/deny behavior remains unchanged vs baseline.
-2. Admin allowlist behavior remains unchanged (`email`/`uid`/display-name checks).
-3. No auth-related increase in API error rate.
-4. Session login/logout flows remain stable in production and preview.
+## Future Cutover Prerequisite
 
-### Rollback plan
-1. Set `TRR_AUTH_PROVIDER=firebase`.
-2. Keep `TRR_AUTH_SHADOW_MODE=true` for post-incident parity diagnostics.
-3. Verify recovery on representative protected routes.
-
-## Firebase Decommission Readiness Checklist
-
-Before removing Firebase auth paths:
-1. Supabase has been primary for one full release cycle with no auth regressions.
-2. Fallback-to-Firebase warnings have dropped to effectively zero.
-3. Session/login route no longer requires Firebase session-cookie minting.
-4. Downstream consumers/tests no longer depend on Firebase-specific claim fields.
-5. Runbook and deploy docs are updated with final provider state.
-
+Before any real provider cutover work, the architecture has to change so that:
+1. Supabase can issue and rotate the durable session artifact used by TRR-APP.
+2. Login/logout flows no longer depend on Firebase session-cookie minting.
+3. Request auth and session auth share one supported provider contract.
+4. This runbook and deploy docs are revised to match the new durable-session implementation.

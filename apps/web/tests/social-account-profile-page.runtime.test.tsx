@@ -521,6 +521,45 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("shows Modal-specific guidance when comments scrape requires Modal dispatch", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/comments?page=1&page_size=25")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments/scrape") && init?.method === "POST") {
+        return jsonResponse(
+          {
+            error: "Modal social dispatch is required for Instagram comments scraping.",
+            code: "UPSTREAM_ERROR",
+            upstream_status: 503,
+            upstream_detail_code: "SOCIAL_MODAL_EXECUTOR_REQUIRED",
+            upstream_detail: {
+              required_execution_backend: "modal",
+            },
+          },
+          503,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const button = await screen.findByRole("button", { name: "Scrape Comments" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText(/configured for Modal-backed execution/i)).toBeInTheDocument();
+    });
+  });
+
   it("queues a per-post comments scrape from the posts tab", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -618,6 +657,36 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(screen.getByText("Instagram comments worker unavailable")).toBeInTheDocument();
     });
+  });
+
+  it("surfaces classified comments read-path errors instead of collapsing to the generic fallback", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/comments?page=1&page_size=25")) {
+        return jsonResponse(
+          {
+            error: "Database service unavailable: runtime DB configuration is incomplete. Set TRR_DB_URL and optional TRR_DB_FALLBACK_URL.",
+            code: "UPSTREAM_ERROR",
+            upstream_status: 503,
+            upstream_detail_code: "DATABASE_SERVICE_UNAVAILABLE",
+          },
+          503,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/runtime DB configuration is incomplete/i),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Failed to load Instagram comments")).not.toBeInTheDocument();
   });
 
   it("renders the SocialBlade dashboard and refreshes through the account proxy", async () => {

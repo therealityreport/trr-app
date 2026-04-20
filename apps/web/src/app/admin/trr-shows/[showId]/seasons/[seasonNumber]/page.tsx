@@ -15,6 +15,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
 import {
   GettyLocalPrefetchError,
+  getGettyRemoteReadiness,
   prefetchGettyLocallyForPerson,
 } from "@/lib/admin/getty-local-prefetch";
 import { ImageLightbox } from "@/components/admin/ImageLightbox";
@@ -3225,38 +3226,57 @@ export default function SeasonDetailPage() {
         show_name: show?.name ?? undefined,
       };
       if (personName) {
-        Object.assign(requestBody, {
-          getty_prefetch_attempted: true,
-          getty_prefetch_succeeded: false,
-        });
-        onProgress?.({
-          stage: "Getty Local",
-          message: `Scraping Getty locally for ${personName}...`,
-          current: null,
-          total: null,
-        });
-        try {
-          const gettyPrefetch = await prefetchGettyLocallyForPerson(personName, show?.name ?? undefined);
-          Object.assign(requestBody, gettyPrefetch.bodyPatch);
-          onProgress?.({
-            stage: "Getty Local",
-            message: `Getty local scrape complete: ${gettyPrefetch.mergedAssetCount} images, ${gettyPrefetch.mergedEventCount} events.`,
-            current: gettyPrefetch.mergedAssetCount,
-            total: gettyPrefetch.mergedAssetCount,
-          });
-        } catch (error) {
+        const gettyReadiness = await getGettyRemoteReadiness();
+        if (gettyReadiness.ready) {
           Object.assign(requestBody, {
-            getty_prefetch_error_code:
-              error instanceof GettyLocalPrefetchError ? error.code : "UNREACHABLE",
+            getty_transport_mode: gettyReadiness.transportMode ?? "decodo_remote",
+            getty_proxy_fingerprint: gettyReadiness.proxyFingerprint ?? undefined,
+            getty_runtime_probe_status: gettyReadiness.status,
+            getty_runtime_probe_reason: gettyReadiness.reason ?? undefined,
+            getty_fallback_invoked: false,
           });
-          const message = error instanceof Error ? error.message : String(error);
           onProgress?.({
             stage: "Getty Local",
-            message: `${message} Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.`,
+            message: "Getty remote probe healthy. Starting backend refresh without local prefetch.",
             current: null,
             total: null,
           });
-          throw new Error(`${message} Getty/NBCUMV refresh was not started.`);
+        } else {
+          Object.assign(requestBody, {
+            getty_prefetch_attempted: true,
+            getty_prefetch_succeeded: false,
+            getty_runtime_probe_status: gettyReadiness.status,
+            getty_runtime_probe_reason: gettyReadiness.reason ?? undefined,
+          });
+          onProgress?.({
+            stage: "Getty Local",
+            message: `Scraping Getty locally for ${personName}...`,
+            current: null,
+            total: null,
+          });
+          try {
+            const gettyPrefetch = await prefetchGettyLocallyForPerson(personName, show?.name ?? undefined);
+            Object.assign(requestBody, gettyPrefetch.bodyPatch);
+            onProgress?.({
+              stage: "Getty Local",
+              message: `Getty local scrape complete: ${gettyPrefetch.mergedAssetCount} images, ${gettyPrefetch.mergedEventCount} events.`,
+              current: gettyPrefetch.mergedAssetCount,
+              total: gettyPrefetch.mergedAssetCount,
+            });
+          } catch (error) {
+            Object.assign(requestBody, {
+              getty_prefetch_error_code:
+                error instanceof GettyLocalPrefetchError ? error.code : "UNREACHABLE",
+            });
+            const message = error instanceof Error ? error.message : String(error);
+            onProgress?.({
+              stage: "Getty Local",
+              message: `${message} Getty/NBCUMV refresh could not start after local Getty fallback.`,
+              current: null,
+              total: null,
+            });
+            throw new Error(`${message} Getty/NBCUMV refresh was not started.`);
+          }
         }
       }
       const streamController = new AbortController();

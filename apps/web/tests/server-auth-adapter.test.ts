@@ -83,39 +83,23 @@ describe("server auth adapter", () => {
     expect(verifyIdTokenMock).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to supabase when firebase verification fails", async () => {
+  it("does not authenticate with supabase when firebase verification fails", async () => {
     verifyIdTokenMock.mockRejectedValue(new Error("firebase down"));
-    process.env.NEXT_PUBLIC_FIREBASE_API_KEY = "";
-    getUserMock.mockResolvedValue({
-      data: {
-        user: {
-          id: "supabase-user",
-          email: "supabase@example.com",
-          user_metadata: { name: "Supabase User" },
-          app_metadata: {},
-          identities: [],
-        },
-      },
-      error: null,
-    });
 
     const auth = await import("@/lib/server/auth");
     const user = await auth.getUserFromRequest(requestWithBearer("token-2"));
 
-    expect(user).toMatchObject({
-      uid: "supabase-user",
-      email: "supabase@example.com",
-      provider: "supabase",
-    });
-    expect(createClientMock).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[auth] Auth provider fallback succeeded",
-      expect.objectContaining({ primary: "firebase", secondary: "supabase", kind: "id" }),
-    );
+    expect(user).toBeNull();
+    expect(createClientMock).not.toHaveBeenCalled();
   });
 
-  it("does not attempt supabase fallback when TRR_CORE_SUPABASE_* is unset", async () => {
-    verifyIdTokenMock.mockRejectedValue(new Error("firebase down"));
+  it("does not attempt supabase shadow verification when TRR_CORE_SUPABASE_* is unset", async () => {
+    process.env.TRR_AUTH_SHADOW_MODE = "true";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-user",
+      email: "firebase@example.com",
+      name: "Firebase User",
+    });
     process.env.SUPABASE_URL = "https://legacy.supabase.co";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "legacy-service-role";
     delete process.env.TRR_CORE_SUPABASE_URL;
@@ -124,7 +108,10 @@ describe("server auth adapter", () => {
     const auth = await import("@/lib/server/auth");
     const user = await auth.getUserFromRequest(requestWithBearer("token-no-supabase-env"));
 
-    expect(user).toBeNull();
+    expect(user).toMatchObject({
+      uid: "firebase-user",
+      provider: "firebase",
+    });
     expect(createClientMock).not.toHaveBeenCalled();
   });
 
@@ -162,40 +149,65 @@ describe("server auth adapter", () => {
     );
   });
 
-  it("allows requireAdmin for supabase user when email is in allowlist", async () => {
+  it("keeps firebase as the authenticating provider when TRR_AUTH_PROVIDER=supabase", async () => {
     process.env.TRR_AUTH_PROVIDER = "supabase";
     process.env.ADMIN_EMAIL_ALLOWLIST = "admin@example.com";
-    getUserMock.mockResolvedValue({
-      data: {
-        user: {
-          id: "supabase-admin",
-          email: "admin@example.com",
-          user_metadata: { name: "Admin User" },
-          app_metadata: {},
-          identities: [],
-        },
-      },
-      error: null,
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-admin",
+      email: "admin@example.com",
+      name: "Admin User",
     });
 
     const auth = await import("@/lib/server/auth");
     const user = await auth.requireAdmin(requestWithBearer("token-4"));
 
     expect(user).toMatchObject({
-      uid: "supabase-admin",
+      uid: "firebase-admin",
       email: "admin@example.com",
-      provider: "supabase",
+      provider: "firebase",
     });
   });
 
-  it("allows requireAdmin for supabase user when display name matches codex default variants", async () => {
+  it("rejects durable session auth when TRR_AUTH_PROVIDER=supabase", async () => {
     process.env.TRR_AUTH_PROVIDER = "supabase";
+    verifySessionCookieMock.mockResolvedValue({
+      uid: "firebase-session-user",
+      email: "session@example.com",
+      name: "Session User",
+    });
+    const request = new NextRequest("http://localhost/api/test", {
+      headers: {
+        cookie: "__session=session-cookie",
+      },
+    });
+
+    const auth = await import("@/lib/server/auth");
+    const user = await auth.getUserFromRequest(request);
+
+    expect(user).toBeNull();
+    expect(verifySessionCookieMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[auth] Unsupported durable auth configuration",
+      expect.objectContaining({
+        configuredProvider: "supabase",
+        kind: "session",
+      }),
+    );
+  });
+
+  it("memoizes the supabase verification client across shadow checks", async () => {
+    process.env.TRR_AUTH_SHADOW_MODE = "true";
+    verifyIdTokenMock.mockResolvedValue({
+      uid: "firebase-user",
+      email: "firebase@example.com",
+      name: "Firebase User",
+    });
     getUserMock.mockResolvedValue({
       data: {
         user: {
-          id: "supabase-codex",
-          email: "different@example.com",
-          user_metadata: { name: "Codex Huli" },
+          id: "firebase-user",
+          email: "firebase@example.com",
+          user_metadata: { name: "Firebase User" },
           app_metadata: {},
           identities: [],
         },
@@ -204,33 +216,19 @@ describe("server auth adapter", () => {
     });
 
     const auth = await import("@/lib/server/auth");
-    const user = await auth.requireAdmin(requestWithBearer("token-codex-handle"));
+    await auth.getUserFromRequest(requestWithBearer("token-shadow-1"));
+    await auth.getUserFromRequest(requestWithBearer("token-shadow-2"));
 
-    expect(user).toMatchObject({
-      uid: "supabase-codex",
-      email: "different@example.com",
-      provider: "supabase",
-    });
+    expect(createClientMock).toHaveBeenCalledTimes(1);
+    expect(getUserMock).toHaveBeenCalledTimes(2);
   });
 
-  it("tracks fallback and shadow mismatch diagnostics counters", async () => {
+  it("tracks shadow mismatch diagnostics counters without fallback auth", async () => {
     process.env.TRR_AUTH_SHADOW_MODE = "true";
     verifyIdTokenMock.mockRejectedValueOnce(new Error("firebase down"));
-    getUserMock.mockResolvedValueOnce({
-      data: {
-        user: {
-          id: "supabase-user",
-          email: "supabase@example.com",
-          user_metadata: { name: "Supabase User" },
-          app_metadata: {},
-          identities: [],
-        },
-      },
-      error: null,
-    });
 
     const auth = await import("@/lib/server/auth");
-    await auth.getUserFromRequest(requestWithBearer("token-fallback"));
+    await expect(auth.getUserFromRequest(requestWithBearer("token-fallback"))).resolves.toBeNull();
 
     verifyIdTokenMock.mockResolvedValueOnce({
       uid: "firebase-user",
@@ -254,7 +252,7 @@ describe("server auth adapter", () => {
     const snapshot = auth.getAuthDiagnosticsSnapshot();
     expect(snapshot.provider).toBe("firebase");
     expect(snapshot.shadowMode).toBe(true);
-    expect(snapshot.counters.fallbackSuccesses).toBe(1);
+    expect(snapshot.counters.fallbackSuccesses).toBe(0);
     expect(snapshot.counters.shadowChecks).toBe(1);
     expect(snapshot.counters.shadowMismatchEvents).toBe(1);
     expect(snapshot.counters.shadowMismatchFieldCounts.uid).toBe(1);

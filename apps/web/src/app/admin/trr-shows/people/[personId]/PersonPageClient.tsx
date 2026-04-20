@@ -35,6 +35,7 @@ import {
 } from "@/lib/admin/operation-session";
 import {
   GettyLocalPrefetchError,
+  getGettyRemoteReadiness,
   prefetchGettyLocallyForPerson,
   type GettyLocalPrefetchProgressState,
 } from "@/lib/admin/getty-local-prefetch";
@@ -7648,141 +7649,175 @@ export default function PersonProfilePage() {
             : prev
         );
       };
-      Object.assign(refreshBody, {
-        getty_prefetch_attempted: true,
-        getty_prefetch_succeeded: false,
-      });
-      setRefreshProgress((prev) =>
-        prev
-          ? {
-              ...prev,
-              phase: PERSON_REFRESH_PHASES.gettyDiscovery,
-              message: "Running Getty discovery locally...",
-              detailMessage: `Fetching Getty search candidates for "${person.full_name}" via the codex Chrome profile...`,
-            }
-          : prev
-      );
-      appendRefreshLog({
-        source: "page_refresh",
-        stage: "getty_discovery",
-        message: "Starting Getty discovery via local Chrome-backed Getty session...",
-        level: "info",
-        runId: requestId,
-      });
-      try {
-        const gettyPrefetch = await prefetchGettyLocallyForPerson(
-          person.full_name,
-          effectiveGalleryImportContext.showName ?? undefined,
-          { mode: "discovery", onProgress: updateGettyDiscoveryProgress }
-        );
-        Object.assign(refreshBody, gettyPrefetch.bodyPatch);
-        const discoveryToken =
-          typeof gettyPrefetch.bodyPatch.getty_prefetch_token === "string"
-            ? gettyPrefetch.bodyPatch.getty_prefetch_token
-            : null;
-        appendRefreshLog({
-          source: "page_refresh",
-          stage: "getty_discovery",
-          message: `Getty discovery complete: ${gettyPrefetch.candidateManifestTotal} candidates (${gettyPrefetch.elapsedSeconds ?? "?"}s). Starting pipeline...`,
-          detail:
-            gettyPrefetch.querySummaries.length > 0
-              ? `${gettyPrefetch.querySummaries.length} query summaries captured`
-              : undefined,
-          level: "info",
-          runId: requestId,
+      const gettyReadiness = await getGettyRemoteReadiness();
+      if (gettyReadiness.ready) {
+        Object.assign(refreshBody, {
+          getty_transport_mode: gettyReadiness.transportMode ?? "decodo_remote",
+          getty_proxy_fingerprint: gettyReadiness.proxyFingerprint ?? undefined,
+          getty_runtime_probe_status: gettyReadiness.status,
+          getty_runtime_probe_reason: gettyReadiness.reason ?? undefined,
+          getty_fallback_invoked: false,
         });
         setRefreshProgress((prev) =>
           prev
             ? {
                 ...prev,
-                detailMessage: `Getty discovery found ${gettyPrefetch.candidateManifestTotal} candidates. Connecting to pipeline...`,
+                phase: PERSON_REFRESH_PHASES.syncing,
+                message: "Getty remote probe healthy. Starting backend pipeline...",
+                detailMessage:
+                  gettyReadiness.proxyFingerprint
+                    ? `Using Getty remote transport ${gettyReadiness.proxyFingerprint}.`
+                    : "Using Getty remote transport.",
+              }
+            : prev,
+        );
+        appendRefreshLog({
+          source: "page_refresh",
+          stage: "getty_discovery",
+          message: "Getty remote probe healthy. Starting backend refresh without local prefetch.",
+          detail: gettyReadiness.proxyFingerprint ?? undefined,
+          level: "info",
+          runId: requestId,
+        });
+      } else {
+        Object.assign(refreshBody, {
+          getty_prefetch_attempted: true,
+          getty_prefetch_succeeded: false,
+          getty_runtime_probe_status: gettyReadiness.status,
+          getty_runtime_probe_reason: gettyReadiness.reason ?? undefined,
+        });
+        setRefreshProgress((prev) =>
+          prev
+            ? {
+                ...prev,
+                phase: PERSON_REFRESH_PHASES.gettyDiscovery,
+                message: "Running Getty discovery locally...",
+                detailMessage: `Fetching Getty search candidates for "${person.full_name}" via the codex Chrome profile...`,
               }
             : prev
         );
-
-        if (discoveryToken && gettyPrefetch.enrichmentPending) {
-          startGettyEnrichment = async () =>
-            (async () => {
-              appendRefreshLog({
-                source: "page_refresh",
-                stage: "getty_enrichment",
-                message: "Starting background Getty enrichment...",
-                detail: `${gettyPrefetch.detailEnrichmentTotal} editorial ids queued`,
-                level: "info",
-                runId: requestId,
-              });
-              const fullPrefetch = await prefetchGettyLocallyForPerson(
-                person.full_name,
-                effectiveGalleryImportContext.showName ?? undefined,
-                {
-                  mode: "full",
-                  prefetchToken: discoveryToken,
-                }
-              );
-              const enrichmentResponse = await fetch(
-                `/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    getty_prefetch_token: discoveryToken,
-                    show_id: effectiveGalleryImportContext.showId ?? undefined,
-                    show_name: effectiveGalleryImportContext.showName ?? undefined,
-                  }),
-                }
-              );
-              const enrichmentData = (await enrichmentResponse
-                .json()
-                .catch(() => ({ error: "Getty enrichment failed" }))) as {
-                error?: string;
-                detail?: string;
-                getty_enrichment_completed?: number;
-                getty_enrichment_failed?: number;
-                cast_photos_mirrored?: number;
-                media_assets_mirrored?: number;
-              };
-              if (!enrichmentResponse.ok) {
-                throw new Error(
-                  enrichmentData.detail ||
-                    enrichmentData.error ||
-                    `Getty enrichment failed (${enrichmentResponse.status})`
-                );
-              }
-              appendRefreshLog({
-                source: "page_refresh",
-                stage: "getty_enrichment",
-                message: `Getty enrichment complete: ${enrichmentData.getty_enrichment_completed ?? 0} editorial ids updated.`,
-                detail: `Mirrored ${(enrichmentData.cast_photos_mirrored ?? 0) + (enrichmentData.media_assets_mirrored ?? 0)} hosted assets after enrichment. Full prefetch mode: ${fullPrefetch.prefetchMode ?? "full"}.`,
-                level: "success",
-                runId: requestId,
-              });
-            })().catch((error) => {
-              gettyEnrichmentError = error instanceof Error ? error.message : String(error);
-              appendRefreshLog({
-                source: "page_refresh",
-                stage: "getty_enrichment",
-                message: "Getty enrichment failed",
-                detail: gettyEnrichmentError,
-                level: "error",
-                runId: requestId,
-              });
-            });
-        }
-      } catch (gettyErr) {
-        Object.assign(refreshBody, {
-          getty_prefetch_error_code:
-            gettyErr instanceof GettyLocalPrefetchError ? gettyErr.code : "UNREACHABLE",
-        });
-        const errMsg = gettyErr instanceof Error ? gettyErr.message : String(gettyErr);
         appendRefreshLog({
           source: "page_refresh",
-          stage: "getty_local_scrape",
-          message: `${errMsg} Getty/NBCUMV refresh requires local Getty prefetch because Modal is blocked by Getty.`,
-          level: "error",
+          stage: "getty_discovery",
+          message: "Getty remote probe is blocked or unavailable. Falling back to local Getty discovery.",
+          detail: gettyReadiness.reason ?? undefined,
+          level: "info",
           runId: requestId,
         });
-        throw new Error(`${errMsg} Getty/NBCUMV refresh was not started.`);
-        
+        try {
+          const gettyPrefetch = await prefetchGettyLocallyForPerson(
+            person.full_name,
+            effectiveGalleryImportContext.showName ?? undefined,
+            { mode: "discovery", onProgress: updateGettyDiscoveryProgress }
+          );
+          Object.assign(refreshBody, gettyPrefetch.bodyPatch);
+          const discoveryToken =
+            typeof gettyPrefetch.bodyPatch.getty_prefetch_token === "string"
+              ? gettyPrefetch.bodyPatch.getty_prefetch_token
+              : null;
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: "getty_discovery",
+            message: `Getty discovery complete: ${gettyPrefetch.candidateManifestTotal} candidates (${gettyPrefetch.elapsedSeconds ?? "?"}s). Starting pipeline...`,
+            detail:
+              gettyPrefetch.querySummaries.length > 0
+                ? `${gettyPrefetch.querySummaries.length} query summaries captured`
+                : undefined,
+            level: "info",
+            runId: requestId,
+          });
+          setRefreshProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  detailMessage: `Getty discovery found ${gettyPrefetch.candidateManifestTotal} candidates. Connecting to pipeline...`,
+                }
+              : prev
+          );
+
+          if (discoveryToken && gettyPrefetch.enrichmentPending) {
+            startGettyEnrichment = async () =>
+              (async () => {
+                appendRefreshLog({
+                  source: "page_refresh",
+                  stage: "getty_enrichment",
+                  message: "Starting background Getty enrichment...",
+                  detail: `${gettyPrefetch.detailEnrichmentTotal} editorial ids queued`,
+                  level: "info",
+                  runId: requestId,
+                });
+                const fullPrefetch = await prefetchGettyLocallyForPerson(
+                  person.full_name,
+                  effectiveGalleryImportContext.showName ?? undefined,
+                  {
+                    mode: "full",
+                    prefetchToken: discoveryToken,
+                  }
+                );
+                const enrichmentResponse = await fetch(
+                  `/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      getty_prefetch_token: discoveryToken,
+                      show_id: effectiveGalleryImportContext.showId ?? undefined,
+                      show_name: effectiveGalleryImportContext.showName ?? undefined,
+                    }),
+                  }
+                );
+                const enrichmentData = (await enrichmentResponse
+                  .json()
+                  .catch(() => ({ error: "Getty enrichment failed" }))) as {
+                  error?: string;
+                  detail?: string;
+                  getty_enrichment_completed?: number;
+                  getty_enrichment_failed?: number;
+                  cast_photos_mirrored?: number;
+                  media_assets_mirrored?: number;
+                };
+                if (!enrichmentResponse.ok) {
+                  throw new Error(
+                    enrichmentData.detail ||
+                      enrichmentData.error ||
+                      `Getty enrichment failed (${enrichmentResponse.status})`
+                  );
+                }
+                appendRefreshLog({
+                  source: "page_refresh",
+                  stage: "getty_enrichment",
+                  message: `Getty enrichment complete: ${enrichmentData.getty_enrichment_completed ?? 0} editorial ids updated.`,
+                  detail: `Mirrored ${(enrichmentData.cast_photos_mirrored ?? 0) + (enrichmentData.media_assets_mirrored ?? 0)} hosted assets after enrichment. Full prefetch mode: ${fullPrefetch.prefetchMode ?? "full"}.`,
+                  level: "success",
+                  runId: requestId,
+                });
+              })().catch((error) => {
+                gettyEnrichmentError = error instanceof Error ? error.message : String(error);
+                appendRefreshLog({
+                  source: "page_refresh",
+                  stage: "getty_enrichment",
+                  message: "Getty enrichment failed",
+                  detail: gettyEnrichmentError,
+                  level: "error",
+                  runId: requestId,
+                });
+              });
+          }
+        } catch (gettyErr) {
+          Object.assign(refreshBody, {
+            getty_prefetch_error_code:
+              gettyErr instanceof GettyLocalPrefetchError ? gettyErr.code : "UNREACHABLE",
+          });
+          const errMsg = gettyErr instanceof Error ? gettyErr.message : String(gettyErr);
+          appendRefreshLog({
+            source: "page_refresh",
+            stage: "getty_local_scrape",
+            message: `${errMsg} Getty/NBCUMV refresh could not start after local Getty fallback.`,
+            level: "error",
+            runId: requestId,
+          });
+          throw new Error(`${errMsg} Getty/NBCUMV refresh was not started.`);
+        }
       }
       // Restore progress phase to syncing for the pipeline stream
       setRefreshProgress((prev) =>

@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
 import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
+import {
+  readInstagramCommentsErrorMessage,
+  type InstagramCommentsProxyErrorPayload,
+} from "@/components/admin/instagram/comments-scrape-error";
 import type {
   SocialAccountCommentsRunProgress,
   SocialAccountCommentsScrapeRequest,
@@ -20,19 +24,10 @@ type Props = {
   onSummaryRefresh?: () => Promise<void> | void;
 };
 
-type ProxyErrorPayload = {
-  error?: string;
-  detail?: string;
+type ProxyErrorPayload = InstagramCommentsProxyErrorPayload & {
   code?: string;
   retryable?: boolean;
   retry_after_seconds?: number;
-  // P2-7: The app proxy extracts the FastAPI `detail.code` into these fields
-  // (see apps/web/src/lib/server/trr-api/social-admin-proxy.ts). The UI
-  // branches on `upstream_detail_code` to show actionable copy for the
-  // specific failure modes users can act on.
-  upstream_detail_code?: string;
-  upstream_status?: number;
-  upstream_detail?: unknown;
 };
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running"]);
@@ -54,23 +49,6 @@ const formatDateTime = (value?: string | null): string => {
 };
 
 const normalizeRunStatus = (value?: string | null): string => String(value || "").trim().toLowerCase();
-
-const readErrorMessage = (payload: ProxyErrorPayload | null | undefined, fallback: string): string => {
-  // P2-7: Map structured backend codes to actionable operator copy.
-  const code = typeof payload?.upstream_detail_code === "string" ? payload.upstream_detail_code : "";
-  if (code === "SOCIAL_WORKER_UNAVAILABLE") {
-    return (
-      "No Instagram comments worker is online. Start one with: " +
-      "TRR_SOCIAL_INGEST_WORKER_ENABLED=1 TRR_SOCIAL_INGEST_WORKER_COMMENTS_SCRAPLING=1 ./scripts/start_remote_job_workers.sh"
-    );
-  }
-  if (code === "instagram_comments_auth_failed") {
-    return "Instagram session expired. Refresh cookies via scripts/socials/cookie_refresh_worker.py.";
-  }
-  if (typeof payload?.error === "string" && payload.error.trim()) return payload.error;
-  if (typeof payload?.detail === "string" && payload.detail.trim()) return payload.detail;
-  return fallback;
-};
 
 export default function InstagramCommentsPanel({ platform, handle, summary, onSummaryRefresh }: Props) {
   const { user, checking, hasAccess } = useAdminGuard();
@@ -108,7 +86,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
       );
       const data = (await response.json().catch(() => ({}))) as SocialAccountProfileCommentsResponse & ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readErrorMessage(data, "Failed to load Instagram comments"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to load Instagram comments"));
       }
       setComments(data);
     } catch (error) {
@@ -135,7 +113,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
       );
       const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsRunProgress & ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readErrorMessage(data, "Failed to load comments scrape progress"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to load comments scrape progress"));
       }
       return data;
     },
@@ -195,7 +173,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
       );
       const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsScrapeResponse & ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readErrorMessage(data, "Failed to start comments scrape"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start comments scrape"));
       }
       const runId = String(data.run_id || "").trim();
       setScrapeRunId(runId || null);

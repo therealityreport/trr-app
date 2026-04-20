@@ -1,421 +1,136 @@
-# PostgreSQL Survey Storage Setup Guide
+# TRR-APP Postgres Setup And Ownership
 
-This guide explains how to configure PostgreSQL storage for TRR surveys and enable the admin survey responses UI.
+This document describes the current TRR-APP Postgres contract after the migration-runner ownership cleanup.
 
-## Overview
+## Runtime Contract
 
-The app has been fully implemented with:
-- ✅ PostgreSQL database schema (migrations created)
-- ✅ API endpoints for saving and retrieving survey responses
-- ✅ Admin UI at `/admin/survey-responses` for viewing and exporting responses
-- ✅ Server-side RBAC (role-based access control) with email allowlisting
-
-**Status:** All code is ready. Only environment configuration is needed.
-
----
-
-## Required Environment Variables
-
-Add these to `apps/web/.env.local`:
-
-### 1. PostgreSQL Database Connection
+TRR-APP runtime reads use:
 
 ```bash
-TRR_DB_URL=postgresql://user:password@host:port/database?sslmode=require
+TRR_DB_URL=postgresql://user:password@host:port/database
 TRR_DB_FALLBACK_URL=
 ```
 
-`TRR_DB_URL` is the app runtime contract. `DATABASE_URL` is still used by the migration scripts only, so invoke those commands as `DATABASE_URL="$TRR_DB_URL" pnpm run db:migrate` instead of storing `DATABASE_URL` as the app runtime source of truth.
+- `TRR_DB_URL` is the canonical runtime database URL.
+- `TRR_DB_FALLBACK_URL` is optional and is only for deliberate break-glass fallback.
+- `DATABASE_URL` is not part of the app runtime contract. The migration runner still accepts it as a compatibility-only input for older tooling flows, but it is no longer the preferred source.
 
-**Where to get this:**
-- **Neon:** https://neon.tech (Free tier available)
-- **Supabase:** https://supabase.com (Includes PostgreSQL)
-- **Railway:** https://railway.app
-- **Local:** `postgresql://localhost:5432/trr_dev`
+The app server resolves Postgres in the same order as the runtime code in [src/lib/server/postgres.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/postgres.ts): `TRR_DB_URL`, then `TRR_DB_FALLBACK_URL`.
 
-### 2. Firebase Admin Service Account
+## What The App Migration Runner Owns
 
-```bash
-FIREBASE_SERVICE_ACCOUNT='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'
-```
+`pnpm -C apps/web run db:migrate` now defaults to the app-local lane only.
 
-**How to get this:**
+That default lane covers the legacy/public-schema tables that still exist under `apps/web/db/migrations/`, including:
 
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Select your project: `trr-web-25d2e`
-3. Click ⚙️ **Project Settings** → **Service Accounts** tab
-4. Click **Generate New Private Key**
-5. Download the JSON file
-6. **Minify it to a single line** (remove all line breaks)
-7. Paste the minified JSON as the value (wrapped in single quotes)
+- legacy survey registry and response tables
+- survey editor support tables such as `surveys`, `survey_cast`, and `survey_episodes`
+- app-local survey show metadata tables such as `survey_shows`, `survey_show_seasons`, and `survey_show_palette_library`
 
-**Example minification:**
-```bash
-# Original (multi-line):
-{
-  "type": "service_account",
-  "project_id": "my-project"
-}
-
-# Minified (single line):
-{"type":"service_account","project_id":"my-project"}
-```
-
-### 3. Admin Email Allowlist
+Run it with the canonical env contract:
 
 ```bash
-ADMIN_EMAIL_ALLOWLIST=your-email@example.com,another-admin@example.com
+cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web
+TRR_DB_URL="postgresql://..." pnpm run db:migrate
 ```
 
-**Important:**
-- Comma-separated list of admin emails
-- Only users with these emails can access `/admin/survey-responses`
-- Leave empty to allow ANY authenticated user (not recommended for production)
-
-### 4. TRR Supabase Admin/Auth Inputs
-
-Set these when server-side Supabase admin/auth flows are enabled:
+Targeted dry validation:
 
 ```bash
-TRR_CORE_SUPABASE_URL=https://your-project.supabase.co
-TRR_CORE_SUPABASE_SERVICE_ROLE_KEY=...
-TRR_INTERNAL_ADMIN_SHARED_SECRET=
+cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web
+TRR_DB_URL="postgresql://..." pnpm run db:migrate -- --dry-run
 ```
 
-`TRR_CORE_SUPABASE_URL` and `TRR_CORE_SUPABASE_SERVICE_ROLE_KEY` are used by
-the server-side Supabase auth adapter when `TRR_AUTH_PROVIDER=supabase`.
+## What The App Migration Runner Does Not Own
 
-No browser-side `NEXT_PUBLIC_SUPABASE_*` runtime envs are required for TRR-APP.
+Shared-schema ownership is backend-owned.
 
-If you use the admin person-gallery facebank seed toggle, also set:
+That means new or canonical migrations for these surfaces belong in `TRR-Backend`, not in `TRR-APP`:
+
+- `firebase_surveys.*`
+- `admin.*`
+- shared grants / RLS / role setup
+- shared tables that reference backend-owned schemas such as `core.*`
+
+The app runner still has a transitional compatibility mode for older environments where that backlog has not been ported yet:
 
 ```bash
-TRR_INTERNAL_ADMIN_SHARED_SECRET=...
+cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web
+TRR_DB_URL="postgresql://..." pnpm run db:migrate -- --include-transitional-shared-schema
 ```
 
-The server proxy sends `X-TRR-Internal-Admin-Secret` to TRR-Backend for the facebank toggle endpoint.
-
----
-
-## Setup Steps
-
-### Step 1: Configure Environment Variables
-
-Edit `apps/web/.env.local` and add the required runtime variables above.
-
-### Step 2: Run Database Migrations
-
-This creates the PostgreSQL tables for survey responses:
-
-```bash
-cd apps/web
-DATABASE_URL="${TRR_DB_URL}" pnpm run db:migrate
-```
-
-**Expected output:**
-```
-[migrations] Applying 001_create_global_profile_responses.sql
-[migrations] Applying 002_create_rhoslc_s6_responses.sql
-[migrations] Complete
-```
-
-**Tables created:**
-- `survey_global_profile_responses` - For Survey X (viewing habits survey)
-- `survey_rhoslc_s6_responses` - For RHOSLC Season 6 flashback rankings
-- `__migrations` - Migration tracking table
-
-### Step 3: Restart Development Server
-
-```bash
-pnpm run dev
-```
-
-### Step 4: Test Survey Submission
-
-1. Go to `/hub/surveys` (Survey X)
-2. Fill out and submit the survey
-3. Check the console - should see no errors
-4. Verify in PostgreSQL that a row was inserted into `survey_global_profile_responses`
-
-### Step 5: Access Admin UI
-
-1. Sign in with an account matching an email in `ADMIN_EMAIL_ALLOWLIST`
-2. Navigate to `/admin/survey-responses`
-3. You should see:
-   - Survey selector dropdown (Global Profile Survey, RHOSLC S6 Flashback Ranking)
-   - Date range filters
-   - Paginated table of responses
-   - "Export CSV" button
-
----
-
-## Database Schema
-
-### `survey_global_profile_responses`
-
-Common columns (all surveys):
-- `id` - UUID primary key
-- `created_at` - Timestamp (auto)
-- `updated_at` - Timestamp (auto, updates on changes)
-- `respondent_id` - External respondent ID (optional)
-- `app_user_id` - Firebase UID (required, unique constraint)
-- `app_user_email` - User's email
-- `source` - Default: `'trr_app'`
-- `show_id`, `season_number`, `episode_number` - For episode-specific surveys
-
-Survey-specific columns:
-- `view_live_tv_household` - Yes/No
-- `view_platforms_subscriptions` - JSON array of platforms
-- `view_devices_reality` - JSON array of devices
-- `view_bravo_platform_primary` - Primary platform
-- `view_hours_week` - Viewing frequency
-- `view_binge_style` - Watch mode (live/next-day/binge/mix)
-- `view_reality_cowatch` - Who they watch with
-- `view_live_chats_social` - Social media engagement
-- ...and more (see migration file)
-
-### `survey_rhoslc_s6_responses`
-
-Episode ranking survey columns:
-- `season_id`, `episode_id` - Episode identifiers
-- `ranking` - JSON array of cast member rankings
-- `completion_pct` - Survey completion percentage
-- `completed` - Boolean flag
-- `client_schema_version`, `client_version` - For versioning
-
----
-
-## API Endpoints
-
-All endpoints require authentication via Firebase ID token in `Authorization: Bearer <token>` header.
-
-### Survey Submission
-
-**POST** `/api/surveys/global-profile`
-- Saves Survey X responses to PostgreSQL
-- Called automatically when users submit Survey X
-- Returns: `{ ok: true }`
-
-### Admin Endpoints
-
-**GET** `/api/admin/surveys`
-- Lists all available surveys
-- Returns: `{ items: SurveyMetadata[] }`
-
-**GET** `/api/admin/surveys/:surveyKey/responses?limit=25&offset=0&from=2025-01-01&to=2025-12-31`
-- Fetches paginated survey responses with filters
-- Query params: `limit`, `offset`, `from`, `to`, `showId`, `seasonNumber`, `episodeNumber`
-- Returns: `{ rows: [], total: number, limit: number, offset: number, columns: [] }`
-
-**GET** `/api/admin/surveys/:surveyKey/responses/:id`
-- Fetches a single response by ID
-- Returns: `{ item: {...} }`
-
-**GET** `/api/admin/surveys/:surveyKey/export?from=2025-01-01&to=2025-12-31`
-- Exports responses to CSV (max 20,000 rows)
-- Same filters as responses endpoint
-- Returns: CSV file download
-
----
-
-## Adding New Surveys
-
-To add a new survey (e.g., RHONJ Season 15):
-
-### 1. Create Migration
-
-`apps/web/db/migrations/003_create_rhonj_s15_responses.sql`:
-
-```sql
-BEGIN;
-
-CREATE TABLE IF NOT EXISTS survey_rhonj_s15_responses (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  respondent_id text,
-  app_user_id text NOT NULL,
-  app_user_email text,
-  source text NOT NULL DEFAULT 'trr_app',
-  show_id text,
-  season_number integer,
-  episode_number integer,
-  -- Survey-specific columns here
-  favorite_cast_member text,
-  drama_rating integer,
-  UNIQUE (app_user_id, episode_number)
-);
-
-DROP TRIGGER IF EXISTS trg_rhonj_s15_updated_at ON survey_rhonj_s15_responses;
-CREATE TRIGGER trg_rhonj_s15_updated_at
-BEFORE UPDATE ON survey_rhonj_s15_responses
-FOR EACH ROW EXECUTE FUNCTION set_updated_at_timestamp();
-
-CREATE INDEX IF NOT EXISTS idx_rhonj_s15_created_at ON survey_rhonj_s15_responses (created_at DESC);
-
-COMMIT;
-```
-
-### 2. Add Survey Definition
-
-In `apps/web/src/lib/server/surveys/definitions.ts`:
-
-```typescript
-{
-  key: "rhonj_s15",
-  title: "RHONJ S15 Episode Survey",
-  description: "Season 15 episode feedback",
-  tableName: "survey_rhonj_s15_responses",
-  showId: "tt1119958",
-  seasonNumber: 15,
-  columns: withCommonColumns([
-    { name: "favorite_cast_member", label: "Favorite Cast Member", type: "text" },
-    { name: "drama_rating", label: "Drama Rating", type: "int" },
-  ]),
-  previewColumns: ["favorite_cast_member", "drama_rating"],
-  allowShowFilters: true,
-  allowEpisodeFilters: true,
-  defaultSortColumn: "created_at",
-  defaultSortDirection: "desc",
-  upsertColumns: ["app_user_id", "episode_number"],
-}
-```
-
-### 3. Create API Route
-
-`apps/web/src/app/api/surveys/rhonj-s15/route.ts`:
-
-```typescript
-import { NextRequest, NextResponse } from "next/server";
-import { requireUser } from "@/lib/server/auth";
-import { upsertSurveyResponse } from "@/lib/server/surveys/repository";
-
-export async function POST(request: NextRequest) {
-  try {
-    const user = await requireUser(request);
-    const payload = await request.json();
-
-    await upsertSurveyResponse({
-      surveyKey: "rhonj_s15",
-      appUserId: user.uid,
-      appUserEmail: user.email,
-      episodeNumber: payload.episodeNumber,
-      answers: {
-        favorite_cast_member: payload.favoriteCastMember,
-        drama_rating: payload.dramaRating,
-      },
-    });
-
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    console.error("[api] Failed to save RHONJ S15 response", error);
-    const message = error instanceof Error ? error.message : "failed";
-    const status = message === "unauthorized" ? 401 : 500;
-    return NextResponse.json({ error: message }, { status });
-  }
-}
-```
-
-### 4. Run Migration
-
-```bash
-DATABASE_URL="${TRR_DB_URL}" pnpm run db:migrate
-```
-
-The new survey will automatically appear in the admin UI dropdown!
-
----
-
-## Troubleshooting
-
-### 401 Unauthorized Error
-
-**Symptom:** Survey submission fails with `401 {"error":"unauthorized"}`
-
-**Cause:** `FIREBASE_SERVICE_ACCOUNT` is missing or invalid
-
-**Fix:**
-1. Verify `FIREBASE_SERVICE_ACCOUNT` is set in `.env.local`
-2. Ensure it's a valid JSON string (check for missing quotes, commas)
-3. Restart the dev server after changing env vars
-
-### Database Connection Error
-
-**Symptom:** `No database connection string is set`
-
-**Cause:** `TRR_DB_URL` is missing from `.env.local`
-
-**Fix:**
-1. Add `TRR_DB_URL` to `.env.local`
-2. Restart the dev server
-
-### Admin UI Shows "Forbidden"
-
-**Symptom:** Redirected to `/hub` when accessing `/admin/survey-responses`
-
-**Cause:** Your email is not in `ADMIN_EMAIL_ALLOWLIST`
-
-**Fix:**
-1. Add your email to `ADMIN_EMAIL_ALLOWLIST` in `.env.local`
-2. Restart the dev server
-3. Sign out and sign back in
-
-### Migration Already Applied
-
-**Symptom:** `Skipping xxx.sql (already applied)`
-
-**Cause:** Migration tracking table shows this migration has run
-
-**Fix:** This is normal. If you need to re-run migrations:
-1. Connect to your PostgreSQL database
-2. Run: `DELETE FROM __migrations WHERE name = 'xxx.sql';`
-3. Re-run: `pnpm run db:migrate`
-
----
-
-## Production Deployment
-
-### Environment Variables
-
-Set these in your hosting provider (Vercel, Railway, etc.):
-
-```bash
-TRR_DB_URL=postgresql://...
-TRR_DB_FALLBACK_URL=
-FIREBASE_SERVICE_ACCOUNT={"type":"service_account",...}
-ADMIN_EMAIL_ALLOWLIST=admin@example.com
-```
-
-### Run Migrations
-
-**Option 1: Manual (one-time)**
-```bash
-DATABASE_URL="${TRR_DB_URL}" pnpm run db:migrate
-```
-
-**Option 2: Automatic (on deploy)**
-
-Add to your CI/CD pipeline or hosting provider's build command:
-```bash
-pnpm run db:migrate && pnpm run build
-```
-
-### Security Considerations
-
-- **Never commit `.env.local`** to version control (already in `.gitignore`)
-- **Never commit the Firebase service account JSON** to the repo
-- Use server-side `ADMIN_EMAIL_ALLOWLIST` (not `NEXT_PUBLIC_ADMIN_EMAILS`)
-- Prefer server-side `ADMIN_DISPLAYNAME_ALLOWLIST` (client values are public)
-- If your provider uses a self-signed certificate, install their CA and reference it with `DATABASE_SSL_CA` or `DATABASE_SSL_CA_FILE` (fallback is `DATABASE_SSL_REJECT_UNAUTHORIZED=false`, but only if you trust the network)
-- Enable SSL for PostgreSQL connections (`?sslmode=require`)
-- Use strong passwords for database users
-- Rotate service account keys periodically
-
----
-
-## Support
-
-For issues or questions:
-- Check the [Firebase Console](https://console.firebase.google.com/)
-- Review database logs in your PostgreSQL provider's dashboard
-- Check Next.js dev server logs for detailed error messages
+Use that flag only when you intentionally need the legacy app bootstrap path. It is not the ownership target going forward.
+
+## Backend-Owned Parity Checklist
+
+This is the concrete backlog still living on the app side. It is not complete, and this checklist is intentionally not phrased as if the port is done.
+
+### 1. Shared-schema SQL still sitting in `apps/web/db/migrations/`
+
+These files should be ported into backend-owned SQL migrations before the app-side transitional flag can go away:
+
+- `013_create_surveys_schema.sql`
+- `014_create_normalized_survey_tables.sql`
+- `015_enable_rls.sql`
+- `016_create_rls_policies.sql`
+- `017_create_rls_role_grants.sql`
+- `018_rename_normalized_surveys_schema.sql`
+- `019_survey_trr_links_and_social_posts.sql`
+- `020_create_covered_shows.sql`
+- `022_create_admin_season_cast_survey_roles.sql`
+- `023_create_admin_reddit_sources.sql`
+- `024_add_post_flares_to_admin_reddit_communities.sql`
+- `025_add_analysis_flares_to_admin_reddit_communities.sql`
+- `026_add_analysis_all_flares_to_admin_reddit_communities.sql`
+- `027_add_focus_fields_to_admin_reddit_communities.sql`
+- `028_add_episode_discussion_rules_to_admin_reddit_communities.sql`
+- `029_add_source_kind_to_admin_reddit_threads.sql`
+- `031_create_admin_reddit_discovery_posts_cache.sql`
+- `032_create_admin_recent_people_views.sql`
+- `033_add_post_flair_categories_to_admin_reddit_communities.sql`
+- `034_rename_flare_columns_to_flair.sql`
+- `035_add_post_flair_assignments_to_admin_reddit_communities.sql`
+- `036_backfill_admin_reddit_community_display_names.sql`
+
+### 2. App runtime bootstrap SQL still embedded in code
+
+These are not handled by the cleaned-up migration runner, but they are still SQL ownership debt that should be ported into canonical backend-owned migrations or dedicated tooling:
+
+- [src/lib/server/shows/shows-repository.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/shows/shows-repository.ts)
+  - idempotent `ALTER TABLE survey_shows ... ADD COLUMN trr_show_id`
+  - idempotent `ALTER TABLE survey_shows ... ADD COLUMN fonts`
+  - `survey_show_palette_library` bootstrap DDL and trigger creation
+- [src/lib/server/admin/typography-repository.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/typography-repository.ts)
+  - `site_typography_sets`
+  - `site_typography_assignments`
+  - `set_site_typography_updated_at()` and related triggers
+
+### 3. App-local SQL that remains intentionally app-scoped for now
+
+These files still run in the default app-local lane and have not been moved during this cleanup:
+
+- `000_create_surveys_table.sql`
+- `000_seed_surveys.sql`
+- `001_create_global_profile_responses.sql`
+- `002_create_rhoslc_s6_responses.sql`
+- `003_create_survey_x_responses.sql`
+- `004_add_app_username_column.sql`
+- `005_make_survey_x_show_fields_nullable.sql`
+- `006_create_rhop_s10_responses.sql`
+- `007_expand_surveys_table.sql`
+- `008_create_survey_cast.sql`
+- `009_create_survey_episodes.sql`
+- `010_create_shows.sql`
+- `011_create_show_seasons.sql`
+- `012_create_survey_shows_tables.sql`
+- `021_add_rhoslc_s6_season_rating.sql`
+- `022_link_brand_shows_to_trr.sql`
+- `030_create_show_palette_library.sql`
+
+Keeping them in the app-local lane is a present-tense tooling choice, not a statement that long-term ownership is settled.
+
+## Practical Rule
+
+- If the work changes shared schema, grants, RLS, or `admin` / `firebase_surveys`, land it in `TRR-Backend` first.
+- If you only need the legacy app-local/public tables for TRR-APP behavior, the default app migration runner is the supported path.
+- Do not add new backend-owned migrations under `TRR-APP/apps/web/db/migrations/`.
