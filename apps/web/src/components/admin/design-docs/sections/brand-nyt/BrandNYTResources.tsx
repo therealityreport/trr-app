@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
 
 /* ------------------------------------------------------------------ */
 /*  NYT Brand — Resources                                              */
@@ -632,6 +633,88 @@ export default function BrandNYTResources() {
             </div>
           </div>
         ))}
+      </div>
+
+      <SectionLabel id="homepage-assets">Homepage Assets</SectionLabel>
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        Homepage-specific shell files grouped by responsibility so they stay
+        distinct from article assets and Birdkit resources.
+      </p>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: 16,
+          marginBottom: 28,
+        }}
+      >
+        <div className="dd-brand-card p-4 overflow-x-auto">
+          <SubSectionLabel>Homepage Stylesheets</SubSectionLabel>
+          <table
+            className="w-full text-left"
+            style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+          >
+            <tbody>
+              {NYT_HOMEPAGE_SNAPSHOT.stylesheets.map((asset) => (
+                <tr
+                  key={asset.href}
+                  style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
+                >
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-black)", fontWeight: 600 }}>
+                    {asset.label}
+                  </td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>
+                    {asset.area}
+                  </td>
+                  <td
+                    className="py-1.5 font-mono"
+                    style={{ fontSize: 10, color: "var(--dd-brand-accent)", wordBreak: "break-all" }}
+                  >
+                    {asset.href}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="dd-brand-card p-4 overflow-x-auto">
+          <SubSectionLabel>Homepage Scripts</SubSectionLabel>
+          <table
+            className="w-full text-left"
+            style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+          >
+            <tbody>
+              {NYT_HOMEPAGE_SNAPSHOT.scripts.map((asset) => (
+                <tr
+                  key={asset.href}
+                  style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
+                >
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-black)", fontWeight: 600 }}>
+                    {asset.label}
+                  </td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>
+                    {asset.area}
+                  </td>
+                  <td
+                    className="py-1.5 font-mono"
+                    style={{ fontSize: 10, color: "var(--dd-brand-accent)", wordBreak: "break-all" }}
+                  >
+                    {asset.href}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

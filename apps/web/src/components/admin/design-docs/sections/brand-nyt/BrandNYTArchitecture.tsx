@@ -1,6 +1,7 @@
 "use client";
 
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
 
 /* ------------------------------------------------------------------ */
 /*  NYT Brand — Architecture                                           */
@@ -486,6 +487,90 @@ export default function BrandNYTArchitecture() {
             dropdown tables), custom Svelte charts, ai2html containers with
             responsive artboard selectors.
           </p>
+        </div>
+      </div>
+
+      <SectionLabel id="homepage-runtime">Homepage Runtime</SectionLabel>
+
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        The homepage uses the NYT vi shell directly, then layers in menu,
+        media, and interactive bundles rather than embedding Birdkit as the
+        dominant runtime.
+      </p>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: 16,
+          marginBottom: 28,
+        }}
+      >
+        <div className="dd-brand-card p-4 overflow-x-auto">
+          <SubSectionLabel>Stylesheets</SubSectionLabel>
+          <table
+            className="w-full text-left"
+            style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+          >
+            <tbody>
+              {NYT_HOMEPAGE_SNAPSHOT.stylesheets.map((asset) => (
+                <tr
+                  key={asset.href}
+                  style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
+                >
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-black)", fontWeight: 600 }}>
+                    {asset.label}
+                  </td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>
+                    {asset.area}
+                  </td>
+                  <td
+                    className="py-1.5 font-mono"
+                    style={{ fontSize: 10, color: "var(--dd-brand-accent)", wordBreak: "break-all" }}
+                  >
+                    {asset.href}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="dd-brand-card p-4 overflow-x-auto">
+          <SubSectionLabel>Scripts</SubSectionLabel>
+          <table
+            className="w-full text-left"
+            style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+          >
+            <tbody>
+              {NYT_HOMEPAGE_SNAPSHOT.scripts.map((asset) => (
+                <tr
+                  key={asset.href}
+                  style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
+                >
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-black)", fontWeight: 600 }}>
+                    {asset.label}
+                  </td>
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-faint)" }}>
+                    {asset.area}
+                  </td>
+                  <td
+                    className="py-1.5 font-mono"
+                    style={{ fontSize: 10, color: "var(--dd-brand-accent)", wordBreak: "break-all" }}
+                  >
+                    {asset.href}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

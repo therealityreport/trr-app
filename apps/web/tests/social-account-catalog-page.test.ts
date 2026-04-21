@@ -2,9 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/admin/social/instagram/bravotv/catalog",
+  usePathname: () => "/social/instagram/bravotv/catalog",
   notFound: () => {
     throw new Error("NOT_FOUND");
+  },
+  redirect: (url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
   },
 }));
 
@@ -13,12 +16,12 @@ describe("social account catalog page", () => {
     vi.resetModules();
   });
 
-  it("normalizes valid params before rendering the catalog tab", async () => {
-    const page = await import("@/app/admin/social/[platform]/[handle]/catalog/page");
+  it("normalizes valid params before rendering the canonical catalog tab", async () => {
+    const page = await import("@/app/social/[platform]/[handle]/catalog/page");
     const element = await page.default({
       params: Promise.resolve({
-        platform: "Instagram",
-        handle: "@BravoTV",
+        platform: "instagram",
+        handle: "bravotv",
       }),
     });
 
@@ -28,7 +31,7 @@ describe("social account catalog page", () => {
   });
 
   it("rejects invalid handles with notFound", async () => {
-    const page = await import("@/app/admin/social/[platform]/[handle]/catalog/page");
+    const page = await import("@/app/social/[platform]/[handle]/catalog/page");
 
     await expect(
       page.default({
@@ -38,5 +41,18 @@ describe("social account catalog page", () => {
         }),
       }),
     ).rejects.toThrow("NOT_FOUND");
+  });
+
+  it("redirects the legacy admin page to the canonical catalog slug", async () => {
+    const page = await import("@/app/admin/social/[platform]/[handle]/catalog/page");
+
+    await expect(
+      page.default({
+        params: Promise.resolve({
+          platform: "Instagram",
+          handle: "@BravoTV",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_REDIRECT:/social/instagram/bravotv/catalog");
   });
 });

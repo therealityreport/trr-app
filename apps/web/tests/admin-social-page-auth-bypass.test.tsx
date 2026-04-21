@@ -98,20 +98,20 @@ describe("admin social page auth bypass", () => {
               {
                 key: "bravo-tv",
                 title: "Bravo TV",
-                description: "Bravo-owned shared social profiles and pipeline state.",
+                description: "Shared Bravo social handles used in sends and profile backfills.",
                 handles: [
                   {
                     platform: "instagram",
                     handle: "bravotv",
                     display_label: "@bravotv",
-                    href: "/admin/social/instagram/bravotv",
+                    href: "/social/instagram/bravotv",
                     external: false,
                   },
                   {
                     platform: "instagram",
                     handle: "bravowwhl",
                     display_label: "@bravowwhl",
-                    href: "/admin/social/instagram/bravowwhl",
+                    href: "/social/instagram/bravowwhl",
                     external: false,
                   },
                 ],
@@ -136,7 +136,7 @@ describe("admin social page auth bypass", () => {
                     platform: "instagram",
                     handle: "bravowwhl",
                     display_label: "@bravowwhl",
-                    href: "/admin/social/instagram/bravowwhl",
+                    href: "/social/instagram/bravowwhl",
                     external: false,
                   },
                 ],
@@ -224,8 +224,20 @@ describe("admin social page auth bypass", () => {
     });
 
     expect(
-      screen.queryByText("Bravo-owned account pipeline"),
-    ).not.toBeInTheDocument();
+      screen.getByText(
+        "Review network profiles, dedicated show social sets, and cast handles already stored in TRR.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Recent Runs")).not.toBeInTheDocument();
+    expect(screen.queryByText("Review Queue")).not.toBeInTheDocument();
+    expect(screen.queryByText("Shared Sources")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bravo account inventory")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ambiguous or unmatched posts")).not.toBeInTheDocument();
+    expect(screen.queryByText("No open shared review items.")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Reddit Dashboard" })).toHaveAttribute(
+      "href",
+      "/admin/social/reddit",
+    );
 
     expect(mocks.fetchAdminWithAuth.mock.calls[0]?.[0]).toBe(
       "/api/admin/social/landing",

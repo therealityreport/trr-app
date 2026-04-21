@@ -18,9 +18,18 @@ describe("admin route path parity", () => {
 
     expect(buildDesignDocsPath("nyt-articles")).toBe("/design-docs/nyt-articles");
     expect(buildDesignDocsPath("nyt-games-articles")).toBe("/design-docs/nyt-games-articles");
+    expect(buildDesignDocsPath("brand-nyt/homepage")).toBe("/design-docs/brand-nyt/homepage");
     expect(buildDesignDocsPath("brand-the-athletic/resources")).toBe(
       "/design-docs/brand-the-athletic/resources",
     );
+  });
+
+  it("exposes the NYT homepage tab beneath the NYT brand section", () => {
+    const nytSubSections = getBrandSubSections("brand-nyt");
+    const homepageLink = nytSubSections.find((subSection) => subSection.anchor === "homepage");
+
+    expect(homepageLink).toBeDefined();
+    expect(homepageLink?.href).toBe("/design-docs/brand-nyt/homepage");
   });
 
   it("keeps NYT Games nested beneath the NYT Games parent brand", () => {

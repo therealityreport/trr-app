@@ -7,6 +7,7 @@ import ClientOnly from "@/components/ClientOnly";
 import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import RedditSourcesManager from "@/components/admin/reddit-sources-manager";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import type { SocialLandingPayload } from "@/lib/admin/social-landing";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -120,8 +121,8 @@ export default function RedditDashboardPage() {
     redditSummary.active_community_count + redditSummary.archived_community_count;
   const breadcrumbs = useMemo(
     () => [
-      ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
-      { label: "Reddit Dashboard", href: "/social/reddit" },
+      ...buildAdminSectionBreadcrumb("Social Analytics", ADMIN_SOCIAL_PATH),
+      { label: "Reddit Dashboard", href: buildSocialPath("reddit") },
     ],
     [],
   );
@@ -150,7 +151,7 @@ export default function RedditDashboardPage() {
           </p>
           <div className="mt-4">
             <Link
-              href="/social"
+              href={ADMIN_SOCIAL_PATH}
               className="inline-flex rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
             >
               Back to Social
@@ -166,14 +167,14 @@ export default function RedditDashboardPage() {
       <RedditAdminShell
         breadcrumbs={breadcrumbs}
         title="Reddit Dashboard"
-        backHref="/social"
+        backHref={ADMIN_SOCIAL_PATH}
         backLabel="Back to Social"
-        seasonLinks={[{ key: "social", label: "Social Hub", href: "/social" }]}
+        seasonLinks={[{ key: "social", label: "Social Hub", href: ADMIN_SOCIAL_PATH }]}
         socialLinks={[
           {
             key: "reddit-dashboard",
             label: "REDDIT DASHBOARD",
-            href: "/social/reddit",
+            href: buildSocialPath("reddit"),
             isActive: true,
           },
         ]}

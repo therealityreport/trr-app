@@ -372,6 +372,21 @@ function normalizeFetchErrorMessage(error: unknown, fallback = "Fetch failed"): 
   return fallback;
 }
 
+function formatEmbeddedQueueErrorMessage(error: string | null | undefined): string | null {
+  const raw = String(error ?? "").trim();
+  if (!raw) return null;
+
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("statement timeout")) {
+    return "Queue activity summary timed out, but workers are still reporting healthy heartbeats.";
+  }
+  if (normalized.includes("queue_aggregate_query_failed")) {
+    return "Queue activity summary could not be fully loaded, but worker health is still reporting.";
+  }
+
+  return `Queue activity summary could not be fully loaded: ${truncate(raw, 140)}`;
+}
+
 type WorkerOrigin = "aws" | "local" | "unknown";
 
 type SummaryCardTone = "neutral" | "good" | "warn" | "bad";
@@ -440,6 +455,67 @@ type SystemHealthViewModel = {
   liveWorkers: LiveWorkerRowViewModel[];
   recentFailureSummary: string;
   recentFailures: ProblemFailureViewModel[];
+};
+
+type SystemHealthDebugSnapshot = {
+  captured_at: string;
+  app: {
+    pathname: string | null;
+    href: string | null;
+    timezone: string | null;
+    user_agent: string | null;
+  };
+  system_jobs_health: {
+    modal_state: HealthState;
+    modal_state_label: string;
+    is_social_admin_route: boolean;
+    live_status_connected: boolean;
+    live_status_generated_at: string | null;
+    live_status_sequence: number | null;
+    last_fetched_at: string | null;
+    notices: {
+      action_notice: string | null;
+      action_error: string | null;
+      worker_detail_error: string | null;
+      debug_error: string | null;
+    };
+    selected_worker_id: string | null;
+    summary:
+      | {
+          status_summary: string;
+          summary_cards: SummaryCardViewModel[];
+          execution: {
+            owner: string;
+            backend: string;
+            mode: string;
+            policy: string;
+          };
+          instagram_remote_auth: {
+            label: string;
+            detail: string;
+          };
+          shared_account_backfill: {
+            label: string;
+            detail: string;
+          };
+          workers_summary_label: string;
+          recent_failure_summary: string;
+        }
+      | null;
+    admin_operations_summary: AdminOperationsHealth["summary"] | null;
+    errors: {
+      live_status_error: string | null;
+      queue_status_error: string | null;
+      admin_operations_error: string | null;
+    };
+    raw_payloads: {
+      health_dot: HealthDotStatus | null;
+      queue_status: QueueStatus | null;
+      admin_operations: AdminOperationsHealth | null;
+      selected_worker_detail: WorkerDetail | null;
+      job_debug_result: DebugJobResult | null;
+    };
+  };
 };
 
 function preferAwsWorkerRows(backend: string | null | undefined): boolean {
@@ -718,7 +794,6 @@ function buildQueueBreakdownRows(
 
 function modalQueueHealthState(queueStatus: QueueStatus): HealthState {
   if (!queueStatus.queue_enabled) return "down";
-  if (queueStatus.queue.error) return "error";
 
   const healthyWorkers = Number(queueStatus.workers.healthy_workers ?? 0);
   const workersHealthy = Boolean(queueStatus.workers.healthy);
@@ -727,6 +802,9 @@ function modalQueueHealthState(queueStatus: QueueStatus): HealthState {
     return "degraded";
   }
   if (dispatcherResolved === false) {
+    return "degraded";
+  }
+  if (queueStatus.queue.error) {
     return "degraded";
   }
 
@@ -770,6 +848,7 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
   const instagramRemoteHealthyWorkers = Number(instagramRemoteAuth?.healthy_authenticated_workers ?? 0);
   const instagramRemoteFreshWorkers = Number(instagramRemoteAuth?.fresh_authenticated_workers ?? 0);
   const sharedAccountBackfillReadiness = queueStatus.workers.shared_account_backfill_readiness;
+  const embeddedQueueErrorMessage = formatEmbeddedQueueErrorMessage(queueStatus.queue.error);
   const oldestQueuedAgeSeconds =
     typeof queueStatus.workers.oldest_queued_age_seconds === "number"
       ? queueStatus.workers.oldest_queued_age_seconds
@@ -782,6 +861,8 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     statusSummary = "Checking workers and queue activity now.";
   } else if (state === "error" || state === "down") {
     statusSummary = "Health details could not be loaded.";
+  } else if (embeddedQueueErrorMessage) {
+    statusSummary = embeddedQueueErrorMessage;
   } else if (dispatchBlockedCount > 0 || dispatcherReadiness?.resolved === false) {
     statusSummary =
       dispatcherReadiness?.resolved === false
@@ -959,6 +1040,120 @@ function buildSystemHealthViewModel(queueStatus: QueueStatus, state: HealthState
     recentFailureSummary: `${recentFailureCount.toLocaleString()} recent failures`,
     recentFailures,
   };
+}
+
+function buildSystemHealthDebugSnapshot({
+  pathname,
+  socialRoute,
+  modalState,
+  liveStatusConnected,
+  liveStatusGeneratedAt,
+  liveStatusSequence,
+  lastFetched,
+  statusData,
+  queueStatusData,
+  queueStatusError,
+  adminOperationsData,
+  adminOperationsError,
+  liveStatusError,
+  actionNotice,
+  actionError,
+  workerDetailError,
+  debugError,
+  selectedWorkerId,
+  workerDetail,
+  debugResult,
+  viewModel,
+}: {
+  pathname: string;
+  socialRoute: boolean;
+  modalState: HealthState;
+  liveStatusConnected: boolean;
+  liveStatusGeneratedAt: string | null;
+  liveStatusSequence: number | null;
+  lastFetched: Date | null;
+  statusData: HealthDotStatus | null;
+  queueStatusData: QueueStatus | null;
+  queueStatusError: string | null;
+  adminOperationsData: AdminOperationsHealth | null;
+  adminOperationsError: string | null;
+  liveStatusError: string | null;
+  actionNotice: string | null;
+  actionError: string | null;
+  workerDetailError: string | null;
+  debugError: string | null;
+  selectedWorkerId: string | null;
+  workerDetail: WorkerDetail | null;
+  debugResult: DebugJobResult | null;
+  viewModel: SystemHealthViewModel | null;
+}): string {
+  const snapshot: SystemHealthDebugSnapshot = {
+    captured_at: new Date().toISOString(),
+    app: {
+      pathname: pathname || null,
+      href: typeof window !== "undefined" ? window.location.href : null,
+      timezone:
+        typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone || null : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    },
+    system_jobs_health: {
+      modal_state: modalState,
+      modal_state_label: modalHealthLabel(modalState),
+      is_social_admin_route: socialRoute,
+      live_status_connected: liveStatusConnected,
+      live_status_generated_at: liveStatusGeneratedAt,
+      live_status_sequence: liveStatusSequence,
+      last_fetched_at: lastFetched?.toISOString() ?? null,
+      notices: {
+        action_notice: actionNotice,
+        action_error: actionError,
+        worker_detail_error: workerDetailError,
+        debug_error: debugError,
+      },
+      selected_worker_id: selectedWorkerId,
+      summary: viewModel
+        ? {
+            status_summary: viewModel.statusSummary,
+            summary_cards: viewModel.summaryCards,
+            execution: {
+              owner: viewModel.executionOwnerLabel,
+              backend: viewModel.executionBackendLabel,
+              mode: viewModel.executionModeLabel,
+              policy: viewModel.executionPolicyLabel,
+            },
+            instagram_remote_auth: {
+              label: viewModel.instagramRemoteAuthLabel,
+              detail: viewModel.instagramRemoteAuthDetail,
+            },
+            shared_account_backfill: {
+              label: viewModel.sharedAccountBackfillReadinessLabel,
+              detail: viewModel.sharedAccountBackfillReadinessDetail,
+            },
+            workers_summary_label: viewModel.workersSummaryLabel,
+            recent_failure_summary: viewModel.recentFailureSummary,
+          }
+        : null,
+      admin_operations_summary: adminOperationsData?.summary ?? null,
+      errors: {
+        live_status_error: liveStatusError,
+        queue_status_error: queueStatusError,
+        admin_operations_error: adminOperationsError,
+      },
+      raw_payloads: {
+        health_dot: statusData,
+        queue_status: queueStatusData,
+        admin_operations: adminOperationsData,
+        selected_worker_detail: workerDetail,
+        job_debug_result: debugResult,
+      },
+    },
+  };
+
+  return [
+    "TRR System Jobs Health Debug Snapshot",
+    "Paste this into Codex or Claude Code to debug the current app status from the System Jobs Health modal.",
+    JSON.stringify(snapshot, null, 2),
+  ].join("\n\n");
 }
 
 export function useQueueStatusModal(options: { isOpen: boolean }) {
@@ -1921,21 +2116,26 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const [debugJobLoadingId, setDebugJobLoadingId] = useState<string | null>(null);
   const [debugResult, setDebugResult] = useState<DebugJobResult | null>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
+  const [copyingDebugSnapshot, setCopyingDebugSnapshot] = useState(false);
 
-  const statusData: HealthDotStatus | null = liveStatus.data?.health_dot
-    ? (liveStatus.data.health_dot as HealthDotStatus)
-    : queueStatus.data
-    ? {
-        queue_enabled: queueStatus.data.queue_enabled,
-        workers: {
-          healthy: queueStatus.data.workers.healthy,
-          healthy_workers: queueStatus.data.workers.healthy_workers,
-        },
-        queue: {
-          by_status: queueStatus.data.queue.by_status,
-        },
-      }
-    : null;
+  const statusData = useMemo<HealthDotStatus | null>(
+    () =>
+      liveStatus.data?.health_dot
+        ? (liveStatus.data.health_dot as HealthDotStatus)
+        : queueStatus.data
+          ? {
+              queue_enabled: queueStatus.data.queue_enabled,
+              workers: {
+                healthy: queueStatus.data.workers.healthy,
+                healthy_workers: queueStatus.data.workers.healthy_workers,
+              },
+              queue: {
+                by_status: queueStatus.data.queue.by_status,
+              },
+            }
+          : null,
+    [liveStatus.data?.health_dot, queueStatus.data],
+  );
 
   const state = healthState(statusData, liveStatus.error ?? queueStatus.error);
   const lastFetched = liveStatus.lastFetched ?? adminOperations.lastFetched ?? queueStatus.lastFetched;
@@ -1965,9 +2165,80 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     () => (queueStatus.data ? buildSystemHealthViewModel(queueStatus.data, modalState) : null),
     [modalState, queueStatus.data],
   );
-  const hasActiveAdminOperations = (adminOperations.data?.summary.active_total ?? 0) > 0;
-  const hasStaleAdminOperations = (adminOperations.data?.summary.stale_total ?? 0) > 0;
   const hasRecentFailures = (queueStatus.data?.queue.recent_failures?.length ?? 0) > 0;
+  const runningJobsCount = queueStatus.data?.queue.running_jobs?.length ?? 0;
+  const staleRunningJobsCount = Number(queueStatus.data?.workers.stale_running_count ?? 0);
+
+  const refreshSystemHealthInBackground = useCallback(() => {
+    void refreshSystemHealth().catch(() => {
+      // The mutation already succeeded; do not overwrite the operator-facing
+      // success notice with a secondary refresh timeout.
+    });
+  }, [refreshSystemHealth]);
+
+  const copyDebugSnapshot = useCallback(async () => {
+    setActionNotice(null);
+    setActionError(null);
+    setCopyingDebugSnapshot(true);
+    try {
+      const clipboard = navigator.clipboard;
+      if (!clipboard?.writeText) {
+        throw new Error("Clipboard access is not available in this browser.");
+      }
+
+      const snapshotText = buildSystemHealthDebugSnapshot({
+        pathname,
+        socialRoute,
+        modalState,
+        liveStatusConnected: Boolean(liveStatus.connected),
+        liveStatusGeneratedAt: typeof liveStatus.data?.generated_at === "string" ? liveStatus.data.generated_at : null,
+        liveStatusSequence: typeof liveStatus.data?.sequence === "number" ? liveStatus.data.sequence : null,
+        lastFetched,
+        statusData,
+        queueStatusData: queueStatus.data,
+        queueStatusError: queueStatus.error,
+        adminOperationsData: adminOperations.data,
+        adminOperationsError: adminOperations.error,
+        liveStatusError: liveStatus.error,
+        actionNotice,
+        actionError,
+        workerDetailError,
+        debugError,
+        selectedWorkerId,
+        workerDetail,
+        debugResult,
+        viewModel,
+      });
+
+      await clipboard.writeText(snapshotText);
+      setActionNotice("Copied System Jobs Health debug snapshot to clipboard.");
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to copy debug snapshot");
+    } finally {
+      setCopyingDebugSnapshot(false);
+    }
+  }, [
+    actionError,
+    actionNotice,
+    adminOperations.data,
+    adminOperations.error,
+    debugError,
+    debugResult,
+    lastFetched,
+    liveStatus.connected,
+    liveStatus.data,
+    liveStatus.error,
+    modalState,
+    pathname,
+    queueStatus.data,
+    queueStatus.error,
+    selectedWorkerId,
+    socialRoute,
+    statusData,
+    viewModel,
+    workerDetail,
+    workerDetailError,
+  ]);
 
   const cancelStuckJobs = useCallback(
     async (jobIds: string[]) => {
@@ -1989,13 +2260,13 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       return {
         cancelledJobs: Number(payload.cancelled_jobs ?? 0),
         stuckJobsRemaining: Number(payload.stuck_jobs_remaining ?? 0),
       };
     },
-    [refreshSystemHealth],
+    [refreshSystemHealthInBackground],
   );
 
   const cancelDispatchBlockedJobs = useCallback(
@@ -2018,13 +2289,13 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       return {
         cancelledJobs: Number(payload.cancelled_jobs ?? 0),
         dispatchBlockedJobsRemaining: Number(payload.dispatch_blocked_jobs_remaining ?? 0),
       };
     },
-    [refreshSystemHealth],
+    [refreshSystemHealthInBackground],
   );
 
   const fetchWorkerDetail = useCallback(async (workerId: string) => {
@@ -2213,20 +2484,22 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       const cancelledOperations = Number(payload.cancelled_operations ?? 0);
       const remaining = Number(payload.stale_operations_remaining ?? 0);
       setActionNotice(
         cancelledOperations > 0
           ? `Cancelled ${cancelledOperations} stale admin operation${cancelledOperations === 1 ? "" : "s"}.${remaining > 0 ? ` ${remaining} still stale.` : ""}`
-          : "No stale admin operations needed cleanup.",
+          : staleRunningJobsCount > 0
+            ? `No stale admin operations needed cleanup. ${staleRunningJobsCount} social job${staleRunningJobsCount === 1 ? " is" : "s are"} still stale; use Cancel all active jobs.`
+            : "No stale admin operations needed cleanup.",
       );
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Failed to clear stale admin operations");
     } finally {
       setClearingStaleAdminOperations(false);
     }
-  }, [refreshSystemHealth]);
+  }, [refreshSystemHealthInBackground, staleRunningJobsCount]);
 
   const cancelSingleAdminOperation = useCallback(
     async (operationId: string) => {
@@ -2251,7 +2524,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         if (!response.ok) {
           throw new Error(payload.error ?? `HTTP ${response.status}`);
         }
-        await refreshSystemHealth();
+        refreshSystemHealthInBackground();
         const cancelledOperations = Number(payload.cancelled_operations ?? 0);
         const status = String(payload.operation?.status || "").trim().toLowerCase();
         if (status === "cancelled") {
@@ -2277,7 +2550,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         });
       }
     },
-    [refreshSystemHealth],
+    [refreshSystemHealthInBackground],
   );
 
   const cancelAllActiveAdminOperations = useCallback(async () => {
@@ -2303,20 +2576,22 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       const requested = Number(payload.cancel_requested_operations ?? 0);
       const remaining = Number(payload.active_operations_remaining ?? 0);
       setActionNotice(
         requested > 0
           ? `Requested cancellation for ${requested} active admin operation${requested === 1 ? "" : "s"}.${remaining > 0 ? ` ${remaining} still active.` : ""}`
-          : "No active admin operations needed cancellation.",
+          : runningJobsCount > 0
+            ? `No active admin operations needed cancellation. ${runningJobsCount} social job${runningJobsCount === 1 ? " is" : "s are"} still running; use Cancel all active jobs.`
+            : "No active admin operations needed cancellation.",
       );
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Failed to cancel active admin operations");
     } finally {
       setCancelingAllActiveAdminOperations(false);
     }
-  }, [refreshSystemHealth]);
+  }, [refreshSystemHealthInBackground, runningJobsCount]);
 
   const dismissRecentFailure = useCallback(
     async (jobId: string) => {
@@ -2342,7 +2617,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         if (!response.ok) {
           throw new Error(payload.error ?? `HTTP ${response.status}`);
         }
-        await refreshSystemHealth();
+        refreshSystemHealthInBackground();
         const dismissedJobs = Number(payload.dismissed_jobs ?? 0);
         const remaining = Number(payload.recent_failures_remaining ?? 0);
         if (dismissedJobs > 0) {
@@ -2364,7 +2639,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
         });
       }
     },
-    [refreshSystemHealth],
+    [refreshSystemHealthInBackground],
   );
 
   const dismissAllRecentFailures = useCallback(async () => {
@@ -2390,7 +2665,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       const dismissedJobs = Number(payload.dismissed_jobs ?? 0);
       const remaining = Number(payload.recent_failures_remaining ?? 0);
       setActionNotice(
@@ -2403,7 +2678,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setDismissingAllRecentFailures(false);
     }
-  }, [refreshSystemHealth]);
+  }, [refreshSystemHealthInBackground]);
 
   const cancelAllActiveJobs = useCallback(async () => {
     setActionNotice(null);
@@ -2428,7 +2703,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       const cancelledJobs = Number(payload.cancelled_jobs ?? 0);
       const remaining = Number(payload.active_jobs_remaining ?? 0);
       if (cancelledJobs > 0) {
@@ -2441,7 +2716,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setCancelingActiveJobs(false);
     }
-  }, [refreshSystemHealth]);
+  }, [refreshSystemHealthInBackground]);
 
   const resetSocialIngestHealth = useCallback(async () => {
     setActionNotice(null);
@@ -2470,7 +2745,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       setActionNotice(
         `Fresh slate ready: cancelled ${Number(payload.cancelled_jobs ?? 0)} active jobs, ` +
           `dismissed ${Number(payload.dismissed_failures ?? 0)} recent failures, ` +
@@ -2484,7 +2759,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setResettingHealth(false);
     }
-  }, [refreshSystemHealth]);
+  }, [refreshSystemHealthInBackground]);
 
   const clearOlderWorkerCheckins = useCallback(async () => {
     setActionNotice(null);
@@ -2509,7 +2784,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
       if (!response.ok) {
         throw new Error(payload.error ?? `HTTP ${response.status}`);
       }
-      await refreshSystemHealth();
+      refreshSystemHealthInBackground();
       const deletedWorkers = Number(payload.deleted_workers ?? 0);
       const totalWorkersAfter = Number(payload.total_workers_after ?? 0);
       setActionNotice(
@@ -2522,7 +2797,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
     } finally {
       setClearingOlderWorkerCheckins(false);
     }
-  }, [refreshSystemHealth]);
+  }, [refreshSystemHealthInBackground]);
 
   return (
     <AdminModal
@@ -2549,6 +2824,18 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
           <span className="text-xs text-zinc-400">
             {lastFetched ? `Updated ${relativeTime(lastFetched.toISOString())}` : "Loading..."}
           </span>
+          <button
+            type="button"
+            onClick={() => {
+              void copyDebugSnapshot();
+            }}
+            disabled={copyingDebugSnapshot}
+            aria-label="Copy debug snapshot"
+            title="Copy the current System Jobs Health state for Codex or Claude Code"
+            className="rounded-md border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {copyingDebugSnapshot ? "Copying..." : "Copy"}
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -2587,9 +2874,19 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               <button
                 type="button"
                 onClick={() => {
+                  void cancelAllActiveJobs();
+                }}
+                disabled={cancelingActiveJobs}
+                className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {cancelingActiveJobs ? "Cancelling active jobs..." : "Cancel all active jobs"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
                   void cancelAllActiveAdminOperations();
                 }}
-                disabled={cancelingAllActiveAdminOperations || !hasActiveAdminOperations}
+                disabled={cancelingAllActiveAdminOperations}
                 className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {cancelingAllActiveAdminOperations ? "Cancelling active admin jobs..." : "Cancel all active admin operations"}
@@ -2599,7 +2896,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                 onClick={() => {
                   void clearStaleAdminOperations();
                 }}
-                disabled={clearingStaleAdminOperations || !hasStaleAdminOperations}
+                disabled={clearingStaleAdminOperations}
                 className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {clearingStaleAdminOperations ? "Clearing stale..." : "Force cancel stale admin operations"}
@@ -2684,7 +2981,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                           onClick={() => {
                             void cancelAllActiveAdminOperations();
                           }}
-                          disabled={cancelingAllActiveAdminOperations || (adminOperations.data.summary.active_total ?? 0) <= 0}
+                          disabled={cancelingAllActiveAdminOperations}
                           className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {cancelingAllActiveAdminOperations ? "Cancelling..." : "Cancel all active admin operations"}
@@ -2713,7 +3010,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
                           onClick={() => {
                             void clearStaleAdminOperations();
                           }}
-                          disabled={clearingStaleAdminOperations || (adminOperations.data.summary.stale_total ?? 0) <= 0}
+                          disabled={clearingStaleAdminOperations}
                           className="rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {clearingStaleAdminOperations ? "Clearing..." : "Force cancel stale admin operations"}
@@ -2874,7 +3171,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               onClick={() => {
                 void cancelAllActiveAdminOperations();
               }}
-              disabled={cancelingAllActiveAdminOperations || (adminOperations.data?.summary.active_total ?? 0) <= 0}
+              disabled={cancelingAllActiveAdminOperations}
               className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {cancelingAllActiveAdminOperations ? "Cancelling active admin operations..." : "Cancel all active admin operations"}
@@ -2887,7 +3184,7 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
               onClick={() => {
                 void clearStaleAdminOperations();
               }}
-              disabled={clearingStaleAdminOperations || (adminOperations.data?.summary.stale_total ?? 0) <= 0}
+              disabled={clearingStaleAdminOperations}
               className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {clearingStaleAdminOperations ? "Clearing stale admin operations..." : "Force cancel stale admin operations"}

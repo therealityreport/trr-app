@@ -246,12 +246,6 @@ describe("admin host proxy", () => {
     ["/shows/settings", "http://admin.localhost:3000/admin/shows/settings"],
     ["/social", "http://admin.localhost:3000/admin/social"],
     ["/social/reddit", "http://admin.localhost:3000/admin/social/reddit"],
-    // `catalog` and `socialblade` are unmigrated account-profile tabs — they
-    // still rewrite to /admin/social/... via the generic prefix rule, while
-    // the five migrated tabs (stats/comments/posts/hashtags/collaborators-tags)
-    // are served directly at /social/... (see the canonical-no-rewrite block below).
-    ["/social/instagram/bravotv/catalog", "http://admin.localhost:3000/admin/social/instagram/bravotv/catalog"],
-    ["/social/instagram/bravotv/socialblade", "http://admin.localhost:3000/admin/social/instagram/bravotv/socialblade"],
     ["/design-docs/overview", "http://admin.localhost:3000/admin/design-docs/overview"],
     ["/api-references", "http://admin.localhost:3000/admin/api-references"],
     ["/dev-dashboard/skills-and-agents", "http://admin.localhost:3000/admin/dev-dashboard/skills-and-agents"],
@@ -294,13 +288,15 @@ describe("admin host proxy", () => {
     expect(response.headers.get("x-middleware-rewrite")).toBe(expectedRewrite);
   });
 
-  // The five migrated social-account-profile tabs (stats/comments/posts/
-  // hashtags/collaborators-tags) render at canonical /social/... paths with
-  // zero rewrite — Next.js serves the /app/social/... page directly. This
-  // locks the fix for the ERR_TOO_MANY_REDIRECTS loop on
-  // /social/instagram/bravotv/comments.
+  // All migrated social-account-profile tabs render at canonical /social/...
+  // paths with zero rewrite — Next.js serves the /app/social/... page
+  // directly. This locks the fix for the ERR_TOO_MANY_REDIRECTS loop on
+  // /social/instagram/bravotv/comments and keeps slug visits stable for every
+  // tab, including catalog and socialblade.
   it.each([
     "/social/instagram/bravotv",
+    "/social/instagram/bravotv/socialblade",
+    "/social/instagram/bravotv/catalog",
     "/social/instagram/bravotv/posts",
     "/social/instagram/bravotv/hashtags",
     "/social/instagram/bravotv/collaborators-tags",
@@ -345,9 +341,9 @@ describe("admin host proxy", () => {
     const response = proxy(request);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("x-middleware-rewrite")).toBe(
-      "http://admin.localhost:3000/admin/social/instagram/bravotv/catalog?tab=recent&sort=desc",
-    );
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(response.headers.get("location")).toBeNull();
   });
 
   it("keeps root show routes on the public host", () => {

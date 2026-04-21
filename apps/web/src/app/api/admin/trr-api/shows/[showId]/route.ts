@@ -19,6 +19,8 @@ import {
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
 import { buildCanonicalShowAlternativeNames } from "@/lib/admin/show-page/details-form";
+import { normalizePersonExternalIdValue } from "@/lib/admin/person-external-ids";
+import { normalizeSocialAccountProfileHandle } from "@/lib/admin/show-admin-routes";
 import { slugifyToken } from "@/lib/slugify";
 import {
   invalidateTrrShowReadCaches,
@@ -31,6 +33,30 @@ export const dynamic = "force-dynamic";
 interface RouteParams {
   params: Promise<{ showId: string }>;
 }
+
+const SHOW_SOCIAL_HANDLE_FIELDS = [
+  "facebook_handle",
+  "instagram_handle",
+  "tiktok_handle",
+  "twitter_handle",
+  "youtube_handle",
+] as const;
+type ShowSocialHandleField = (typeof SHOW_SOCIAL_HANDLE_FIELDS)[number];
+type ShowSocialHandlePlatform = "facebook" | "instagram" | "tiktok" | "twitter" | "youtube";
+const SHOW_SOCIAL_HANDLE_PLATFORM_BY_FIELD: Record<ShowSocialHandleField, ShowSocialHandlePlatform> = {
+  facebook_handle: "facebook",
+  instagram_handle: "instagram",
+  tiktok_handle: "tiktok",
+  twitter_handle: "twitter",
+  youtube_handle: "youtube",
+};
+const SHOW_SOCIAL_EXTERNAL_ID_KEYS_BY_FIELD: Record<ShowSocialHandleField, readonly string[]> = {
+  facebook_handle: ["facebook_handle", "facebook"],
+  instagram_handle: ["instagram_handle", "instagram"],
+  tiktok_handle: ["tiktok_handle", "tiktok"],
+  twitter_handle: ["twitter_handle", "twitter", "x_handle"],
+  youtube_handle: ["youtube_handle", "youtube"],
+};
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -84,6 +110,44 @@ function normalizeNullableIntegerString(
     throw new Error(`${fieldName}_invalid`);
   }
   return Number.parseInt(trimmed, 10);
+}
+
+function normalizeOptionalShowSocialHandle(
+  value: unknown,
+  fieldName: ShowSocialHandleField
+): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName}_invalid`);
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const platform = SHOW_SOCIAL_HANDLE_PLATFORM_BY_FIELD[fieldName];
+  const normalizedValue = normalizePersonExternalIdValue(platform, trimmed);
+  if (!normalizedValue) {
+    throw new Error(`${fieldName}_invalid`);
+  }
+
+  if (platform === "youtube") {
+    if (
+      normalizedValue.startsWith("channel/") ||
+      normalizedValue.startsWith("user/") ||
+      normalizedValue.startsWith("c/")
+    ) {
+      throw new Error(`${fieldName}_invalid`);
+    }
+  }
+
+  const canonicalHandle = normalizeSocialAccountProfileHandle(normalizedValue);
+  if (!canonicalHandle) {
+    throw new Error(`${fieldName}_invalid`);
+  }
+  return canonicalHandle;
 }
 
 /**
@@ -180,6 +244,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const tvdbId = normalizeNullableIntegerString(body.tvdb_id, "tvdb_id");
     const wikidataId = normalizeText(body.wikidata_id);
     const tvRageId = normalizeNullableIntegerString(body.tv_rage_id, "tv_rage_id");
+    const facebookHandle = normalizeOptionalShowSocialHandle(body.facebook_handle, "facebook_handle");
+    const instagramHandle = normalizeOptionalShowSocialHandle(body.instagram_handle, "instagram_handle");
+    const tiktokHandle = normalizeOptionalShowSocialHandle(body.tiktok_handle, "tiktok_handle");
+    const twitterHandle = normalizeOptionalShowSocialHandle(body.twitter_handle, "twitter_handle");
+    const youtubeHandle = normalizeOptionalShowSocialHandle(body.youtube_handle, "youtube_handle");
     const genres = normalizeStringArray(body.genres);
     const networks = normalizeStringArray(body.networks);
     const streamingProviders = normalizeStringArray(body.streaming_providers);
@@ -213,11 +282,23 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    const hasExternalIdsUpdate =
+      imdbIdRaw !== undefined ||
+      tmdbId !== undefined ||
+      tvdbId !== undefined ||
+      wikidataId !== undefined ||
+      tvRageId !== undefined ||
+      facebookHandle !== undefined ||
+      instagramHandle !== undefined ||
+      tiktokHandle !== undefined ||
+      twitterHandle !== undefined ||
+      youtubeHandle !== undefined;
+
     const currentShow =
-      nickname !== undefined || alternativeNamesInput !== undefined
+      nickname !== undefined || alternativeNamesInput !== undefined || hasExternalIdsUpdate
         ? await getShowById(showId)
         : null;
-    if ((nickname !== undefined || alternativeNamesInput !== undefined) && !currentShow) {
+    if ((nickname !== undefined || alternativeNamesInput !== undefined || hasExternalIdsUpdate) && !currentShow) {
       return NextResponse.json({ error: "Show not found" }, { status: 404 });
     }
 
@@ -291,6 +372,38 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    const externalIdUpdates: Record<string, string | number | null> = {
+      ...(imdbIdRaw !== undefined ? { imdb_id: imdbIdRaw.length > 0 ? imdbIdRaw : null } : {}),
+      ...(tmdbId !== undefined ? { tmdb_id: tmdbId } : {}),
+      ...(tvdbId !== undefined ? { tvdb_id: tvdbId } : {}),
+      ...(wikidataId !== undefined ? { wikidata_id: wikidataId.length > 0 ? wikidataId : null } : {}),
+      ...(tvRageId !== undefined ? { tv_rage_id: tvRageId } : {}),
+    };
+
+    const socialHandleUpdates: Record<ShowSocialHandleField, string | null | undefined> = {
+      facebook_handle: facebookHandle,
+      instagram_handle: instagramHandle,
+      tiktok_handle: tiktokHandle,
+      twitter_handle: twitterHandle,
+      youtube_handle: youtubeHandle,
+    };
+
+    for (const field of SHOW_SOCIAL_HANDLE_FIELDS) {
+      const nextValue = socialHandleUpdates[field];
+      if (nextValue === undefined) continue;
+      for (const key of SHOW_SOCIAL_EXTERNAL_ID_KEYS_BY_FIELD[field]) {
+        externalIdUpdates[key] = nextValue;
+      }
+    }
+
+    const mergedExternalIds =
+      hasExternalIdsUpdate && currentShow
+        ? {
+            ...(((currentShow.external_ids as Record<string, unknown> | null) ?? {}) as Record<string, unknown>),
+            ...externalIdUpdates,
+          }
+        : undefined;
+
     const show = await updateShowById(showId, {
       ...(name !== undefined ? { name } : {}),
       ...(slug !== undefined ? { slug } : {}),
@@ -299,21 +412,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       ...(alternativeNames !== undefined ? { alternativeNames } : {}),
       ...(imdbIdRaw !== undefined ? { imdbId: imdbIdRaw.length > 0 ? imdbIdRaw : null } : {}),
       ...(tmdbId !== undefined ? { tmdbId } : {}),
-      ...((imdbIdRaw !== undefined ||
-        tmdbId !== undefined ||
-        tvdbId !== undefined ||
-        wikidataId !== undefined ||
-        tvRageId !== undefined)
-        ? {
-            externalIds: {
-              ...(imdbIdRaw !== undefined ? { imdb_id: imdbIdRaw.length > 0 ? imdbIdRaw : null } : {}),
-              ...(tmdbId !== undefined ? { tmdb_id: tmdbId } : {}),
-              ...(tvdbId !== undefined ? { tvdb_id: tvdbId } : {}),
-              ...(wikidataId !== undefined ? { wikidata_id: wikidataId.length > 0 ? wikidataId : null } : {}),
-              ...(tvRageId !== undefined ? { tv_rage_id: tvRageId } : {}),
-            },
-          }
-        : {}),
+      ...(mergedExternalIds !== undefined ? { externalIds: mergedExternalIds } : {}),
       ...(genres !== undefined ? { genres } : {}),
       ...(networks !== undefined ? { networks } : {}),
       ...(streamingProviders !== undefined ? { streamingProviders } : {}),
@@ -345,9 +444,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
     if (
       error instanceof Error &&
-      ["tmdb_id_invalid", "tvdb_id_invalid", "tv_rage_id_invalid"].includes(error.message)
+      [
+        "tmdb_id_invalid",
+        "tvdb_id_invalid",
+        "tv_rage_id_invalid",
+        "facebook_handle_invalid",
+        "instagram_handle_invalid",
+        "tiktok_handle_invalid",
+        "twitter_handle_invalid",
+        "youtube_handle_invalid",
+      ].includes(error.message)
     ) {
-      return NextResponse.json({ error: `${error.message.replace("_invalid", "")} must be an integer or empty` }, { status: 400 });
+      const fieldName = error.message.replace("_invalid", "");
+      const socialFieldNames = new Set<string>(SHOW_SOCIAL_HANDLE_FIELDS);
+      return NextResponse.json(
+        {
+          error: socialFieldNames.has(fieldName)
+            ? `${fieldName} must be a valid social handle or empty`
+            : `${fieldName} must be an integer or empty`,
+        },
+        { status: 400 }
+      );
     }
     console.error("[api] Failed to update TRR show", error);
     const message = error instanceof Error ? error.message : "failed";

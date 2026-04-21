@@ -73,6 +73,7 @@ const sectionImporters = {
   NytTechStackSection: () => import("./sections/NytTechStackSection"),
   NYTGamesArticlesSection: () => import("./sections/NYTGamesArticlesSection"),
   "brand-nyt/BrandNYTTypography": () => import("./sections/brand-nyt/BrandNYTTypography"),
+  "brand-nyt/BrandNYTHomepage": () => import("./sections/brand-nyt/BrandNYTHomepage"),
   "brand-nyt/BrandNYTColors": () => import("./sections/brand-nyt/BrandNYTColors"),
   "brand-nyt/BrandNYTLayout": () => import("./sections/brand-nyt/BrandNYTLayout"),
   "brand-nyt/BrandNYTArchitecture": () => import("./sections/brand-nyt/BrandNYTArchitecture"),
@@ -105,6 +106,7 @@ const load = (path: SectionImporterKey) => dynamic(sectionImporters[path], { loa
 
 /* Brand tab components — dynamically imported per tab */
 const nytTabComponents: Record<string, ComponentType> = {
+  homepage: load("brand-nyt/BrandNYTHomepage"),
   typography: load("brand-nyt/BrandNYTTypography"),
   colors: load("brand-nyt/BrandNYTColors"),
   layout: load("brand-nyt/BrandNYTLayout"),

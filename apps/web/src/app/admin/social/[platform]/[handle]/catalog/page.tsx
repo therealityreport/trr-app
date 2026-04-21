@@ -1,36 +1,20 @@
 import { notFound, redirect } from "next/navigation";
-import SocialAccountProfilePage from "@/components/admin/SocialAccountProfilePage";
 import {
-  SOCIAL_ACCOUNT_PROFILE_PLATFORMS,
-  type SocialPlatformSlug,
+  SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS,
 } from "@/lib/admin/social-account-profile";
-import {
-  buildSocialAccountProfileUrl,
-  normalizeSocialAccountProfileHandle,
-} from "@/lib/admin/show-admin-routes";
+import { resolveSocialAccountProfileRoute } from "@/lib/admin/social-account-profile-route";
 
 type PageProps = {
   params: Promise<{ platform: string; handle: string }>;
 };
 
-const isValidHandle = (value: string): boolean => /^[a-z0-9._-]{1,64}$/i.test(value);
-
-export default async function SocialAccountCatalogPage({ params }: PageProps) {
-  const resolved = await params;
-  const platform = resolved.platform.trim().toLowerCase();
-  const rawHandle = resolved.handle.trim().replace(/^@+/, "").toLowerCase();
-  if (!SOCIAL_ACCOUNT_PROFILE_PLATFORMS.includes(platform as SocialPlatformSlug)) {
+export default async function LegacyAdminSocialAccountCatalogPage({ params }: PageProps) {
+  const resolved = resolveSocialAccountProfileRoute(await params, {
+    tab: "catalog",
+    supportedPlatforms: SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS,
+  });
+  if (!resolved) {
     notFound();
   }
-  if (!isValidHandle(rawHandle)) {
-    notFound();
-  }
-  const handle = normalizeSocialAccountProfileHandle(rawHandle);
-  if (!handle) {
-    notFound();
-  }
-  if (rawHandle !== handle) {
-    redirect(buildSocialAccountProfileUrl({ platform, handle, tab: "catalog" }));
-  }
-  return <SocialAccountProfilePage platform={platform as SocialPlatformSlug} handle={handle} activeTab="catalog" />;
+  redirect(resolved.canonicalUrl);
 }

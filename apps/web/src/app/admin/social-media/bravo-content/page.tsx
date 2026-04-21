@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
+import { buildSocialPath } from "@/lib/admin/admin-route-paths";
 
 export default function LegacyAdminSocialBravoContentPage() {
-  redirect("/social/bravo-content");
+  redirect(buildSocialPath("bravo-content"));
 }

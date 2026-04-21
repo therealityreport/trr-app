@@ -5,6 +5,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const NETWORK_ACCOUNT_MAP = [
@@ -59,8 +60,8 @@ export default function NetworkContentDashboardPage() {
             <div>
               <AdminBreadcrumbs
                 items={[
-                  ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
-                  { label: "Network Content", href: "/social/bravo-content" },
+                  ...buildAdminSectionBreadcrumb("Social Analytics", ADMIN_SOCIAL_PATH),
+                  { label: "Network Content", href: buildSocialPath("bravo-content") },
                 ]}
                 className="mb-1"
               />
@@ -71,7 +72,7 @@ export default function NetworkContentDashboardPage() {
             </div>
             <div className="flex gap-2">
               <Link
-                href="/social"
+                href={ADMIN_SOCIAL_PATH}
                 className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
               >
                 Back

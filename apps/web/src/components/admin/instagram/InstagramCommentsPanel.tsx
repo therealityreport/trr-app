@@ -126,19 +126,19 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
     const status = normalizeRunStatus(progress.run_status);
     if (!runId) return;
     if (ACTIVE_RUN_STATUSES.has(status)) {
-      setScrapeMessage(`Comments scrape ${status}. Run ${runId.slice(0, 8)}.`);
+      setScrapeMessage(`Comments sync ${status}. Run ${runId.slice(0, 8)}.`);
       setScrapeError(null);
       return;
     }
     if (!TERMINAL_RUN_STATUSES.has(status) || handledTerminalRunRef.current === runId) return;
     handledTerminalRunRef.current = runId;
     if (status === "completed") {
-      setScrapeMessage(`Comments scrape completed. Run ${runId.slice(0, 8)}.`);
+      setScrapeMessage(`Comments sync completed. Run ${runId.slice(0, 8)}.`);
       setScrapeError(null);
       void refreshComments();
       void onSummaryRefresh?.();
     } else {
-      setScrapeError(progress.error_message || `Comments scrape ${status}.`);
+      setScrapeError(progress.error_message || `Comments sync ${status}.`);
     }
     setScrapeRunId(null);
   }, [onSummaryRefresh, refreshComments, runProgress.data]);
@@ -157,9 +157,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
     const body: SocialAccountCommentsScrapeRequest = {
       mode: "profile",
       source_scope: "bravo",
-      refresh_policy: "stale_or_missing",
-      max_posts: 50,
-      max_comments_per_post: 200,
+      refresh_policy: "all_saved_posts",
     };
     try {
       const response = await fetchAdminWithAuth(
@@ -173,13 +171,13 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
       );
       const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsScrapeResponse & ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start comments scrape"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start comments sync"));
       }
       const runId = String(data.run_id || "").trim();
       setScrapeRunId(runId || null);
-      setScrapeMessage(runId ? `Comments scrape queued. Run ${runId.slice(0, 8)}.` : "Comments scrape queued.");
+      setScrapeMessage(runId ? `Comments sync queued. Run ${runId.slice(0, 8)}.` : "Comments sync queued.");
     } catch (error) {
-      setScrapeError(error instanceof Error ? error.message : "Failed to start comments scrape");
+      setScrapeError(error instanceof Error ? error.message : "Failed to start comments sync");
     }
   }, [fetchAdminWithAuth, handle, platform, user]);
 
@@ -199,7 +197,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
         <div>
           <h2 className="text-lg font-semibold text-zinc-900">Instagram Comments</h2>
           <p className="text-sm text-zinc-500">
-            Review saved comment coverage and run the dedicated Scrapling comments lane for stale or missing posts.
+            Review saved comment coverage and run a full-account comments sync across saved Instagram posts.
           </p>
         </div>
         <button
@@ -208,7 +206,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
           disabled={isScraping || checking || !user || !hasAccess}
           className={PRIMARY_BUTTON_CLASS}
         >
-          {isScraping ? "Scraping Comments..." : "Scrape Comments"}
+          {isScraping ? "Syncing Comments..." : "Sync Comments"}
         </button>
       </div>
 

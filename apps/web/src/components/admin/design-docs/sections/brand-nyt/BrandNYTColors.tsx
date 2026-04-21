@@ -1,6 +1,7 @@
 "use client";
 
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
 
 /* ------------------------------------------------------------------ */
 /*  BrandNYTColors — Aggregated color reference across all NYT articles */
@@ -460,6 +461,52 @@ export default function BrandNYTColors() {
               </div>
               <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 10, color: "var(--dd-ink-faint)", fontStyle: "italic" }}>
                 {c.sources.join(", ")}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <SectionLabel id="homepage-shell-palette">Homepage Shell Palette</SectionLabel>
+
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        The homepage shell adds structural colors for masthead chrome, live labels,
+        footer rules, and product accents that are not fully represented in
+        article-focused palettes.
+      </p>
+
+      <div className="flex flex-wrap gap-3 mb-8">
+        {NYT_HOMEPAGE_SNAPSHOT.colorRoles.map((color) => (
+          <div
+            key={color.label}
+            className="dd-brand-card px-3 py-2 flex items-center gap-2"
+          >
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: 6,
+                background: color.hex,
+                border: "1px solid #e5e5e5",
+                flexShrink: 0,
+              }}
+            />
+            <div>
+              <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 12, fontWeight: 600, color: "var(--dd-ink-black)" }}>
+                {color.label}
+              </div>
+              <div className="font-mono" style={{ fontSize: 10, color: "var(--dd-brand-accent)" }}>
+                {color.hex}
+              </div>
+              <div style={{ fontFamily: "var(--dd-font-sans)", fontSize: 10, color: "var(--dd-ink-faint)", fontStyle: "italic" }}>
+                {color.usage}
               </div>
             </div>
           </div>

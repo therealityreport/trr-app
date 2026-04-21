@@ -66,6 +66,24 @@ function formatCompactNumber(n: number): string {
   return n.toLocaleString();
 }
 
+function formatSignedCompactDelta(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "0";
+  const sign = n > 0 ? "+" : "-";
+  return `${sign}${formatCompactNumber(Math.abs(n))}`;
+}
+
+function parsePercentValue(value: string | null | undefined): number | null {
+  if (typeof value !== "string") return null;
+  const parsed = Number.parseFloat(value.replace("%", "").trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatSignedPercentDelta(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "0%";
+  const sign = n > 0 ? "+" : "-";
+  return `${sign}${Math.abs(n).toFixed(2)}%`;
+}
+
 function formatDate(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00`);
   return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
@@ -405,7 +423,9 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
       setRefreshNotice(
         json.refresh_status === "skipped"
           ? "Using the latest stored SocialBlade snapshot because it is still within the freshness window."
-          : "SocialBlade data refreshed.",
+          : json.previous_run?.scraped_at
+            ? `SocialBlade data refreshed. Card deltas now compare against the previous scrape from ${formatFullDate(json.previous_run.scraped_at.split("T")[0])}.`
+            : "SocialBlade data refreshed.",
       );
       await fetchData({ silent: true });
     } catch (err) {
@@ -425,6 +445,13 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
       ...(data?.profile_stats_labels ?? {}),
     };
   }, [data?.profile_stats_labels, platform]);
+  const previousRun = data?.previous_run ?? null;
+  const previousRunDateLabel = useMemo(() => {
+    const rawDate = previousRun?.scraped_at;
+    if (!rawDate) return null;
+    const datePart = rawDate.split("T")[0];
+    return datePart ? formatFullDate(datePart) : null;
+  }, [previousRun?.scraped_at]);
 
   const metricLabel = data?.chart_metric_label || statsLabels.chart_metric_label || statsLabels.followers || "Followers";
   const accountHref = buildPersonExternalIdUrl(platform, data?.account_handle ?? canonicalHandle ?? data?.username ?? null);
@@ -499,6 +526,84 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
   const { profile_stats: stats, rankings, daily_total_followers_chart: chart, daily_channel_metrics_60day: metrics } = data;
   const freshnessChip = getFreshnessChip(data);
   const chartPoints = chart?.data ?? [];
+  const statsCards = [
+    {
+      label: statsLabels.followers || "Followers",
+      value: formatCompactNumber(stats.followers),
+      raw: stats.followers.toLocaleString(),
+      delta:
+        typeof previousRun?.profile_stats?.followers === "number"
+          ? {
+              value: stats.followers - previousRun.profile_stats.followers,
+              text: formatSignedCompactDelta(stats.followers - previousRun.profile_stats.followers),
+            }
+          : null,
+    },
+    {
+      label: statsLabels.following || "Following",
+      value: formatCompactNumber(stats.following),
+      raw: stats.following.toLocaleString(),
+      delta:
+        typeof previousRun?.profile_stats?.following === "number"
+          ? {
+              value: stats.following - previousRun.profile_stats.following,
+              text: formatSignedCompactDelta(stats.following - previousRun.profile_stats.following),
+            }
+          : null,
+    },
+    {
+      label: statsLabels.media_count || "Posts",
+      value: formatCompactNumber(stats.media_count),
+      raw: stats.media_count.toLocaleString(),
+      delta:
+        typeof previousRun?.profile_stats?.media_count === "number"
+          ? {
+              value: stats.media_count - previousRun.profile_stats.media_count,
+              text: formatSignedCompactDelta(stats.media_count - previousRun.profile_stats.media_count),
+            }
+          : null,
+    },
+    {
+      label: statsLabels.engagement_rate || "Engagement",
+      value: stats.engagement_rate,
+      raw: stats.engagement_rate,
+      delta: (() => {
+        const current = parsePercentValue(stats.engagement_rate);
+        const previous = parsePercentValue(previousRun?.profile_stats?.engagement_rate);
+        if (current === null || previous === null) return null;
+        const delta = current - previous;
+        return { value: delta, text: formatSignedPercentDelta(delta) };
+      })(),
+    },
+    {
+      label: statsLabels.average_likes || "Avg Likes",
+      value: formatCompactNumber(Math.round(stats.average_likes)),
+      raw: Math.round(stats.average_likes).toLocaleString(),
+      delta:
+        typeof previousRun?.profile_stats?.average_likes === "number"
+          ? {
+              value: Math.round(stats.average_likes) - Math.round(previousRun.profile_stats.average_likes),
+              text: formatSignedCompactDelta(
+                Math.round(stats.average_likes) - Math.round(previousRun.profile_stats.average_likes),
+              ),
+            }
+          : null,
+    },
+    {
+      label: statsLabels.average_comments || "Avg Comments",
+      value: formatCompactNumber(Math.round(stats.average_comments)),
+      raw: Math.round(stats.average_comments).toLocaleString(),
+      delta:
+        typeof previousRun?.profile_stats?.average_comments === "number"
+          ? {
+              value: Math.round(stats.average_comments) - Math.round(previousRun.profile_stats.average_comments),
+              text: formatSignedCompactDelta(
+                Math.round(stats.average_comments) - Math.round(previousRun.profile_stats.average_comments),
+              ),
+            }
+          : null,
+    },
+  ];
   const growthSummary = (() => {
     if (chartPoints.length < 2) return null;
     const latest = chartPoints[chartPoints.length - 1].followers;
@@ -547,6 +652,9 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
           <p className="mt-1 text-xs text-zinc-500">
             Last scraped {formatFullDate(data.scraped_at.split("T")[0])} · {formatRelativeAge(data.age_hours)}
           </p>
+          {previousRunDateLabel ? (
+            <p className="mt-1 text-xs text-zinc-500">Card deltas compare against the previous scrape on {previousRunDateLabel}.</p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${freshnessChip.className}`}>
@@ -590,41 +698,15 @@ export default function SocialGrowthSection({ platform, handle, personId = null 
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {[
-          {
-            label: statsLabels.followers || "Followers",
-            value: formatCompactNumber(stats.followers),
-            raw: stats.followers.toLocaleString(),
-          },
-          {
-            label: statsLabels.following || "Following",
-            value: formatCompactNumber(stats.following),
-            raw: stats.following.toLocaleString(),
-          },
-          {
-            label: statsLabels.media_count || "Posts",
-            value: formatCompactNumber(stats.media_count),
-            raw: stats.media_count.toLocaleString(),
-          },
-          {
-            label: statsLabels.engagement_rate || "Engagement",
-            value: stats.engagement_rate,
-            raw: stats.engagement_rate,
-          },
-          {
-            label: statsLabels.average_likes || "Avg Likes",
-            value: formatCompactNumber(Math.round(stats.average_likes)),
-            raw: Math.round(stats.average_likes).toLocaleString(),
-          },
-          {
-            label: statsLabels.average_comments || "Avg Comments",
-            value: formatCompactNumber(Math.round(stats.average_comments)),
-            raw: Math.round(stats.average_comments).toLocaleString(),
-          },
-        ].map((stat) => (
+        {statsCards.map((stat) => (
           <div key={stat.label} className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm" title={stat.raw}>
             <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-400">{stat.label}</p>
             <p className="mt-1 text-lg font-bold text-zinc-900">{stat.value}</p>
+            {stat.delta ? (
+              <p className={`mt-1 text-xs font-semibold ${stat.delta.value >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                {stat.delta.text}
+              </p>
+            ) : null}
           </div>
         ))}
       </div>

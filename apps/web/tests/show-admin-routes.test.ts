@@ -164,9 +164,7 @@ describe("show-admin-routes", () => {
   });
 
   it("builds and parses canonical social account profile URLs", () => {
-    // The five profile tabs (stats/comments/posts/hashtags/collaborators-tags)
-    // are canonical under `/social/...`. `catalog` and `socialblade` remain
-    // under `/admin/social/...` until a follow-up migration moves them.
+    // All social-account profile tabs are canonical under `/social/...`.
     expect(
       buildSocialAccountProfileUrl({
         platform: "instagram",
@@ -180,7 +178,15 @@ describe("show-admin-routes", () => {
         handle: "@BravoTV",
         tab: "catalog",
       }),
-    ).toBe("/admin/social/instagram/bravotv/catalog");
+    ).toBe("/social/instagram/bravotv/catalog");
+
+    expect(
+      buildSocialAccountProfileUrl({
+        platform: "instagram",
+        handle: "@BravoTV",
+        tab: "socialblade",
+      }),
+    ).toBe("/social/instagram/bravotv/socialblade");
 
     expect(
       buildSocialAccountProfileUrl({
@@ -226,12 +232,18 @@ describe("show-admin-routes", () => {
       canonicalPath: "/social/instagram/bravotv/collaborators-tags",
     });
 
-    // `catalog` is not migrated — canonicalPath stays under /admin/social.
     expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/catalog")).toMatchObject({
       platform: "instagram",
       handle: "bravotv",
       tab: "catalog",
-      canonicalPath: "/admin/social/instagram/bravotv/catalog",
+      canonicalPath: "/social/instagram/bravotv/catalog",
+    });
+
+    expect(parseSocialAccountProfilePath("/admin/social/instagram/bravotv/socialblade")).toMatchObject({
+      platform: "instagram",
+      handle: "bravotv",
+      tab: "socialblade",
+      canonicalPath: "/social/instagram/bravotv/socialblade",
     });
 
     // Parsing a legacy `/admin/social/.../comments` URL must return the
