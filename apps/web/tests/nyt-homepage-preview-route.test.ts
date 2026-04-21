@@ -13,14 +13,12 @@ import { NYT_HOMEPAGE_SOURCE_BUNDLE } from "@/lib/admin/nyt-homepage-source-bund
 // and the bundle isn't present. Gate these fixture-dependent tests on bundle
 // presence so the PR is unblocked; the tests still run whenever the workspace is
 // available (local dev, any workspace-inclusive CI).
-const describeIfBundle = existsSync(
+const HAS_BUNDLE = existsSync(
   path.resolve(process.cwd(), "../../..", NYT_HOMEPAGE_SOURCE_BUNDLE.html.rendered),
-)
-  ? describe
-  : describe.skip;
+);
 
-describeIfBundle("NYT homepage preview route", () => {
-  it("serves distinct Watch Today’s Videos and More News fragments", async () => {
+describe("NYT homepage preview route", () => {
+  it.skipIf(!HAS_BUNDLE)("serves distinct Watch Today’s Videos and More News fragments", async () => {
     const watchRequest = new NextRequest(
       "http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=watch-todays-videos",
     );
@@ -44,7 +42,7 @@ describeIfBundle("NYT homepage preview route", () => {
     expect(moreNewsHtml).not.toEqual(watchHtml);
   }, 15000);
 
-  it("resolves the Wirecutter package without falling through to nav labels", async () => {
+  it.skipIf(!HAS_BUNDLE)("resolves the Wirecutter package without falling through to nav labels", async () => {
     const request = new NextRequest(
       "http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=wirecutter-package",
     );
@@ -59,7 +57,7 @@ describeIfBundle("NYT homepage preview route", () => {
     expect(html).not.toContain('{"error":"Could not resolve container');
   });
 
-  it("resolves the Games package as its own homepage module", async () => {
+  it.skipIf(!HAS_BUNDLE)("resolves the Games package as its own homepage module", async () => {
     const request = new NextRequest(
       "http://localhost/api/admin/design-docs/nyt-homepage-preview?view=fragment&id=games-package",
     );
