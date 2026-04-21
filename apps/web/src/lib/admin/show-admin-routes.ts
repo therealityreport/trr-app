@@ -683,12 +683,13 @@ export function parseSocialAccountProfilePath(pathname: string): ParsedSocialAcc
   };
 }
 
-// The five profile tabs (stats/comments/posts/hashtags/collaborators-tags)
-// render at canonical `/social/...` paths. `catalog` and `socialblade` remain
-// under `/admin/social/...` until a broader migration moves them — a future
-// migration must delete the admin redirect shim AND add the tab here.
+// All social-account profile tabs render at canonical `/social/...` paths.
+// The `/admin/social/...` tree remains as a legacy redirect shim for inbound
+// links during the broader admin URL migration.
 const MIGRATED_SOCIAL_ACCOUNT_PROFILE_TABS: ReadonlySet<SocialAccountProfileTab> = new Set([
   "stats",
+  "socialblade",
+  "catalog",
   "comments",
   "posts",
   "hashtags",

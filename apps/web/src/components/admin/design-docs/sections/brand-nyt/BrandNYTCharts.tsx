@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
 
 /* ------------------------------------------------------------------ */
 /*  NYT Brand — Charts & Graphs                                        */
@@ -469,6 +470,72 @@ export default function BrandNYTCharts() {
           </table>
         </div>
       )}
+
+      <SectionLabel id="homepage-interactives">Homepage Interactives</SectionLabel>
+
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        The homepage mixes charts, utilities, and media entrypoints through
+        inline-interactive and video-feed modules rather than Birdkit article
+        embeds alone.
+      </p>
+
+      <div className="dd-brand-card p-4 mb-8 overflow-x-auto">
+        <table
+          className="w-full text-left"
+          style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+        >
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
+              <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Homepage Zone
+              </th>
+              <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                DOM Evidence
+              </th>
+              <th className="py-1 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Current Labels
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {NYT_HOMEPAGE_SNAPSHOT.shellSections
+              .filter((section) =>
+                ["inline-interactives", "video-feed", "product-rails"].includes(section.id),
+              )
+              .map((section) => (
+                <tr
+                  key={section.id}
+                  style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
+                >
+                  <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-black)", fontWeight: 600 }}>
+                    {section.label}
+                  </td>
+                  <td className="py-1.5 pr-4">
+                    {section.domEvidence.map((evidence) => (
+                      <div
+                        key={evidence}
+                        className="font-mono"
+                        style={{ fontSize: 10, color: "var(--dd-brand-accent)" }}
+                      >
+                        {evidence}
+                      </div>
+                    ))}
+                  </td>
+                  <td className="py-1.5" style={{ color: "var(--dd-ink-faint)" }}>
+                    {section.visibleLabels.join(", ")}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

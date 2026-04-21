@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
 
 /* ------------------------------------------------------------------ */
 /*  NYT Brand Typography — Aggregated font data from all NYT articles  */
@@ -852,6 +853,61 @@ export default function BrandNYTTypography() {
             </div>
           );
         })}
+      </div>
+
+      <SectionLabel id="homepage-roles">Homepage Typography Roles</SectionLabel>
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        The live homepage adds shell-specific text roles for masthead, nested
+        navigation, live labels, and product rails that do not appear clearly in
+        article-only font inventories.
+      </p>
+      <div className="dd-brand-card p-4 overflow-x-auto">
+        <table
+          className="w-full text-left"
+          style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+        >
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
+              <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Role
+              </th>
+              <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Family
+              </th>
+              <th className="py-1 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Usage
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {NYT_HOMEPAGE_SNAPSHOT.typographyRoles.map((role) => (
+              <tr
+                key={role.label}
+                style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
+              >
+                <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-black)", fontWeight: 600 }}>
+                  {role.label}
+                </td>
+                <td
+                  className="py-1.5 pr-4 font-mono"
+                  style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}
+                >
+                  {role.family}
+                </td>
+                <td className="py-1.5" style={{ color: "var(--dd-ink-faint)" }}>
+                  {role.usage}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

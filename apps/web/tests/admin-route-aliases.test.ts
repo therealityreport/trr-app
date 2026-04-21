@@ -41,4 +41,19 @@ describe("admin route aliases", () => {
       }),
     ).rejects.toThrow("REDIRECT:/design-system/admin-labels");
   });
+
+  it("redirects the legacy /admin/social-media alias to the canonical admin social hub", async () => {
+    const page = await import("@/app/admin/social-media/page");
+    expect(() => page.default()).toThrow("REDIRECT:/admin/social");
+  });
+
+  it("redirects the legacy creator-content alias to the canonical admin social namespace", async () => {
+    const page = await import("@/app/admin/social-media/creator-content/page");
+    expect(() => page.default()).toThrow("REDIRECT:/admin/social/creator-content");
+  });
+
+  it("redirects the legacy bravo-content alias to the canonical admin social namespace", async () => {
+    const page = await import("@/app/admin/social-media/bravo-content/page");
+    expect(() => page.default()).toThrow("REDIRECT:/admin/social/bravo-content");
+  });
 });

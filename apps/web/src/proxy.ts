@@ -355,6 +355,8 @@ function resolveSocialWeekSubTab(value: string | undefined): string | null {
 function resolveSocialAccountProfileTab(value: string | undefined): string | null {
   const normalized = value?.trim().toLowerCase() ?? "";
   if (!normalized) return "stats";
+  if (normalized === "socialblade" || normalized === "social-blade") return "socialblade";
+  if (normalized === "catalog") return "catalog";
   if (normalized === "comments" || normalized === "comment") return "comments";
   if (normalized === "posts") return "posts";
   if (normalized === "hashtags" || normalized === "hashtag") return "hashtags";
@@ -746,11 +748,11 @@ function mapCanonicalAdminUiRewrite(pathname: string): string | null {
 
   const socialAccountProfilePath = parseSocialAccountProfilePath(pathname);
   if (socialAccountProfilePath) {
-    // All 5 account-profile tabs (stats/comments/posts/hashtags/collaborators-tags)
-    // render at the canonical /social/... path. Canonical visit → no rewrite,
-    // NextResponse.next() serves the page. Legacy /admin/social/... visits are
-    // redirected upstream by NESTED_ADMIN_SECTION_CANONICAL_PREFIXES; returning
-    // canonicalPath here is defense-in-depth.
+    // All account-profile tabs render at the canonical /social/... path.
+    // Canonical visit → no rewrite, NextResponse.next() serves the page.
+    // Legacy /admin/social/... visits are redirected upstream by
+    // NESTED_ADMIN_SECTION_CANONICAL_PREFIXES; returning canonicalPath here is
+    // defense-in-depth.
     return pathname === socialAccountProfilePath.canonicalPath
       ? null
       : socialAccountProfilePath.canonicalPath;

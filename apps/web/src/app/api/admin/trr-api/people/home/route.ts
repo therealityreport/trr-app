@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
 import {
-  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS,
   buildAdminProxyErrorResponse,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
             headers: {
               "X-TRR-Admin-User-Uid": user.uid,
             },
-            timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+            timeoutMs: ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS,
             routeName: "people-home",
           },
         );

@@ -5,6 +5,8 @@
    stylesheet, script, and sitemap provides for the design docs.
    ────────────────────────────────────────────────────────────── */
 
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
+
 /* ── Stylesheet inventory ───────────────────────────────────── */
 
 interface AssetEntry {
@@ -348,9 +350,83 @@ export default function NytTechStackSection() {
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
           Complete inventory of stylesheets, scripts, and sitemaps extracted from NYT
-          article pages — what each asset provides for the design system.
+          article pages and the live homepage shell.
         </p>
       </div>
+
+      <section id="homepage-shell-assets">
+        <h3 className="mb-1 text-lg font-semibold text-zinc-900">
+          Homepage Shell Assets
+        </h3>
+        <p className="mb-4 text-sm text-zinc-500">
+          The live homepage uses the vi shell directly, then layers in nested-nav,
+          Betamax, weather-strip, and analytics assets that do not belong to
+          Birdkit article pages.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-zinc-100 bg-zinc-50">
+                  <th className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    Stylesheet
+                  </th>
+                  <th className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    Area
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {NYT_HOMEPAGE_SNAPSHOT.stylesheets.map((asset, index) => (
+                  <tr
+                    key={asset.href}
+                    className={index % 2 === 0 ? "bg-white" : "bg-zinc-50/50"}
+                  >
+                    <td className="px-4 py-2">
+                      <div className="font-medium text-zinc-800">{asset.label}</div>
+                      <div className="font-mono text-[11px] text-zinc-500 break-all">
+                        {asset.href}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 text-zinc-600">{asset.area}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-zinc-100 bg-zinc-50">
+                  <th className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    Script
+                  </th>
+                  <th className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    Area
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {NYT_HOMEPAGE_SNAPSHOT.scripts.map((asset, index) => (
+                  <tr
+                    key={asset.href}
+                    className={index % 2 === 0 ? "bg-white" : "bg-zinc-50/50"}
+                  >
+                    <td className="px-4 py-2">
+                      <div className="font-medium text-zinc-800">{asset.label}</div>
+                      <div className="font-mono text-[11px] text-zinc-500 break-all">
+                        {asset.href}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 text-zinc-600">{asset.area}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
       {/* Birdkit Framework Overview */}
       <section id="birdkit">

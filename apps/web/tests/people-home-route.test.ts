@@ -16,6 +16,7 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
   invalidateAdminBackendCache: vi.fn(),
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
+  ADMIN_READ_PROXY_PRIMARY_TIMEOUT_MS: 20_000,
   buildAdminProxyErrorResponse: (error: unknown) =>
     NextResponse.json({ error: error instanceof Error ? error.message : "failed" }, { status: 500 }),
 }));

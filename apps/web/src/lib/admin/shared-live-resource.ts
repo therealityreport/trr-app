@@ -7,9 +7,20 @@ export type AdminLiveResourceKey = string;
 export type SharedLiveSnapshot<T> = {
   data: T | null;
   error: string | null;
+  errorDetails: SharedLiveErrorDetails | null;
   lastEventAtMs: number | null;
   lastSuccessAtMs: number | null;
   connected: boolean;
+};
+
+export type SharedLiveErrorDetails = {
+  message: string;
+  name?: string;
+  code?: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+  isBackendSaturated?: boolean;
+  upstreamStatus?: number;
 };
 
 type SharedLiveSubscriber<T> = {
@@ -62,6 +73,8 @@ type SharedResourceConfig<T> =
 
 const DEFAULT_LEASE_DURATION_MS = 45_000;
 const DEFAULT_FOLLOWER_CHECK_INTERVAL_MS = 5_000;
+const DEFAULT_RETRY_BACKOFF_BASE_MS = 2_000;
+const DEFAULT_RETRY_BACKOFF_MAX_MS = 30_000;
 // Startup jitter spreads polling across tabs that open simultaneously. Vitest runs
 // real timers with short waitFor windows, so we zero the jitter under test to keep
 // initial poll latency deterministic instead of flapping [150ms, 1.2s].
@@ -81,14 +94,39 @@ const createTabId = (): string => {
   return `tab-${Date.now()}-${randomPart}`;
 };
 
-const normalizeFetchErrorMessage = (error: unknown, fallback = "Fetch failed"): string => {
+const normalizeFetchError = (error: unknown, fallback = "Fetch failed"): SharedLiveErrorDetails => {
   if (error instanceof DOMException && error.name === "AbortError") {
-    return error.message || "Request timed out";
+    return {
+      message: error.message || "Request timed out",
+      name: error.name,
+    };
   }
   if (error instanceof Error) {
-    return error.message || fallback;
+    const candidate = error as Error & {
+      code?: unknown;
+      retryable?: unknown;
+      retryAfterMs?: unknown;
+      isBackendSaturated?: unknown;
+      upstreamStatus?: unknown;
+    };
+    return {
+      message: error.message || fallback,
+      name: error.name,
+      code: typeof candidate.code === "string" && candidate.code.trim() ? candidate.code.trim() : undefined,
+      retryable: typeof candidate.retryable === "boolean" ? candidate.retryable : undefined,
+      retryAfterMs:
+        typeof candidate.retryAfterMs === "number" && Number.isFinite(candidate.retryAfterMs)
+          ? Math.max(0, candidate.retryAfterMs)
+          : undefined,
+      isBackendSaturated:
+        typeof candidate.isBackendSaturated === "boolean" ? candidate.isBackendSaturated : undefined,
+      upstreamStatus:
+        typeof candidate.upstreamStatus === "number" && Number.isFinite(candidate.upstreamStatus)
+          ? candidate.upstreamStatus
+          : undefined,
+    };
   }
-  return fallback;
+  return { message: fallback };
 };
 
 class SharedLiveResourceCoordinator<T> {
@@ -96,6 +134,7 @@ class SharedLiveResourceCoordinator<T> {
   private snapshot: SharedLiveSnapshot<T> = {
     data: null,
     error: null,
+    errorDetails: null,
     lastEventAtMs: null,
     lastSuccessAtMs: null,
     connected: false,
@@ -112,6 +151,7 @@ class SharedLiveResourceCoordinator<T> {
   private readonly channel: BroadcastChannel | null;
   private config: SharedResourceConfig<T>;
   private pendingPollRequest: SharedPollRequest | null = null;
+  private consecutiveRetryableErrorCount = 0;
 
   constructor(config: SharedResourceConfig<T>) {
     this.config = config;
@@ -209,6 +249,7 @@ class SharedLiveResourceCoordinator<T> {
     const nextSnapshot: SharedLiveSnapshot<T> = {
       data: update.data === undefined ? this.snapshot.data : update.data,
       error: update.error === undefined ? this.snapshot.error : update.error,
+      errorDetails: update.errorDetails === undefined ? this.snapshot.errorDetails : update.errorDetails,
       lastEventAtMs: update.lastEventAtMs === undefined ? this.snapshot.lastEventAtMs : update.lastEventAtMs,
       lastSuccessAtMs:
         update.lastSuccessAtMs === undefined ? this.snapshot.lastSuccessAtMs : update.lastSuccessAtMs,
@@ -281,9 +322,9 @@ class SharedLiveResourceCoordinator<T> {
     this.inFlight = true;
     try {
       if (this.config.mode === "poll") {
-        await this.runPoll();
+        const nextDelayMs = await this.runPoll();
         if (this.shouldRunInThisTab()) {
-          this.scheduleTick(this.config.intervalMs);
+          this.scheduleTick(nextDelayMs ?? this.config.intervalMs);
         }
         return;
       }
@@ -301,9 +342,9 @@ class SharedLiveResourceCoordinator<T> {
     this.scheduleTick(this.followerCheckIntervalMs());
   }
 
-  private async runPoll(): Promise<void> {
+  private async runPoll(): Promise<number | null> {
     const config = this.config;
-    if (config.mode !== "poll") return;
+    if (config.mode !== "poll") return null;
     const controller = new AbortController();
     this.executorAbort = controller;
     const request = this.pendingPollRequest ?? { cause: "interval" };
@@ -316,24 +357,32 @@ class SharedLiveResourceCoordinator<T> {
         {
           data,
           error: null,
+          errorDetails: null,
           lastEventAtMs: now,
           lastSuccessAtMs: now,
           connected: true,
         },
         { broadcast: true },
       );
+      this.consecutiveRetryableErrorCount = 0;
+      return null;
     } catch (error) {
       if (controller.signal.aborted) {
         this.publish({ connected: false }, { broadcast: true });
+        return null;
       } else {
+        const errorDetails = normalizeFetchError(error);
+        const nextDelayMs = this.resolveRetryDelayMs(errorDetails);
         this.publish(
           {
-            error: normalizeFetchErrorMessage(error),
+            error: errorDetails.message,
+            errorDetails,
             lastEventAtMs: Date.now(),
             connected: false,
           },
           { broadcast: true },
         );
+        return nextDelayMs;
       }
     } finally {
       if (this.executorAbort === controller) {
@@ -358,14 +407,15 @@ class SharedLiveResourceCoordinator<T> {
       );
     };
     try {
-      publish({ connected: true, error: null });
+      publish({ connected: true, error: null, errorDetails: null });
       await config.connect({ signal: controller.signal, publish });
       if (!controller.signal.aborted) {
         publish({ connected: false });
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        publish({ connected: false, error: normalizeFetchErrorMessage(error) });
+        const errorDetails = normalizeFetchError(error);
+        publish({ connected: false, error: errorDetails.message, errorDetails });
       }
     } finally {
       if (this.executorAbort === controller) {
@@ -392,6 +442,29 @@ class SharedLiveResourceCoordinator<T> {
     const [minDelay, maxDelay] = this.config.startupJitterMs ?? DEFAULT_STARTUP_JITTER;
     const span = Math.max(0, maxDelay - minDelay);
     return minDelay + Math.floor(Math.random() * (span + 1));
+  }
+
+  private resolveRetryDelayMs(errorDetails: SharedLiveErrorDetails): number | null {
+    const retryableStatus = errorDetails.upstreamStatus;
+    const isRetryable =
+      Boolean(errorDetails.retryable) ||
+      Boolean(errorDetails.isBackendSaturated) ||
+      errorDetails.code === "BACKEND_SATURATED" ||
+      retryableStatus === 429 ||
+      retryableStatus === 502 ||
+      retryableStatus === 503 ||
+      retryableStatus === 504;
+    if (!isRetryable) {
+      this.consecutiveRetryableErrorCount = 0;
+      return null;
+    }
+    const attempt = this.consecutiveRetryableErrorCount;
+    this.consecutiveRetryableErrorCount += 1;
+    const exponentialDelayMs = Math.min(
+      DEFAULT_RETRY_BACKOFF_MAX_MS,
+      DEFAULT_RETRY_BACKOFF_BASE_MS * 2 ** attempt,
+    );
+    return Math.max(errorDetails.retryAfterMs ?? 0, exponentialDelayMs);
   }
 
   private readLease(): LeaderLease | null {
@@ -454,6 +527,9 @@ class SharedLiveResourceCoordinator<T> {
       if (
         (parsed.data === null || parsed.data === undefined || typeof parsed.data === "object") &&
         (parsed.error === null || parsed.error === undefined || typeof parsed.error === "string") &&
+        (parsed.errorDetails === null ||
+          parsed.errorDetails === undefined ||
+          typeof parsed.errorDetails === "object") &&
         (parsed.lastEventAtMs === null || parsed.lastEventAtMs === undefined || typeof parsed.lastEventAtMs === "number") &&
         (parsed.lastSuccessAtMs === null || parsed.lastSuccessAtMs === undefined || typeof parsed.lastSuccessAtMs === "number") &&
         typeof parsed.connected === "boolean"
@@ -461,6 +537,7 @@ class SharedLiveResourceCoordinator<T> {
         return {
           data: (parsed.data as T | null | undefined) ?? null,
           error: parsed.error ?? null,
+          errorDetails: (parsed.errorDetails as SharedLiveErrorDetails | null | undefined) ?? null,
           lastEventAtMs: parsed.lastEventAtMs ?? null,
           lastSuccessAtMs: parsed.lastSuccessAtMs ?? null,
           connected: parsed.connected,
@@ -481,6 +558,7 @@ class SharedLiveResourceCoordinator<T> {
     this.publish({
       data: (incoming.data as T | null | undefined) ?? null,
       error: incoming.error ?? null,
+      errorDetails: (incoming.errorDetails as SharedLiveErrorDetails | null | undefined) ?? null,
       lastEventAtMs: incomingTs,
       lastSuccessAtMs:
         typeof incoming.lastSuccessAtMs === "number" ? incoming.lastSuccessAtMs : this.snapshot.lastSuccessAtMs,
@@ -527,6 +605,7 @@ const useSharedLiveResource = <T,>(config: SharedResourceConfig<T>) => {
   const [snapshot, setSnapshot] = useState<SharedLiveSnapshot<T>>({
     data: null,
     error: null,
+    errorDetails: null,
     lastEventAtMs: null,
     lastSuccessAtMs: null,
     connected: false,

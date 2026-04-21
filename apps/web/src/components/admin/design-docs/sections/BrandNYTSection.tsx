@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
 
 /* ------------------------------------------------------------------ */
 /*  NYT Master Brand Landing Page                                      */
@@ -47,6 +48,13 @@ function countComponents(): number {
 }
 
 const TABS = [
+  {
+    href: buildDesignDocsPath("brand-nyt/homepage"),
+    label: "Homepage",
+    description: "Live homepage shell snapshot: edition rail, masthead, nested nav, programming nodes, inline interactives, media rails, site index",
+    stat: `${NYT_HOMEPAGE_SNAPSHOT.shellSections.length} shell zones`,
+    icon: "HP",
+  },
   {
     href: buildDesignDocsPath("brand-nyt/typography"),
     label: "Typography",
@@ -118,9 +126,9 @@ export default function BrandNYTSection() {
       <div className="dd-section-label">Brand Reference</div>
       <h2 className="dd-section-title">The New York Times</h2>
       <p className="dd-section-desc">
-        The master design system powering nytimes.com &mdash; typography-first
-        hierarchy, a restrained palette, and a 600px content column that has
-        defined digital news design for two decades.
+        The master design system powering nytimes.com &mdash; homepage shell,
+        typography-first hierarchy, restrained color, and article templates that
+        sit underneath a much larger main-page programming system.
       </p>
 
       {/* Summary stats */}
@@ -130,9 +138,9 @@ export default function BrandNYTSection() {
       >
         {[
           { label: "Articles", value: nytArticles.length },
+          { label: "Homepage Zones", value: NYT_HOMEPAGE_SNAPSHOT.shellSections.length },
           { label: "Font Families", value: countFonts() },
-          { label: "Chart Types", value: countCharts() },
-          { label: "Component Types", value: countComponents() },
+          { label: "Component Types", value: countComponents() + NYT_HOMEPAGE_SNAPSHOT.componentPatterns.length },
         ].map((s) => (
           <div key={s.label} className="text-center">
             <div
@@ -236,6 +244,63 @@ export default function BrandNYTSection() {
             </div>
           </Link>
         ))}
+      </div>
+
+      <div
+        className="dd-brand-card"
+        style={{
+          marginTop: 24,
+          marginBottom: 28,
+          padding: "18px 20px 20px",
+        }}
+      >
+        <div
+          style={{
+            fontFamily: "var(--dd-font-sans)",
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: "uppercase" as const,
+            letterSpacing: "0.08em",
+            color: "var(--dd-brand-accent)",
+            marginBottom: 10,
+          }}
+        >
+          Homepage Snapshot
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--dd-font-headline, Georgia, serif)",
+            fontSize: 26,
+            lineHeight: 1.12,
+            color: "var(--dd-ink-black)",
+            marginBottom: 10,
+            maxWidth: 760,
+          }}
+        >
+          The NYT homepage is its own product surface, not just a collection of article promos.
+        </div>
+        <div
+          style={{
+            fontFamily: "var(--dd-font-sans)",
+            fontSize: 13,
+            lineHeight: 1.65,
+            color: "var(--dd-ink-faint)",
+            marginBottom: 12,
+            maxWidth: 760,
+          }}
+        >
+          This pass adds the live main-page shell as a first-class source alongside
+          the existing article breakdowns. Use the Homepage tab for source-order
+          structure, then use Typography, Layout, Components, Resources, and Tech
+          Stack for the detailed breakdowns.
+        </div>
+        <div
+          className="font-mono"
+          style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}
+        >
+          Snapshot date: {NYT_HOMEPAGE_SNAPSHOT.capturedAt} · Product rails:{" "}
+          {NYT_HOMEPAGE_SNAPSHOT.productRails.length}
+        </div>
       </div>
 
       {/* Article listing */}

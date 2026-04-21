@@ -307,6 +307,7 @@ const NYT_GAMES_SUB_SECTIONS: readonly BrandSubSection[] = [
 
 /* NYT master brand sub-sections — each tab is its own page */
 const NYT_BRAND_SUB_SECTIONS: readonly BrandSubSection[] = [
+  { anchor: "homepage", label: "Homepage", href: buildDesignDocsPath("brand-nyt/homepage") },
   { anchor: "typography", label: "Typography", href: buildDesignDocsPath("brand-nyt/typography") },
   { anchor: "colors", label: "Colors", href: buildDesignDocsPath("brand-nyt/colors") },
   { anchor: "layout", label: "Layout & Tokens", href: buildDesignDocsPath("brand-nyt/layout") },

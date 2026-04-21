@@ -87,6 +87,10 @@ describe("reddit dashboard page", () => {
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByText("9")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back to social/i })).toHaveAttribute(
+      "href",
+      "/admin/social",
+    );
     expect(screen.getByTestId("reddit-sources-manager")).toBeInTheDocument();
     expect(redditSourcesManagerMock).toHaveBeenLastCalledWith(
       expect.objectContaining({

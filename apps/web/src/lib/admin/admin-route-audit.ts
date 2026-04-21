@@ -155,8 +155,8 @@ const ADMIN_HOME_ENTRY_CONFIG: Record<string, AdminHomeEntryConfig> = {
       },
     ],
     notes: [
-      "Social-account-profile tabs (stats/comments/posts/hashtags/collaborators-tags) render at the canonical /social/[platform]/[handle] family.",
-      "The catalog and socialblade tabs remain under /admin/social/... until a follow-up migration moves them.",
+      "Social-account-profile tabs render at the canonical /social/[platform]/[handle] family, including socialblade and catalog slugs.",
+      "The /admin/social/... tree remains as a compatibility alias while inbound links migrate to the canonical short URLs.",
     ],
   },
   "networks-streaming": {

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import DesignDocsPageClient from "@/components/admin/design-docs/DesignDocsPageClient";
 
 const VALID_TABS = new Set([
+  "homepage",
   "typography",
   "colors",
   "layout",
@@ -19,7 +20,7 @@ export default async function BrandNYTTabPage({ params }: Props) {
   const { tab } = await params;
 
   if (!VALID_TABS.has(tab)) {
-    redirect("/design-docs/brand-nyt/typography");
+    redirect("/design-docs/brand-nyt/homepage");
   }
 
   return <DesignDocsPageClient activeSection="brand-nyt" brandTab={tab} />;

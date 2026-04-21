@@ -1,6 +1,7 @@
 "use client";
 
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import { NYT_HOMEPAGE_SNAPSHOT } from "@/lib/admin/nyt-homepage-snapshot";
 
 /* ------------------------------------------------------------------ */
 /*  NYT Brand — Layout & Tokens                                        */
@@ -326,6 +327,80 @@ export default function BrandNYTLayout() {
           );
         })}
       </div>
+
+      <SectionLabel id="homepage-shell-layout">Homepage Shell Layout</SectionLabel>
+
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        The NYT homepage is a stacked shell composed of rails and programming nodes,
+        not the 600px article-body column documented above.
+      </p>
+
+      <div className="dd-brand-card p-4 mb-6 overflow-x-auto">
+        <table
+          className="w-full text-left"
+          style={{ fontSize: 12, fontFamily: "var(--dd-font-sans)" }}
+        >
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--dd-brand-border)" }}>
+              <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Layout Token
+              </th>
+              <th className="py-1 pr-4 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Value
+              </th>
+              <th className="py-1 font-semibold" style={{ color: "var(--dd-ink-black)" }}>
+                Note
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {NYT_HOMEPAGE_SNAPSHOT.layoutTokens.map((token) => (
+              <tr
+                key={token.label}
+                style={{ borderBottom: "1px solid var(--dd-brand-border-subtle)" }}
+              >
+                <td className="py-1.5 pr-4" style={{ color: "var(--dd-ink-black)", fontWeight: 600 }}>
+                  {token.label}
+                </td>
+                <td
+                  className="py-1.5 pr-4 font-mono"
+                  style={{ fontSize: 11, color: "var(--dd-brand-accent)" }}
+                >
+                  {token.value}
+                </td>
+                <td className="py-1.5" style={{ color: "var(--dd-ink-faint)" }}>
+                  {token.note}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <SubSectionLabel>Source Order</SubSectionLabel>
+      <pre
+        className="dd-brand-card p-4 overflow-x-auto"
+        style={{
+          fontFamily: "var(--dd-font-mono, ui-monospace, monospace)",
+          fontSize: 11,
+          lineHeight: 1.6,
+          color: "var(--dd-ink-black)",
+        }}
+      >
+        {NYT_HOMEPAGE_SNAPSHOT.shellSections
+          .map(
+            (section, index) =>
+              `${index + 1}. ${section.label} — ${section.domEvidence.join(" · ")}`,
+          )
+          .join("\n")}
+      </pre>
     </div>
   );
 }

@@ -3,6 +3,15 @@
 import Link from "next/link";
 import { buildDesignDocsPath } from "@/lib/admin/admin-route-paths";
 import { ARTICLES } from "@/lib/admin/design-docs-config";
+import {
+  NYT_HOMEPAGE_COMPONENT_EXAMPLES,
+  NYT_HOMEPAGE_PACKAGE_CONTAINERS,
+} from "@/lib/admin/nyt-homepage-preview-config";
+import {
+  HomepageComponentPreview,
+  HomepagePackagePreview,
+  HomepageSourceSnippet,
+} from "@/components/admin/design-docs/sections/brand-nyt/nyt-homepage-specimens";
 
 /* ------------------------------------------------------------------ */
 /*  NYT Brand — Components                                              */
@@ -1455,6 +1464,127 @@ export default function BrandNYTComponents() {
           <br />
           Byline: nyt-franklin 12px/500 #727272
         </div>
+      </div>
+
+      <SectionLabel id="homepage-components">Homepage Components</SectionLabel>
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        Homepage-only patterns that sit outside the article content-block model.
+      </p>
+
+      <div className="grid grid-cols-1 gap-4 mb-8">
+        {NYT_HOMEPAGE_COMPONENT_EXAMPLES.map((pattern) => (
+          <div
+            key={pattern.previewId}
+            className="dd-brand-card"
+            style={{ padding: "18px 18px 20px" }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--dd-font-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.08em",
+                color: "var(--dd-brand-accent)",
+                marginBottom: 8,
+              }}
+            >
+              {pattern.category}
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--dd-font-sans)",
+                fontSize: 14,
+                fontWeight: 600,
+                color: "var(--dd-ink-black)",
+                marginBottom: 6,
+              }}
+            >
+              {pattern.label}
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--dd-font-sans)",
+                fontSize: 12,
+                color: "var(--dd-ink-faint)",
+                lineHeight: 1.55,
+                marginBottom: 14,
+              }}
+            >
+              {pattern.note}
+            </div>
+            <HomepageComponentPreview previewId={pattern.previewId} />
+            <HomepageSourceSnippet snippet={pattern.htmlSnippet} />
+          </div>
+        ))}
+      </div>
+
+      <SectionLabel id="homepage-package-containers">Homepage Package Containers</SectionLabel>
+      <p
+        style={{
+          fontFamily: "var(--dd-font-sans)",
+          fontSize: 12,
+          color: "var(--dd-ink-faint)",
+          marginBottom: 12,
+        }}
+      >
+        Actual homepage package containers, kept separate so carousel packages, cross-property shelves, and
+        list-plus-lead modules are documented as different layouts instead of one merged rail abstraction.
+      </p>
+
+      <div className="grid grid-cols-1 gap-4 mb-8">
+        {NYT_HOMEPAGE_PACKAGE_CONTAINERS.map((container) => (
+          <div
+            key={container.previewId}
+            className="dd-brand-card"
+            style={{ padding: "18px 18px 20px" }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--dd-font-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.08em",
+                color: "var(--dd-brand-accent)",
+                marginBottom: 8,
+              }}
+            >
+              live container
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--dd-font-sans)",
+                fontSize: 14,
+                fontWeight: 600,
+                color: "var(--dd-ink-black)",
+                marginBottom: 6,
+              }}
+            >
+              {container.label}
+            </div>
+            <div
+              style={{
+                fontFamily: "var(--dd-font-sans)",
+                fontSize: 12,
+                color: "var(--dd-ink-faint)",
+                lineHeight: 1.55,
+                marginBottom: 14,
+              }}
+            >
+              {container.description}
+            </div>
+            <HomepagePackagePreview previewId={container.previewId} />
+            <HomepageSourceSnippet snippet={container.htmlSnippet} />
+          </div>
+        ))}
       </div>
     </div>
   );

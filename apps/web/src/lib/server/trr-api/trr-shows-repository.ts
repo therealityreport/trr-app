@@ -196,6 +196,15 @@ export interface TrrPerson {
   updated_at: string;
 }
 
+export interface PersonEffectiveSocialHandles {
+  person_id: string;
+  facebook_handle: string | null;
+  instagram_handle: string | null;
+  tiktok_handle: string | null;
+  twitter_handle: string | null;
+  youtube_handle: string | null;
+}
+
 type PersonOverrideHandles = {
   person_id: string;
   instagram_handle: string | null;
@@ -497,6 +506,28 @@ export async function getShowById(id: string): Promise<TrrShow | null> {
   );
   const row = result.rows[0];
   return row ? normalizeTrrShowRow(row) : null;
+}
+
+export async function listShowExternalIdsByIds(
+  showIds: readonly string[],
+): Promise<Map<string, Record<string, unknown> | null>> {
+  const uniqueShowIds = [...new Set(showIds.map((showId) => showId.trim()).filter(Boolean))];
+  if (uniqueShowIds.length === 0) return new Map();
+
+  const result = await pgQuery<{ id: string; external_ids: Record<string, unknown> | null }>(
+    `SELECT id::text AS id, external_ids
+     FROM core.shows
+     WHERE id = ANY($1::uuid[])`,
+    [uniqueShowIds],
+  );
+
+  const map = new Map<string, Record<string, unknown> | null>();
+  for (const row of result.rows) {
+    const externalIds =
+      row.external_ids && typeof row.external_ids === "object" ? row.external_ids : null;
+    map.set(row.id, externalIds);
+  }
+  return map;
 }
 
 export interface ShowSlugRecord {
@@ -2075,6 +2106,209 @@ export async function listPersonExternalIds(
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
   }));
+}
+
+export async function listPrimaryPersonExternalIdsByPersonIds(
+  personIds: readonly string[],
+  options?: { includeInactive?: boolean },
+): Promise<Map<string, PersonExternalIdRecord[]>> {
+  const uniquePersonIds = [...new Set(personIds.map((personId) => personId.trim()).filter(Boolean))];
+  if (uniquePersonIds.length === 0) return new Map();
+
+  const includeInactive = options?.includeInactive ?? false;
+  const inactiveFilter = includeInactive ? "" : "AND pei.valid_to IS NULL";
+  const result = await pgQuery<
+    PersonExternalIdRecord & {
+      person_id: string;
+    }
+  >(
+    `SELECT
+       pei.person_id::text AS person_id,
+       pei.id,
+       pei.source_id,
+       pei.external_id,
+       pei.is_primary,
+       pei.valid_from,
+       pei.valid_to,
+       pei.observed_at,
+       pei.created_at,
+       pei.updated_at
+     FROM core.person_external_ids AS pei
+     WHERE pei.person_id = ANY($1::uuid[])
+       AND pei.is_primary = true
+       ${inactiveFilter}
+     ORDER BY pei.person_id ASC, pei.source_id ASC`,
+    [uniquePersonIds],
+  );
+
+  const recordsByPersonId = new Map<string, PersonExternalIdRecord[]>();
+  for (const personId of uniquePersonIds) {
+    recordsByPersonId.set(personId, []);
+  }
+
+  for (const row of result.rows) {
+    const records = recordsByPersonId.get(row.person_id) ?? [];
+    records.push({
+      id: typeof row.id === "number" ? row.id : Number(row.id ?? 0),
+      source_id: row.source_id,
+      external_id: row.external_id,
+      is_primary: Boolean(row.is_primary),
+      valid_from: row.valid_from,
+      valid_to: row.valid_to,
+      observed_at: row.observed_at,
+      created_at: row.created_at ?? null,
+      updated_at: row.updated_at ?? null,
+    });
+    recordsByPersonId.set(row.person_id, records);
+  }
+
+  return recordsByPersonId;
+}
+
+type EffectivePersonSocialHandleRow = {
+  person_id: string;
+  external_ids: Record<string, unknown> | null;
+  instagram_override: string | null;
+  tiktok_override: string | null;
+  twitter_override: string | null;
+  youtube_override: string | null;
+};
+
+const pickFirstNonEmptyString = (...candidates: unknown[]): string | null => {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const trimmed = candidate.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+};
+
+const readSocialHandleFromExternalIds = (
+  externalIds: Record<string, unknown> | null | undefined,
+  keys: readonly string[],
+): string | null => {
+  if (!externalIds) return null;
+  for (const key of keys) {
+    const value = externalIds[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+};
+
+const normalizeOptionalSocialHandle = (
+  source: Extract<
+    PersonExternalIdSource,
+    "facebook" | "instagram" | "twitter" | "tiktok" | "youtube"
+  >,
+  value: string | null,
+): string | null => {
+  if (!value) return null;
+  const normalized = normalizePersonExternalIdValue(source, value);
+  return normalized.trim() ? normalized : null;
+};
+
+export async function listEffectivePersonSocialHandlesByPersonIds(
+  personIds: readonly string[],
+): Promise<Map<string, PersonEffectiveSocialHandles>> {
+  const uniquePersonIds = [...new Set(personIds.map((personId) => personId.trim()).filter(Boolean))];
+  if (uniquePersonIds.length === 0) return new Map();
+
+  const result = await pgQuery<EffectivePersonSocialHandleRow>(
+    `SELECT
+       p.id::text AS person_id,
+       p.external_ids,
+       po.instagram_handle AS instagram_override,
+       po.tiktok_handle AS tiktok_override,
+       po.twitter_handle AS twitter_override,
+       po.youtube_handle AS youtube_override
+     FROM core.people AS p
+     LEFT JOIN core.people_overrides AS po
+       ON po.person_id = p.id
+     WHERE p.id = ANY($1::uuid[])`,
+    [uniquePersonIds],
+  );
+
+  const handlesByPersonId = new Map<string, PersonEffectiveSocialHandles>();
+  for (const personId of uniquePersonIds) {
+    handlesByPersonId.set(personId, {
+      person_id: personId,
+      facebook_handle: null,
+      instagram_handle: null,
+      tiktok_handle: null,
+      twitter_handle: null,
+      youtube_handle: null,
+    });
+  }
+
+  for (const row of result.rows) {
+    const externalIds =
+      row.external_ids && typeof row.external_ids === "object"
+        ? (row.external_ids as Record<string, unknown>)
+        : null;
+
+    handlesByPersonId.set(row.person_id, {
+      person_id: row.person_id,
+      facebook_handle: normalizeOptionalSocialHandle(
+        "facebook",
+        readSocialHandleFromExternalIds(externalIds, [
+          "facebook_id",
+          "facebook",
+          "facebook_handle",
+        ]),
+      ),
+      instagram_handle: normalizeOptionalSocialHandle(
+        "instagram",
+        pickFirstNonEmptyString(
+          row.instagram_override,
+          readSocialHandleFromExternalIds(externalIds, [
+            "instagram_id",
+            "instagram",
+            "instagram_handle",
+          ]),
+        ),
+      ),
+      tiktok_handle: normalizeOptionalSocialHandle(
+        "tiktok",
+        pickFirstNonEmptyString(
+          row.tiktok_override,
+          readSocialHandleFromExternalIds(externalIds, [
+            "tiktok_id",
+            "tiktok",
+            "tiktok_handle",
+          ]),
+        ),
+      ),
+      twitter_handle: normalizeOptionalSocialHandle(
+        "twitter",
+        pickFirstNonEmptyString(
+          row.twitter_override,
+          readSocialHandleFromExternalIds(externalIds, [
+            "twitter_id",
+            "twitter",
+            "twitter_handle",
+            "x_id",
+            "x_handle",
+            "x",
+          ]),
+        ),
+      ),
+      youtube_handle: normalizeOptionalSocialHandle(
+        "youtube",
+        pickFirstNonEmptyString(
+          row.youtube_override,
+          readSocialHandleFromExternalIds(externalIds, [
+            "youtube_id",
+            "youtube",
+            "youtube_handle",
+          ]),
+        ),
+      ),
+    });
+  }
+
+  return handlesByPersonId;
 }
 
 const normalizePersonExternalIdInput = (
