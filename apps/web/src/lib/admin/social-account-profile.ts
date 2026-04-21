@@ -738,6 +738,8 @@ export type CatalogBackfillLaunchResponse = {
   run_id?: string | null;
   status?: string | null;
   launch_group_id?: string | null;
+  launch_state?: "pending" | "ready" | "failed" | null;
+  launch_task_resolution_pending?: boolean | null;
   selected_tasks?: CatalogBackfillSelectedTask[];
   effective_selected_tasks?: CatalogBackfillSelectedTask[];
   post_details_skipped_reason?: "already_materialized" | null;

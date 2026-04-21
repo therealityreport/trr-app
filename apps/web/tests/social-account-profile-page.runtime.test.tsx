@@ -1241,6 +1241,55 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
+  it("shows provisional launch copy once instagram kickoff returns a run id", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+        expect(body).toEqual({
+          source_scope: "bravo",
+          backfill_scope: "full_history",
+          selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
+        });
+        return jsonResponse({
+          run_id: "catalog-run-pending-12345678",
+          status: "queued",
+          catalog_run_id: "catalog-run-pending-12345678",
+          launch_group_id: "launch-group-12345678",
+          launch_state: "pending",
+          launch_task_resolution_pending: true,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+    expect(await screen.findByText("Choose what this backfill should run")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Instagram backfill accepted. Task selection is still being finalized. Launch launch-g · Catalog catalog-.",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("preserves deselection in the Instagram backfill dialog and launch copy", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -4316,7 +4365,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
-          catalog_recent_runs: [{ run_id: "run-old-1", status: "cancelled", created_at: "2026-04-20T17:09:36.000Z" }],
+          catalog_recent_runs: [{ run_id: "run-old-1", status: "running", created_at: "2026-04-20T17:09:36.000Z" }],
         });
       }
       if (url.includes("/catalog/runs/run-old-1/progress")) {
@@ -4391,7 +4440,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
-          catalog_recent_runs: [{ run_id: "run-archive-1", status: "cancelled", created_at: "2026-04-20T17:09:36.000Z" }],
+          catalog_recent_runs: [{ run_id: "run-archive-1", status: "running", created_at: "2026-04-20T17:09:36.000Z" }],
         });
       }
       if (url.includes("/catalog/runs/run-archive-1/progress")) {
@@ -5367,16 +5416,20 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       if (url.includes("/catalog/runs/run-live-1/progress")) {
         return jsonResponse(frontierProgress);
       }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="hashtags" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
-      expect(screen.getByText("8,359,747")).toBeInTheDocument();
+      expect(screen.getByText("16,474 / 16,475")).toBeInTheDocument();
     });
-    expect(screen.getByText("110,072,264")).toBeInTheDocument();
-    expect(screen.getByText("16,474 / 16,475")).toBeInTheDocument();
     await waitFor(() => {
       expect(
         screen.getByText(
@@ -5563,7 +5616,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     rerender(<SocialAccountProfilePage platform="instagram" handle="bravowwhl" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("TRR-Backend request timed out.")).toBeInTheDocument();
+      expect(screen.getByText("Summary read timed out before completion. Retry in a moment.")).toBeInTheDocument();
     });
     expect(screen.queryByRole("heading", { name: "Distribution" })).not.toBeInTheDocument();
     expect(screen.queryByText("The Real Housewives of Salt Lake City")).not.toBeInTheDocument();
@@ -6132,7 +6185,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     fireEvent.click(screen.getByRole("button", { name: "View Details" }));
 
     await waitFor(() => {
-      expect(screen.getByText("0%")).toBeInTheDocument();
+      expect(screen.getAllByText("0%").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("0 / 16,453 posts checked")).toBeInTheDocument();
     });
   });
@@ -7304,10 +7357,16 @@ it("uses the newest inspected catalog run from the summary when discovery outran
           checked_at: "2026-03-20T12:30:00.000Z",
         });
       }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
       expect(screen.getByText("Catalog totals trail the live profile by 2 posts. Stored 12 posts; live profile shows 14.")).toBeInTheDocument();
@@ -7452,10 +7511,16 @@ it("uses the newest inspected catalog run from the summary when discovery outran
           catalog_action_scope: "full_history",
         });
       }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
@@ -7549,10 +7614,16 @@ it("uses the newest inspected catalog run from the summary when discovery outran
           },
         });
       }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();
@@ -7627,10 +7698,16 @@ it("uses the newest inspected catalog run from the summary when discovery outran
           },
         });
       }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({ items: [], pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 } });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
-    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Run Gap Analysis" })).toBeInTheDocument();

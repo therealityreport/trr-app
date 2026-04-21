@@ -3845,6 +3845,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           catalogTerminalSummaryRefreshRunIdRef.current = null;
         }
         if (action === "backfill" && platform === "instagram") {
+          const launchTaskResolutionPending =
+            data.launch_state === "pending" || Boolean(data.launch_task_resolution_pending);
           const launchParts = [
             data.launch_group_id ? `Launch ${data.launch_group_id.slice(0, 8)}` : null,
             catalogRunId ? `Catalog ${catalogRunId.slice(0, 8)}` : null,
@@ -3862,11 +3864,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             data.post_details_skipped_reason === "already_materialized"
               ? " Post Details skipped because all catalog posts are already materialized."
               : "";
-          setCatalogActionMessage(
-            launchParts.length > 0
-              ? `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage} ${launchParts.join(" · ")}.`
-              : `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage}`,
-          );
+          if (launchTaskResolutionPending) {
+            setCatalogActionMessage(
+              launchParts.length > 0
+                ? `Instagram backfill accepted. Task selection is still being finalized. ${launchParts.join(" · ")}.`
+                : "Instagram backfill accepted. Task selection is still being finalized.",
+            );
+          } else {
+            setCatalogActionMessage(
+              launchParts.length > 0
+                ? `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage} ${launchParts.join(" · ")}.`
+                : `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage}`,
+            );
+          }
         } else if (action === "backfill") {
           setCatalogActionMessage(`Post backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)}).` : "."}`);
         } else {
