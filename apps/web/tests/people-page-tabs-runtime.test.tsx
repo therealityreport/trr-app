@@ -397,7 +397,7 @@ describe("people page tab runtime behavior", () => {
 
     expect(screen.getByRole("link", { name: "Open account page" })).toHaveAttribute(
       "href",
-      "/admin/social/instagram/andycohen/socialblade",
+      "/social/instagram/andycohen/socialblade",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Facebook · @andycohen" }));
@@ -405,7 +405,7 @@ describe("people page tab runtime behavior", () => {
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Open account page" })).toHaveAttribute(
         "href",
-        "/admin/social/facebook/andycohen/socialblade",
+        "/social/facebook/andycohen/socialblade",
       );
     });
     expect(
@@ -419,7 +419,7 @@ describe("people page tab runtime behavior", () => {
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Open account page" })).toHaveAttribute(
         "href",
-        "/admin/social/youtube/andycohen/socialblade",
+        "/social/youtube/andycohen/socialblade",
       );
     });
   });
