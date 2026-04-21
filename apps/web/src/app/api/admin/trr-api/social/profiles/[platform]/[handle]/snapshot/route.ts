@@ -24,7 +24,7 @@ const LIVE_STALE_MS = 2_500;
 
 export const dynamic = "force-dynamic";
 
-const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "running", "retrying", "attached"]);
+const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "running", "retrying", "cancelling", "attached"]);
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -32,6 +32,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { platform, handle } = await context.params;
     const searchParams = new URLSearchParams(request.nextUrl.searchParams);
     const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
+    const summarySearchParams = new URLSearchParams();
+    const requestedDetail = (searchParams.get("detail") ?? "").trim();
+    if (requestedDetail) {
+      summarySearchParams.set("detail", requestedDetail);
+    }
     searchParams.delete("refresh");
 
     const snapshot = await getOrCreateAdminSnapshot({
@@ -50,6 +55,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
             buildSnapshotSubrequest(
               request,
               `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
+              summarySearchParams,
             ),
             context,
           ),
@@ -64,8 +70,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
           recentRuns.find((run) =>
             ACTIVE_CATALOG_RUN_STATUSES.has(String(run.status ?? "").trim().toLowerCase()),
           )?.run_id ?? null;
-        const progressRunId =
-          explicitRunId || (typeof inferredRunId === "string" && inferredRunId.trim().length > 0 ? inferredRunId.trim() : "");
+        const explicitRunStatus =
+          recentRuns.find((run) => String(run.run_id ?? "").trim() === explicitRunId)?.status ?? null;
+        const shouldLoadExplicitRunProgress =
+          explicitRunId.length > 0 &&
+          (!explicitRunStatus || ACTIVE_CATALOG_RUN_STATUSES.has(String(explicitRunStatus).trim().toLowerCase()));
+        const progressRunId = shouldLoadExplicitRunProgress
+          ? explicitRunId
+          : typeof inferredRunId === "string" && inferredRunId.trim().length > 0
+            ? inferredRunId.trim()
+            : "";
 
         const catalogRunProgress = progressRunId
           ? await readRouteJsonOrThrow<Record<string, unknown>>(

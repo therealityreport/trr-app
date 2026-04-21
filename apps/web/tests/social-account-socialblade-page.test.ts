@@ -2,9 +2,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/admin/social/instagram/bravotv/socialblade",
+  usePathname: () => "/social/instagram/bravotv/socialblade",
   notFound: () => {
     throw new Error("NOT_FOUND");
+  },
+  redirect: (url: string) => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
   },
 }));
 
@@ -13,12 +16,12 @@ describe("social account SocialBlade page", () => {
     vi.resetModules();
   });
 
-  it("normalizes supported params before rendering the SocialBlade tab", async () => {
-    const page = await import("@/app/admin/social/[platform]/[handle]/socialblade/page");
+  it("normalizes supported params before rendering the canonical SocialBlade tab", async () => {
+    const page = await import("@/app/social/[platform]/[handle]/socialblade/page");
     const element = await page.default({
       params: Promise.resolve({
-        platform: "Facebook",
-        handle: "@BravoTV",
+        platform: "facebook",
+        handle: "bravotv",
       }),
     });
 
@@ -28,7 +31,7 @@ describe("social account SocialBlade page", () => {
   });
 
   it("rejects unsupported socialblade platforms", async () => {
-    const page = await import("@/app/admin/social/[platform]/[handle]/socialblade/page");
+    const page = await import("@/app/social/[platform]/[handle]/socialblade/page");
 
     await expect(
       page.default({
@@ -38,5 +41,18 @@ describe("social account SocialBlade page", () => {
         }),
       }),
     ).rejects.toThrow("NOT_FOUND");
+  });
+
+  it("redirects the legacy admin page to the canonical SocialBlade slug", async () => {
+    const page = await import("@/app/admin/social/[platform]/[handle]/socialblade/page");
+
+    await expect(
+      page.default({
+        params: Promise.resolve({
+          platform: "Facebook",
+          handle: "@BravoTV",
+        }),
+      }),
+    ).rejects.toThrow("NEXT_REDIRECT:/social/facebook/bravotv/socialblade");
   });
 });

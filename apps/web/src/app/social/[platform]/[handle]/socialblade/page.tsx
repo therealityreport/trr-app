@@ -1,14 +1,20 @@
 import { notFound, redirect } from "next/navigation";
 import SocialAccountProfilePage from "@/components/admin/SocialAccountProfilePage";
-import { type SocialPlatformSlug } from "@/lib/admin/social-account-profile";
+import {
+  SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS,
+  type SocialPlatformSlug,
+} from "@/lib/admin/social-account-profile";
 import { resolveSocialAccountProfileRoute } from "@/lib/admin/social-account-profile-route";
 
 type PageProps = {
   params: Promise<{ platform: string; handle: string }>;
 };
 
-export default async function SocialAccountProfileCollaboratorsTagsPage({ params }: PageProps) {
-  const resolved = resolveSocialAccountProfileRoute(await params, { tab: "collaborators-tags" });
+export default async function SocialAccountProfileSocialBladePage({ params }: PageProps) {
+  const resolved = resolveSocialAccountProfileRoute(await params, {
+    tab: "socialblade",
+    supportedPlatforms: SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS,
+  });
   if (!resolved) {
     notFound();
   }
@@ -19,7 +25,7 @@ export default async function SocialAccountProfileCollaboratorsTagsPage({ params
     <SocialAccountProfilePage
       platform={resolved.platform as SocialPlatformSlug}
       handle={resolved.handle}
-      activeTab="collaborators-tags"
+      activeTab="socialblade"
     />
   );
 }

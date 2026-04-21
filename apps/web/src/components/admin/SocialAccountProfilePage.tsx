@@ -17,11 +17,16 @@ import {
   type SocialAccountCatalogGapAnalysisStatusResponse,
   type SocialAccountCatalogFreshness,
   type CatalogBackfillRequest,
+  type CatalogBackfillLaunchResponse,
+  type CatalogBackfillSelectedTask,
+  type CatalogRemediateDriftRequest,
+  type CatalogRemediateDriftResponse,
   type CatalogRepairAuthRequest,
   type CatalogReviewResolveRequest,
   type CatalogSyncNewerRequest,
   type CatalogSyncRecentRequest,
   type SocialAccountCatalogPost,
+  type SocialAccountCatalogPostDetail,
   type SocialAccountCatalogReviewItem,
   type SocialAccountCatalogRun,
   type SocialAccountCatalogRunProgressHandle,
@@ -32,18 +37,22 @@ import {
   type SocialAccountProfileHashtag,
   type SocialAccountProfileHashtagAssignment,
   type SocialAccountProfileHashtagTimeline,
+  type SocialAccountLiveProfileTotal,
   type SocialAccountProfilePost,
+  type SocialAccountProfileSummaryDetail,
   type SocialAccountProfileSummary,
   type SocialAccountProfileTab,
   type SocialPlatformSlug,
   type SocialAccountProfileCollaboratorTagAggregate,
   type SocialProfileCookieHealth,
+  type SocialProfileCookieRefreshResult,
   SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS,
   SOCIAL_ACCOUNT_PLATFORM_LABELS,
   SOCIAL_ACCOUNT_PROFILE_TAB_LABELS,
   SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS,
 } from "@/lib/admin/social-account-profile";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_SOCIAL_PATH } from "@/lib/admin/admin-route-paths";
 import { isLocalDevHostname } from "@/lib/admin/dev-admin-bypass";
 import { buildSocialAccountProfileUrl } from "@/lib/admin/show-admin-routes";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
@@ -56,6 +65,8 @@ type Props = {
   handle: string;
   activeTab: SocialAccountProfileTab;
 };
+
+type SummaryFetchDetail = SocialAccountProfileSummaryDetail;
 
 type PostsResponse = {
   items: SocialAccountProfilePost[];
@@ -98,6 +109,17 @@ type ShowOption = {
 type ReviewResolutionDraft = {
   resolution_action: CatalogReviewResolveRequest["resolution_action"];
   show_id: string;
+};
+
+type PendingCatalogAction = {
+  action: "backfill" | "sync_recent" | "sync_newer";
+  requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest;
+};
+
+type BackfillTaskOption = {
+  value: CatalogBackfillSelectedTask;
+  label: string;
+  description: string;
 };
 
 type CollaboratorsTagsResponse = {
@@ -191,12 +213,40 @@ const TERMINAL_CATALOG_RUN_STATUSES = new Set(["completed", "failed", "cancelled
 const TIKTOK_EMPTY_FIRST_PAGE_ERROR_CODE = "tiktok_discovery_empty_first_page";
 const TIKTOK_EMPTY_FIRST_PAGE_ALERT_CODE = "tiktok_empty_first_page";
 const TIKTOK_DIRECT_FALLBACK_FAILED_ALERT_CODE = "tiktok_direct_fallback_failed";
+const INSTAGRAM_LOCAL_FALLBACK_ALERT_CODES = new Set([
+  "frontier_auth_blocked",
+  "instagram_modal_empty_page",
+  "instagram_modal_empty_page_retry_exhausted",
+  "no_authenticated_modal_workers",
+]);
 const CATALOG_ACTION_SCOPES: ReadonlyArray<SocialAccountCatalogActionScope> = [
   "full_history",
   "bounded_window",
   "recent_window",
   "head_gap",
   "frontier_resume",
+];
+const INSTAGRAM_BACKFILL_TASK_OPTIONS: ReadonlyArray<BackfillTaskOption> = [
+  {
+    value: "post_details",
+    label: "Post Details",
+    description: "Refresh saved Instagram post details and metrics for existing posts.",
+  },
+  {
+    value: "comments",
+    label: "Comments",
+    description: "Save the full comment payload for the saved Instagram posts in scope.",
+  },
+  {
+    value: "media",
+    label: "Media",
+    description: "Mirror hosted post media to the R2/CDN lanes for the saved Instagram posts in scope.",
+  },
+];
+const INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = [
+  "post_details",
+  "comments",
+  "media",
 ];
 const BOUNDED_CATALOG_ACTION_SCOPES = new Set<SocialAccountCatalogActionScope>([
   "bounded_window",
@@ -231,6 +281,13 @@ const formatInteger = (value: number | null | undefined): string => {
   return INTEGER_FORMATTER.format(Number.isFinite(Number(value)) ? Number(value) : 0);
 };
 
+const formatPercent = (saved: number | null | undefined, total: number | null | undefined): string => {
+  const normalizedTotal = Math.max(0, Number(total ?? 0));
+  const normalizedSaved = Math.max(0, Number(saved ?? 0));
+  if (normalizedTotal <= 0) return "0%";
+  return `${Math.round((Math.min(normalizedSaved, normalizedTotal) / normalizedTotal) * 100)}%`;
+};
+
 const formatDateTime = (value?: string | null): string => {
   if (!value) return "Never";
   const parsed = new Date(value);
@@ -241,9 +298,10 @@ const formatDateTime = (value?: string | null): string => {
 const buildLocalCatalogCommand = (
   platform: SocialPlatformSlug,
   handle: string,
-  action: "backfill" | "fill_missing_photos",
+  sourceScope: string,
+  action: "backfill" | "fill_missing_posts",
 ): string =>
-  `cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/local_catalog_action.py --platform ${platform} --account ${handle} --action ${action}`;
+  `cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/local_catalog_action.py --platform ${platform} --account ${handle} --source-scope ${sourceScope} --action ${action}`;
 
 const formatDiagnosticToken = (value?: string | null): string => {
   const normalized = String(value || "").trim();
@@ -270,14 +328,54 @@ const formatSeasonLabel = (seasonNumber?: number | null): string => {
   return seasonNumber ? `Season ${seasonNumber}` : "All seasons";
 };
 
+const formatBackfillTaskLabel = (task: CatalogBackfillSelectedTask): string => {
+  return INSTAGRAM_BACKFILL_TASK_OPTIONS.find((option) => option.value === task)?.label ?? task;
+};
+
+const formatDetailMetricValue = (value: unknown): string => {
+  return typeof value === "number" && Number.isFinite(value) ? formatInteger(value) : "0";
+};
+
+const formatMirrorStatusLabel = (value: unknown): string => {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim().replace(/_/g, " ");
+  }
+  if (value && typeof value === "object" && "status" in value) {
+    return String((value as { status?: unknown }).status || "")
+      .trim()
+      .replace(/_/g, " ");
+  }
+  return "Unknown";
+};
+
+const isLikelyVideoUrl = (value?: string | null): boolean => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.endsWith(".mp4") || normalized.endsWith(".mov") || normalized.endsWith(".webm") || normalized.includes(".mp4?");
+};
+
 const formatHashtagWindowLabel = (value: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]): string => {
   return HASHTAG_WINDOW_OPTIONS.find((option) => option.value === value)?.label ?? "All Time";
+};
+
+export const shouldUseSummaryTopHashtagsPreview = (options: {
+  activeTab: SocialAccountProfileTab;
+  hashtagWindow: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"];
+  summaryTopHashtags: ReadonlyArray<SocialAccountProfileHashtag> | null | undefined;
+  hasLoadedExactWindow: boolean;
+}): boolean => {
+  return (
+    options.activeTab === "stats" &&
+    options.hashtagWindow === "all" &&
+    !options.hasLoadedExactWindow &&
+    (options.summaryTopHashtags?.length ?? 0) > 0
+  );
 };
 
 const buildEmptySocialAccountProfileSummary = (
   platform: SocialPlatformSlug,
   handle: string,
 ): SocialAccountProfileSummary => ({
+  summary_detail: "full",
   platform,
   account_handle: handle,
   total_posts: 0,
@@ -297,6 +395,9 @@ const buildEmptySocialAccountProfileSummary = (
   last_catalog_run_at: null,
   last_catalog_run_status: null,
   catalog_recent_runs: [],
+  comments_saved_summary: null,
+  comments_coverage: null,
+  media_coverage: null,
   per_show_counts: [],
   per_season_counts: [],
   top_hashtags: [],
@@ -398,9 +499,29 @@ const isBackendSaturationError = (error: unknown): error is SocialAccountRequest
   return Boolean((error as SocialAccountRequestError | undefined)?.isBackendSaturated);
 };
 
+const toSharedLiveResourceRequestError = (
+  message: string | null,
+  details: {
+    code?: string;
+    retryable?: boolean;
+    retryAfterMs?: number;
+    isBackendSaturated?: boolean;
+    upstreamStatus?: number;
+  } | null,
+): SocialAccountRequestError => {
+  const error = new Error(message || details?.code || "Fetch failed") as SocialAccountRequestError;
+  error.code = details?.code;
+  error.retryable = details?.retryable;
+  error.retryAfterMs = details?.retryAfterMs;
+  error.isBackendSaturated = details?.isBackendSaturated;
+  error.upstreamStatus = details?.upstreamStatus;
+  return error;
+};
+
 const isTimeoutRequestError = (error: SocialAccountRequestError | null | undefined): boolean => {
   if (!error) return false;
   return (
+    error.code === "BACKEND_REQUEST_TIMEOUT" ||
     error.code === "UPSTREAM_TIMEOUT" ||
     error.upstreamStatus === 504 ||
     error.message.toLowerCase().includes("timed out")
@@ -421,6 +542,47 @@ const formatCatalogDiagnosticErrorMessage = (
       : "Freshness check timed out before completion. Retry in a moment.";
   }
   return `${label} failed. ${(error as Error).message}`;
+};
+
+const formatCatalogActionErrorMessage = (
+  action: "backfill" | "sync_recent" | "sync_newer",
+  error: SocialAccountRequestError | null,
+): string => {
+  if (!error) {
+    return `Failed to ${
+      action === "backfill" ? "start backfill"
+      : action === "sync_newer" ? "sync newer posts"
+      : "sync recent catalog content"
+    }`;
+  }
+  if (isBackendSaturationError(error)) {
+    return `${
+      action === "backfill" ? "Backfill start"
+      : action === "sync_newer" ? "Sync newer start"
+      : "Recent sync start"
+    } is retryable while the backend is busy.`;
+  }
+  if (isTimeoutRequestError(error)) {
+    return `${
+      action === "backfill" ? "Backfill start"
+      : action === "sync_newer" ? "Sync newer start"
+      : "Recent sync start"
+    } timed out before TRR-Backend replied. Retry in a moment.`;
+  }
+  const message = typeof (error as { message?: unknown } | null)?.message === "string"
+    ? ((error as { message: string }).message || "").trim()
+    : "";
+  return message || "Catalog action failed.";
+};
+
+const formatSummaryRequestErrorMessage = (error: SocialAccountRequestError | null): string => {
+  if (!error) {
+    return "Failed to load social account profile summary";
+  }
+  if (isTimeoutRequestError(error)) {
+    return "Summary read timed out before completion. Retry in a moment.";
+  }
+  return (error as Error).message || "Failed to load social account profile summary";
 };
 
 const toCatalogGapAnalysisStatusError = (
@@ -709,8 +871,17 @@ const getCatalogPhaseLabel = (progress?: SocialAccountCatalogRunProgressSnapshot
   const recoveryStatus = String(recovery?.status || "").trim().toLowerCase();
   const recoveryReason = String(recovery?.reason || "").trim().toLowerCase();
   const recoveryStage = String(recovery?.stage || "").trim().toLowerCase();
+  const completionGapReason = String(progress?.completion_gap_reason || "").trim().toLowerCase();
   if (runStatus === "cancelled") {
     return "Run cancelled";
+  }
+  if (
+    runStatus === "failed" &&
+    completionGapReason === "fetch_incomplete" &&
+    recoveryReason === "no_partitions_discovered" &&
+    !["queued", "running", "fallback_enqueued", "blocked"].includes(recoveryStatus)
+  ) {
+    return "Recovery ended before catalog fetch";
   }
   if (runStatus === "failed") {
     return "Run failed";
@@ -823,13 +994,15 @@ const normalizeCatalogRunState = (value?: string | null): string => {
 const resolveActiveCatalogSourceScope = (
   summary?: SocialAccountProfileSummary | null,
   progress?: SocialAccountCatalogRunProgressSnapshot | null,
-): string => {
+): NonNullable<CatalogBackfillRequest["source_scope"]> => {
   const progressScope = String(progress?.source_scope || "").trim().toLowerCase();
-  if (progressScope) return progressScope;
+  if (progressScope === "creator" || progressScope === "community") return progressScope;
+  if (progressScope === "bravo") return "bravo";
   const sourceStatusRows = Array.isArray(summary?.source_status) ? summary.source_status : [];
   for (const row of sourceStatusRows) {
     const scope = String((row as Record<string, unknown>).source_scope || "").trim().toLowerCase();
-    if (scope) return scope;
+    if (scope === "creator" || scope === "community") return scope;
+    if (scope === "bravo") return "bravo";
   }
   return "bravo";
 };
@@ -858,11 +1031,13 @@ const getOperationalAlertTone = (severity?: string | null): string => {
 };
 
 const formatOperationalAlertLabel = (alert: SocialAccountOperationalAlert): string =>
-  String(alert.code || "")
-    .trim()
-    .toLowerCase()
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (token) => token.toUpperCase());
+  String(alert.code || "").trim().toLowerCase() === "failed_recovery_no_partitions_discovered"
+    ? "Failed Recovery"
+    : String(alert.code || "")
+        .trim()
+        .toLowerCase()
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (token) => token.toUpperCase());
 
 const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgressSnapshot | null): {
   tone: "amber" | "red";
@@ -945,6 +1120,23 @@ const getCatalogDispatchStatusMessage = (progress?: SocialAccountCatalogRunProgr
   return null;
 };
 
+const getCatalogLaunchGuardMessage = (
+  progress?: SocialAccountCatalogRunProgressSnapshot | null,
+): string | null => {
+  const operationalState = normalizeCatalogRunState(progress?.operational_state);
+  if (operationalState === "blocked_auth") {
+    const reason = formatDiagnosticToken(progress?.repairable_reason);
+    return reason
+      ? `Catalog launch is blocked until Instagram auth is repaired. Reason: ${reason}.`
+      : "Catalog launch is blocked until Instagram auth is repaired.";
+  }
+  const dispatchMessage = getCatalogDispatchStatusMessage(progress);
+  if (dispatchMessage?.tone === "red") {
+    return `Catalog launch is blocked. ${dispatchMessage.text}`;
+  }
+  return null;
+};
+
 export default function SocialAccountProfilePage({ platform, handle, activeTab }: Props) {
   const { user, checking, hasAccess } = useAdminGuard();
   const fetchAdminWithAuth = useCallback(
@@ -964,6 +1156,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [summaryUninitialized, setSummaryUninitialized] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [fullSummaryLoading, setFullSummaryLoading] = useState(false);
+  const [fullSummaryError, setFullSummaryError] = useState<string | null>(null);
   const [summarySaturationActive, setSummarySaturationActive] = useState(false);
 
   const [posts, setPosts] = useState<PostsResponse | null>(null);
@@ -979,15 +1173,29 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogPosts, setCatalogPosts] = useState<CatalogPostsResponse | null>(null);
   const [catalogPostsLoading, setCatalogPostsLoading] = useState(false);
   const [catalogPostsError, setCatalogPostsError] = useState<string | null>(null);
+  const [catalogDetailSourceId, setCatalogDetailSourceId] = useState<string | null>(null);
+  const [catalogDetail, setCatalogDetail] = useState<SocialAccountCatalogPostDetail | null>(null);
+  const [catalogDetailLoading, setCatalogDetailLoading] = useState(false);
+  const [catalogDetailError, setCatalogDetailError] = useState<string | null>(null);
   const [catalogCardPreview, setCatalogCardPreview] = useState<{
     total: number;
     latestPostedAt: string | null;
   } | null>(null);
   const [catalogPage, setCatalogPage] = useState(1);
   const [catalogFilter, setCatalogFilter] = useState<"all" | "assigned" | "unassigned" | "ambiguous" | "needs_review">("all");
+  const [instagramBackfillDialogOpen, setInstagramBackfillDialogOpen] = useState(false);
+  const [instagramBackfillSelectedTasks, setInstagramBackfillSelectedTasks] = useState<CatalogBackfillSelectedTask[]>([
+    ...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS,
+  ]);
   const [catalogActionMessage, setCatalogActionMessage] = useState<string | null>(null);
   const [runningCatalogAction, setRunningCatalogAction] = useState<
-    "backfill" | "fill_missing_photos" | "repair_auth" | "sync_recent" | "sync_newer" | null
+    | "backfill"
+    | "fill_missing_posts"
+    | "repair_auth"
+    | "sync_recent"
+    | "sync_newer"
+    | "remediate_drift"
+    | null
   >(null);
   const [reviewQueue, setReviewQueue] = useState<SocialAccountCatalogReviewItem[]>([]);
   const [reviewQueueLoading, setReviewQueueLoading] = useState(false);
@@ -1031,6 +1239,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogProgressLastSuccessAt, setCatalogProgressLastSuccessAt] = useState<string | null>(null);
   const [catalogLogsExpanded, setCatalogLogsExpanded] = useState(false);
   const catalogTerminalSummaryRefreshRunIdRef = useRef<string | null>(null);
+  const catalogRuntimePivotRef = useRef<string | null>(null);
   const catalogFreshnessProbeKeyRef = useRef<string | null>(null);
   const hashtagResponseCacheRef = useRef<
     Map<
@@ -1042,21 +1251,32 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     >
   >(new Map());
   // Cookie preflight state
-  const COOKIE_REQUIRED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = ["tiktok", "twitter", "facebook", "threads"];
+  const COOKIE_REQUIRED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
+    "instagram",
+    "tiktok",
+    "twitter",
+    "facebook",
+    "threads",
+  ];
   const platformRequiresCookies = COOKIE_REQUIRED_PLATFORMS.includes(platform);
   const [cookieHealth, setCookieHealth] = useState<SocialProfileCookieHealth | null>(null);
   const [cookieHealthLoading, setCookieHealthLoading] = useState(false);
   const [cookieHealthError, setCookieHealthError] = useState<string | null>(null);
   const [cookieRefreshing, setCookieRefreshing] = useState(false);
   const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
+  const pendingCatalogActionAfterCookieRepairRef = useRef<PendingCatalogAction | null>(null);
+  const liveProfileTotalProbeKeyRef = useRef<string | null>(null);
+  const autoFullSummaryAttemptedRef = useRef<string | null>(null);
 
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
   const supportsComments = platform === "instagram";
   const supportsSocialBlade = SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS.includes(platform);
   const hasSummary = summary !== null;
+  const hasFullSummary = Boolean(summary && (summary.summary_detail ?? "full") === "full");
+  const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
   const shouldDeferSecondaryCatalogReads =
     !hasSummary || summaryLoading || summarySaturationActive || catalogProgressSaturationActive;
-  const summaryRequestKey = `summary:${platform}:${handle}`;
+  const commentsTabNeedsFullSummary = activeTab === "comments" && supportsComments;
   const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}`;
   const hashtagTimelineRequestKey = `hashtags-timeline:${platform}:${handle}:${hashtagWindow}`;
   const collaboratorsRequestKey = `collaborators-tags:${platform}:${handle}`;
@@ -1093,8 +1313,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return activeCatalogRun?.run_id?.trim() || null;
   }, [activeCatalogRun?.run_id]);
   const backgroundCatalogRunId = useMemo(() => {
-    return selectedCatalogRunId || activeCatalogRunId || latestCatalogRunId || null;
-  }, [activeCatalogRunId, latestCatalogRunId, selectedCatalogRunId]);
+    return selectedCatalogRunId || activeCatalogRunId || null;
+  }, [activeCatalogRunId, selectedCatalogRunId]);
   const visibleTabs = useMemo(
     () =>
       (Object.keys(SOCIAL_ACCOUNT_PROFILE_TAB_LABELS) as SocialAccountProfileTab[]).filter(
@@ -1113,6 +1333,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setSummaryUninitialized(false);
     setSummaryLoading(false);
     setSummaryError(null);
+    setFullSummaryLoading(false);
+    setFullSummaryError(null);
     setSummarySaturationActive(false);
     setPosts(null);
     setPostsLoading(false);
@@ -1163,6 +1385,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setPostSearchResults(null);
     setPostSearchLoading(false);
     setPostSearchError(null);
+    liveProfileTotalProbeKeyRef.current = null;
+    autoFullSummaryAttemptedRef.current = null;
   }, [platform, handle]);
 
   useEffect(() => {
@@ -1174,11 +1398,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     postSearchInputRef.current?.focus();
   }, [postSearchExpanded]);
 
-  const refreshSummary = useCallback(async () => {
+  const refreshSummary = useCallback(async (options?: { detail?: SummaryFetchDetail }) => {
     if (!user) return;
+    const detail = options?.detail ?? "lite";
+    const summaryRequestKey = `summary:${platform}:${handle}:${detail}`;
+    const query = new URLSearchParams({ detail });
     const result = await withSocialProfileRequestDedup(summaryRequestKey, async (): Promise<SummaryLoadResult> => {
       const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary?${query.toString()}`,
         undefined,
         { preferredUser: user },
       );
@@ -1205,14 +1432,30 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setSummaryUninitialized(result.uninitialized);
     setSummaryError(null);
     return result;
-  }, [fetchAdminWithAuth, handle, platform, summaryRequestKey, user]);
+  }, [fetchAdminWithAuth, handle, platform, user]);
+
+  const loadFullSummary = useCallback(async () => {
+    if (!user) return;
+    setFullSummaryLoading(true);
+    setFullSummaryError(null);
+    try {
+      await refreshSummary({ detail: "full" });
+    } catch (error) {
+      setFullSummaryError(
+        error instanceof Error ? error.message : "Failed to load social account profile summary",
+      );
+    } finally {
+      setFullSummaryLoading(false);
+    }
+  }, [refreshSummary, user]);
 
   const fetchProfileSnapshot = useCallback(
-    async (options?: { signal?: AbortSignal; forceRefresh?: boolean; runId?: string | null }) => {
+    async (options?: { signal?: AbortSignal; forceRefresh?: boolean; runId?: string | null; detail?: SummaryFetchDetail }) => {
       if (!user) {
         throw new Error("Missing admin user");
       }
       const params = new URLSearchParams();
+      params.set("detail", options?.detail ?? "lite");
       const runId = options?.runId ?? backgroundCatalogRunId;
       if (runId) {
         params.set("run_id", runId);
@@ -1283,6 +1526,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       const snapshot = await fetchProfileSnapshot({
         forceRefresh: true,
         runId: options?.runId,
+        detail: "lite",
       });
       if (snapshot.payload.summary) {
         setSummary(snapshot.payload.summary);
@@ -1456,39 +1700,44 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const loadSummary = async () => {
       setSummaryLoading(true);
       setSummaryError(null);
-      try {
-        const snapshot = await fetchProfileSnapshotRef.current();
-        if (snapshot.payload.summary) {
-          setSummary(snapshot.payload.summary);
-          setSummaryUninitialized(false);
-          setSummaryError(null);
-        }
-        if (snapshot.payload.catalog_run_progress) {
-          setCatalogRunProgress(snapshot.payload.catalog_run_progress);
-          setCatalogRunProgressError(null);
-          setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
-        }
-        if (cancelled) return;
-        setSummaryError(null);
-      } catch (snapshotError) {
-        // Snapshot is a cache layer; if it fails, fall back to the live /summary endpoint
-        // so transient snapshot outages don't break the page.
-        if (cancelled) return;
-        try {
-          await refreshSummaryRef.current();
+      const snapshotPromise = fetchProfileSnapshotRef.current()
+        .then((snapshot) => {
           if (cancelled) return;
-          setSummarySaturationActive(false);
-        } catch (error) {
-          if (cancelled) return;
-          setSummaryUninitialized(false);
-          if (!isBackendSaturationError(error)) {
-            setSummarySaturationActive(false);
+          if (snapshot.payload.summary) {
+            setSummary(snapshot.payload.summary);
+            setSummaryUninitialized(false);
+            setSummaryError(null);
           }
-          setSummaryError(
-            error instanceof Error ? error.message : "Failed to load social account profile summary",
-          );
+          if (snapshot.payload.catalog_run_progress) {
+            setCatalogRunProgress(snapshot.payload.catalog_run_progress);
+            setCatalogRunProgressError(null);
+            setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
+          }
+        })
+        .catch(() => {
+          // Best-effort snapshot hydration only. The live summary request below
+          // remains the source of truth for first paint.
+        });
+      try {
+        await refreshSummaryRef.current({ detail: "lite" });
+        if (cancelled) return;
+        setSummarySaturationActive(false);
+        setSummaryError(null);
+      } catch (error) {
+        // Snapshot hydrates in the background; the live /summary endpoint is what
+        // should gate the initial account render.
+        if (cancelled) return;
+        setSummaryUninitialized(false);
+        if (!isBackendSaturationError(error)) {
+          setSummarySaturationActive(false);
         }
+        setSummaryError(
+          formatSummaryRequestErrorMessage(
+            toSocialAccountRequestError(error, "Failed to load social account profile summary"),
+          ),
+        );
       } finally {
+        void snapshotPromise;
         if (!cancelled) setSummaryLoading(false);
       }
     };
@@ -1498,6 +1747,122 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       cancelled = true;
     };
   }, [checking, handle, hasAccess, platform, user]);
+
+  useEffect(() => {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !commentsTabNeedsFullSummary ||
+      !summary ||
+      summaryUninitialized ||
+      hasFullSummary ||
+      summaryLoading ||
+      fullSummaryLoading
+    ) {
+      return;
+    }
+
+    const requestKey = `${platform}:${handle}:comments`;
+    if (autoFullSummaryAttemptedRef.current === requestKey) {
+      return;
+    }
+    autoFullSummaryAttemptedRef.current = requestKey;
+    void loadFullSummary();
+  }, [
+    checking,
+    commentsTabNeedsFullSummary,
+    fullSummaryLoading,
+    handle,
+    hasAccess,
+    hasFullSummary,
+    loadFullSummary,
+    platform,
+    summary,
+    summaryLoading,
+    summaryUninitialized,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      platform !== "instagram" ||
+      summaryLoading ||
+      !summary ||
+      (platformRequiresCookies && !cookieHealth && !cookieHealthError)
+    ) {
+      return;
+    }
+
+    const probeKey = `${platform}:${handle}`;
+    if (liveProfileTotalProbeKeyRef.current === probeKey) {
+      return;
+    }
+
+    let cancelled = false;
+    liveProfileTotalProbeKeyRef.current = probeKey;
+
+    const loadLiveProfileTotal = async () => {
+      try {
+        const data = await withSocialProfileRequestDedup(
+          `live-profile-total:${probeKey}`,
+          async (): Promise<SocialAccountLiveProfileTotal> => {
+            const response = await fetchAdminWithAuth(
+              `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/live-profile-total`,
+              undefined,
+              { preferredUser: user },
+            );
+            const payload = (await response.json().catch(() => ({}))) as
+              | SocialAccountLiveProfileTotal
+              | ProxyErrorPayload;
+            if (!response.ok) {
+              throw buildSocialAccountRequestError(
+                toProxyErrorPayload(payload),
+                "Failed to load social account live profile total",
+              );
+            }
+            return payload as SocialAccountLiveProfileTotal;
+          },
+        );
+        if (cancelled) return;
+        setSummary((current) => {
+          if (!current) return current;
+          const nextLiveTotal = Math.max(
+            Number(current.live_total_posts ?? 0),
+            Number(data.live_total_posts_current ?? 0),
+          );
+          return {
+            ...current,
+            live_total_posts: nextLiveTotal > 0 ? nextLiveTotal : current.live_total_posts ?? null,
+            profile_url: data.profile_url || current.profile_url,
+          };
+        });
+      } catch {
+        // Best-effort only; leave the cached summary values intact.
+      }
+    };
+
+    void loadLiveProfileTotal();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    checking,
+    cookieHealth,
+    cookieHealthError,
+    fetchAdminWithAuth,
+    handle,
+    hasAccess,
+    platform,
+    platformRequiresCookies,
+    summary,
+    summaryLoading,
+    summaryUninitialized,
+    user,
+  ]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
@@ -1627,8 +1992,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [activeTab, catalogFilter, catalogPage, checking, fetchAdminWithAuth, handle, hasAccess, platform, summaryUninitialized, supportsCatalog, user]);
 
+  const hasLoadedExactHashtagWindow = hashtagsLoadedRequestKey === hashtagsRequestKey;
+  const useSummaryTopHashtagsPreview = shouldUseSummaryTopHashtagsPreview({
+    activeTab,
+    hashtagWindow,
+    summaryTopHashtags: summary?.top_hashtags ?? [],
+    hasLoadedExactWindow: hasLoadedExactHashtagWindow,
+  });
+
   useEffect(() => {
-    const shouldLoadHashtags = activeTab === "hashtags" || activeTab === "stats";
+    const shouldLoadHashtags = activeTab === "hashtags";
     if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
       return;
     }
@@ -1677,6 +2050,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     hashtagsRequestKey,
     platform,
     refreshHashtags,
+    useSummaryTopHashtagsPreview,
     shouldDeferSecondaryCatalogReads,
     summaryUninitialized,
     user,
@@ -1879,15 +2253,28 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogGapAnalysisRequestNonce((current) => current + 1);
   }, [catalogGapAnalysis]);
 
-  const displayedStatsHashtags = useMemo(() => hashtags, [hashtags]);
+  const summaryTopHashtagsPreview = useMemo(
+    () => cloneHashtagItems(summary?.top_hashtags ?? []),
+    [summary?.top_hashtags],
+  );
+
+  const displayedStatsHashtags = useMemo(() => {
+    if (useSummaryTopHashtagsPreview) {
+      return summaryTopHashtagsPreview;
+    }
+    return hashtags;
+  }, [hashtags, summaryTopHashtagsPreview, useSummaryTopHashtagsPreview]);
 
   const statsHashtagsPending = useMemo(() => {
-    const shouldShowFetchedHashtags = activeTab === "stats" || activeTab === "hashtags";
+    const shouldShowFetchedHashtags = activeTab === "hashtags";
     if (!shouldShowFetchedHashtags) {
       return false;
     }
+    if (useSummaryTopHashtagsPreview) {
+      return false;
+    }
     return hashtagsLoadedRequestKey !== hashtagsRequestKey;
-  }, [activeTab, hashtagsLoadedRequestKey, hashtagsRequestKey]);
+  }, [activeTab, hashtagsLoadedRequestKey, hashtagsRequestKey, useSummaryTopHashtagsPreview]);
 
   const hashtagsErrorMessage = useMemo(() => formatHashtagRequestErrorMessage(hashtagsError), [hashtagsError]);
   const hashtagsErrorToneClass = useMemo(() => {
@@ -1899,6 +2286,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       checking ||
       !user ||
       !hasAccess ||
+      activeTab !== "catalog" ||
       !supportsCatalog ||
       platform !== "instagram" ||
       summaryUninitialized ||
@@ -1962,6 +2350,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [
     activeCatalogRun,
+    activeTab,
     checking,
     fetchAdminWithAuth,
     handle,
@@ -1980,6 +2369,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       checking ||
       !user ||
       !hasAccess ||
+      activeTab !== "catalog" ||
       !supportsCatalog ||
       platform !== "instagram" ||
       summaryUninitialized ||
@@ -2043,6 +2433,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     };
   }, [
     activeCatalogRun,
+    activeTab,
     applyCatalogGapAnalysisStatus,
     catalogCountsMismatch,
     catalogGapAnalysisRequestNonce,
@@ -2063,6 +2454,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       checking ||
       !user ||
       !hasAccess ||
+      activeTab !== "catalog" ||
       !supportsCatalog ||
       platform !== "instagram" ||
       summaryUninitialized ||
@@ -2143,6 +2535,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [
+    activeTab,
     applyCatalogGapAnalysisStatus,
     catalogCountsMismatch,
     catalogGapAnalysisOperationId,
@@ -2251,13 +2644,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (activeCatalogRunId) {
       return runs.find((run) => run.run_id === activeCatalogRunId) ?? null;
     }
-    if (backgroundCatalogRunId) {
-      return runs.find((run) => run.run_id === backgroundCatalogRunId) ?? null;
+    if (latestCatalogRunId) {
+      return runs.find((run) => run.run_id === latestCatalogRunId) ?? null;
     }
     return null;
   }, [
     activeCatalogRunId,
-    backgroundCatalogRunId,
+    latestCatalogRunId,
     selectedCatalogRunId,
     summary?.catalog_recent_runs,
   ]);
@@ -2266,10 +2659,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return (
       selectedCatalogRunId ||
       activeCatalogRunId ||
-      backgroundCatalogRunId ||
+      latestCatalogRunId ||
       null
     );
-  }, [activeCatalogRunId, backgroundCatalogRunId, selectedCatalogRunId]);
+  }, [activeCatalogRunId, latestCatalogRunId, selectedCatalogRunId]);
 
   const displayedCatalogRunStatus = useMemo(() => {
     const selectedRunId = displayedCatalogRunId?.trim() ?? "";
@@ -2296,6 +2689,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     displayedCatalogRunId,
   ]);
 
+  const catalogReplacementRunId = useMemo(() => {
+    return String(catalogRunProgress?.worker_runtime?.replacement_run_id || "").trim() || null;
+  }, [catalogRunProgress?.worker_runtime?.replacement_run_id]);
+
+  const catalogAutoRequeueStatus = useMemo(() => {
+    return String(catalogRunProgress?.worker_runtime?.auto_requeue_status || "").trim().toLowerCase() || null;
+  }, [catalogRunProgress?.worker_runtime?.auto_requeue_status]);
+
+  const catalogAutoRequeueActive = useMemo(() => {
+    return Boolean(catalogReplacementRunId) && (catalogAutoRequeueStatus === "queued" || catalogAutoRequeueStatus === "running");
+  }, [catalogAutoRequeueStatus, catalogReplacementRunId]);
+
   const cancellableCatalogRunId = useMemo(() => {
     const normalizedDisplayedRunId = displayedCatalogRunId?.trim() ?? "";
     if (normalizedDisplayedRunId && ACTIVE_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "")) {
@@ -2320,8 +2725,47 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return Boolean(cancellableCatalogRunId) && ACTIVE_CATALOG_RUN_STATUSES.has(cancellableCatalogRunStatus || "");
   }, [cancellableCatalogRunId, cancellableCatalogRunStatus]);
 
+  const catalogLaunchGuardMessage = useMemo(() => {
+    return getCatalogLaunchGuardMessage(catalogRunProgress);
+  }, [catalogRunProgress]);
+
   const catalogActionsBlocked =
     runningCatalogAction !== null || activeCatalogRunBlocksActions || cancellableCatalogRunIsActive;
+
+  const catalogLaunchActionsBlocked =
+    runningCatalogAction !== null ||
+    activeCatalogRunBlocksActions ||
+    cancellableCatalogRunIsActive ||
+    Boolean(catalogLaunchGuardMessage);
+
+  useEffect(() => {
+    const currentRunId = String(catalogRunProgress?.run_id || "").trim();
+    const displayedRunId = String(displayedCatalogRunId || "").trim();
+    const replacementRunId = String(catalogReplacementRunId || "").trim();
+    if (!currentRunId || !displayedRunId || currentRunId !== displayedRunId || !replacementRunId || !catalogAutoRequeueActive) {
+      return;
+    }
+    const pivotKey = `${currentRunId}:${replacementRunId}`;
+    if (catalogRuntimePivotRef.current === pivotKey) {
+      return;
+    }
+    catalogRuntimePivotRef.current = pivotKey;
+    setCatalogActionMessage(
+      `Run ${shortRunId(currentRunId)} was superseded. Following replacement ${shortRunId(replacementRunId)}.`,
+    );
+    setCatalogProgressRunId(replacementRunId);
+    setCatalogRunProgress(null);
+    setCatalogRunProgressError(null);
+    setCatalogLogsExpanded(false);
+    catalogTerminalSummaryRefreshRunIdRef.current = null;
+    void refreshProfileSnapshotNow({ runId: replacementRunId }).catch(() => {});
+  }, [
+    catalogAutoRequeueActive,
+    catalogReplacementRunId,
+    catalogRunProgress?.run_id,
+    displayedCatalogRunId,
+    refreshProfileSnapshotNow,
+  ]);
 
   const catalogPhaseLabel = useMemo(() => {
     const progressLabel = getCatalogPhaseLabel(catalogRunProgress);
@@ -2330,6 +2774,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
     if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() === "blocked_auth") {
       return "Instagram auth blocked";
+    }
+    if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() === "runtime_superseded") {
+      return "Runtime superseded";
     }
     if (displayedCatalogRunStatus === "cancelled") {
       return "Run cancelled";
@@ -2399,7 +2846,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const lastErrorCode = String(catalogRunProgress?.last_error_code || "").trim().toLowerCase();
     return (
       lastErrorCode === TIKTOK_EMPTY_FIRST_PAGE_ERROR_CODE ||
-      catalogAlertCodes.has("tiktok_empty_first_page") ||
+      catalogAlertCodes.has(TIKTOK_EMPTY_FIRST_PAGE_ALERT_CODE) ||
       catalogAlertCodes.has(TIKTOK_DIRECT_FALLBACK_FAILED_ALERT_CODE)
     );
   }, [
@@ -2412,6 +2859,43 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     isLocalDevHost,
     platform,
   ]);
+  const canRetryInstagramLocally = useMemo(() => {
+    if (platform !== "instagram" || !isLocalDevHost || displayedCatalogRunStatus !== "failed") {
+      return false;
+    }
+    if (activeCatalogRunBlocksActions || cancellableCatalogRunIsActive || hasActiveCatalogRecovery) {
+      return false;
+    }
+    const operationalState = String(catalogRunProgress?.operational_state || "").trim().toLowerCase();
+    if (operationalState === "blocked_auth") {
+      return true;
+    }
+    const latestRemoteBlockedReason = String(
+      catalogRunProgress?.dispatch_health?.latest_remote_blocked_reason || "",
+    )
+      .trim()
+      .toLowerCase();
+    const latestDispatchErrorCode = String(catalogRunProgress?.dispatch_health?.latest_dispatch_error_code || "")
+      .trim()
+      .toLowerCase();
+    return (
+      Array.from(INSTAGRAM_LOCAL_FALLBACK_ALERT_CODES).some((code) => catalogAlertCodes.has(code)) ||
+      latestRemoteBlockedReason.endsWith("_remote_auth_unavailable") ||
+      latestDispatchErrorCode.endsWith("_remote_auth_unavailable")
+    );
+  }, [
+    activeCatalogRunBlocksActions,
+    cancellableCatalogRunIsActive,
+    catalogAlertCodes,
+    catalogRunProgress?.dispatch_health?.latest_dispatch_error_code,
+    catalogRunProgress?.dispatch_health?.latest_remote_blocked_reason,
+    catalogRunProgress?.operational_state,
+    displayedCatalogRunStatus,
+    hasActiveCatalogRecovery,
+    isLocalDevHost,
+    platform,
+  ]);
+  const canRetryCatalogLocally = canRetryTikTokLocally || canRetryInstagramLocally;
 
   const catalogGapAnalysisPresentation = useMemo(() => {
     if (!catalogGapAnalysis) return null;
@@ -2659,14 +3143,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   useEffect(() => {
     if (!liveProfileSnapshot.error) return;
-    if (isBackendSaturationError(liveProfileSnapshot.error)) {
+    const requestError = toSharedLiveResourceRequestError(
+      liveProfileSnapshot.error,
+      liveProfileSnapshot.errorDetails,
+    );
+    if (isBackendSaturationError(requestError)) {
       setCatalogProgressSaturationActive(true);
     } else {
       setCatalogProgressSaturationActive(false);
     }
     setCatalogRunProgressLoading(false);
-    setCatalogRunProgressError(liveProfileSnapshot.error);
-  }, [liveProfileSnapshot.error]);
+    setCatalogRunProgressError(requestError.message);
+  }, [liveProfileSnapshot.error, liveProfileSnapshot.errorDetails]);
 
   useEffect(() => {
     const runId = String(catalogRunProgress?.run_id || "").trim();
@@ -2689,6 +3177,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         return left.localeCompare(right);
       });
   }, [catalogRunProgress?.stages]);
+
+  const catalogTerminalNoStageTelemetryMessage = useMemo(() => {
+    if (catalogRunProgressLoading || catalogStageEntries.length > 0) return null;
+    if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus)) return null;
+    if (displayedCatalogRunStatus === "completed") {
+      return "This completed run did not report stage-level progress telemetry.";
+    }
+    return "This terminal run did not report stage-level progress telemetry.";
+  }, [catalogRunProgressLoading, catalogStageEntries.length, displayedCatalogRunStatus]);
 
   const catalogProgressSummary = useMemo(() => {
     const summaryPayload = catalogRunProgress?.summary ?? {};
@@ -2778,6 +3275,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     summary?.total_posts,
   ]);
 
+  const catalogProgressBarWidthPct = useMemo(() => {
+    if (TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus)) {
+      return Math.max(0, Math.min(100, catalogPostProgress.pct));
+    }
+    return Math.max(catalogPostProgress.pct, 2);
+  }, [catalogPostProgress.pct, displayedCatalogRunStatus]);
+
   const catalogTerminalCoverageMessage = useMemo(() => {
     if (catalogProgressMode !== "coverage") return null;
     const status = displayedCatalogRunStatus;
@@ -2789,6 +3293,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (catalogRunProgress?.completion_gap_reason === "source_total_drift") {
       return `Catalog fetch reached the stored frontier, but the live source total moved during the run. This run checked ${formatInteger(catalogPostProgress.completed)} of the original ${formatInteger(catalogPostProgress.total)} expected posts.`;
     }
+    if (
+      catalogRunProgress?.completion_gap_reason === "fetch_incomplete" &&
+      catalogRunProgress?.recovery?.reason === "no_partitions_discovered" &&
+      !["queued", "running", "fallback_enqueued", "blocked"].includes(
+        String(catalogRunProgress?.recovery?.status || "").trim().toLowerCase(),
+      )
+    ) {
+      return `History discovery completed, but recovery did not produce catalog fetch work. This run only checked ${formatInteger(catalogPostProgress.completed)} of ${formatInteger(catalogPostProgress.total)} posts before stopping with no partitions discovered.`;
+    }
     return `History discovery finished, but this run only checked ${formatInteger(catalogPostProgress.completed)} of ${formatInteger(catalogPostProgress.total)} posts. Review recent logs before starting the next backfill.`;
   }, [
     catalogPostProgress.completed,
@@ -2796,6 +3309,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogPostProgress.total,
     catalogProgressMode,
     catalogRunProgress?.completion_gap_reason,
+    catalogRunProgress?.recovery?.reason,
+    catalogRunProgress?.recovery?.status,
     catalogRunProgress?.discovery?.completed_count,
     displayedCatalogRunStatus,
   ]);
@@ -2866,19 +3381,34 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return "Catalog fetch is complete and the saved catalog totals shown above reflect the latest stored rows.";
   }, [catalogRunProgress?.classify_incomplete, catalogRunProgress?.scrape_complete]);
 
-  const displayEngagement = useMemo(() => {
-    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0) {
-      return Number(summary?.live_catalog_total_engagement ?? 0);
-    }
-    return Number(summary?.total_engagement ?? 0);
-  }, [summary?.live_catalog_total_engagement, summary?.live_catalog_total_posts, summary?.total_engagement, supportsCatalog]);
+  const commentsSavedPosts = useMemo(() => {
+    return Number(summary?.comments_saved_summary?.saved_posts ?? 0);
+  }, [summary?.comments_saved_summary?.saved_posts]);
 
-  const displayViews = useMemo(() => {
-    if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0) {
-      return Number(summary?.live_catalog_total_views ?? 0);
-    }
-    return Number(summary?.total_views ?? 0);
-  }, [summary?.live_catalog_total_posts, summary?.live_catalog_total_views, summary?.total_views, supportsCatalog]);
+  const commentsTargetPosts = useMemo(
+    () => Number(summary?.comments_saved_summary?.total_posts ?? 0),
+    [summary?.comments_saved_summary?.total_posts],
+  );
+
+  const displayCommentsSaved = useMemo(
+    () => formatPercent(commentsSavedPosts, commentsTargetPosts),
+    [commentsSavedPosts, commentsTargetPosts],
+  );
+
+  const mediaSavedFiles = useMemo(
+    () => Number(summary?.media_coverage?.saved_files ?? 0),
+    [summary?.media_coverage?.saved_files],
+  );
+
+  const mediaTotalFiles = useMemo(
+    () => Number(summary?.media_coverage?.total_files ?? 0),
+    [summary?.media_coverage?.total_files],
+  );
+
+  const displayMediaSaved = useMemo(
+    () => formatPercent(mediaSavedFiles, mediaTotalFiles),
+    [mediaSavedFiles, mediaTotalFiles],
+  );
 
   const displayLastPostAt = useMemo(() => {
     if (supportsCatalog && Number(summary?.live_catalog_total_posts ?? 0) > 0 && summary?.live_catalog_last_post_at) {
@@ -3124,8 +3654,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
   // --- Cookie preflight: fetch health on load for cookie-dependent platforms ---
   const fetchCookieHealth = useCallback(
-    async (force = false) => {
-      if (!platformRequiresCookies || !user) return;
+    async (force = false): Promise<SocialProfileCookieHealth | null> => {
+      if (!platformRequiresCookies || !user) return null;
       setCookieHealthLoading(true);
       setCookieHealthError(null);
       try {
@@ -3138,8 +3668,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (!response.ok) throw new Error("Failed to check cookie health");
         const data = (await response.json()) as SocialProfileCookieHealth;
         setCookieHealth(data);
+        return data;
       } catch (error) {
         setCookieHealthError(error instanceof Error ? error.message : "Cookie health check failed");
+        return null;
       } finally {
         setCookieHealthLoading(false);
       }
@@ -3148,16 +3680,50 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   );
 
   useEffect(() => {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      !platformRequiresCookies ||
+      summaryLoading ||
+      !summary ||
+      cookieHealth ||
+      cookieHealthLoading
+    ) {
+      return;
+    }
     if (platformRequiresCookies && user && !cookieHealth && !cookieHealthLoading) {
       void fetchCookieHealth();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [platformRequiresCookies, user]);
+  }, [
+    checking,
+    cookieHealth,
+    cookieHealthLoading,
+    fetchCookieHealth,
+    hasAccess,
+    platformRequiresCookies,
+    summary,
+    summaryLoading,
+    user,
+  ]);
 
-  const handleCookieRefresh = async () => {
-    if (!user) return;
+  const handleCookieRefresh = useCallback(async (): Promise<{
+    refreshResult: SocialProfileCookieRefreshResult | null;
+    refreshedHealth: SocialProfileCookieHealth | null;
+  }> => {
+    if (!user) {
+      return { refreshResult: null, refreshedHealth: null };
+    }
+    const refreshAction = cookieHealth?.refresh_action || (platform === "instagram" ? "instagram_auth_repair" : "cookie_refresh");
+    const refreshLabel =
+      cookieHealth?.refresh_label ||
+      (refreshAction === "instagram_auth_repair" ? "Repair Instagram Auth" : "Refresh Cookies");
     setCookieRefreshing(true);
-    setCookieRefreshMessage("Opening browser… Log in to " + SOCIAL_ACCOUNT_PLATFORM_LABELS[platform] + " in the browser window.");
+    setCookieRefreshMessage(
+      refreshAction === "instagram_auth_repair"
+        ? "Opening browser… A local headed Chrome window will open for Instagram confirmation."
+        : "Opening browser… Log in to " + SOCIAL_ACCOUNT_PLATFORM_LABELS[platform] + " in the browser window.",
+    );
     try {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/cookies/refresh`,
@@ -3168,133 +3734,367 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         },
         { preferredUser: user },
       );
-      const data = (await response.json().catch(() => ({}))) as {
-        success?: boolean;
-        healthy?: boolean;
-        reason?: string;
-        warning_message?: string;
+      const data = (await response.json().catch(() => ({}))) as SocialProfileCookieRefreshResult & {
         detail?: { message?: string };
       };
       if (!response.ok) {
         throw new Error(data.detail?.message || data.reason || "Cookie refresh failed");
       }
+      const refreshedHealth = await fetchCookieHealth(true);
       if (data.success) {
-        setCookieRefreshMessage("Cookies refreshed successfully.");
-        void fetchCookieHealth(true);
+        setCookieRefreshMessage(
+          refreshAction === "instagram_auth_repair"
+            ? "Instagram auth repaired successfully."
+            : `${refreshLabel} completed successfully.`,
+        );
       } else {
-        setCookieRefreshMessage(`Refresh completed but cookies may still be invalid: ${data.reason || "unknown"}`);
-        void fetchCookieHealth(true);
+        setCookieRefreshMessage(
+          refreshAction === "instagram_auth_repair"
+            ? `Instagram auth repair completed but health is still invalid: ${data.reason || "unknown"}`
+            : `Refresh completed but cookies may still be invalid: ${data.reason || "unknown"}`,
+        );
       }
+      return { refreshResult: data, refreshedHealth };
     } catch (error) {
       setCookieRefreshMessage(error instanceof Error ? error.message : "Cookie refresh failed");
+      return { refreshResult: null, refreshedHealth: null };
     } finally {
       setCookieRefreshing(false);
     }
-  };
+  }, [cookieHealth?.refresh_action, cookieHealth?.refresh_label, fetchAdminWithAuth, fetchCookieHealth, handle, platform, user]);
 
-  const runCatalogAction = async (
-    action: "backfill" | "sync_recent" | "sync_newer",
-    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
-  ) => {
-    if (!user) return;
-    // Gate: block if cookies are explicitly unhealthy (don't block on unknown/error state)
-    if (platformRequiresCookies && cookieHealth?.healthy === false) {
-      setCatalogActionMessage(
-        `Cannot start ${action === "backfill" ? "backfill" : action === "sync_newer" ? "sync newer" : "sync recent"}: ` +
-          `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} cookies are expired. Please refresh cookies first.`,
-      );
-      return;
-    }
-    setRunningCatalogAction(action);
-    setCatalogActionMessage(null);
-    setCatalogFreshness(null);
-    setCatalogFreshnessError(null);
-    setCatalogGapAnalysis(null);
-    setCatalogGapAnalysisError(null);
-    try {
-      const actionSlug =
-        action === "backfill" ? "backfill"
-        : action === "sync_newer" ? "sync-newer"
-        : "sync-recent";
-      const response = await fetchAdminWithAuth(
-        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/${actionSlug}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        },
-        { preferredUser: user },
-      );
-      const data = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        message?: string;
-        run_id?: string;
-        catalog_action?: string;
-        catalog_action_scope?: string;
-        detail?: { message?: string; run_id?: string; status?: string };
-      };
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            data.message ||
-            data.detail?.message ||
+  const buildFullHistoryBackfillRequest = useCallback(
+    (selectedTasks: CatalogBackfillSelectedTask[] = [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]): CatalogBackfillRequest => ({
+      source_scope: activeCatalogSourceScope,
+      backfill_scope: "full_history",
+      ...(platform === "instagram" ? { selected_tasks: selectedTasks } : {}),
+    }),
+    [activeCatalogSourceScope, platform],
+  );
+
+  const buildBoundedWindowBackfillRequest = useCallback(
+    (
+      dateStart: string,
+      dateEnd: string,
+      selectedTasks: CatalogBackfillSelectedTask[] = [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS],
+    ): CatalogBackfillRequest => ({
+      source_scope: activeCatalogSourceScope,
+      backfill_scope: "bounded_window",
+      date_start: dateStart,
+      date_end: dateEnd,
+      ...(platform === "instagram" ? { selected_tasks: selectedTasks } : {}),
+    }),
+    [activeCatalogSourceScope, platform],
+  );
+
+  const startCatalogActionRequest = useCallback(
+    async (
+      action: "backfill" | "sync_recent" | "sync_newer",
+      requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
+    ) => {
+      setRunningCatalogAction(action);
+      setCatalogActionMessage(null);
+      setCatalogFreshness(null);
+      setCatalogFreshnessError(null);
+      setCatalogGapAnalysis(null);
+      setCatalogGapAnalysisError(null);
+      try {
+        const actionSlug =
+          action === "backfill" ? "backfill"
+          : action === "sync_newer" ? "sync-newer"
+          : "sync-recent";
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/${actionSlug}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+          },
+          { preferredUser: user },
+        );
+        const data = (await response.json().catch(() => ({}))) as CatalogBackfillLaunchResponse & {
+          error?: string;
+          message?: string;
+          catalog_action?: string;
+          catalog_action_scope?: string;
+          detail?: { message?: string; run_id?: string; status?: string };
+        } & ProxyErrorPayload;
+        if (!response.ok) {
+          throw buildSocialAccountRequestError(
+            data,
             `Failed to ${
               action === "backfill" ? "start backfill"
               : action === "sync_newer" ? "sync newer posts"
               : "sync recent catalog content"
             }`,
-        );
-      }
-      const queuedRunId = String(data.run_id || "").trim() || null;
-      setCatalogProgressRunId(queuedRunId);
-      setCatalogRunProgress(null);
-      setCatalogRunProgressError(null);
-      setCatalogLogsExpanded(false);
-      catalogTerminalSummaryRefreshRunIdRef.current = null;
-      setCatalogActionMessage(
-        action === "backfill"
-          ? `Post backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
-          : action === "sync_newer"
-          ? `Sync newer posts queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
-          : `Recent sync queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`,
-      );
-      await refreshProfileSnapshotNow({ runId: queuedRunId }).catch(() => {});
-    } catch (error) {
-      setCatalogActionMessage(
-        error instanceof Error
-          ? error.message
-          : `Failed to ${
+          );
+        }
+        const queuedRunId = String(data.run_id || "").trim() || null;
+        const catalogRunId = String(data.catalog_run_id || "").trim() || queuedRunId;
+        const commentsRunId = String(data.comments_run_id || "").trim() || null;
+        const commentsDeferredUntilCatalogComplete =
+          action === "backfill" &&
+          platform === "instagram" &&
+          Boolean(data.comments_deferred_until_catalog_complete) &&
+          Boolean(catalogRunId);
+        if (catalogRunId) {
+          setCatalogProgressRunId(catalogRunId);
+          setCatalogRunProgress(null);
+          setCatalogRunProgressError(null);
+          setCatalogLogsExpanded(false);
+          catalogTerminalSummaryRefreshRunIdRef.current = null;
+        }
+        if (action === "backfill" && platform === "instagram") {
+          const launchParts = [
+            data.launch_group_id ? `Launch ${data.launch_group_id.slice(0, 8)}` : null,
+            catalogRunId ? `Catalog ${catalogRunId.slice(0, 8)}` : null,
+            commentsRunId ? `Comments ${commentsRunId.slice(0, 8)}` : null,
+            commentsDeferredUntilCatalogComplete ? "Comments deferred until catalog completes" : null,
+          ].filter(Boolean);
+          const selectedTaskSet =
+            data.effective_selected_tasks ??
+            data.selected_tasks ??
+            ("selected_tasks" in requestBody ? requestBody.selected_tasks ?? [] : []);
+          const selectedTaskLabels = selectedTaskSet
+            .map((task) => INSTAGRAM_BACKFILL_TASK_OPTIONS.find((option) => option.value === task)?.label ?? task)
+            .join(", ");
+          const skippedPostDetailsMessage =
+            data.post_details_skipped_reason === "already_materialized"
+              ? " Post Details skipped because all catalog posts are already materialized."
+              : "";
+          setCatalogActionMessage(
+            launchParts.length > 0
+              ? `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage} ${launchParts.join(" · ")}.`
+              : `Instagram backfill queued for ${selectedTaskLabels || "Post Details"}.${skippedPostDetailsMessage}`,
+          );
+        } else if (action === "backfill") {
+          setCatalogActionMessage(`Post backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)}).` : "."}`);
+        } else {
+          setCatalogActionMessage(
+            action === "sync_newer"
+              ? `Sync newer posts queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`
+              : `Recent sync queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`,
+          );
+        }
+        await refreshProfileSnapshotNow({ runId: catalogRunId || queuedRunId }).catch(() => {});
+      } catch (error) {
+        const requestError = toSocialAccountRequestError(
+          error,
+          `Failed to ${
             action === "backfill" ? "start backfill"
             : action === "sync_newer" ? "sync newer posts"
             : "sync recent catalog content"
           }`,
+        );
+        setCatalogActionMessage(formatCatalogActionErrorMessage(action, requestError));
+      } finally {
+        setRunningCatalogAction(null);
+      }
+    },
+    [fetchAdminWithAuth, handle, platform, refreshProfileSnapshotNow, user],
+  );
+
+  const runCatalogAction = useCallback(async (
+    action: "backfill" | "sync_recent" | "sync_newer",
+    requestBody: CatalogBackfillRequest | CatalogSyncRecentRequest | CatalogSyncNewerRequest,
+  ) => {
+    if (!user) return;
+    const actionLabel =
+      action === "backfill" ? "backfill"
+      : action === "sync_newer" ? "sync newer"
+      : "sync recent";
+    const explicitLocalInlineFallback =
+      action === "backfill" &&
+      "allow_inline_dev_fallback" in requestBody &&
+      requestBody.allow_inline_dev_fallback === true &&
+      "execution_preference" in requestBody &&
+      requestBody.execution_preference === "prefer_local_inline";
+    if (catalogLaunchGuardMessage && !explicitLocalInlineFallback) {
+      setCatalogActionMessage(catalogLaunchGuardMessage);
+      return;
+    }
+    let effectiveCookieHealth = cookieHealth;
+    if (platformRequiresCookies && !effectiveCookieHealth) {
+      setCatalogActionMessage(`Checking ${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} auth before starting…`);
+      effectiveCookieHealth = await fetchCookieHealth(true);
+      if (!effectiveCookieHealth) {
+        setCatalogActionMessage(
+          `Cannot start ${actionLabel} until ${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} auth status can be checked.`,
+        );
+        return;
+      }
+    }
+    if (platformRequiresCookies && effectiveCookieHealth?.healthy === false) {
+      const canAutoRepairBeforeLaunch =
+        platform === "instagram" &&
+        effectiveCookieHealth.refresh_available &&
+        effectiveCookieHealth.refresh_action === "instagram_auth_repair";
+      if (canAutoRepairBeforeLaunch) {
+        pendingCatalogActionAfterCookieRepairRef.current = { action, requestBody };
+        setCatalogActionMessage("Instagram auth must be repaired before Backfill can start.");
+        const { refreshResult, refreshedHealth } = await handleCookieRefresh();
+        const pendingAction = pendingCatalogActionAfterCookieRepairRef.current;
+        pendingCatalogActionAfterCookieRepairRef.current = null;
+        if (!pendingAction) {
+          return;
+        }
+        if (!refreshResult?.success) {
+          setCatalogActionMessage("Backfill was not started because Instagram auth repair failed.");
+          return;
+        }
+        if (refreshedHealth?.healthy !== true) {
+          setCatalogActionMessage("Backfill was not started because Instagram auth is still unhealthy after repair.");
+          return;
+        }
+        setCatalogActionMessage("Instagram auth is repaired. Starting Backfill…");
+        await startCatalogActionRequest(pendingAction.action, pendingAction.requestBody);
+        return;
+      }
+      if (
+        platform === "instagram" &&
+        effectiveCookieHealth.refresh_action === "instagram_auth_repair" &&
+        !effectiveCookieHealth.refresh_available
+      ) {
+        setCatalogActionMessage(
+          "Backfill cannot continue until Instagram auth is repaired from a local TRR-Backend host.",
+        );
+        return;
+      }
+      setCatalogActionMessage(
+        `Cannot start ${actionLabel}: ` +
+          `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} cookies are expired. Please refresh cookies first.`,
       );
+      return;
+    }
+    await startCatalogActionRequest(action, requestBody);
+  }, [
+    catalogLaunchGuardMessage,
+    cookieHealth,
+    fetchCookieHealth,
+    handleCookieRefresh,
+    platform,
+    platformRequiresCookies,
+    startCatalogActionRequest,
+    user,
+  ]);
+
+  const toggleInstagramBackfillTask = useCallback((task: CatalogBackfillSelectedTask) => {
+    setInstagramBackfillSelectedTasks((current) =>
+      current.includes(task) ? current.filter((value) => value !== task) : [...current, task],
+    );
+  }, []);
+
+  const openInstagramBackfillDialog = useCallback(() => {
+    setInstagramBackfillSelectedTasks([...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]);
+    setInstagramBackfillDialogOpen(true);
+  }, []);
+
+  const submitInstagramBackfillDialog = useCallback(async () => {
+    if (instagramBackfillSelectedTasks.length === 0) {
+      setCatalogActionMessage("Select at least one backfill task before starting Instagram backfill.");
+      return;
+    }
+    setInstagramBackfillDialogOpen(false);
+    await runCatalogAction("backfill", buildFullHistoryBackfillRequest(instagramBackfillSelectedTasks));
+  }, [buildFullHistoryBackfillRequest, instagramBackfillSelectedTasks, runCatalogAction]);
+
+  const openCatalogDetail = useCallback(
+    async (sourceId: string) => {
+      if (!user) return;
+      const normalizedSourceId = String(sourceId || "").trim();
+      if (!normalizedSourceId) return;
+      setCatalogDetailSourceId(normalizedSourceId);
+      setCatalogDetail(null);
+      setCatalogDetailError(null);
+      setCatalogDetailLoading(true);
+      try {
+        const response = await fetchAdminWithAuth(
+          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/posts/${encodeURIComponent(normalizedSourceId)}/detail`,
+          {
+            cache: "no-store",
+          },
+          { preferredUser: user },
+        );
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as ProxyErrorPayload & { error?: string };
+          throw buildSocialAccountRequestError(data, "Failed to load catalog post detail");
+        }
+        const data = (await response.json().catch(() => ({}))) as SocialAccountCatalogPostDetail;
+        setCatalogDetail(data);
+      } catch (error) {
+        const requestError = toSocialAccountRequestError(error, "Failed to load catalog post detail");
+        setCatalogDetailError(requestError.message);
+      } finally {
+        setCatalogDetailLoading(false);
+      }
+    },
+    [fetchAdminWithAuth, handle, platform, user],
+  );
+
+  const runCatalogRemediateDrift = async (requestBody: CatalogRemediateDriftRequest = {}) => {
+    if (!user) return;
+    setRunningCatalogAction("remediate_drift");
+    setCatalogActionMessage(null);
+    try {
+      const requestedRunId = String(requestBody.run_id || displayedCatalogRunId || "").trim() || null;
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/remediate-drift`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requeue_canary: true, source_scope: "bravo", run_id: requestedRunId, ...requestBody }),
+        },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as CatalogRemediateDriftResponse &
+        ProxyErrorPayload & { error?: string; message?: string };
+      if (!response.ok) {
+        throw buildSocialAccountRequestError(data, "Failed to remediate catalog runtime drift");
+      }
+      const cancelled = Array.isArray(data.cancelled_runs) ? data.cancelled_runs.length : 0;
+      const canaryRunId = String(data.requeued_canary?.run_id || "").trim() || null;
+      setCatalogActionMessage(
+        canaryRunId
+          ? `Cancelled ${cancelled} stuck run${cancelled === 1 ? "" : "s"} and queued clean canary (${canaryRunId.slice(0, 8)}).`
+          : `Cancelled ${cancelled} stuck run${cancelled === 1 ? "" : "s"}.`,
+      );
+      if (canaryRunId) {
+        setCatalogProgressRunId(canaryRunId);
+        setCatalogRunProgress(null);
+        setCatalogRunProgressError(null);
+        setCatalogLogsExpanded(false);
+        catalogTerminalSummaryRefreshRunIdRef.current = null;
+      }
+      await refreshProfileSnapshotNow({ runId: canaryRunId }).catch(() => {});
+    } catch (error) {
+      const requestError = toSocialAccountRequestError(error, "Failed to remediate catalog runtime drift");
+      setCatalogActionMessage(requestError.message ?? "Failed to remediate catalog runtime drift");
     } finally {
       setRunningCatalogAction(null);
     }
   };
 
-  const copyLocalCatalogCommand = async (action: "backfill" | "fill_missing_photos") => {
+  const copyLocalCatalogCommand = async (action: "backfill" | "fill_missing_posts") => {
     const clipboard = navigator.clipboard;
     if (!clipboard?.writeText) {
       setCatalogActionMessage("Clipboard copy is unavailable in this browser.");
       return;
     }
     try {
-      await clipboard.writeText(buildLocalCatalogCommand(platform, handle, action));
+      await clipboard.writeText(buildLocalCatalogCommand(platform, handle, activeCatalogSourceScope, action));
       setCatalogActionMessage(
         action === "backfill"
           ? "Copied Backfill Posts terminal command."
-          : "Copied Fill Missing Photos terminal command.",
+          : "Copied Fill Missing Posts terminal command.",
       );
     } catch (error) {
       setCatalogActionMessage(error instanceof Error ? error.message : "Failed to copy terminal command.");
     }
   };
 
-  const runFillMissingPhotos = async () => {
+  const runFillMissingPosts = async () => {
     if (!user) return;
-    setRunningCatalogAction("fill_missing_photos");
+    setRunningCatalogAction("fill_missing_posts");
     setCatalogActionMessage(null);
     setCatalogGapAnalysisError(null);
     try {
@@ -3348,9 +4148,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }
 
       if (result.recommended_action === "backfill_posts") {
-        await runCatalogAction("backfill", {
-          backfill_scope: "full_history",
-        });
+        await runCatalogAction("backfill", buildFullHistoryBackfillRequest());
         return;
       }
 
@@ -3358,11 +4156,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (!result.repair_window_start || !result.repair_window_end) {
           throw new Error("Gap analysis requested a bounded repair window without dates.");
         }
-        await runCatalogAction("backfill", {
-          backfill_scope: "bounded_window",
-          date_start: result.repair_window_start,
-          date_end: result.repair_window_end,
-        });
+        await runCatalogAction(
+          "backfill",
+          buildBoundedWindowBackfillRequest(result.repair_window_start, result.repair_window_end),
+        );
         return;
       }
 
@@ -3377,7 +4174,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         error instanceof Error ? error.message : "Failed to analyze social account catalog gaps",
       );
     } finally {
-      setRunningCatalogAction((current) => (current === "fill_missing_photos" ? null : current));
+      setRunningCatalogAction((current) => (current === "fill_missing_posts" ? null : current));
     }
   };
 
@@ -3436,6 +4233,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (!user || !runId) return;
     setCancellingCatalogRun(true);
     setCatalogActionMessage(null);
+    applyCancelledCatalogRunLocally(runId);
     try {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(runId)}/cancel`,
@@ -3448,8 +4246,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       if (!response.ok) {
         throw new Error(data.error || "Failed to cancel catalog run");
       }
-      applyCancelledCatalogRunLocally(runId);
-      await refreshProfileSnapshotNow({ runId }).catch(() => {});
+      void refreshProfileSnapshotNow({ runId }).catch(() => {});
     } catch (error) {
       const reconciled = await reconcileCatalogRunAfterCancelAttempt(runId);
       if (reconciled) {
@@ -3544,7 +4341,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     ? `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} · ${networkProfileName} · @${handle}`
     : `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} · @${handle}`;
   const breadcrumbs = [
-    ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
+    ...buildAdminSectionBreadcrumb("Social Analytics", ADMIN_SOCIAL_PATH),
     { label: `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} @${handle}`, href: buildSocialAccountProfileUrl({ platform, handle }) },
   ];
 
@@ -3604,11 +4401,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       <button
                         type="button"
                         onClick={() =>
-                          void runCatalogAction("backfill", {
-                            backfill_scope: "full_history",
-                          })
+                          platform === "instagram"
+                            ? openInstagramBackfillDialog()
+                            : void runCatalogAction("backfill", buildFullHistoryBackfillRequest())
                         }
-                        disabled={catalogActionsBlocked}
+                        disabled={catalogLaunchActionsBlocked}
                         className="inline-flex rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {runningCatalogAction === "backfill" ? "Queueing Backfill…" : "Backfill Posts"}
@@ -3627,17 +4424,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       </button>
                       <button
                         type="button"
-                        onClick={() => void runFillMissingPhotos()}
-                        disabled={catalogActionsBlocked}
+                        onClick={() => void runFillMissingPosts()}
+                        disabled={catalogLaunchActionsBlocked}
                         className="inline-flex rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-900 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {runningCatalogAction === "fill_missing_photos" ? "Analyzing Gaps…" : "Fill Missing Photos"}
+                        {runningCatalogAction === "fill_missing_posts" ? "Analyzing Gaps…" : "Fill Missing Posts"}
                       </button>
                       <button
                         type="button"
                         aria-label="Copy terminal command"
-                        title="Copy Fill Missing Photos terminal command"
-                        onClick={() => void copyLocalCatalogCommand("fill_missing_photos")}
+                        title="Copy Fill Missing Posts terminal command"
+                        onClick={() => void copyLocalCatalogCommand("fill_missing_posts")}
                         className="inline-flex items-center rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -3653,7 +4450,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               lookback_days: 1,
                             })
                           }
-                          disabled={catalogActionsBlocked}
+                          disabled={catalogLaunchActionsBlocked}
                           className="inline-flex rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {runningCatalogAction === "sync_recent" ? "Queueing Recent Sync…" : "Sync Recent"}
@@ -3690,10 +4487,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 {supportsCatalog ? (
                   <p className="mt-2 text-xs text-zinc-500">
                     {platform === "instagram"
-                      ? "Backfill Posts scans the full catalog and updates saved posts. If a saved older frontier exists, Backfill Posts resumes it automatically before continuing full-history fetches. Run Gap Analysis before using targeted repairs like Sync Newer."
+                      ? "Backfill Posts opens an Instagram task picker. If catalog posts are missing from social.instagram_posts, the backend backfills post rows first. If they are already materialized, it skips post-detail hydration and runs only the requested media and comments follow-ups."
                       : "Backfill Posts runs the full-history catalog job. Sync Recent runs the same pipeline, limited to the last day."}
                   </p>
                 ) : null}
+                {catalogLaunchGuardMessage ? <p className="mt-2 text-sm text-red-700">{catalogLaunchGuardMessage}</p> : null}
                 {catalogActionMessage ? <p className="mt-2 text-sm text-zinc-600">{catalogActionMessage}</p> : null}
                 {/* Cookie preflight card for cookie-dependent platforms */}
                 {supportsCatalog && platformRequiresCookies ? (
@@ -3738,11 +4536,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             disabled={cookieRefreshing}
                             className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {cookieRefreshing ? "Refreshing…" : "Refresh Cookies"}
+                            {cookieRefreshing ? "Refreshing…" : cookieHealth.refresh_label || "Refresh Cookies"}
                           </button>
                         ) : (
                           <span className="text-xs text-zinc-400" title="Cookie refresh requires local dev server">
-                            Refresh unavailable (requires local dev)
+                            {(cookieHealth.refresh_label || "Refresh Cookies") + " unavailable (requires local dev)"}
                           </span>
                         )}
                       </>
@@ -3820,7 +4618,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               source_scope: activeCatalogSourceScope,
                             })
                           }
-                            disabled={catalogActionsBlocked}
+                            disabled={catalogLaunchActionsBlocked}
                             className="mt-3 inline-flex rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-900 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {runningCatalogAction === "sync_newer" ? "Queueing…" : "Sync Newer Now"}
@@ -3832,13 +4630,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <button
                             type="button"
                             onClick={() =>
-                              void runCatalogAction("backfill", {
-                                backfill_scope: "bounded_window",
-                                date_start: catalogGapAnalysis.repair_window_start,
-                                date_end: catalogGapAnalysis.repair_window_end,
-                              })
+                              void runCatalogAction(
+                                "backfill",
+                                buildBoundedWindowBackfillRequest(
+                                  catalogGapAnalysis.repair_window_start!,
+                                  catalogGapAnalysis.repair_window_end!,
+                                ),
+                              )
                             }
-                            disabled={catalogActionsBlocked}
+                            disabled={catalogLaunchActionsBlocked}
                             className="mt-3 inline-flex rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {runningCatalogAction === "backfill" ? "Queueing…" : "Repair Missing Window"}
@@ -3847,12 +4647,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         {catalogGapAnalysis.recommended_action === "backfill_posts" ? (
                           <button
                             type="button"
-                            onClick={() =>
-                              void runCatalogAction("backfill", {
-                                backfill_scope: "full_history",
-                              })
-                            }
-                            disabled={catalogActionsBlocked}
+                            onClick={() => void runCatalogAction("backfill", buildFullHistoryBackfillRequest())}
+                            disabled={catalogLaunchActionsBlocked}
                             className="mt-3 inline-flex rounded-lg border border-zinc-400 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {runningCatalogAction === "backfill" ? "Queueing…" : "Backfill Posts Now"}
@@ -3863,40 +4659,71 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   </div>
                 ) : null}
               </div>
-              <div className={`grid min-w-[220px] gap-3 ${supportsCatalog ? "grid-cols-3" : "grid-cols-2"}`}>
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Posts</p>
+                <div className={`grid min-w-[220px] gap-3 ${supportsCatalog ? "grid-cols-3" : "grid-cols-2"}`}>
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Posts</p>
+                    {summaryInitialStatePending ? (
+                      <>
+                        <p className="mt-2 text-sm font-semibold text-zinc-500">Loading…</p>
+                        {supportsCatalog ? <p className="mt-1 text-xs text-zinc-500">{postsSummaryLabel}</p> : null}
+                      </>
+                    ) : supportsCatalog ? (
+                      <>
+                        <p className="mt-2 text-2xl font-bold leading-tight text-zinc-900">
+                          {formatInteger(displayCatalogTotalPosts)} / {formatInteger(displayTotalPosts)}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">{postsSummaryLabel}</p>
+                      </>
+                    ) : (
+                      <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayTotalPosts)}</p>
+                    )}
+                  </div>
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Comments Saved</p>
+                    {summaryInitialStatePending ? (
+                      <p className="mt-2 text-sm font-semibold text-zinc-500">Loading…</p>
+                    ) : (
+                      <>
+                        <p className="mt-2 text-2xl font-bold text-zinc-900">{displayCommentsSaved}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {formatInteger(commentsSavedPosts)} / {formatInteger(commentsTargetPosts)} posts
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Media Saved</p>
+                    {summaryInitialStatePending ? (
+                      <p className="mt-2 text-sm font-semibold text-zinc-500">Loading…</p>
+                    ) : (
+                      <>
+                        <p className="mt-2 text-2xl font-bold text-zinc-900">{displayMediaSaved}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {formatInteger(mediaSavedFiles)} / {formatInteger(mediaTotalFiles)} files
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Last Post</p>
+                    <p className="mt-2 text-sm font-semibold text-zinc-900">
+                      {summaryInitialStatePending ? "Loading…" : formatDateTime(displayLastPostAt)}
+                    </p>
+                  </div>
                   {supportsCatalog ? (
                     <>
-                      <p className="mt-2 text-2xl font-bold leading-tight text-zinc-900">
-                        {formatInteger(displayCatalogTotalPosts)} / {formatInteger(displayTotalPosts)}
-                      </p>
-                      <p className="mt-1 text-xs text-zinc-500">{postsSummaryLabel}</p>
+                      <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Pending Review</p>
+                        {summaryInitialStatePending ? (
+                          <p className="mt-2 text-sm font-semibold text-zinc-500">Loading…</p>
+                        ) : (
+                          <p className="mt-2 text-2xl font-bold text-zinc-900">
+                            {formatInteger(summary?.catalog_pending_review_posts)}
+                          </p>
+                        )}
+                      </div>
                     </>
-                  ) : (
-                    <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayTotalPosts)}</p>
-                  )}
-                </div>
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Engagement</p>
-                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayEngagement)}</p>
-                </div>
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Views</p>
-                  <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(displayViews)}</p>
-                </div>
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Last Post</p>
-                  <p className="mt-2 text-sm font-semibold text-zinc-900">{formatDateTime(displayLastPostAt)}</p>
-                </div>
-                {supportsCatalog ? (
-                  <>
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Pending Review</p>
-                      <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(summary?.catalog_pending_review_posts)}</p>
-                    </div>
-                  </>
-                ) : null}
+                  ) : null}
               </div>
             </div>
 
@@ -4051,12 +4878,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           {dismissingCatalogRunId === displayedCatalogRunId ? "Dismissing…" : "Dismiss"}
                         </button>
                       )}
-                    {canRetryTikTokLocally ? (
+                    {canRetryCatalogLocally ? (
                       <button
                         type="button"
                         onClick={() =>
                           void runCatalogAction("backfill", {
-                            backfill_scope: "full_history",
+                            ...buildFullHistoryBackfillRequest(),
                             allow_inline_dev_fallback: true,
                             execution_preference: "prefer_local_inline",
                           })
@@ -4095,6 +4922,23 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         >
                           <p className="font-semibold">{formatOperationalAlertLabel(alert)}</p>
                           <p className="mt-1">{alert.message}</p>
+                          {alert.code === "no_eligible_worker_for_required_runtime" && !catalogAutoRequeueActive ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void runCatalogRemediateDrift({
+                                  run_id: catalogRunProgress?.run_id ?? displayedCatalogRunId,
+                                  requeue_canary: true,
+                                })
+                              }
+                              disabled={runningCatalogAction === "remediate_drift"}
+                              className="mt-2 inline-flex rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {runningCatalogAction === "remediate_drift"
+                                ? "Cancelling + requeuing…"
+                                : "Cancel + Requeue clean run"}
+                            </button>
+                          ) : null}
                         </div>
                       ))}
                     </div>
@@ -4181,7 +5025,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                         ? "bg-amber-500"
                         : "bg-emerald-500"
                   }`}
-                  style={{ width: `${Math.max(catalogPostProgress.pct, 2)}%` }}
+                  style={{ width: `${catalogProgressBarWidthPct}%` }}
                 />
               </div>
 
@@ -4239,6 +5083,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     );
                   })}
                 </div>
+              ) : catalogTerminalNoStageTelemetryMessage ? (
+                <p className="mt-4 text-sm text-zinc-500">{catalogTerminalNoStageTelemetryMessage}</p>
               ) : !catalogRunProgressLoading ? (
                 <p className="mt-4 text-sm text-zinc-500">Waiting for the job to report stage-level progress…</p>
               ) : null}
@@ -4424,47 +5270,72 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
               <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-semibold text-zinc-900">Distribution</h2>
-                <div className="mt-4 grid gap-6 md:grid-cols-2">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Shows</p>
-                    <div className="mt-3 space-y-2">
-                      {(summary?.per_show_counts ?? []).length === 0 ? (
-                        <p className="text-sm text-zinc-500">No show assignments yet.</p>
-                      ) : (
-                        (summary?.per_show_counts ?? []).map((item) => (
-                          <div key={item.show_id ?? item.show_name} className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3">
-                            <p className="font-semibold text-zinc-900">{item.show_name ?? "Unassigned show"}</p>
-                            <p className="mt-1 text-xs text-zinc-500">
-                              {formatInteger(item.post_count)} posts · {formatInteger(item.engagement)} engagement
-                            </p>
-                          </div>
-                        ))
-                      )}
+                {!hasFullSummary ? (
+                  <>
+                    <p className="mt-2 text-sm text-zinc-500">
+                      Keep the fast lite summary by default, then load full profile insights only when you need show and
+                      season distribution details.
+                    </p>
+                    {fullSummaryError ? (
+                      <p className="mt-4 text-sm text-red-700">Full profile insights failed: {fullSummaryError}</p>
+                    ) : null}
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void loadFullSummary()}
+                        disabled={fullSummaryLoading}
+                        className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {fullSummaryLoading ? "Loading Full Profile Insights…" : "Load Full Profile Insights"}
+                      </button>
+                      <p className="text-xs text-zinc-500">
+                        Hashtags, source status, and catalog metadata stay available without the heavier request.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-4 grid gap-6 md:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Shows</p>
+                      <div className="mt-3 space-y-2">
+                        {(summary?.per_show_counts ?? []).length === 0 ? (
+                          <p className="text-sm text-zinc-500">No show assignments yet.</p>
+                        ) : (
+                          (summary?.per_show_counts ?? []).map((item) => (
+                            <div key={item.show_id ?? item.show_name} className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3">
+                              <p className="font-semibold text-zinc-900">{item.show_name ?? "Unassigned show"}</p>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {formatInteger(item.post_count)} posts · {formatInteger(item.engagement)} engagement
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Seasons</p>
+                      <div className="mt-3 space-y-2">
+                        {(summary?.per_season_counts ?? []).length === 0 ? (
+                          <p className="text-sm text-zinc-500">No season assignments yet.</p>
+                        ) : (
+                          (summary?.per_season_counts ?? []).map((item) => (
+                            <div
+                              key={item.season_id ?? `${item.show_id}-${item.season_number}`}
+                              className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3"
+                            >
+                              <p className="font-semibold text-zinc-900">
+                                {item.show_name ?? "Unknown show"} · {formatSeasonLabel(item.season_number)}
+                              </p>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {formatInteger(item.post_count)} posts · {formatInteger(item.engagement)} engagement
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Seasons</p>
-                    <div className="mt-3 space-y-2">
-                      {(summary?.per_season_counts ?? []).length === 0 ? (
-                        <p className="text-sm text-zinc-500">No season assignments yet.</p>
-                      ) : (
-                        (summary?.per_season_counts ?? []).map((item) => (
-                          <div
-                            key={item.season_id ?? `${item.show_id}-${item.season_number}`}
-                            className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3"
-                          >
-                            <p className="font-semibold text-zinc-900">
-                              {item.show_name ?? "Unknown show"} · {formatSeasonLabel(item.season_number)}
-                            </p>
-                            <p className="mt-1 text-xs text-zinc-500">
-                              {formatInteger(item.post_count)} posts · {formatInteger(item.engagement)} engagement
-                            </p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
+                )}
               </section>
 
               <section className="space-y-6">
@@ -4627,7 +5498,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               </tr>
                             ) : (
                               (catalogPosts?.items ?? []).map((item) => (
-                                <tr key={item.id}>
+                                <tr
+                                  key={item.id}
+                                  onClick={() => {
+                                    if (platform === "instagram") {
+                                      void openCatalogDetail(item.source_id);
+                                    }
+                                  }}
+                                  className={`${
+                                    platform === "instagram" ? "cursor-pointer hover:bg-zinc-50" : ""
+                                  }`}
+                                >
                                   <td className="py-4 pr-4 align-top">
                                     <div className="max-w-xl">
                                       <p className="font-semibold text-zinc-900">{item.title || item.excerpt || "Untitled post"}</p>
@@ -4636,6 +5517,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                           href={item.url}
                                           target="_blank"
                                           rel="noreferrer"
+                                          onClick={(event) => event.stopPropagation()}
                                           className="mt-1 inline-flex text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline"
                                         >
                                           Open post
@@ -4758,14 +5640,34 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           ) : null}
 
           {hasSummary && activeTab === "comments" && supportsComments ? (
-            <InstagramCommentsPanel
-              platform={platform}
-              handle={handle}
-              summary={summary}
-              onSummaryRefresh={async () => {
-                await refreshSummary();
-              }}
-            />
+            hasFullSummary ? (
+              <InstagramCommentsPanel
+                platform={platform}
+                handle={handle}
+                summary={summary}
+                onSummaryRefresh={async () => {
+                  await refreshSummary({ detail: "full" });
+                }}
+              />
+            ) : (
+              <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <h2 className="text-lg font-semibold text-zinc-900">Comments</h2>
+                <p className={`mt-2 text-sm ${fullSummaryError ? "text-red-700" : "text-zinc-500"}`}>
+                  {fullSummaryLoading
+                    ? "Loading comments coverage…"
+                    : fullSummaryError ? `Comments coverage failed: ${fullSummaryError}` : "Loading comments coverage…"}
+                </p>
+                {!fullSummaryLoading ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadFullSummary()}
+                    className="mt-4 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+                  >
+                    {fullSummaryError ? "Retry Comments Coverage" : "Load Comments Coverage"}
+                  </button>
+                ) : null}
+              </section>
+            )
           ) : null}
 
           {hasSummary && activeTab === "posts" ? (
@@ -5186,6 +6088,273 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     </section>
                   );
                 })}
+              </div>
+            </div>
+          ) : null}
+
+          {instagramBackfillDialogOpen ? (
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/55 px-4 py-6">
+              <div className="w-full max-w-xl rounded-3xl border border-zinc-200 bg-white p-6 shadow-2xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Instagram Backfill</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-zinc-900">Choose what this backfill should run</h2>
+                    <p className="mt-2 text-sm text-zinc-500">
+                      Post Details, Comments, and Media are selected by default. Deselect any task you do not want to run.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setInstagramBackfillDialogOpen(false)}
+                    className="rounded-full border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {INSTAGRAM_BACKFILL_TASK_OPTIONS.map((option) => {
+                    const checked = instagramBackfillSelectedTasks.includes(option.value);
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-4 ${
+                          checked ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleInstagramBackfillTask(option.value)}
+                          className="mt-1 h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                        />
+                        <div>
+                          <p className="font-semibold text-zinc-900">{option.label}</p>
+                          <p className="mt-1 text-sm text-zinc-500">{option.description}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="mt-6 flex items-center justify-between gap-3">
+                  <p className="text-xs text-zinc-500">
+                    {instagramBackfillSelectedTasks.length > 0
+                      ? `Selected: ${instagramBackfillSelectedTasks.map((task) => formatBackfillTaskLabel(task)).join(", ")}`
+                      : "Select at least one task to continue."}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setInstagramBackfillDialogOpen(false)}
+                      className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void submitInstagramBackfillDialog()}
+                      disabled={instagramBackfillSelectedTasks.length === 0 || runningCatalogAction === "backfill"}
+                      className="rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {runningCatalogAction === "backfill" ? "Queueing Backfill…" : "Start Backfill"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {catalogDetailSourceId ? (
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/60 px-4 py-6">
+              <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl">
+                <div className="flex items-center justify-between gap-4 border-b border-zinc-200 px-6 py-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Catalog Detail</p>
+                    <h2 className="mt-1 text-xl font-semibold text-zinc-900">
+                      {catalogDetail?.title || catalogDetail?.source_id || "Instagram Post"}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCatalogDetailSourceId(null);
+                      setCatalogDetail(null);
+                      setCatalogDetailError(null);
+                    }}
+                    className="rounded-full border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="max-h-[calc(90vh-72px)] overflow-y-auto px-6 py-5">
+                  {catalogDetailLoading ? <p className="text-sm text-zinc-500">Loading catalog post detail…</p> : null}
+                  {catalogDetailError ? <p className="text-sm text-red-700">{catalogDetailError}</p> : null}
+                  {!catalogDetailLoading && !catalogDetailError && catalogDetail ? (
+                    <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
+                      <div className="space-y-5">
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Likes</p>
+                              <p className="mt-1 text-lg font-semibold text-zinc-900">
+                                {formatDetailMetricValue(catalogDetail.saved_metrics?.likes)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Comments</p>
+                              <p className="mt-1 text-lg font-semibold text-zinc-900">
+                                {formatDetailMetricValue(catalogDetail.saved_metrics?.comments_count)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Views</p>
+                              <p className="mt-1 text-lg font-semibold text-zinc-900">
+                                {formatDetailMetricValue(catalogDetail.saved_metrics?.views)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Engagement</p>
+                              <p className="mt-1 text-lg font-semibold text-zinc-900">
+                                {formatDetailMetricValue(catalogDetail.saved_metrics?.engagement)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {([...(catalogDetail.hosted_media_urls ?? []), ...(catalogDetail.source_media_urls ?? [])].filter(Boolean) as string[]).length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500">
+                              No saved media URLs are available for this catalog row yet.
+                            </div>
+                          ) : (
+                            ([...(catalogDetail.hosted_media_urls ?? []), ...(catalogDetail.source_media_urls ?? [])].filter(Boolean) as string[])
+                              .slice(0, 8)
+                              .map((mediaUrl, index) => (
+                                <div key={`${mediaUrl}-${index}`} className="overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50">
+                                  {isLikelyVideoUrl(mediaUrl) ? (
+                                    <video src={mediaUrl} controls className="h-64 w-full bg-black object-cover" />
+                                  ) : (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={mediaUrl} alt="" className="h-64 w-full object-cover" />
+                                  )}
+                                </div>
+                              ))
+                          )}
+                        </div>
+
+                        <section className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Caption</h3>
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
+                            {catalogDetail.content || "No caption saved for this post."}
+                          </p>
+                        </section>
+                      </div>
+
+                      <div className="space-y-4">
+                        <section className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Post Meta</h3>
+                          <div className="mt-3 space-y-3 text-sm text-zinc-700">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Published</p>
+                              <p className="mt-1">{formatDateTime(catalogDetail.posted_at)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Mirror Status</p>
+                              <p className="mt-1">{formatMirrorStatusLabel(catalogDetail.media_mirror_status)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Last Mirror Job</p>
+                              <p className="mt-1">{catalogDetail.media_mirror_last_job_id || "None"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Source Surface</p>
+                              <p className="mt-1 capitalize">{catalogDetail.source_surface || "catalog"}</p>
+                            </div>
+                            {catalogDetail.permalink ? (
+                              <div>
+                                <a
+                                  href={catalogDetail.permalink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                                >
+                                  Open permalink
+                                </a>
+                              </div>
+                            ) : null}
+                          </div>
+                        </section>
+
+                        <section className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Saved Fields</h3>
+                          <div className="mt-3 space-y-3 text-sm text-zinc-700">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Hashtags</p>
+                              <p className="mt-1">{(catalogDetail.hashtags ?? []).join(", ") || "None"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Mentions</p>
+                              <p className="mt-1">{(catalogDetail.mentions ?? []).join(", ") || "None"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Collaborators</p>
+                              <p className="mt-1">{(catalogDetail.collaborators ?? []).join(", ") || "None"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">Tags</p>
+                              <p className="mt-1">{(catalogDetail.tags ?? []).join(", ") || "None"}</p>
+                            </div>
+                          </div>
+                        </section>
+
+                        <section className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Media URLs</h3>
+                          <div className="mt-3 space-y-3 text-xs text-zinc-600">
+                            <div>
+                              <p className="font-semibold uppercase tracking-[0.14em] text-zinc-500">Hosted</p>
+                              <div className="mt-2 space-y-2">
+                                {(catalogDetail.hosted_media_urls ?? []).length === 0 ? (
+                                  <p>None</p>
+                                ) : (
+                                  (catalogDetail.hosted_media_urls ?? []).map((url) => (
+                                    <a
+                                      key={url}
+                                      href={url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="block break-all text-blue-600 hover:text-blue-800 hover:underline"
+                                    >
+                                      {url}
+                                    </a>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="font-semibold uppercase tracking-[0.14em] text-zinc-500">Source</p>
+                              <div className="mt-2 space-y-2">
+                                {(catalogDetail.source_media_urls ?? []).length === 0 ? (
+                                  <p>None</p>
+                                ) : (
+                                  (catalogDetail.source_media_urls ?? []).map((url) => (
+                                    <a
+                                      key={url}
+                                      href={url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="block break-all text-blue-600 hover:text-blue-800 hover:underline"
+                                    >
+                                      {url}
+                                    </a>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </section>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : null}

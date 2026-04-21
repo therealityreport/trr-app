@@ -35,10 +35,11 @@ import {
 } from "@/lib/server/trr-api/admin-read-proxy";
 import { fetchSocialBackendJson } from "@/lib/server/trr-api/social-admin-proxy";
 import {
-  getShowById,
-  listPersonExternalIds,
+  listPrimaryPersonExternalIdsByPersonIds,
+  listEffectivePersonSocialHandlesByPersonIds,
+  listShowExternalIdsByIds,
+  type PersonEffectiveSocialHandles,
   type TrrCastMember,
-  type TrrShow,
 } from "@/lib/server/trr-api/trr-shows-repository";
 
 type SharedSourcesPayload = {
@@ -53,6 +54,7 @@ type CastPayload = {
   cast_members?: TrrCastMember[];
 };
 
+const SOCIAL_LANDING_SHOW_BOOTSTRAP_CONCURRENCY = 2;
 type SupportedPersonSocialSource = Extract<
   PersonExternalIdSource,
   "facebook" | "instagram" | "twitter" | "tiktok" | "youtube"
@@ -70,11 +72,11 @@ const SHOW_EXTERNAL_ID_KEYS: Record<
   SupportedPersonSocialSource,
   readonly string[]
 > = {
-  facebook: ["facebook_id", "facebook", "facebook_handle"],
-  instagram: ["instagram_id", "instagram", "instagram_handle"],
-  twitter: ["twitter_id", "twitter", "twitter_handle", "x_id", "x_handle"],
-  tiktok: ["tiktok_id", "tiktok", "tiktok_handle"],
-  youtube: ["youtube_id", "youtube", "youtube_handle"],
+  facebook: ["facebook_handle", "facebook", "facebook_id"],
+  instagram: ["instagram_handle", "instagram", "instagram_id"],
+  twitter: ["twitter_handle", "twitter", "x_handle", "twitter_id", "x_id"],
+  tiktok: ["tiktok_handle", "tiktok", "tiktok_id"],
+  youtube: ["youtube_handle", "youtube", "youtube_id"],
 };
 
 const toRecord = (value: unknown): Record<string, unknown> | null =>
@@ -186,6 +188,55 @@ const buildPersonHandleSummary = (
   };
 };
 
+const buildPersonHandleSummaryFromSource = (
+  source: SupportedPersonSocialSource,
+  value: string | null | undefined,
+): SocialHandleSummary | null => {
+  if (typeof value !== "string") return null;
+  const normalizedValue = normalizePersonExternalIdValue(source, value);
+  if (!normalizedValue) return null;
+
+  const canonicalHandle =
+    normalizeSocialAccountProfileHandle(normalizedValue) ??
+    normalizedValue.replace(/^@+/, "");
+  if (!canonicalHandle) return null;
+
+  const displayValue =
+    source === "youtube" && normalizedValue.startsWith("@")
+      ? `@${canonicalHandle}`
+      : canonicalHandle;
+
+  return {
+    platform: source,
+    handle: canonicalHandle,
+    display_label: formatHandleLabel(source, displayValue),
+    href: buildPersonExternalIdUrl(source, value),
+    external: true,
+  };
+};
+
+const buildFallbackPersonHandleSummaries = (
+  handles: PersonEffectiveSocialHandles | null | undefined,
+): SocialHandleSummary[] => {
+  if (!handles) return [];
+  return PERSON_SOCIAL_SOURCES.map((source) => {
+    switch (source) {
+      case "facebook":
+        return buildPersonHandleSummaryFromSource(source, handles.facebook_handle);
+      case "instagram":
+        return buildPersonHandleSummaryFromSource(source, handles.instagram_handle);
+      case "twitter":
+        return buildPersonHandleSummaryFromSource(source, handles.twitter_handle);
+      case "tiktok":
+        return buildPersonHandleSummaryFromSource(source, handles.tiktok_handle);
+      case "youtube":
+        return buildPersonHandleSummaryFromSource(source, handles.youtube_handle);
+      default:
+        return null;
+    }
+  }).filter((handle): handle is SocialHandleSummary => handle !== null);
+};
+
 const dedupeHandles = (
   handles: readonly SocialHandleSummary[],
 ): SocialHandleSummary[] => {
@@ -203,6 +254,29 @@ const dedupeHandles = (
       }
       return left.handle.localeCompare(right.handle);
     });
+};
+
+const runWithConcurrency = async <T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> => {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  let cursor = 0;
+
+  const runWorker = async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
 };
 
 const safeLoadSharedSources = async (): Promise<SharedAccountSourceSummary[]> => {
@@ -308,12 +382,14 @@ const safeLoadRedditDashboardSummary = async (): Promise<RedditDashboardSummary>
   }
 };
 
-const safeLoadShowDetail = async (showId: string): Promise<TrrShow | null> => {
+const safeLoadShowExternalIdsMap = async (
+  showIds: readonly string[],
+): Promise<ReadonlyMap<string, Record<string, unknown> | null>> => {
   try {
-    return await getShowById(showId);
+    return await listShowExternalIdsByIds(showIds);
   } catch (error) {
-    console.warn("[social-landing] Failed to load show detail", { showId, error });
-    return null;
+    console.warn("[social-landing] Failed to load show external ids", { showIds, error });
+    return new Map();
   }
 };
 
@@ -335,22 +411,35 @@ const safeLoadShowCast = async (showId: string): Promise<TrrCastMember[]> => {
   }
 };
 
-const safeLoadPersonExternalIds = async (
-  personId: string,
-): Promise<PersonExternalIdRecord[]> => {
+const safeLoadPrimaryPersonExternalIdsMap = async (
+  personIds: readonly string[],
+): Promise<ReadonlyMap<string, PersonExternalIdRecord[]>> => {
   try {
-    return await listPersonExternalIds(personId);
+    return await listPrimaryPersonExternalIdsByPersonIds(personIds);
   } catch (error) {
-    console.warn("[social-landing] Failed to load person external ids", {
-      personId,
-      error,
-    });
-    return [];
+    console.warn("[social-landing] Failed to load person external ids", { personIds, error });
+    return new Map();
   }
 };
 
-const extractShowHandles = (show: TrrShow | null): SocialHandleSummary[] => {
-  const externalIds = toRecord(show?.external_ids);
+const safeLoadEffectivePersonSocialHandlesMap = async (
+  personIds: readonly string[],
+): Promise<ReadonlyMap<string, PersonEffectiveSocialHandles>> => {
+  try {
+    return await listEffectivePersonSocialHandlesByPersonIds(personIds);
+  } catch (error) {
+    console.warn("[social-landing] Failed to load fallback person social handles", {
+      personIds,
+      error,
+    });
+    return new Map();
+  }
+};
+
+const extractShowHandles = (
+  externalIdsValue: Record<string, unknown> | null | undefined,
+): SocialHandleSummary[] => {
+  const externalIds = toRecord(externalIdsValue);
   if (!externalIds) return [];
 
   const handles: SocialHandleSummary[] = [];
@@ -402,7 +491,7 @@ const buildNetworkSets = (
     {
       key: "bravo-tv",
       title: "Bravo TV",
-      description: "Bravo-owned shared social profiles and pipeline state.",
+      description: "Shared Bravo social handles used in sends and profile backfills.",
       handles: activeHandles,
     },
   ];
@@ -410,14 +499,14 @@ const buildNetworkSets = (
 
 const buildShowSets = (
   coveredShows: readonly CoveredShow[],
-  showDetails: ReadonlyMap<string, TrrShow | null>,
+  showExternalIdsById: ReadonlyMap<string, Record<string, unknown> | null>,
   sharedSources: readonly SharedAccountSourceSummary[],
 ): ShowProfileSet[] => {
   return [...coveredShows]
     .sort((left, right) => left.show_name.localeCompare(right.show_name))
     .map((coveredShow) => {
       const directHandles = extractShowHandles(
-        showDetails.get(coveredShow.trr_show_id) ?? null,
+        showExternalIdsById.get(coveredShow.trr_show_id) ?? null,
       );
       const duplicatedWwhlHandles = isWwhlShow(coveredShow)
         ? sharedSources
@@ -479,26 +568,36 @@ const buildPeopleProfiles = async (
     }
   }
 
-  const hydrated = await Promise.all(
-    [...people.values()].map(async (person) => {
-      const records = await safeLoadPersonExternalIds(person.person_id);
-      const handles = dedupeHandles(
-        records
+  const peopleList = [...people.values()];
+  const personIds = peopleList.map((person) => person.person_id);
+  const [externalIdsByPersonId, fallbackHandlesByPersonId] = await Promise.all([
+    safeLoadPrimaryPersonExternalIdsMap(personIds),
+    safeLoadEffectivePersonSocialHandlesMap(personIds),
+  ]);
+
+  const hydrated = peopleList.map((person) => {
+    const records = externalIdsByPersonId.get(person.person_id) ?? [];
+    const handles = dedupeHandles(
+      [
+        ...records
           .map((record) => buildPersonHandleSummary(record))
           .filter((handle): handle is SocialHandleSummary => handle !== null),
-      );
-      if (handles.length === 0) return null;
-
-      return {
-        person_id: person.person_id,
-        full_name: person.full_name,
-        shows: [...person.shows.values()].sort((left, right) =>
-          left.show_name.localeCompare(right.show_name),
+        ...buildFallbackPersonHandleSummaries(
+          fallbackHandlesByPersonId.get(person.person_id),
         ),
-        handles,
-      } satisfies PersonProfileSummary;
-    }),
-  );
+      ],
+    );
+    if (handles.length === 0) return null;
+
+    return {
+      person_id: person.person_id,
+      full_name: person.full_name,
+      shows: [...person.shows.values()].sort((left, right) =>
+        left.show_name.localeCompare(right.show_name),
+      ),
+      handles,
+    } satisfies PersonProfileSummary;
+  });
 
   return hydrated
     .filter((person): person is PersonProfileSummary => person !== null)
@@ -506,39 +605,34 @@ const buildPeopleProfiles = async (
 };
 
 export async function getSocialLandingPayload(): Promise<SocialLandingPayload> {
-  const [coveredShows, sharedSources, sharedRuns, sharedReviewItems, redditDashboard] =
-    await Promise.all([
-      getCoveredShows(),
-      safeLoadSharedSources(),
-      safeLoadSharedRuns(),
-      safeLoadSharedReviewItems(),
-      safeLoadRedditDashboardSummary(),
-    ]);
+  const [coveredShows, redditDashboard] = await Promise.all([
+    getCoveredShows(),
+    safeLoadRedditDashboardSummary(),
+  ]);
+  const sharedSources = await safeLoadSharedSources();
+  const sharedRuns = await safeLoadSharedRuns();
+  const sharedReviewItems = await safeLoadSharedReviewItems();
 
-  const showPairs = await Promise.all(
-    coveredShows.map(async (show) => {
-      const [showDetail, castMembers] = await Promise.all([
-        safeLoadShowDetail(show.trr_show_id),
-        safeLoadShowCast(show.trr_show_id),
-      ]);
-      return {
-        show_id: show.trr_show_id,
-        detail: showDetail,
-        cast_members: castMembers,
-      };
+  const showExternalIdsById = await safeLoadShowExternalIdsMap(
+    coveredShows.map((show) => show.trr_show_id),
+  );
+
+  const castPairs = await runWithConcurrency(
+    coveredShows,
+    SOCIAL_LANDING_SHOW_BOOTSTRAP_CONCURRENCY,
+    async (show) => ({
+      show_id: show.trr_show_id,
+      cast_members: await safeLoadShowCast(show.trr_show_id),
     }),
   );
 
-  const showDetails = new Map(
-    showPairs.map((entry) => [entry.show_id, entry.detail] as const),
-  );
   const castByShowId = new Map(
-    showPairs.map((entry) => [entry.show_id, entry.cast_members] as const),
+    castPairs.map((entry) => [entry.show_id, entry.cast_members] as const),
   );
 
   return {
     network_sets: buildNetworkSets(sharedSources),
-    show_sets: buildShowSets(coveredShows, showDetails, sharedSources),
+    show_sets: buildShowSets(coveredShows, showExternalIdsById, sharedSources),
     people_profiles: await buildPeopleProfiles(coveredShows, castByShowId),
     shared_pipeline: {
       sources: sharedSources,

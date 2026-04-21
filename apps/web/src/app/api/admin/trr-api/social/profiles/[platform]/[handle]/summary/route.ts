@@ -9,7 +9,7 @@ import {
 } from "@/lib/server/admin/route-response-cache";
 import {
   fetchSocialBackendJson,
-  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+  SOCIAL_PROXY_LONG_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
@@ -47,8 +47,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
           `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
           {
             fallbackError: "Failed to fetch social account profile summary",
+            queryString: request.nextUrl.searchParams.toString(),
             retries: 0,
-            timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+            timeoutMs: SOCIAL_PROXY_LONG_TIMEOUT_MS,
           },
         );
         setRouteResponseCache(

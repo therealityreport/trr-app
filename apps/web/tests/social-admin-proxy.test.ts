@@ -399,6 +399,52 @@ describe("social-admin-proxy", () => {
     expect(payload.upstream_detail_code).toBe("REQUEST_TIMEOUT");
   });
 
+  it("logs timeout tier, path, trace id, and cause when AbortError becomes UPSTREAM_TIMEOUT", async () => {
+    getBackendApiUrlMock.mockImplementation((path: string) => `http://backend.local/api/v1${path}`);
+    const abortError = new Error("signal aborted");
+    abortError.name = "AbortError";
+    (abortError as Error & { cause?: unknown }).cause = {
+      code: "UND_ERR_ABORTED",
+      reason: "timeout",
+    };
+    const fetchMock = vi.fn().mockRejectedValue(abortError);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    let thrown: unknown;
+    try {
+      await fetchSocialBackendJson("/profiles/instagram/bravodailydish/summary", {
+        fallbackError: "Failed to fetch social account profile summary",
+        retries: 0,
+        timeoutMs: 60_000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const response = socialProxyErrorResponse(thrown, "[test] upstream timeout");
+    const payload = (await response.json()) as { code?: string; trace_id?: string };
+    const consoleErrorMock = vi.mocked(console.error);
+    const [, logPayload] = consoleErrorMock.mock.calls.at(-1) ?? [];
+
+    expect(response.status).toBe(504);
+    expect(payload.code).toBe("UPSTREAM_TIMEOUT");
+    expect(logPayload).toEqual(
+      expect.objectContaining({
+        code: "UPSTREAM_TIMEOUT",
+        trace_id: payload.trace_id,
+        context: expect.objectContaining({
+          backend_path: "/api/v1/admin/socials/profiles/instagram/bravodailydish/summary",
+          timeout_ms: 60_000,
+          timeout_tier: "long",
+          error_cause: expect.objectContaining({
+            code: "UND_ERR_ABORTED",
+            reason: "timeout",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("maps missing backend configuration to BACKEND_UNREACHABLE", async () => {
     getBackendApiUrlMock.mockReturnValue(null);
 

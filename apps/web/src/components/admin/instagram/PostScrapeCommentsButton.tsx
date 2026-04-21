@@ -87,7 +87,7 @@ export default function PostScrapeCommentsButton({ platform, handle, sourceId, o
       setErrorMessage(null);
       void onCompleted?.();
     } else {
-      setErrorMessage(progress.error_message || `Comments scrape ${status}.`);
+      setErrorMessage(progress.error_message || `Comments sync ${status}.`);
     }
     setScrapeRunId(null);
   }, [onCompleted, runProgress.data]);
@@ -120,13 +120,13 @@ export default function PostScrapeCommentsButton({ platform, handle, sourceId, o
       );
       const data = (await response.json().catch(() => ({}))) as SocialAccountCommentsScrapeResponse & ProxyErrorPayload;
       if (!response.ok) {
-        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start comments scrape"));
+        throw new Error(readInstagramCommentsErrorMessage(data, "Failed to start comments sync"));
       }
       const runId = String(data.run_id || "").trim();
       setScrapeRunId(runId || null);
       setMessage(runId ? `Queued ${runId.slice(0, 8)}.` : "Queued.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to start comments scrape");
+      setErrorMessage(error instanceof Error ? error.message : "Failed to start comments sync");
     }
   }, [fetchAdminWithAuth, handle, platform, sourceId, user]);
 
@@ -148,7 +148,7 @@ export default function PostScrapeCommentsButton({ platform, handle, sourceId, o
         disabled={isRunning || checking || !user || !hasAccess}
         className="inline-flex rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isRunning ? "Scraping..." : "Scrape Comments"}
+        {isRunning ? "Syncing..." : "Sync Comments"}
       </button>
       {message ? <p className="text-[11px] text-zinc-500">{message}</p> : null}
       {errorMessage ? <p className="text-[11px] text-red-700">{errorMessage}</p> : null}

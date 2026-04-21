@@ -2,15 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   getCoveredShowsMock,
-  getShowByIdMock,
-  listPersonExternalIdsMock,
+  listPrimaryPersonExternalIdsByPersonIdsMock,
+  listEffectivePersonSocialHandlesByPersonIdsMock,
+  listShowExternalIdsByIdsMock,
   listRedditCommunitiesMock,
   fetchSocialBackendJsonMock,
   fetchAdminBackendJsonMock,
 } = vi.hoisted(() => ({
   getCoveredShowsMock: vi.fn(),
-  getShowByIdMock: vi.fn(),
-  listPersonExternalIdsMock: vi.fn(),
+  listPrimaryPersonExternalIdsByPersonIdsMock: vi.fn(),
+  listEffectivePersonSocialHandlesByPersonIdsMock: vi.fn(),
+  listShowExternalIdsByIdsMock: vi.fn(),
   listRedditCommunitiesMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
@@ -21,8 +23,10 @@ vi.mock("@/lib/server/admin/covered-shows-repository", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/trr-shows-repository", () => ({
-  getShowById: getShowByIdMock,
-  listPersonExternalIds: listPersonExternalIdsMock,
+  listPrimaryPersonExternalIdsByPersonIds: listPrimaryPersonExternalIdsByPersonIdsMock,
+  listEffectivePersonSocialHandlesByPersonIds:
+    listEffectivePersonSocialHandlesByPersonIdsMock,
+  listShowExternalIdsByIds: listShowExternalIdsByIdsMock,
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
@@ -40,11 +44,17 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
 
 import { getSocialLandingPayload } from "@/lib/server/admin/social-landing-repository";
 
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
 describe("social landing repository", () => {
   beforeEach(() => {
     getCoveredShowsMock.mockReset();
-    getShowByIdMock.mockReset();
-    listPersonExternalIdsMock.mockReset();
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockReset();
+    listEffectivePersonSocialHandlesByPersonIdsMock.mockReset();
+    listShowExternalIdsByIdsMock.mockReset();
     listRedditCommunitiesMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
@@ -215,75 +225,24 @@ describe("social landing repository", () => {
       throw new Error(`Unhandled social path: ${path}`);
     });
 
-    getShowByIdMock.mockImplementation(async (showId: string) => {
-      if (showId === "show-rhoslc") {
-        return {
-          id: "show-rhoslc",
-          name: "The Real Housewives of Salt Lake City",
-          slug: "the-real-housewives-of-salt-lake-city",
-          canonical_slug: "the-real-housewives-of-salt-lake-city",
-          alternative_names: ["RHOSLC"],
-          imdb_id: null,
-          tmdb_id: null,
-          external_ids: {},
-          show_total_seasons: 5,
-          show_total_episodes: 100,
-          description: null,
-          premiere_date: null,
-          genres: [],
-          networks: [],
-          tags: [],
-          primary_poster_image_id: null,
-          primary_backdrop_image_id: null,
-          primary_logo_image_id: null,
-          poster_url: null,
-          backdrop_url: null,
-          logo_url: null,
-          tmdb_status: null,
-          tmdb_vote_average: null,
-          imdb_rating_value: null,
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-        };
-      }
-
-      if (showId === "show-wwhl") {
-        return {
-          id: "show-wwhl",
-          name: "Watch What Happens Live with Andy Cohen",
-          slug: "watch-what-happens-live-with-andy-cohen",
-          canonical_slug: "watch-what-happens-live-with-andy-cohen",
-          alternative_names: ["WWHL"],
-          imdb_id: null,
-          tmdb_id: null,
-          external_ids: {
-            instagram_id: "bravowwhl",
-            twitter_id: "BravoWWHL",
-            facebook_id: "WatchWhatHappensLive",
-          },
-          show_total_seasons: 20,
-          show_total_episodes: 1000,
-          description: null,
-          premiere_date: null,
-          genres: [],
-          networks: [],
-          tags: [],
-          primary_poster_image_id: null,
-          primary_backdrop_image_id: null,
-          primary_logo_image_id: null,
-          poster_url: null,
-          backdrop_url: null,
-          logo_url: null,
-          tmdb_status: null,
-          tmdb_vote_average: null,
-          imdb_rating_value: null,
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-        };
-      }
-
-      return null;
-    });
+    listShowExternalIdsByIdsMock.mockImplementation(
+      async (showIds: readonly string[]) =>
+        new Map(
+          showIds.map((showId) => {
+            if (showId === "show-wwhl") {
+              return [
+                showId,
+                {
+                  instagram_id: "bravowwhl",
+                  twitter_id: "BravoWWHL",
+                  facebook_id: "WatchWhatHappensLive",
+                },
+              ] as const;
+            }
+            return [showId, {}] as const;
+          }),
+        ),
+    );
 
     fetchAdminBackendJsonMock.mockImplementation(async (path: string) => {
       if (path.includes("/admin/trr-api/shows/show-rhoslc/cast")) {
@@ -357,69 +316,85 @@ describe("social landing repository", () => {
       throw new Error(`Unhandled admin path: ${path}`);
     });
 
-    listPersonExternalIdsMock.mockImplementation(async (personId: string) => {
-      if (personId === "person-heather") {
-        return [
-          {
-            id: 1,
-            source_id: "instagram",
-            external_id: "heathergay",
-            is_primary: true,
-            valid_from: null,
-            valid_to: null,
-            observed_at: null,
-          },
-          {
-            id: 2,
-            source_id: "twitter",
-            external_id: "HeatherGay29",
-            is_primary: true,
-            valid_from: null,
-            valid_to: null,
-            observed_at: null,
-          },
-        ];
-      }
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) =>
+        new Map(
+          personIds.map((personId) => {
+            if (personId === "person-heather") {
+              return [
+                personId,
+                [
+                  {
+                    id: 1,
+                    source_id: "instagram",
+                    external_id: "heathergay",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                  {
+                    id: 2,
+                    source_id: "twitter",
+                    external_id: "HeatherGay29",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
 
-      if (personId === "person-andy") {
-        return [
-          {
-            id: 3,
-            source_id: "instagram",
-            external_id: "andycohen",
-            is_primary: true,
-            valid_from: null,
-            valid_to: null,
-            observed_at: null,
-          },
-          {
-            id: 4,
-            source_id: "youtube",
-            external_id: "@andycohen",
-            is_primary: true,
-            valid_from: null,
-            valid_to: null,
-            observed_at: null,
-          },
-        ];
-      }
+            if (personId === "person-andy") {
+              return [
+                personId,
+                [
+                  {
+                    id: 3,
+                    source_id: "instagram",
+                    external_id: "andycohen",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                  {
+                    id: 4,
+                    source_id: "youtube",
+                    external_id: "@andycohen",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
 
-      if (personId === "person-producer") {
-        return [
-          {
-            id: 5,
-            source_id: "imdb",
-            external_id: "nm1234567",
-            is_primary: true,
-            valid_from: null,
-            valid_to: null,
-            observed_at: null,
-          },
-        ];
-      }
+            if (personId === "person-producer") {
+              return [
+                personId,
+                [
+                  {
+                    id: 5,
+                    source_id: "imdb",
+                    external_id: "nm1234567",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
 
-      return [];
-    });
+            return [personId, []] as const;
+          }),
+        ),
+    );
+
+    listEffectivePersonSocialHandlesByPersonIdsMock.mockResolvedValue(new Map());
   });
 
   it("builds networks, shows, and people with WWHL duplication and handle filtering", async () => {
@@ -531,5 +506,165 @@ describe("social landing repository", () => {
       archived_community_count: expect.any(Number),
       show_count: expect.any(Number),
     });
+  });
+
+  it("caps social landing show and people fanout concurrency to avoid saturating local admin reads", async () => {
+    getCoveredShowsMock.mockResolvedValue(
+      Array.from({ length: 5 }, (_, index) => ({
+        id: `covered-${index + 1}`,
+        trr_show_id: `show-${index + 1}`,
+        show_name: `Show ${index + 1}`,
+        canonical_slug: `show-${index + 1}`,
+        alternative_names: [],
+        show_total_episodes: 10,
+        created_at: "2026-01-01T00:00:00Z",
+        created_by_firebase_uid: "admin",
+      })),
+    );
+
+    let showExternalIdBatchCalls = 0;
+    listShowExternalIdsByIdsMock.mockImplementation(async (showIds: readonly string[]) => {
+      showExternalIdBatchCalls += 1;
+      return new Map(showIds.map((showId) => [showId, {}] as const));
+    });
+
+    let activeCastReads = 0;
+    let maxActiveCastReads = 0;
+    fetchAdminBackendJsonMock.mockImplementation(async (path: string) => {
+      activeCastReads += 1;
+      maxActiveCastReads = Math.max(maxActiveCastReads, activeCastReads);
+      await delay(5);
+      activeCastReads -= 1;
+      const showId = path.match(/shows\/([^/]+)\/cast/)?.[1] ?? "show-unknown";
+      return {
+        status: 200,
+        data: {
+          cast_members: [
+            {
+              id: `cast-${showId}`,
+              show_id: showId,
+              person_id: `person-${showId}`,
+              show_name: showId,
+              cast_member_name: `Person ${showId}`,
+              role: "Self",
+              billing_order: 1,
+              credit_category: "cast",
+              source_type: "tmdb",
+              full_name: `Person ${showId}`,
+              known_for: null,
+              photo_url: null,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        },
+      };
+    });
+
+    let personExternalIdBatchCalls = 0;
+    let receivedPersonIds: readonly string[] = [];
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) => {
+        personExternalIdBatchCalls += 1;
+        receivedPersonIds = [...personIds];
+        await delay(5);
+        return new Map(
+          personIds.map((personId) => [
+            personId,
+            [
+              {
+                id: Number(personId.replace(/\D/g, "")) || 1,
+                source_id: "instagram",
+                external_id: `${personId}-handle`,
+                is_primary: true,
+                valid_from: null,
+                valid_to: null,
+                observed_at: null,
+              },
+            ],
+          ]),
+        );
+      },
+    );
+    let personFallbackHandleBatchCalls = 0;
+    listEffectivePersonSocialHandlesByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) => {
+        personFallbackHandleBatchCalls += 1;
+        return new Map(
+          personIds.map((personId) => [
+            personId,
+            {
+              person_id: personId,
+              facebook_handle: null,
+              instagram_handle: null,
+              tiktok_handle: null,
+              twitter_handle: null,
+              youtube_handle: null,
+            },
+          ]),
+        );
+      },
+    );
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.show_sets).toHaveLength(5);
+    expect(payload.people_profiles).toHaveLength(5);
+    expect(maxActiveCastReads).toBeLessThanOrEqual(2);
+    expect(showExternalIdBatchCalls).toBe(1);
+    expect(personExternalIdBatchCalls).toBe(1);
+    expect(personFallbackHandleBatchCalls).toBe(1);
+    expect(receivedPersonIds).toHaveLength(5);
+  });
+
+  it("includes cast members with fallback social handles even when primary external-id rows are missing", async () => {
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) =>
+        new Map(personIds.map((personId) => [personId, []] as const)),
+    );
+    listEffectivePersonSocialHandlesByPersonIdsMock.mockResolvedValue(
+      new Map([
+        [
+          "person-heather",
+          {
+            person_id: "person-heather",
+            facebook_handle: null,
+            instagram_handle: "heathergay",
+            tiktok_handle: null,
+            twitter_handle: "HeatherGay29",
+            youtube_handle: null,
+          },
+        ],
+        [
+          "person-andy",
+          {
+            person_id: "person-andy",
+            facebook_handle: null,
+            instagram_handle: null,
+            tiktok_handle: null,
+            twitter_handle: null,
+            youtube_handle: null,
+          },
+        ],
+      ]),
+    );
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.people_profiles.map((person) => person.full_name)).toEqual([
+      "Heather Gay",
+    ]);
+    expect(payload.people_profiles[0]?.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "instagram",
+          handle: "heathergay",
+        }),
+        expect.objectContaining({
+          platform: "twitter",
+          handle: "heathergay29",
+        }),
+      ]),
+    );
   });
 });

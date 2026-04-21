@@ -5,6 +5,7 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 export default function CreatorContentDashboardPage() {
@@ -51,8 +52,8 @@ export default function CreatorContentDashboardPage() {
             <div>
               <AdminBreadcrumbs
                 items={[
-                  ...buildAdminSectionBreadcrumb("Social Analytics", "/social"),
-                  { label: "Creator Content", href: "/social/creator-content" },
+                  ...buildAdminSectionBreadcrumb("Social Analytics", ADMIN_SOCIAL_PATH),
+                  { label: "Creator Content", href: buildSocialPath("creator-content") },
                 ]}
                 className="mb-1"
               />
@@ -62,7 +63,7 @@ export default function CreatorContentDashboardPage() {
               </p>
             </div>
             <Link
-              href="/social"
+              href={ADMIN_SOCIAL_PATH}
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
             >
               Back

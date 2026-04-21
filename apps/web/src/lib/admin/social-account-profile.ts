@@ -11,6 +11,8 @@ export const SOCIAL_ACCOUNT_PROFILE_PLATFORMS: ReadonlyArray<SocialPlatformSlug>
   "threads",
 ];
 
+export const SOCIAL_ACCOUNT_COMMENTS_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = ["instagram"];
+
 export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
   "instagram",
   "tiktok",
@@ -36,7 +38,10 @@ export type SocialBladeProfileStatsLabels = Partial<{
   chart_metric_label: string;
 }>;
 
+export type SocialAccountProfileSummaryDetail = "lite" | "full";
+
 export type SocialAccountProfileSummary = {
+  summary_detail?: SocialAccountProfileSummaryDetail | null;
   platform: SocialPlatformSlug;
   account_handle: string;
   network_name?: string | null;
@@ -70,7 +75,9 @@ export type SocialAccountProfileSummary = {
   last_catalog_run_at?: string | null;
   last_catalog_run_status?: string | null;
   catalog_recent_runs?: SocialAccountCatalogRun[];
+  comments_saved_summary?: SocialAccountCommentsSavedSummary | null;
   comments_coverage?: SocialAccountCommentsCoverage | null;
+  media_coverage?: SocialAccountMediaCoverage | null;
   per_show_counts: SocialAccountProfileShowBucket[];
   per_season_counts: SocialAccountProfileSeasonBucket[];
   top_hashtags: SocialAccountProfileHashtag[];
@@ -94,6 +101,24 @@ export type SocialBladeGrowthData = {
   chart_metric_label?: string | null;
   socialblade_url?: string | null;
   profile_stats_labels?: SocialBladeProfileStatsLabels;
+  previous_run?: {
+    scraped_at?: string | null;
+    profile_stats: {
+      followers: number;
+      following: number;
+      media_count: number;
+      engagement_rate: string;
+      average_likes: number;
+      average_comments: number;
+    };
+    rankings?: {
+      sb_rank?: string;
+      followers_rank?: string;
+      engagement_rate_rank?: string;
+      grade?: string;
+    };
+    profile_stats_labels?: SocialBladeProfileStatsLabels;
+  } | null;
   profile_stats: {
     followers: number;
     following: number;
@@ -184,6 +209,16 @@ export type SocialAccountCommentsCoverage = {
   last_comments_run_status?: string | null;
 };
 
+export type SocialAccountCommentsSavedSummary = {
+  saved_posts: number;
+  total_posts: number;
+};
+
+export type SocialAccountMediaCoverage = {
+  saved_files: number;
+  total_files: number;
+};
+
 export type SocialAccountProfileComment = {
   id: string;
   comment_id: string;
@@ -214,7 +249,7 @@ export type SocialAccountCommentsScrapeRequest =
       source_scope?: string;
       max_posts?: number;
       max_comments_per_post?: number;
-      refresh_policy?: "stale_or_missing";
+      refresh_policy?: "stale_or_missing" | "all_saved_posts";
       allow_inline_dev_fallback?: boolean;
     }
   | {
@@ -249,6 +284,51 @@ export type SocialAccountCatalogPost = SocialAccountProfilePost & {
   assignment_status?: "assigned" | "unassigned" | "ambiguous" | "needs_review";
   assignment_source?: string | null;
   candidate_matches?: Array<Record<string, unknown>>;
+};
+
+export type CatalogBackfillSelectedTask = "post_details" | "comments" | "media";
+
+export type SocialAccountCatalogPostDetail = {
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  id?: string | null;
+  source_id: string;
+  source_surface?: "materialized" | "catalog";
+  title?: string | null;
+  content?: string | null;
+  url?: string | null;
+  permalink?: string | null;
+  posted_at?: string | null;
+  assignment_status?: "assigned" | "unassigned" | "ambiguous" | "needs_review";
+  assignment_source?: string | null;
+  candidate_matches?: Array<Record<string, unknown>>;
+  show_id?: string | null;
+  show_name?: string | null;
+  show_slug?: string | null;
+  season_id?: string | null;
+  season_number?: number | null;
+  thumbnail_url?: string | null;
+  source_thumbnail_url?: string | null;
+  hosted_thumbnail_url?: string | null;
+  media_urls?: string[] | null;
+  source_media_urls?: string[] | null;
+  hosted_media_urls?: string[] | null;
+  media_asset_meta?: Record<string, unknown> | null;
+  media_mirror_status?: Record<string, unknown> | null;
+  media_mirror_last_job_id?: string | null;
+  post_status?: Record<string, unknown> | null;
+  stats?: Record<string, number | null> | null;
+  saved_metrics?: Record<string, number | null> | null;
+  saved_comments?: number | null;
+  hashtags?: string[];
+  mentions?: string[];
+  collaborators?: string[];
+  tags?: string[];
+  profile_tags?: string[];
+  tagged_users_detail?: Array<Record<string, unknown>> | null;
+  collaborators_detail?: Array<Record<string, unknown>> | null;
+  child_posts_data?: Array<Record<string, unknown>> | null;
+  post_format?: string | null;
 };
 
 export type SocialAccountCatalogAction = "backfill" | "sync_recent" | "sync_newer" | "resume_tail";
@@ -345,6 +425,9 @@ export type SocialAccountOperationalAlert = {
   stage?: string | null;
   transport?: string | null;
   execution_backend?: string | null;
+  required_runtime?: Record<string, unknown> | null;
+  observed_runtime_labels?: string[] | null;
+  remediation_script?: string | null;
 };
 
 export type SocialAccountCatalogVerification = {
@@ -380,6 +463,13 @@ export type SocialAccountCatalogFreshness = {
   has_resumable_frontier?: boolean;
   frontier_pages_scanned?: number | null;
   frontier_posts_checked?: number | null;
+};
+
+export type SocialAccountLiveProfileTotal = {
+  platform: SocialPlatformSlug;
+  account_handle: string;
+  profile_url?: string | null;
+  live_total_posts_current?: number | null;
 };
 
 export type SocialAccountCatalogGapAnalysis = {
@@ -507,6 +597,17 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     };
     runtime_versions_observed?: Array<Record<string, unknown>>;
     runtime_version_drift?: boolean;
+    replacement_run_id?: string | null;
+    auto_requeue_status?: string | null;
+    runtime_superseded?: boolean;
+    superseded_by_runtime_version?: {
+      commit_sha?: string | null;
+      modal_image?: string | null;
+      modal_environment?: string | null;
+      modal_function?: string | null;
+      execution_backend?: string | null;
+      label?: string | null;
+    } | null;
   };
   cancel_reason?: string | null;
   last_error_code?: string | null;
@@ -600,6 +701,8 @@ export type SocialAccountCatalogRunProgressSnapshot = {
     newest_posted_at_seen?: string | null;
     strategy_mismatch?: boolean;
     runtime_version_drift?: boolean;
+    replacement_run_id?: string | null;
+    auto_requeue_status?: string | null;
   };
   dispatch_health?: SocialAccountCatalogRunDispatchHealth;
   summary?: SocialAccountCatalogRunProgressSummary;
@@ -622,11 +725,26 @@ export type SocialAccountCatalogReviewItem = {
 };
 
 export type CatalogBackfillRequest = {
+  source_scope?: "bravo" | "creator" | "community";
   date_start?: string | null;
   date_end?: string | null;
   backfill_scope: "full_history" | "bounded_window";
   allow_inline_dev_fallback?: boolean;
   execution_preference?: "auto" | "prefer_local_inline";
+  selected_tasks?: CatalogBackfillSelectedTask[];
+};
+
+export type CatalogBackfillLaunchResponse = {
+  run_id?: string | null;
+  status?: string | null;
+  launch_group_id?: string | null;
+  selected_tasks?: CatalogBackfillSelectedTask[];
+  effective_selected_tasks?: CatalogBackfillSelectedTask[];
+  post_details_skipped_reason?: "already_materialized" | null;
+  catalog_run_id?: string | null;
+  comments_run_id?: string | null;
+  catalog_bootstrap_required?: boolean;
+  comments_deferred_until_catalog_complete?: boolean;
 };
 
 export type CatalogSyncRecentRequest = {
@@ -635,6 +753,30 @@ export type CatalogSyncRecentRequest = {
 
 export type CatalogSyncNewerRequest = {
   source_scope?: string;
+};
+
+export type CatalogRemediateDriftRequest = {
+  run_id?: string | null;
+  requeue_canary?: boolean;
+  source_scope?: "bravo" | "creator" | "community";
+};
+
+export type CatalogRemediateDriftResponse = {
+  platform: string;
+  account_handle: string;
+  candidate_job_count: number;
+  candidate_runs: Array<{
+    run_id: string;
+    run_status?: string | null;
+    job_ids: string[];
+    job_statuses: string[];
+    job_types: string[];
+    runner_strategy?: string | null;
+    partition_strategy?: string | null;
+    catalog_action?: string | null;
+  }>;
+  cancelled_runs: Array<Record<string, unknown>>;
+  requeued_canary: { run_id?: string; status?: string } | null;
 };
 
 export type CatalogRepairAuthRequest = {
@@ -744,6 +886,8 @@ export type SocialProfileCookieHealth = {
   reason: string | null;
   refresh_supported: boolean;
   refresh_available: boolean;
+  refresh_action?: "cookie_refresh" | "instagram_auth_repair";
+  refresh_label?: string;
   source_kind: string;
   source_path?: string;
   refresh_target_path?: string;
@@ -755,6 +899,9 @@ export type SocialProfileCookieRefreshResult = {
   success: boolean;
   healthy: boolean;
   reason: string | null;
+  refresh_action?: "cookie_refresh" | "instagram_auth_repair";
+  steps?: Array<{ name: string; status: string }>;
+  remote_auth_probe?: Record<string, unknown> | null;
   warning_code?: string;
   warning_message?: string;
 };

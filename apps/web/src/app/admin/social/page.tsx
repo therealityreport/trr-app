@@ -8,36 +8,112 @@ import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
 import type {
   RedditDashboardSummary,
-  SharedReviewItemSummary,
-  SharedRunSummary,
   ShowProfileSet,
   SocialHandleSummary,
   SocialLandingPlatform,
   SocialLandingPayload,
 } from "@/lib/admin/social-landing";
 import {
-  buildShowAdminUrl,
   buildSocialAccountProfileUrl,
+  buildShowAdminUrl,
+  normalizeSocialAccountProfileHandle,
 } from "@/lib/admin/show-admin-routes";
+import { normalizePersonExternalIdValue } from "@/lib/admin/person-external-ids";
 import { resolvePreferredShowRouteSlug } from "@/lib/admin/show-route-slug";
 import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return "Never";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v1";
+const EDITABLE_SHOW_SOCIAL_PLATFORMS = [
+  "instagram",
+  "facebook",
+  "twitter",
+  "tiktok",
+  "youtube",
+] as const;
+type EditableShowSocialPlatform = (typeof EDITABLE_SHOW_SOCIAL_PLATFORMS)[number];
+type ShowHandleDraft = Record<EditableShowSocialPlatform, string>;
+const SHOW_SOCIAL_HANDLE_FIELD_BY_PLATFORM: Record<EditableShowSocialPlatform, string> = {
+  instagram: "instagram_handle",
+  facebook: "facebook_handle",
+  twitter: "twitter_handle",
+  tiktok: "tiktok_handle",
+  youtube: "youtube_handle",
 };
 
 const formatPlatformLabel = (platform: SocialLandingPlatform): string => {
   if (platform === "twitter") return "Twitter/X";
   return platform.charAt(0).toUpperCase() + platform.slice(1);
+};
+
+const buildEmptyShowHandleDraft = (): ShowHandleDraft => ({
+  instagram: "",
+  facebook: "",
+  twitter: "",
+  tiktok: "",
+  youtube: "",
+});
+
+const buildShowHandleDraft = (show: ShowProfileSet): ShowHandleDraft => {
+  const draft = buildEmptyShowHandleDraft();
+  for (const handle of show.handles) {
+    if ((EDITABLE_SHOW_SOCIAL_PLATFORMS as readonly string[]).includes(handle.platform)) {
+      draft[handle.platform as EditableShowSocialPlatform] = handle.handle;
+    }
+  }
+  return draft;
+};
+
+const buildEditableShowHandleSummary = (
+  platform: EditableShowSocialPlatform,
+  rawValue: string,
+): SocialHandleSummary | null => {
+  const normalizedValue = normalizePersonExternalIdValue(platform, rawValue);
+  if (!normalizedValue) return null;
+  if (
+    platform === "youtube" &&
+    (normalizedValue.startsWith("channel/") ||
+      normalizedValue.startsWith("user/") ||
+      normalizedValue.startsWith("c/"))
+  ) {
+    return null;
+  }
+  const canonicalHandle = normalizeSocialAccountProfileHandle(normalizedValue);
+  if (!canonicalHandle) return null;
+
+  const displayLabel =
+    platform === "youtube"
+      ? normalizedValue.startsWith("@")
+        ? `@${canonicalHandle}`
+        : canonicalHandle
+      : `@${canonicalHandle}`;
+
+  return {
+    platform,
+    handle: canonicalHandle,
+    display_label: displayLabel,
+    href: buildSocialAccountProfileUrl({ platform, handle: canonicalHandle }),
+    external: false,
+  };
+};
+
+const applyShowHandleDraft = (
+  show: ShowProfileSet,
+  draft: ShowHandleDraft,
+): ShowProfileSet => {
+  const handles = EDITABLE_SHOW_SOCIAL_PLATFORMS.map((platform) =>
+    buildEditableShowHandleSummary(platform, draft[platform]),
+  ).filter((handle): handle is SocialHandleSummary => handle !== null);
+
+  return {
+    ...show,
+    handles,
+  };
 };
 
 const loadLandingData = async (
@@ -85,6 +161,64 @@ const loadLandingData = async (
   };
 };
 
+const readCachedLandingData = (): SocialLandingPayload | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SOCIAL_LANDING_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { payload?: SocialLandingPayload } | null;
+    const payload = parsed?.payload;
+    if (!payload || typeof payload !== "object") return null;
+    return {
+      network_sets: Array.isArray(payload.network_sets) ? payload.network_sets : [],
+      show_sets: Array.isArray(payload.show_sets) ? payload.show_sets : [],
+      people_profiles: Array.isArray(payload.people_profiles) ? payload.people_profiles : [],
+      shared_pipeline: {
+        sources: Array.isArray(payload.shared_pipeline?.sources)
+          ? payload.shared_pipeline.sources
+          : [],
+        runs: Array.isArray(payload.shared_pipeline?.runs)
+          ? payload.shared_pipeline.runs
+          : [],
+        review_items: Array.isArray(payload.shared_pipeline?.review_items)
+          ? payload.shared_pipeline.review_items
+          : [],
+      },
+      reddit_dashboard: {
+        active_community_count:
+          typeof payload.reddit_dashboard?.active_community_count === "number"
+            ? payload.reddit_dashboard.active_community_count
+            : 0,
+        archived_community_count:
+          typeof payload.reddit_dashboard?.archived_community_count === "number"
+            ? payload.reddit_dashboard.archived_community_count
+            : 0,
+        show_count:
+          typeof payload.reddit_dashboard?.show_count === "number"
+            ? payload.reddit_dashboard.show_count
+            : 0,
+      },
+    };
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedLandingData = (payload: SocialLandingPayload): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      SOCIAL_LANDING_CACHE_KEY,
+      JSON.stringify({
+        cached_at: new Date().toISOString(),
+        payload,
+      }),
+    );
+  } catch {
+    // Ignore localStorage failures and keep the live response.
+  }
+};
+
 const HandleChip = ({ handle }: { handle: SocialHandleSummary }) => {
   const className =
     "inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-50";
@@ -119,79 +253,13 @@ const HandleChip = ({ handle }: { handle: SocialHandleSummary }) => {
   );
 };
 
-const RecentRunsList = ({ runs }: { runs: SharedRunSummary[] }) => (
-  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-      Recent Runs
-    </p>
-    <div className="mt-3 space-y-2">
-      {runs.length === 0 ? (
-        <p className="text-sm text-zinc-500">No shared ingest runs yet.</p>
-      ) : (
-        runs.map((run) => (
-          <div
-            key={run.id}
-            className="rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-semibold text-zinc-900">{run.status}</span>
-              <span className="text-xs text-zinc-500">
-                {run.ingest_mode || "shared_account_async"}
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              Started {formatDateTime(run.created_at)}
-            </p>
-          </div>
-        ))
-      )}
-    </div>
-  </div>
-);
-
-const ReviewQueueList = ({ items }: { items: SharedReviewItemSummary[] }) => (
-  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-    <div className="flex items-center justify-between gap-3">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-          Review Queue
-        </p>
-        <h3 className="text-sm font-semibold text-zinc-900">
-          Ambiguous or unmatched posts
-        </h3>
-      </div>
-      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600">
-        {items.length} open
-      </span>
-    </div>
-    <div className="mt-3 space-y-2">
-      {items.length === 0 ? (
-        <p className="text-sm text-zinc-500">No open shared review items.</p>
-      ) : (
-        items.map((item) => (
-          <div
-            key={item.id}
-            className="rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-700"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-semibold text-zinc-900">
-                {formatPlatformLabel(item.platform)}
-              </span>
-              <span className="text-xs uppercase tracking-[0.14em] text-amber-700">
-                {item.review_reason.replace(/_/g, " ")}
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              @{item.source_account || "unknown"} · {item.source_id}
-            </p>
-          </div>
-        ))
-      )}
-    </div>
-  </div>
-);
-
-const ShowCard = ({ show }: { show: ShowProfileSet }) => {
+const ShowCard = ({
+  show,
+  onSaveHandleOverrides,
+}: {
+  show: ShowProfileSet;
+  onSaveHandleOverrides: (show: ShowProfileSet, draft: ShowHandleDraft) => Promise<void>;
+}) => {
   const routeSlug = resolvePreferredShowRouteSlug({
     alternativeNames: show.alternative_names,
     canonicalSlug: show.canonical_slug,
@@ -202,6 +270,34 @@ const ShowCard = ({ show }: { show: ShowProfileSet }) => {
     tab: "social",
     socialView: "official",
   }) as Route;
+  const [editingHandles, setEditingHandles] = useState(false);
+  const [savingHandles, setSavingHandles] = useState(false);
+  const [handleDraft, setHandleDraft] = useState<ShowHandleDraft>(() =>
+    buildShowHandleDraft(show),
+  );
+  const [handleSaveMessage, setHandleSaveMessage] = useState<string | null>(null);
+  const [handleSaveError, setHandleSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHandleDraft(buildShowHandleDraft(show));
+  }, [show]);
+
+  const saveHandles = async () => {
+    setSavingHandles(true);
+    setHandleSaveError(null);
+    setHandleSaveMessage(null);
+    try {
+      await onSaveHandleOverrides(show, handleDraft);
+      setHandleSaveMessage("Saved social handle overrides.");
+      setEditingHandles(false);
+    } catch (error) {
+      setHandleSaveError(
+        error instanceof Error ? error.message : "Failed to save social handle overrides",
+      );
+    } finally {
+      setSavingHandles(false);
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
@@ -216,15 +312,88 @@ const ShowCard = ({ show }: { show: ShowProfileSet }) => {
             </p>
           )}
         </div>
-        <Link
-          href={socialHref}
-          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-100"
-        >
-          Open Analytics
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setEditingHandles((current) => !current);
+              setHandleSaveError(null);
+              setHandleSaveMessage(null);
+              setHandleDraft(buildShowHandleDraft(show));
+            }}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-100"
+          >
+            {editingHandles ? "Close Editor" : "Edit Handles"}
+          </button>
+          <Link
+            href={socialHref}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-100"
+          >
+            Open Analytics
+          </Link>
+        </div>
       </div>
 
-      {show.handles.length > 0 ? (
+      {handleSaveError ? (
+        <p className="mt-3 text-sm text-red-600">{handleSaveError}</p>
+      ) : null}
+      {handleSaveMessage ? (
+        <p className="mt-3 text-sm text-zinc-500">{handleSaveMessage}</p>
+      ) : null}
+
+      {editingHandles ? (
+        <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {EDITABLE_SHOW_SOCIAL_PLATFORMS.map((platform) => (
+              <label key={`${show.show_id}:${platform}`} className="block">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                  {formatPlatformLabel(platform)}
+                </span>
+                <input
+                  type="text"
+                  value={handleDraft[platform]}
+                  onChange={(event) =>
+                    setHandleDraft((current) => ({
+                      ...current,
+                      [platform]: event.target.value,
+                    }))
+                  }
+                  placeholder={`No ${formatPlatformLabel(platform)} handle`}
+                  className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                />
+              </label>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-zinc-500">
+            Leave a field blank to remove that stored handle. Saved values update this card immediately and refresh the
+            linked profile route in the background.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditingHandles(false);
+                setHandleDraft(buildShowHandleDraft(show));
+                setHandleSaveError(null);
+              }}
+              disabled={savingHandles}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void saveHandles();
+              }}
+              disabled={savingHandles}
+              className="rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white transition hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {savingHandles ? "Saving…" : "Save Handles"}
+            </button>
+          </div>
+        </div>
+      ) : show.handles.length > 0 ? (
         <div className="mt-4 flex flex-wrap gap-2">
           {show.handles.map((handle) => (
             <HandleChip
@@ -258,7 +427,7 @@ const RedditDashboardCard = ({
           </p>
         </div>
         <Link
-          href="/social/reddit"
+          href={buildSocialPath("reddit")}
           className="inline-flex rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
         >
           Open Reddit Dashboard
@@ -314,20 +483,31 @@ export default function AdminSocialMediaPage() {
     if (checking || !user || !hasAccess) return;
 
     let cancelled = false;
+    const cachedPayload = readCachedLandingData();
+    if (cachedPayload) {
+      setLanding(cachedPayload);
+      setLoadingLanding(false);
+    }
     const load = async () => {
-      setLoadingLanding(true);
-      setLoadError(null);
+      setLoadingLanding(!cachedPayload);
+      if (!cachedPayload) {
+        setLoadError(null);
+      }
       try {
         const payload = await loadLandingData(user);
         if (cancelled) return;
         setLanding(payload);
+        writeCachedLandingData(payload);
+        setLoadError(null);
       } catch (error) {
         if (cancelled) return;
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : "Failed to load social landing data",
-        );
+        if (!cachedPayload) {
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load social landing data",
+          );
+        }
       } finally {
         if (!cancelled) {
           setLoadingLanding(false);
@@ -379,6 +559,55 @@ export default function AdminSocialMediaPage() {
     }
   };
 
+  const saveShowHandleOverrides = async (
+    show: ShowProfileSet,
+    draft: ShowHandleDraft,
+  ) => {
+    if (!user) return;
+    const payload = Object.fromEntries(
+      EDITABLE_SHOW_SOCIAL_PLATFORMS.map((platform) => [
+        SHOW_SOCIAL_HANDLE_FIELD_BY_PLATFORM[platform],
+        draft[platform].trim(),
+      ]),
+    );
+
+    const response = await fetchAdminWithAuth(
+      `/api/admin/trr-api/shows/${encodeURIComponent(show.show_id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      { allowDevAdminBypass: true, preferredUser: user },
+    );
+    const data = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to save show handle overrides");
+    }
+
+    const optimisticShow = applyShowHandleDraft(show, draft);
+    setLanding((current) => {
+      if (!current) return current;
+      const nextPayload: SocialLandingPayload = {
+        ...current,
+        show_sets: current.show_sets.map((entry) =>
+          entry.show_id === show.show_id ? optimisticShow : entry,
+        ),
+      };
+      writeCachedLandingData(nextPayload);
+      return nextPayload;
+    });
+
+    void loadLandingData(user)
+      .then((payload) => {
+        setLanding(payload);
+        writeCachedLandingData(payload);
+      })
+      .catch(() => {
+        // Keep the optimistic card state if the background refresh fails.
+      });
+  };
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -417,11 +646,6 @@ export default function AdminSocialMediaPage() {
   const networkSets = landing?.network_sets ?? [];
   const showSets = landing?.show_sets ?? [];
   const peopleProfiles = landing?.people_profiles ?? [];
-  const sharedPipeline = landing?.shared_pipeline ?? {
-    sources: [],
-    runs: [],
-    review_items: [],
-  };
   const redditDashboard = landing?.reddit_dashboard ?? {
     active_community_count: 0,
     archived_community_count: 0,
@@ -435,14 +659,14 @@ export default function AdminSocialMediaPage() {
           <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <AdminBreadcrumbs
-                items={buildAdminSectionBreadcrumb("Social Analytics", "/social")}
+                items={buildAdminSectionBreadcrumb("Social Analytics", ADMIN_SOCIAL_PATH)}
                 className="mb-1"
               />
               <h1 className="text-3xl font-bold text-zinc-900">
                 Social Analytics
               </h1>
               <p className="text-sm text-zinc-500">
-                Review Bravo network profiles, covered-show social sets, and cast
+                Review network profiles, dedicated show social sets, and cast
                 handles already stored in TRR.
               </p>
             </div>
@@ -500,22 +724,24 @@ export default function AdminSocialMediaPage() {
                             {network.description}
                           </p>
                         </div>
-                        <div className="flex flex-col items-start gap-2 sm:items-end">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void runSharedIngest();
-                            }}
-                            className="rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-                          >
-                            Run Shared Ingest
-                          </button>
-                          {sharedActionState ? (
-                            <p className="text-xs text-zinc-500">
-                              {sharedActionState}
-                            </p>
-                          ) : null}
-                        </div>
+                        {network.key === "bravo-tv" ? (
+                          <div className="flex flex-col items-start gap-2 sm:items-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void runSharedIngest();
+                              }}
+                              className="rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                            >
+                              Run Shared Ingest
+                            </button>
+                            {sharedActionState ? (
+                              <p className="text-xs text-zinc-500">
+                                {sharedActionState}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
 
                       {network.handles.length > 0 ? (
@@ -529,74 +755,9 @@ export default function AdminSocialMediaPage() {
                         </div>
                       ) : (
                         <p className="mt-4 text-sm text-zinc-500">
-                          No active Bravo shared sources are configured.
+                          No linked profiles are configured for this set.
                         </p>
                       )}
-
-                      <div className="mt-6 grid gap-6 lg:grid-cols-[1.25fr_0.95fr]">
-                        <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                          <div className="mb-3 flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                                Shared Sources
-                              </p>
-                              <h4 className="text-sm font-semibold text-zinc-900">
-                                Bravo account inventory
-                              </h4>
-                            </div>
-                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
-                              {sharedPipeline.sources.length} rows
-                            </span>
-                          </div>
-                          <div className="space-y-2">
-                            {sharedPipeline.sources.length === 0 ? (
-                              <p className="text-sm text-zinc-500">
-                                No shared sources configured.
-                              </p>
-                            ) : (
-                              sharedPipeline.sources.map((source) => (
-                                <div
-                                  key={source.id}
-                                  className="grid gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-700 sm:grid-cols-[120px_1fr_auto]"
-                                >
-                                  <div className="font-semibold text-zinc-900">
-                                    {formatPlatformLabel(source.platform)}
-                                  </div>
-                                  <div>
-                                    <Link
-                                      href={
-                                        buildSocialAccountProfileUrl({
-                                          platform: source.platform,
-                                          handle: source.account_handle,
-                                        }) as Route
-                                      }
-                                      className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
-                                    >
-                                      @{source.account_handle}
-                                    </Link>
-                                    <p className="text-xs text-zinc-500">
-                                      Priority {source.scrape_priority} ·{" "}
-                                      {source.is_active ? "Active" : "Archived"}
-                                    </p>
-                                  </div>
-                                  <div className="text-xs text-zinc-500 sm:text-right">
-                                    <p>Scrape: {source.last_scrape_status || "Not run"}</p>
-                                    <p>
-                                      Last scrape:{" "}
-                                      {formatDateTime(source.last_scrape_at)}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="space-y-4">
-                          <RecentRunsList runs={sharedPipeline.runs} />
-                          <ReviewQueueList items={sharedPipeline.review_items} />
-                        </div>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -621,7 +782,11 @@ export default function AdminSocialMediaPage() {
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2">
                     {showSets.map((show) => (
-                      <ShowCard key={show.show_id} show={show} />
+                      <ShowCard
+                        key={show.show_id}
+                        show={show}
+                        onSaveHandleOverrides={saveShowHandleOverrides}
+                      />
                     ))}
                   </div>
                 )}

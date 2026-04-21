@@ -10,7 +10,7 @@ import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-a
 import { getSeasonByShowAndNumber } from "@/lib/server/trr-api/trr-shows-repository";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
-type ProxyErrorCode =
+export type ProxyErrorCode =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "BAD_REQUEST"
@@ -33,7 +33,7 @@ export type SocialProxyErrorBody = {
   upstream_detail_code?: string;
 };
 
-class SocialProxyError extends Error {
+export class SocialProxyError extends Error {
   status: number;
   code: ProxyErrorCode;
   retryable: boolean;
@@ -42,6 +42,7 @@ class SocialProxyError extends Error {
   upstreamStatus?: number;
   upstreamDetail?: unknown;
   upstreamDetailCode?: string;
+  logContext?: Record<string, unknown>;
 
   constructor(
     message: string,
@@ -54,6 +55,7 @@ class SocialProxyError extends Error {
       upstreamStatus?: number;
       upstreamDetail?: unknown;
       upstreamDetailCode?: string;
+      logContext?: Record<string, unknown>;
     },
   ) {
     super(message);
@@ -65,6 +67,7 @@ class SocialProxyError extends Error {
     this.upstreamStatus = options.upstreamStatus;
     this.upstreamDetail = options.upstreamDetail;
     this.upstreamDetailCode = options.upstreamDetailCode;
+    this.logContext = options.logContext;
   }
 }
 
@@ -87,6 +90,40 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 export const SOCIAL_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_SHORT_TIMEOUT_MS", 10_000);
 export const SOCIAL_PROXY_DEFAULT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_DEFAULT_TIMEOUT_MS", 25_000);
 export const SOCIAL_PROXY_LONG_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_LONG_TIMEOUT_MS", 60_000);
+
+const readTimeoutTier = (timeoutMs: number): string => {
+  if (timeoutMs === SOCIAL_PROXY_SHORT_TIMEOUT_MS) return "short";
+  if (timeoutMs === SOCIAL_PROXY_DEFAULT_TIMEOUT_MS) return "default";
+  if (timeoutMs === SOCIAL_PROXY_LONG_TIMEOUT_MS) return "long";
+  return "custom";
+};
+
+const readBackendPath = (backendUrl: string): string => {
+  try {
+    const url = new URL(backendUrl);
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return backendUrl;
+  }
+};
+
+const serializeErrorCause = (cause: unknown): unknown => {
+  if (cause instanceof Error) {
+    return {
+      name: cause.name,
+      message: cause.message,
+      ...(typeof (cause as Error & { code?: unknown }).code !== "undefined"
+        ? { code: String((cause as Error & { code?: unknown }).code) }
+        : {}),
+    };
+  }
+  if (cause && typeof cause === "object") {
+    return Object.fromEntries(
+      Object.entries(cause as Record<string, unknown>).filter(([, value]) => typeof value !== "function"),
+    );
+  }
+  return cause;
+};
 const SEASON_ID_RESOLUTION_CACHE_TTL_MS = readPositiveIntEnv(
   "TRR_SOCIAL_PROXY_SEASON_ID_CACHE_TTL_MS",
   5 * 60 * 1000,
@@ -477,6 +514,7 @@ async function fetchBackend(
 ): Promise<Response> {
   const retries = Math.max(0, options.retries ?? 0);
   const maxAttempts = retries + 1;
+  const timeoutMs = options.timeoutMs ?? 30_000;
   const requestHeaders = new Headers(options.headers);
   const traceId = String(options.traceId || requestHeaders.get("x-trace-id") || "").trim() || buildTraceId();
   requestHeaders.set("x-trace-id", traceId);
@@ -494,7 +532,7 @@ async function fetchBackend(
           body: options.body,
           cache: "no-store",
         },
-        options.timeoutMs ?? 30_000,
+        timeoutMs,
       );
 
       if (response.ok) {
@@ -573,6 +611,18 @@ async function fetchBackend(
       await sleep(retryDelayMs);
     } catch (error) {
       const proxyError = toProxyError(error, traceId);
+      if (proxyError.code === "UPSTREAM_TIMEOUT") {
+        proxyError.logContext = {
+          backend_url: backendUrl,
+          backend_path: readBackendPath(backendUrl),
+          timeout_ms: timeoutMs,
+          timeout_tier: readTimeoutTier(timeoutMs),
+          trace_id: traceId,
+          attempt,
+          max_attempts: maxAttempts,
+          error_cause: serializeErrorCause((error as Error & { cause?: unknown })?.cause),
+        };
+      }
       if (!proxyError.retryable || attempt >= maxAttempts) {
         throw proxyError;
       }
@@ -720,7 +770,16 @@ export const socialProxyErrorResponse = (
   logLabel: string,
 ): NextResponse<SocialProxyErrorBody> => {
   const proxyError = toProxyError(error);
-  console.error(logLabel, error);
+  console.error(logLabel, {
+    error: proxyError.message,
+    code: proxyError.code,
+    status: proxyError.status,
+    retryable: proxyError.retryable,
+    trace_id: proxyError.traceId,
+    upstream_status: proxyError.upstreamStatus,
+    upstream_detail_code: proxyError.upstreamDetailCode,
+    context: proxyError.logContext,
+  });
   const body: SocialProxyErrorBody = {
     error: proxyError.message,
     code: proxyError.code,
