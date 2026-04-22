@@ -83,7 +83,7 @@ describe("social account profile stats page", () => {
     await expect(
       page.default({
         params: Promise.resolve({
-          platform: "tiktok",
+          platform: "facebook",
           handle: "bravotv",
         }),
       }),
@@ -143,7 +143,7 @@ describe("social account profile stats page", () => {
     await expect(
       page.default({
         params: Promise.resolve({
-          platform: "tiktok",
+          platform: "facebook",
           handle: "bravotv",
         }),
       }),
