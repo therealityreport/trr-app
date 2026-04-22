@@ -107,6 +107,24 @@ const baseSummary = {
   last_catalog_run_at: "2026-03-17T12:00:00.000Z",
   last_catalog_run_status: "completed",
   catalog_recent_runs: [],
+  comments_saved_summary: {
+    saved_comments: 41,
+    retrieved_comments: 429,
+    saved_comment_posts: 8,
+    retrieved_comment_posts: 12,
+    saved_comment_media_files: 7,
+  },
+  media_coverage: {
+    saved_files: 1289,
+    total_files: 1400,
+    saved_post_media_files: 1200,
+    total_post_media_files: 1300,
+    saved_comment_media_files: 60,
+    total_comment_media_files: 75,
+    saved_avatar_files: 55,
+    saved_reel_still_files: 29,
+    total_reel_still_files: 29,
+  },
   comments_coverage: {
     available_posts: 12,
     eligible_posts: 12,
@@ -249,6 +267,75 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
+  });
+
+  it("renders comment-row and media-file totals in the top summary tiles", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-04-09T03:00:00.000Z",
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
+
+    const commentsTile = await screen.findByText("Comments Saved");
+    const commentsCard = commentsTile.closest("div.rounded-2xl");
+    expect(commentsCard).not.toBeNull();
+    expect(within(commentsCard as HTMLElement).getByText("41")).toBeInTheDocument();
+    expect(within(commentsCard as HTMLElement).getByText("41 / 429 comments")).toBeInTheDocument();
+
+    const mediaTile = screen.getByText("Media Saved");
+    const mediaCard = mediaTile.closest("div.rounded-2xl");
+    expect(mediaCard).not.toBeNull();
+    expect(within(mediaCard as HTMLElement).getByText("1,289")).toBeInTheDocument();
+    expect(within(mediaCard as HTMLElement).getByText("1,289 / 1,400 files")).toBeInTheDocument();
+  });
+
+  it("aliases the legacy posts tab to catalog for catalog-backed platforms", async () => {
+    const requestUrls: string[] = [];
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: baseSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-04-09T03:00:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/review-queue")) {
+        return jsonResponse({ items: [] });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="posts" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Catalog" })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("link", { name: "Posts" })).not.toBeInTheDocument();
+    expect(requestUrls.some((url) => url.includes("/catalog/posts"))).toBe(true);
+    expect(requestUrls.some((url) => url.includes("/profiles/instagram/bravotv/posts?page="))).toBe(false);
   });
 
   it("renders supported-platform catalog actions on the stats tab", async () => {
@@ -728,7 +815,7 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("queues a per-post comments scrape from the posts tab", async () => {
+  it("routes the legacy posts tab to catalog actions for Instagram accounts", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -765,38 +852,17 @@ describe("SocialAccountProfilePage", () => {
           },
         });
       }
-      if (url.includes("/comments/scrape")) {
-        expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(
-          JSON.stringify({
-            mode: "single_post",
-            source_id: "C123",
-            max_comments_per_post: 500,
-          }),
-        );
-        return jsonResponse({ run_id: "comments-run-post-1", status: "queued" });
-      }
-      if (url.includes("/comments/runs/comments-run-post-1/progress")) {
-        return jsonResponse({
-          run_id: "comments-run-post-1",
-          platform: "instagram",
-          account_handle: "bravotv",
-          run_status: "completed",
-          job_status: "completed",
-          target_source_ids: ["C123"],
-        });
-      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="posts" />);
 
-    const button = await screen.findByRole("button", { name: "Sync Comments" });
-    fireEvent.click(button);
-
     await waitFor(() => {
-      expect(screen.getByText("Comments refreshed.")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Catalog" })).toBeInTheDocument();
     });
+
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sync Comments" })).not.toBeInTheDocument();
   });
 
   it("surfaces comments scrape worker errors on the comments tab", async () => {
@@ -1004,6 +1070,57 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 
+  it("keeps the snapshot-backed shell visible when the live lite summary times out afterward", async () => {
+    let liveSummaryCalls = 0;
+    const liteSummary = {
+      ...baseSummary,
+      summary_detail: "lite" as const,
+      comments_saved_summary: null,
+      media_coverage: null,
+      comments_coverage: null,
+      per_show_counts: [],
+      per_season_counts: [],
+      top_hashtags: [],
+      top_collaborators: [],
+      top_tags: [],
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: liteSummary,
+          catalog_run_progress: null,
+          generated_at: "2026-04-21T12:00:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        liveSummaryCalls += 1;
+        return jsonResponse(
+          {
+            error: "TRR-Backend request timed out.",
+            code: "BACKEND_REQUEST_TIMEOUT",
+            retryable: true,
+            upstream_status: 504,
+            upstream_detail_code: "REQUEST_TIMEOUT",
+          },
+          504,
+        );
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("12 / 12")).toBeInTheDocument();
+    });
+
+    expect(liveSummaryCalls).toBe(1);
+    expect(screen.queryByText("Summary read timed out before completion. Retry in a moment.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Loads with full profile insights.").length).toBeGreaterThan(0);
+  });
+
   it("shows a timeout-specific summary banner when the lite summary fallback also times out", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1114,7 +1231,7 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("renders collaborator-backed Instagram posts without requiring a new run", async () => {
+  it("renders collaborator-backed Instagram catalog posts without requiring a new run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -1174,7 +1291,7 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Bravo Daily Dish x Bravo")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Collaborator match")).toBeInTheDocument();
+    expect(screen.getByText("Collaborator post already in the catalog.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open post" })).toHaveAttribute(
       "href",
       "https://www.instagram.com/p/C123/",
@@ -1376,6 +1493,228 @@ describe("SocialAccountProfilePage", () => {
     expect(
       screen.getByText(/Post Details skipped because all catalog posts are already materialized\./),
     ).toBeInTheDocument();
+  });
+
+  it("shows reused comments and attached media in Instagram launch copy", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          run_id: "catalog-run-12345678",
+          status: "queued",
+          launch_group_id: "launch-group-1",
+          catalog_run_id: "catalog-run-12345678",
+          comments_run_id: "comments-run-12345679",
+          effective_selected_tasks: ["comments", "media"],
+          attached_followups: {
+            comments: {
+              run_id: "comments-run-12345679",
+              state: "running",
+              status: "running",
+              source: "reused_run",
+            },
+            media: {
+              attachment_id: "media-launch-group-1",
+              state: "pending",
+              status: "queued",
+              source: "catalog_media_mirror",
+              enqueued_job_ids: ["media-job-1"],
+              enqueued_job_count: 1,
+            },
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Backfill" }));
+
+    expect(await screen.findByText(/comments comments.*\(reused\) · media attached\./i)).toBeInTheDocument();
+  });
+
+  it("renders deferred attached lanes on recent Instagram catalog runs", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "catalog-run-deferred-1",
+              status: "running",
+              created_at: "2026-04-21T12:00:00Z",
+              launch_group_id: "launch-group-deferred-1",
+              launch_state: "ready",
+              selected_tasks: ["post_details", "comments", "media"],
+              effective_selected_tasks: ["post_details", "comments", "media"],
+              attached_followups: {
+                comments: {
+                  run_id: null,
+                  state: "pending",
+                  status: "pending",
+                  source: "deferred_after_catalog",
+                },
+                media: {
+                  attachment_id: "media-launch-group-deferred-1",
+                  state: "pending",
+                  status: "queued",
+                  source: "catalog_media_mirror",
+                  enqueued_job_ids: [],
+                  enqueued_job_count: 0,
+                },
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/catalog/runs/catalog-run-deferred-1/progress")) {
+        return jsonResponse({
+          run_id: "catalog-run-deferred-1",
+          run_status: "running",
+          source_scope: "bravo",
+          stages: {},
+          per_handle: [],
+          recent_log: [],
+          alerts: [],
+          summary: {
+            total_jobs: 1,
+            completed_jobs: 0,
+            failed_jobs: 0,
+            active_jobs: 1,
+            items_found_total: 0,
+          },
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const recentRunsHeading = await screen.findByText("Recent Catalog Runs");
+    const recentRunsSection = recentRunsHeading.closest("section");
+    expect(recentRunsSection).not.toBeNull();
+    expect(within(recentRunsSection as HTMLElement).getByText("Deferred")).toBeInTheDocument();
+    expect(within(recentRunsSection as HTMLElement).getByText("Starts after catalog completion")).toBeInTheDocument();
+  });
+
+  it("renders reused comments and attached media lanes in catalog progress", async () => {
+    const progressPayload = {
+      run_id: "catalog-run-reused-1",
+      run_status: "running",
+      source_scope: "bravo",
+      selected_tasks: ["comments", "media"],
+      effective_selected_tasks: ["comments", "media"],
+      comments_run_id: "comments-run-reused-1",
+      attached_followups: {
+        comments: {
+          run_id: "comments-run-reused-1",
+          state: "running",
+          status: "running",
+          source: "reused_run",
+        },
+        media: {
+          attachment_id: "media-launch-group-reused-1",
+          state: "pending",
+          status: "queued",
+          source: "catalog_media_mirror",
+          enqueued_job_ids: ["media-job-1", "media-job-2"],
+          enqueued_job_count: 2,
+        },
+      },
+      stages: {},
+      per_handle: [],
+      recent_log: [],
+      alerts: [],
+      summary: {
+        total_jobs: 1,
+        completed_jobs: 0,
+        failed_jobs: 0,
+        active_jobs: 1,
+        items_found_total: 0,
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "catalog-run-reused-1",
+              status: "running",
+              created_at: "2026-04-21T12:00:00Z",
+              selected_tasks: ["comments", "media"],
+              effective_selected_tasks: ["comments", "media"],
+              comments_run_id: "comments-run-reused-1",
+              attached_followups: {
+                comments: {
+                  run_id: "comments-run-reused-1",
+                  state: "running",
+                  status: "running",
+                  source: "reused_run",
+                },
+                media: {
+                  attachment_id: "media-launch-group-reused-1",
+                  state: "pending",
+                  status: "queued",
+                  source: "catalog_media_mirror",
+                  enqueued_job_ids: ["media-job-1", "media-job-2"],
+                  enqueued_job_count: 2,
+                },
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            catalog_recent_runs: [
+              {
+                run_id: "catalog-run-reused-1",
+                status: "running",
+                created_at: "2026-04-21T12:00:00Z",
+                selected_tasks: ["comments", "media"],
+                effective_selected_tasks: ["comments", "media"],
+                comments_run_id: "comments-run-reused-1",
+                attached_followups: progressPayload.attached_followups,
+              },
+            ],
+          },
+          catalog_run_progress: progressPayload,
+        });
+      }
+      if (url.includes("/catalog/runs/catalog-run-reused-1/progress")) {
+        return jsonResponse(progressPayload);
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const progressHeading = await screen.findByText("Catalog Run Progress");
+    const progressSection = progressHeading.closest("section");
+    expect(progressSection).not.toBeNull();
+    expect(within(progressSection as HTMLElement).getByText("Reused")).toBeInTheDocument();
+    expect(within(progressSection as HTMLElement).getByText("2 repair jobs")).toBeInTheDocument();
   });
 
   it("does not POST comments scrape from the page when catalog completion is backend-driven", async () => {
@@ -4193,7 +4532,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
   render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
   await waitFor(() => {
-    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(screen.getAllByText("Cancelled").length).toBeGreaterThan(0);
   });
   expect(screen.getByText(/Run run-canc · Cancelled/i)).toBeInTheDocument();
   expect(screen.queryByText(/^Recovering$/)).not.toBeInTheDocument();
@@ -6280,7 +6619,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(progressSection).not.toBeNull();
 
     await waitFor(() => {
-      expect(within(progressSection as HTMLElement).getByText("Completed")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getAllByText("Completed").length).toBeGreaterThan(0);
       expect(within(progressSection as HTMLElement).getByText("0%")).toBeInTheDocument();
       expect(within(progressSection as HTMLElement).getByText("0 / 431 posts checked")).toBeInTheDocument();
       expect(within(progressSection as HTMLElement).getByText("0 persisted")).toBeInTheDocument();

@@ -83,6 +83,8 @@ type FailureEntry = {
   completed_at: string | null;
 };
 
+const ACTION_MESSAGE_AUTO_DISMISS_MS = 10 * 60 * 1000;
+
 type StuckJobEntry = {
   id: string;
   run_id: string | null;
@@ -2117,6 +2119,19 @@ export default function SystemHealthModal({ isOpen, onClose }: { isOpen: boolean
   const [debugResult, setDebugResult] = useState<DebugJobResult | null>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
   const [copyingDebugSnapshot, setCopyingDebugSnapshot] = useState(false);
+
+  useEffect(() => {
+    if (!actionNotice && !actionError) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setActionNotice(null);
+      setActionError(null);
+    }, ACTION_MESSAGE_AUTO_DISMISS_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [actionError, actionNotice]);
 
   const statusData = useMemo<HealthDotStatus | null>(
     () =>
