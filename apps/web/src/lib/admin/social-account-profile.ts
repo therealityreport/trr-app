@@ -11,7 +11,19 @@ export const SOCIAL_ACCOUNT_PROFILE_PLATFORMS: ReadonlyArray<SocialPlatformSlug>
   "threads",
 ];
 
-export const SOCIAL_ACCOUNT_COMMENTS_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = ["instagram"];
+export const SOCIAL_ACCOUNT_COMMENTS_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
+  "instagram",
+  "tiktok",
+  "twitter",
+  "youtube",
+];
+
+export const SOCIAL_ACCOUNT_CATALOG_DETAIL_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
+  "instagram",
+  "tiktok",
+  "twitter",
+  "youtube",
+];
 
 export const SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS: ReadonlyArray<SocialPlatformSlug> = [
   "instagram",
@@ -188,6 +200,7 @@ export type SocialAccountProfilePost = {
   tags?: string[];
   match_mode?: "owner" | "collaborator";
   source_surface?: "materialized" | "catalog";
+  saved_comments?: number | null;
   metrics: {
     likes?: number | null;
     comments_count?: number | null;
@@ -200,6 +213,18 @@ export type SocialAccountProfilePost = {
   };
 };
 
+export type SocialAccountProfilePagination = {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+};
+
+export type SocialAccountProfilePostsResponse = {
+  items: SocialAccountProfilePost[];
+  pagination: SocialAccountProfilePagination;
+};
+
 export type SocialAccountCommentsCoverage = {
   available_posts?: number | null;
   eligible_posts: number;
@@ -207,6 +232,12 @@ export type SocialAccountCommentsCoverage = {
   missing_posts: number;
   last_comments_run_at?: string | null;
   last_comments_run_status?: string | null;
+  effective_status?: "idle" | "running" | "queued" | "pending" | "retrying" | "covered" | "needs_refresh" | "failed" | string | null;
+  effective_label?: string | null;
+  historical_failure?: boolean | null;
+  last_attempt_status?: string | null;
+  last_attempt_at?: string | null;
+  active_run_id?: string | null;
 };
 
 export type SocialAccountCommentsSavedSummary = {
@@ -236,21 +267,25 @@ export type SocialAccountProfileComment = {
   post_source_id?: string | null;
   post_url?: string | null;
   username?: string | null;
+  display_name?: string | null;
   text?: string | null;
+  discussion_type?: string | null;
   likes?: number | null;
   is_reply?: boolean;
   created_at?: string | null;
   parent_comment_id?: string | null;
+  media_urls?: string[] | null;
+  hosted_media_urls?: string[] | null;
 };
 
 export type SocialAccountProfileCommentsResponse = {
   items: SocialAccountProfileComment[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total: number;
-    total_pages: number;
-  };
+  pagination: SocialAccountProfilePagination;
+};
+
+export type SocialAccountCatalogDiscussionItem = SocialAccountProfileComment & {
+  user?: Record<string, unknown> | null;
+  url?: string | null;
 };
 
 export type SocialAccountCommentsScrapeRequest =
@@ -339,6 +374,20 @@ export type SocialAccountCatalogPostDetail = {
   collaborators_detail?: Array<Record<string, unknown>> | null;
   child_posts_data?: Array<Record<string, unknown>> | null;
   post_format?: string | null;
+  discussion_items?: SocialAccountCatalogDiscussionItem[] | null;
+  comments?: Array<Record<string, unknown>> | null;
+  quotes?: Array<Record<string, unknown>> | null;
+  total_comments_in_db?: number | null;
+  total_quotes_in_db?: number | null;
+  author?: string | null;
+  display_name?: string | null;
+  duration_seconds?: number | null;
+  transcript_text?: string | null;
+  transcript_segments?: Array<Record<string, unknown> | string> | null;
+  transcript_language?: string | null;
+  transcript_source?: string | null;
+  transcript_synced_at?: string | null;
+  transcript_error?: string | null;
 };
 
 export type SocialAccountCatalogAction = "backfill" | "sync_recent" | "sync_newer" | "resume_tail";
@@ -655,7 +704,7 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   cancel_reason?: string | null;
   last_error_code?: string | null;
   last_error_message?: string | null;
-  repair_action?: "repair_instagram_auth" | null;
+  repair_action?: "cookie_refresh" | "repair_instagram_auth" | null;
   repair_status?: "idle" | "running" | "failed" | "succeeded" | null;
   repairable_reason?: string | null;
   auto_resume_pending?: boolean;

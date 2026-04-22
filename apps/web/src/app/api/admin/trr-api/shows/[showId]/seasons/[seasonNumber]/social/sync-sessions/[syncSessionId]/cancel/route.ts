@@ -51,7 +51,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         "content-type": "application/json",
       },
       fallbackError: "Failed to cancel social sync session",
-      retries: 1,
+      retries: 0,
       timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
     });
     return NextResponse.json(data);

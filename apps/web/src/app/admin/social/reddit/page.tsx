@@ -27,6 +27,7 @@ const loadLandingData = async (currentUser: User): Promise<SocialLandingPayload>
     network_sets: Array.isArray(data?.network_sets) ? data.network_sets : [],
     show_sets: Array.isArray(data?.show_sets) ? data.show_sets : [],
     people_profiles: Array.isArray(data?.people_profiles) ? data.people_profiles : [],
+    person_targets: Array.isArray(data?.person_targets) ? data.person_targets : [],
     shared_pipeline: {
       sources: Array.isArray(data?.shared_pipeline?.sources)
         ? data.shared_pipeline.sources

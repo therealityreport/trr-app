@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
         "content-type": "application/json",
       },
       fallbackError: "Failed to cancel stuck jobs",
-      retries: 1,
+      retries: 0,
       timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
     });
 

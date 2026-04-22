@@ -848,7 +848,11 @@ export const getGettyRemoteReadiness = async (): Promise<GettyRemoteReadiness> =
   const python = await resolvePython(backendDir);
   const scriptPath = path.join(backendDir, "scripts/modal/verify_modal_readiness.py");
   try {
-    const { stdout } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    const { stdout, error } = await new Promise<{
+      error: Error | null;
+      stdout: string;
+      stderr: string;
+    }>((resolve) => {
       execFile(
         python,
         [scriptPath, "--json", "--probe-getty-remote-access"],
@@ -858,11 +862,8 @@ export const getGettyRemoteReadiness = async (): Promise<GettyRemoteReadiness> =
           env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" },
         },
         (error, stdout, stderr) => {
-          if (error) {
-            reject(error);
-            return;
-          }
           resolve({
+            error: error instanceof Error ? error : null,
             stdout: typeof stdout === "string" ? stdout : "",
             stderr: typeof stderr === "string" ? stderr : "",
           });
@@ -873,6 +874,9 @@ export const getGettyRemoteReadiness = async (): Promise<GettyRemoteReadiness> =
       getty_remote_probe?: Record<string, unknown>;
     };
     const probe = summary.getty_remote_probe ?? {};
+    if (!probe || typeof probe !== "object" || Array.isArray(probe)) {
+      throw error ?? new Error("Getty remote probe payload missing");
+    }
     const ready = probe.ready === true;
     const payload: GettyRemoteReadiness = {
       ready,

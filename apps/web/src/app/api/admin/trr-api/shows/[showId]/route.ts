@@ -38,15 +38,23 @@ const SHOW_SOCIAL_HANDLE_FIELDS = [
   "facebook_handle",
   "instagram_handle",
   "tiktok_handle",
+  "threads_handle",
   "twitter_handle",
   "youtube_handle",
 ] as const;
 type ShowSocialHandleField = (typeof SHOW_SOCIAL_HANDLE_FIELDS)[number];
-type ShowSocialHandlePlatform = "facebook" | "instagram" | "tiktok" | "twitter" | "youtube";
+type ShowSocialHandlePlatform =
+  | "facebook"
+  | "instagram"
+  | "tiktok"
+  | "threads"
+  | "twitter"
+  | "youtube";
 const SHOW_SOCIAL_HANDLE_PLATFORM_BY_FIELD: Record<ShowSocialHandleField, ShowSocialHandlePlatform> = {
   facebook_handle: "facebook",
   instagram_handle: "instagram",
   tiktok_handle: "tiktok",
+  threads_handle: "threads",
   twitter_handle: "twitter",
   youtube_handle: "youtube",
 };
@@ -54,6 +62,7 @@ const SHOW_SOCIAL_EXTERNAL_ID_KEYS_BY_FIELD: Record<ShowSocialHandleField, reado
   facebook_handle: ["facebook_handle", "facebook"],
   instagram_handle: ["instagram_handle", "instagram"],
   tiktok_handle: ["tiktok_handle", "tiktok"],
+  threads_handle: ["threads_handle", "threads", "threads_id"],
   twitter_handle: ["twitter_handle", "twitter", "x_handle"],
   youtube_handle: ["youtube_handle", "youtube"],
 };
@@ -247,6 +256,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const facebookHandle = normalizeOptionalShowSocialHandle(body.facebook_handle, "facebook_handle");
     const instagramHandle = normalizeOptionalShowSocialHandle(body.instagram_handle, "instagram_handle");
     const tiktokHandle = normalizeOptionalShowSocialHandle(body.tiktok_handle, "tiktok_handle");
+    const threadsHandle = normalizeOptionalShowSocialHandle(body.threads_handle, "threads_handle");
     const twitterHandle = normalizeOptionalShowSocialHandle(body.twitter_handle, "twitter_handle");
     const youtubeHandle = normalizeOptionalShowSocialHandle(body.youtube_handle, "youtube_handle");
     const genres = normalizeStringArray(body.genres);
@@ -291,6 +301,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       facebookHandle !== undefined ||
       instagramHandle !== undefined ||
       tiktokHandle !== undefined ||
+      threadsHandle !== undefined ||
       twitterHandle !== undefined ||
       youtubeHandle !== undefined;
 
@@ -384,6 +395,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       facebook_handle: facebookHandle,
       instagram_handle: instagramHandle,
       tiktok_handle: tiktokHandle,
+      threads_handle: threadsHandle,
       twitter_handle: twitterHandle,
       youtube_handle: youtubeHandle,
     };
@@ -451,6 +463,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         "facebook_handle_invalid",
         "instagram_handle_invalid",
         "tiktok_handle_invalid",
+        "threads_handle_invalid",
         "twitter_handle_invalid",
         "youtube_handle_invalid",
       ].includes(error.message)

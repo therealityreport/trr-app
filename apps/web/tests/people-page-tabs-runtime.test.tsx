@@ -102,6 +102,7 @@ type FetchOverrides = {
   person?: (url: string) => Response;
   credits?: (url: string) => Response;
   fandom?: (url: string) => Response;
+  bravoVideoSync?: (url: string) => Response;
   videos?: (url: string) => Response;
   news?: (url: string) => Response;
   googleSync?: (url: string) => Response;
@@ -199,6 +200,10 @@ const createFetchMock = (overrides: FetchOverrides = {}) =>
       if (overrides.fandom) return overrides.fandom(url);
       return jsonResponse({ fandomData: [], count: 0 });
     }
+    if (url.includes(`/api/admin/trr-api/shows/${SHOW_ID}/bravo/videos/sync-thumbnails`)) {
+      if (overrides.bravoVideoSync) return overrides.bravoVideoSync(url);
+      return jsonResponse({ video_thumbnail_sync: { attempted: 0, synced: 0, failed: 0 } });
+    }
     if (url.includes(`/api/admin/trr-api/shows/${SHOW_ID}/bravo/videos`)) {
       if (overrides.videos) return overrides.videos(url);
       return jsonResponse({ videos: [] });
@@ -278,13 +283,60 @@ describe("people page tab runtime behavior", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/bravo/videos"))).toBe(true);
     });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes("/bravo/videos/sync-thumbnails")),
+    ).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: /^News/i }));
     await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/google-news/sync`))).toBe(
-        true
-      );
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/news`))).toBe(true);
+    });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/google-news/sync`)),
+    ).toBe(false);
+  });
+
+  it("keeps Bravo video sync behind the explicit refresh action", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+
+    await waitForPersonHeading("Andy Cohen");
+    fireEvent.click(screen.getByRole("button", { name: /^Videos/i }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/bravo/videos"))).toBe(true);
+    });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes("/bravo/videos/sync-thumbnails")),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh videos/i }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/bravo/videos/sync-thumbnails"))).toBe(true);
+    });
+  });
+
+  it("keeps Google News sync behind the explicit refresh action", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<PersonPage />);
+
+    await waitForPersonHeading("Andy Cohen");
+    fireEvent.click(screen.getByRole("button", { name: /^News/i }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/news`))).toBe(true);
+    });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/google-news/sync`)),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh news/i }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes(`/shows/${SHOW_ID}/google-news/sync`))).toBe(
+        true,
+      );
     });
   });
 

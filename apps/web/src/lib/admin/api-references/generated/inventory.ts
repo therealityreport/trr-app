@@ -4,7 +4,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-21T15:07:19.654Z",
+  "generatedAt": "2026-04-22T05:49:33.160Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
@@ -4875,7 +4875,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "pollCadenceMs": null,
       "automatic": false,
       "loadsLargeDatasets": false,
-      "usesPagination": false,
+      "usesPagination": true,
       "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
@@ -8646,7 +8646,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 20,
+        "line": 81,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -8665,7 +8665,8 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
-        "list"
+        "list",
+        "detail"
       ],
       "staticOnly": false,
       "payloadRisk": "high",
@@ -10203,7 +10204,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/route.ts",
       "sourceLocator": {
-        "line": 158,
+        "line": 167,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14030,6 +14031,40 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "pollCadenceMs": null,
       "automatic": false,
       "loadsLargeDatasets": true,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/social/landing",
+      "kind": "api_route",
+      "title": "POST /api/admin/social/landing",
+      "pathPattern": "/api/admin/social/landing",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/social/landing/route.ts",
+      "sourceLocator": {
+        "line": 117,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
       "usesPagination": false,
       "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
@@ -18259,7 +18294,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/route.ts",
       "sourceLocator": {
-        "line": 218,
+        "line": 227,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -22059,6 +22094,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/shows/[showKey]/icons",
         "route:POST:/api/admin/shows/[showKey]/seasons",
         "route:POST:/api/admin/shows/palette-library",
+        "route:POST:/api/admin/social/landing",
         "route:POST:/api/admin/surveys/[surveyKey]/cast",
         "route:POST:/api/admin/surveys/[surveyKey]/episodes",
         "route:POST:/api/admin/surveys/[surveyKey]/episodes/[episodeId]/activate",
@@ -22512,11 +22548,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 544,
+      "totalNodes": 545,
       "totalEdges": 186,
       "nodesByKind": {
         "ui_surface": 58,
-        "api_route": 369,
+        "api_route": 370,
         "backend_endpoint": 111,
         "repository_surface": 2,
         "polling_loop": 4

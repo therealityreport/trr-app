@@ -47,6 +47,10 @@ describe("person external id helpers", () => {
     ).toBe("andy");
   });
 
+  it("normalizes Threads profile URLs to the canonical handle", () => {
+    expect(normalizePersonExternalIdValue("threads", "https://www.threads.net/@andycohen")).toBe("andycohen");
+  });
+
   it("normalizes YouTube handle URLs even when extra tabs are present", () => {
     expect(normalizePersonExternalIdValue("youtube", "https://www.youtube.com/@bravotv/videos")).toBe("@bravotv");
   });
@@ -137,6 +141,10 @@ describe("person external id helpers", () => {
 
     expect(legacy.twitter).toBe("andy");
     expect(legacy.twitter_id).toBe("andy");
+  });
+
+  it("builds Threads profile URLs from stored handles", () => {
+    expect(buildPersonExternalIdUrl("threads", "andycohen")).toBe("https://www.threads.net/@andycohen");
   });
 
   it("mirrors normalized YouTube handle identifiers into legacy external_ids fields", () => {
