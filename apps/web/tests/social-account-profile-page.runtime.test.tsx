@@ -815,7 +815,7 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("queues a per-post comments scrape from the posts tab", async () => {
+  it("routes the legacy posts tab to catalog actions for Instagram accounts", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -852,38 +852,17 @@ describe("SocialAccountProfilePage", () => {
           },
         });
       }
-      if (url.includes("/comments/scrape")) {
-        expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(
-          JSON.stringify({
-            mode: "single_post",
-            source_id: "C123",
-            max_comments_per_post: 500,
-          }),
-        );
-        return jsonResponse({ run_id: "comments-run-post-1", status: "queued" });
-      }
-      if (url.includes("/comments/runs/comments-run-post-1/progress")) {
-        return jsonResponse({
-          run_id: "comments-run-post-1",
-          platform: "instagram",
-          account_handle: "bravotv",
-          run_status: "completed",
-          job_status: "completed",
-          target_source_ids: ["C123"],
-        });
-      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="posts" />);
 
-    const button = await screen.findByRole("button", { name: "Sync Comments" });
-    fireEvent.click(button);
-
     await waitFor(() => {
-      expect(screen.getByText("Comments refreshed.")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Catalog" })).toBeInTheDocument();
     });
+
+    expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sync Comments" })).not.toBeInTheDocument();
   });
 
   it("surfaces comments scrape worker errors on the comments tab", async () => {
@@ -1252,7 +1231,7 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("renders collaborator-backed Instagram posts without requiring a new run", async () => {
+  it("renders collaborator-backed Instagram catalog posts without requiring a new run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
@@ -1312,7 +1291,7 @@ describe("SocialAccountProfilePage", () => {
       expect(screen.getByText("Bravo Daily Dish x Bravo")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Collaborator match")).toBeInTheDocument();
+    expect(screen.getByText("Collaborator post already in the catalog.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open post" })).toHaveAttribute(
       "href",
       "https://www.instagram.com/p/C123/",
