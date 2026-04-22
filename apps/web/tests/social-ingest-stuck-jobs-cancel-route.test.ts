@@ -55,7 +55,7 @@ describe("social ingest stuck-jobs cancel proxy route", () => {
       expect.objectContaining({
         method: "POST",
         fallbackError: "Failed to cancel stuck jobs",
-        retries: 1,
+        retries: 0,
         timeoutMs: 45_000,
       }),
     );
