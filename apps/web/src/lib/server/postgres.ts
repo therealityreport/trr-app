@@ -152,6 +152,11 @@ export function resolvePostgresConnectionCandidates(env: EnvLike = process.env):
   return resolvePostgresConnectionCandidateDetails(env).map((candidate) => candidate.value);
 }
 
+export function resolveActiveCandidateIndex(env: EnvLike = process.env): number {
+  const force = (env.TRR_DB_FORCE_FALLBACK ?? "").toLowerCase().trim();
+  return force === "1" || force === "true" || force === "yes" ? 1 : 0;
+}
+
 export const resolvePostgresConnectionString = (env: EnvLike = process.env): string => {
   const candidates = resolvePostgresConnectionCandidates(env);
   const connectionString = candidates[0];
@@ -203,7 +208,7 @@ type PoolState = {
 };
 
 let poolState: PoolState | null = null;
-let activeCandidateIndex = 0;
+const activeCandidateIndex = resolveActiveCandidateIndex(process.env);
 let activeOperationCount = 0;
 const waitingOperationResolvers: Array<() => void> = [];
 
@@ -233,10 +238,10 @@ export const resolvePostgresPoolSizing = (
   return {
     maxConcurrentOperations:
       parsePositiveInt(env.POSTGRES_MAX_CONCURRENT_OPERATIONS) ??
-      (isSessionPooler ? (isDevelopment ? 4 : 2) : isDevelopment ? 2 : 12),
+      (isSessionPooler ? (isDevelopment ? 8 : 6) : isDevelopment ? 8 : 12),
     poolMax:
       parsePositiveInt(env.POSTGRES_POOL_MAX) ??
-      (isSessionPooler ? (isDevelopment ? 4 : 4) : isDevelopment ? 4 : 10),
+      (isSessionPooler ? (isDevelopment ? 8 : 6) : isDevelopment ? 8 : 10),
   };
 };
 
@@ -301,6 +306,11 @@ const getPool = (): Pool => {
 
   const candidateDetails = resolvePostgresConnectionCandidateDetails(process.env);
   const selectedCandidate = candidateDetails[activeCandidateIndex];
+  if (activeCandidateIndex > 0 && !selectedCandidate) {
+    throw new Error(
+      "TRR_DB_FORCE_FALLBACK=1 requires TRR_DB_FALLBACK_URL to be configured. Runtime fallback is operator-engaged only.",
+    );
+  }
   const connectionString = selectedCandidate?.value ?? getConnectionString();
 
   if (selectedCandidate) {
@@ -355,6 +365,14 @@ const getPool = (): Pool => {
         ? "env:POSTGRES_APPLICATION_NAME"
         : "default",
     });
+    if (activeCandidateIndex > 0) {
+      emitStructured("postgres_pool_engaged_fallback", {
+        candidate_index: activeCandidateIndex,
+        winner_source: selectedCandidate.source,
+        host_class: selectedCandidate.hostClass,
+        connection_class: selectedCandidate.connectionClass,
+      });
+    }
   }
   return poolState.pool;
 };
@@ -383,66 +401,27 @@ function isTransientPostgresError(error: unknown): boolean {
   );
 }
 
-function isCredentialPostgresError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  const code = String((error as Error & { code?: unknown }).code ?? "").toLowerCase();
-  return code === "28p01" || message.includes("password authentication failed");
-}
-
 async function withPoolRetry<T>(operation: (pool: Pool) => Promise<T>): Promise<T> {
-  const candidates = resolvePostgresConnectionCandidates(process.env);
   const maxAttempts =
     parsePositiveInt(process.env.POSTGRES_TRANSIENT_RETRY_ATTEMPTS) ??
-    (process.env.NODE_ENV === "development" ? 4 : 3);
+    (process.env.NODE_ENV === "development" ? 3 : 2);
   let lastError: unknown;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const pool = getPool();
-    const usingFallbackCandidate = (poolState?.candidateIndex ?? activeCandidateIndex) > 0;
     try {
-      const result = await operation(pool);
-      if (usingFallbackCandidate) {
-        activeCandidateIndex = 0;
-        await closePoolState();
-      }
-      return result;
+      return await operation(getPool());
     } catch (error) {
       lastError = error;
-      if (usingFallbackCandidate) {
-        activeCandidateIndex = 0;
-        await closePoolState();
-        if (isCredentialPostgresError(error) || isTransientPostgresError(error)) {
-          continue;
-        }
+      if (!isTransientPostgresError(error) || attempt + 1 >= maxAttempts) {
         throw error;
       }
-      if (isCredentialPostgresError(error) && activeCandidateIndex > 0) {
-        activeCandidateIndex = 0;
-        await closePoolState();
-        continue;
-      }
-      if (!isTransientPostgresError(error)) {
-        throw error;
-      }
-
-      const nextCandidateIndex =
-        activeCandidateIndex + 1 < candidates.length ? activeCandidateIndex + 1 : activeCandidateIndex;
-      emitStructured("postgres_pool_fallback", {
+      emitStructured("postgres_pool_transient_retry", {
         attempt,
-        from_candidate_index: activeCandidateIndex,
-        to_candidate_index: nextCandidateIndex,
-        transient: true,
+        candidate_index: poolState?.candidateIndex ?? activeCandidateIndex,
         error_message: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
       });
-      activeCandidateIndex = nextCandidateIndex;
       await closePoolState();
-      if (attempt + 1 < maxAttempts) {
-        await sleep(150 * 2 ** attempt);
-      }
+      await sleep(150 * 2 ** attempt);
     }
   }
 

@@ -2,6 +2,10 @@ import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
 import { buildAdminReadResponseHeaders } from "@/lib/server/trr-api/admin-read-proxy";
+import {
+  buildInternalAdminHeaders,
+  type VerifiedAdminContext,
+} from "@/lib/server/trr-api/internal-admin-auth";
 import { SocialProxyError, type ProxyErrorCode } from "@/lib/server/trr-api/social-admin-proxy";
 
 export type AdminSnapshotEnvelope<T extends Record<string, unknown>> = {
@@ -15,6 +19,7 @@ export const buildSnapshotSubrequest = (
   request: NextRequest,
   pathname: string,
   searchParams?: URLSearchParams,
+  adminContext?: VerifiedAdminContext,
 ): NextRequest => {
   const url = new URL(pathname, request.url);
   if (searchParams && Array.from(searchParams.keys()).length > 0) {
@@ -22,7 +27,7 @@ export const buildSnapshotSubrequest = (
   }
   return new NextRequest(url, {
     method: "GET",
-    headers: request.headers,
+    headers: adminContext ? buildInternalAdminHeaders(adminContext, request.headers) : request.headers,
   });
 };
 

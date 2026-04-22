@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   requireAdmin: vi.fn(),
+  toVerifiedAdminContext: vi.fn(),
   buildAdminAuthPartition: vi.fn(),
   buildAdminSnapshotCacheKey: vi.fn(),
   getOrCreateAdminSnapshot: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: (...args: unknown[]) => mocks.requireAdmin(...args),
+  toVerifiedAdminContext: (...args: unknown[]) => mocks.toVerifiedAdminContext(...args),
 }));
 
 vi.mock("@/lib/server/admin/admin-snapshot-cache", () => ({
@@ -50,6 +52,7 @@ import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]
 describe("social account profile snapshot route", () => {
   beforeEach(() => {
     mocks.requireAdmin.mockReset();
+    mocks.toVerifiedAdminContext.mockReset();
     mocks.buildAdminAuthPartition.mockReset();
     mocks.buildAdminSnapshotCacheKey.mockReset();
     mocks.getOrCreateAdminSnapshot.mockReset();
@@ -60,7 +63,12 @@ describe("social account profile snapshot route", () => {
     mocks.getCatalogRunProgress.mockReset();
     mocks.getSummary.mockReset();
 
-    mocks.requireAdmin.mockResolvedValue({ uid: "admin-1" });
+    mocks.requireAdmin.mockResolvedValue({ uid: "admin-1", email: "admin@example.com" });
+    mocks.toVerifiedAdminContext.mockReturnValue({
+      uid: "admin-1",
+      email: "admin@example.com",
+      verifiedAt: 1_700_000_000_000,
+    });
     mocks.buildAdminAuthPartition.mockReturnValue("partition:admin-1");
     mocks.buildAdminSnapshotCacheKey.mockReturnValue("snapshot-key");
     mocks.buildSnapshotSubrequest.mockImplementation(
@@ -168,6 +176,11 @@ describe("social account profile snapshot route", () => {
       "/api/admin/trr-api/social/profiles/instagram/bravotv/summary",
       expect.objectContaining({
         toString: expect.any(Function),
+      }),
+      expect.objectContaining({
+        uid: "admin-1",
+        email: "admin@example.com",
+        verifiedAt: 1_700_000_000_000,
       }),
     );
     const summarySearchParams = mocks.buildSnapshotSubrequest.mock.calls[0]?.[2] as URLSearchParams | undefined;

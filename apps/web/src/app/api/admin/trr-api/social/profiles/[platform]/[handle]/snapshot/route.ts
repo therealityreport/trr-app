@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   buildAdminAuthPartition,
   buildAdminSnapshotCacheKey,
@@ -29,6 +29,7 @@ const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "running", "re
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const { platform, handle } = await context.params;
     const searchParams = new URLSearchParams(request.nextUrl.searchParams);
     const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
@@ -52,13 +53,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
       fetcher: async () => {
         const summary = await readRouteJsonOrThrow<Record<string, unknown>>(
           await getSummary(
-            buildSnapshotSubrequest(
-              request,
-              `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
-              summarySearchParams,
+              buildSnapshotSubrequest(
+                request,
+                `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
+                summarySearchParams,
+                adminContext,
+              ),
+              context,
             ),
-            context,
-          ),
           "Failed to load social account profile snapshot",
         );
 
@@ -84,13 +86,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
         const catalogRunProgress = progressRunId
           ? await readRouteJsonOrThrow<Record<string, unknown>>(
               await getCatalogRunProgress(
-                buildSnapshotSubrequest(
-                  request,
-                  `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(progressRunId)}/progress`,
-                  new URLSearchParams({
-                    recent_log_limit: searchParams.get("recent_log_limit") ?? "25",
-                  }),
-                ),
+                  buildSnapshotSubrequest(
+                    request,
+                    `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(progressRunId)}/progress`,
+                    new URLSearchParams({
+                      recent_log_limit: searchParams.get("recent_log_limit") ?? "25",
+                    }),
+                    adminContext,
+                  ),
                 { params: Promise.resolve({ platform, handle, runId: progressRunId }) },
               ),
               "Failed to load social account catalog progress snapshot",

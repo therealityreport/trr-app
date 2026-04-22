@@ -113,59 +113,8 @@ function parseArgs(argv) {
     dryRun: argv.includes("--dry-run"),
   };
 }
-
-const args = parseArgs(process.argv.slice(2));
-
-const candidateSources = [
-  ["TRR_DB_URL", process.env.TRR_DB_URL],
-  ["TRR_DB_FALLBACK_URL", process.env.TRR_DB_FALLBACK_URL],
-  ["DATABASE_URL", process.env.DATABASE_URL],
-];
-const resolvedCandidate = candidateSources.find(([, value]) => value?.trim());
-const connectionString = resolvedCandidate?.[1]?.trim();
-if (!connectionString && !args.dryRun) {
-  console.error(
-    "[migrations] No database URL is set. Configure TRR_DB_URL or optional TRR_DB_FALLBACK_URL. DATABASE_URL is compatibility-only for older tooling flows.",
-  );
-  process.exit(1);
-}
-const connectionSource = resolvedCandidate?.[0] ?? (args.dryRun ? "not-required" : "unknown");
-if (connectionSource === "DATABASE_URL") {
-  console.warn(
-    "[migrations] Using DATABASE_URL compatibility input. Prefer TRR_DB_URL and optional TRR_DB_FALLBACK_URL for app runtime and migration tooling.",
-  );
-}
-
-// Configure SSL if enabled
-let ssl = undefined;
-if (process.env.DATABASE_SSL === "true") {
-  // Supabase poolers sometimes present cert chains that fail strict verification.
-  // Align this script with the app's default: only reject unauthorized certs when
-  // explicitly requested via DATABASE_SSL_REJECT_UNAUTHORIZED.
-  const rejectEnv = (process.env.DATABASE_SSL_REJECT_UNAUTHORIZED ?? "").toLowerCase().trim();
-  const rejectUnauthorized = rejectEnv.length
-    ? !["false", "0", "no", "off"].includes(rejectEnv)
-    : false;
-
-  const inlineCa = process.env.DATABASE_SSL_CA;
-  const caPath = process.env.DATABASE_SSL_CA_PATH;
-
-  if (inlineCa) {
-    console.log("[migrations] Using inline SSL CA certificate");
-    ssl = { rejectUnauthorized, ca: inlineCa };
-  } else if (caPath) {
-    const resolved = path.resolve(path.join(__dirname, ".."), caPath);
-    console.log(`[migrations] Loading SSL CA from file: ${resolved}`);
-    const ca = readFileSync(resolved, "utf8");
-    console.log(`[migrations] Successfully loaded SSL CA (${ca.length} bytes)`);
-    ssl = { rejectUnauthorized, ca };
-  } else {
-    console.log("[migrations] DATABASE_SSL=true but no CA provided, using default SSL");
-    ssl = { rejectUnauthorized };
-  }
-}
-
-const pool = connectionString ? new Pool({ connectionString, ssl }) : null;
+let poolOverride = null;
+let pool = null;
 
 function classifyMigrations(files) {
   const unknown = files.filter((file) => !migrationManifest.has(file));
@@ -181,11 +130,88 @@ function classifyMigrations(files) {
   }));
 }
 
-function getPool() {
-  if (!pool) {
+function resolveConnectionConfig({ dryRun = false } = {}) {
+  const candidateSources = [
+    ["TRR_DB_URL", process.env.TRR_DB_URL],
+    ["TRR_DB_FALLBACK_URL", process.env.TRR_DB_FALLBACK_URL],
+    ["DATABASE_URL", process.env.DATABASE_URL],
+  ];
+  const resolvedCandidate = candidateSources.find(([, value]) => value?.trim());
+  const connectionString = resolvedCandidate?.[1]?.trim();
+  if (!connectionString && !dryRun) {
+    throw new Error(
+      "[migrations] No database URL is set. Configure TRR_DB_URL or optional TRR_DB_FALLBACK_URL. DATABASE_URL is compatibility-only for older tooling flows.",
+    );
+  }
+  const connectionSource = resolvedCandidate?.[0] ?? (dryRun ? "not-required" : "unknown");
+  return {
+    connectionString,
+    connectionSource,
+  };
+}
+
+function resolveSslConfig() {
+  if (process.env.DATABASE_SSL !== "true") {
+    return undefined;
+  }
+
+  // Supabase poolers sometimes present cert chains that fail strict verification.
+  // Align this script with the app's default: only reject unauthorized certs when
+  // explicitly requested via DATABASE_SSL_REJECT_UNAUTHORIZED.
+  const rejectEnv = (process.env.DATABASE_SSL_REJECT_UNAUTHORIZED ?? "").toLowerCase().trim();
+  const rejectUnauthorized = rejectEnv.length
+    ? !["false", "0", "no", "off"].includes(rejectEnv)
+    : false;
+
+  const inlineCa = process.env.DATABASE_SSL_CA;
+  const caPath = process.env.DATABASE_SSL_CA_PATH;
+
+  if (inlineCa) {
+    console.log("[migrations] Using inline SSL CA certificate");
+    return { rejectUnauthorized, ca: inlineCa };
+  }
+  if (caPath) {
+    const resolved = path.resolve(path.join(__dirname, ".."), caPath);
+    console.log(`[migrations] Loading SSL CA from file: ${resolved}`);
+    const ca = readFileSync(resolved, "utf8");
+    console.log(`[migrations] Successfully loaded SSL CA (${ca.length} bytes)`);
+    return { rejectUnauthorized, ca };
+  }
+  console.log("[migrations] DATABASE_SSL=true but no CA provided, using default SSL");
+  return { rejectUnauthorized };
+}
+
+function getPool(options = {}) {
+  if (poolOverride) {
+    return poolOverride;
+  }
+  if (pool) {
+    return pool;
+  }
+  const { connectionString, connectionSource } = resolveConnectionConfig(options);
+  if (connectionSource === "DATABASE_URL") {
+    console.warn(
+      "[migrations] Using DATABASE_URL compatibility input. Prefer TRR_DB_URL and optional TRR_DB_FALLBACK_URL for app runtime and migration tooling.",
+    );
+  }
+  if (!connectionString) {
     throw new Error("[migrations] No database connection is available for this operation.");
   }
+  pool = new Pool({ connectionString, ssl: resolveSslConfig() });
   return pool;
+}
+
+export function __setPoolForTests(nextPool) {
+  poolOverride = nextPool;
+  pool = null;
+}
+
+export async function __resetPoolForTests() {
+  if (pool && typeof pool.end === "function") {
+    await pool.end().catch(() => undefined);
+  }
+  pool = null;
+  poolOverride = null;
 }
 
 async function ensureMigrationsTable() {
@@ -202,50 +228,61 @@ async function hasRun(name) {
   return result.rowCount > 0;
 }
 
-async function recordMigration(name) {
-  await getPool().query("INSERT INTO __migrations (name) VALUES ($1)", [name]);
+async function recordMigration(client, name) {
+  await client.query("INSERT INTO __migrations (name) VALUES ($1)", [name]);
 }
 
-async function applyMigration(fileName) {
+export async function applyMigration(fileName, sqlOverride) {
   const fullPath = path.join(migrationsDir, fileName);
-  const sql = await readFile(fullPath, "utf8");
+  const sql = sqlOverride ?? (await readFile(fullPath, "utf8"));
   console.log(`[migrations] Applying ${fileName}`);
-  await getPool().query(sql);
-  await recordMigration(fileName);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(sql);
+    await recordMigration(client, fileName);
+    await client.query("COMMIT");
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Ignore rollback failures; the original error is the actionable one.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
-async function run() {
+export async function runMigrations(options = {}) {
+  const args = {
+    ...parseArgs(process.argv.slice(2)),
+    ...options,
+  };
   try {
+    const { connectionSource } = resolveConnectionConfig({ dryRun: args.dryRun });
     const files = (await readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
     const classifiedFiles = classifyMigrations(files);
-    const filesToApply = classifiedFiles.filter((entry) => {
-      if (entry.lane === "app-local") return true;
-      return args.includeTransitionalSharedSchema;
-    });
-    const skippedFiles = classifiedFiles.filter((entry) => !filesToApply.includes(entry));
+    const filesToApply = classifiedFiles.filter((entry) => entry.lane === "app-local");
+    const skippedFiles = classifiedFiles.filter((entry) => entry.lane === "transitional-shared-schema");
 
     console.log(`[migrations] Connection source: ${connectionSource}`);
-    console.log(
-      `[migrations] Mode: ${
-        args.includeTransitionalSharedSchema
-          ? "app-local + transitional shared-schema"
-          : "app-local only"
-      }${args.dryRun ? " (dry-run)" : ""}`,
-    );
+    console.log(`[migrations] Mode: app-local only${args.dryRun ? " (dry-run)" : ""}`);
+
+    if (args.includeTransitionalSharedSchema) {
+      throw new Error(
+        "[migrations] Shared-schema migrations belong in TRR-Backend/supabase/migrations. " +
+          `The legacy ${TRANSITIONAL_SHARED_SCHEMA_FLAG} flag has been removed.`,
+      );
+    }
 
     if (skippedFiles.length > 0) {
-      console.warn("[migrations] Skipping backend-owned transitional shared-schema files by default:");
+      console.warn("[migrations] Ignoring backend-owned shared-schema backlog still present in app db/migrations:");
       for (const entry of skippedFiles) {
         console.warn(`  - ${entry.file}: ${entry.note}`);
       }
       console.warn(
-        `[migrations] Use ${TRANSITIONAL_SHARED_SCHEMA_FLAG} only when you intentionally need the legacy app bootstrap path while parity is still being ported to TRR-Backend.`,
-      );
-    }
-
-    if (args.includeTransitionalSharedSchema) {
-      console.warn(
-        "[migrations] Transitional shared-schema mode is enabled. This is a temporary compatibility path; backend-owned shared schema should migrate via TRR-Backend.",
+        "[migrations] These files are not applied by TRR-APP. Port them into TRR-Backend/supabase/migrations and remove them from TRR-APP/db when ownership cleanup is complete.",
       );
     }
 
@@ -268,14 +305,28 @@ async function run() {
       await applyMigration(file);
     }
     console.log("[migrations] Complete");
-  } catch (error) {
-    console.error("[migrations] Failed", error);
-    process.exitCode = 1;
   } finally {
-    if (pool) {
+    if (pool && !poolOverride) {
       await pool.end();
+      pool = null;
     }
   }
 }
 
-run();
+async function runCli() {
+  try {
+    await runMigrations();
+  } catch (error) {
+    console.error("[migrations] Failed", error);
+    process.exitCode = 1;
+  }
+}
+
+function isMainModule() {
+  const entry = process.argv[1];
+  return Boolean(entry && path.resolve(entry) === __filename);
+}
+
+if (isMainModule()) {
+  await runCli();
+}

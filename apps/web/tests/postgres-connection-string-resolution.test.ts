@@ -3,6 +3,7 @@ import {
   classifyConnectionClass,
   isDeployedRuntime,
   isSupavisorSessionPoolerConnectionString,
+  resolveActiveCandidateIndex,
   resolvePostgresConnectionCandidates,
   resolvePostgresPoolSizing,
   resolvePostgresConnectionString,
@@ -45,6 +46,19 @@ describe("resolvePostgresConnectionString", () => {
     expect(() => resolvePostgresConnectionString({})).toThrow(
       "No database connection string is set. Configure TRR_DB_URL (recommended in TRR-APP/apps/web/.env.local for make dev) or TRR_DB_FALLBACK_URL. Runtime reads do not use SUPABASE_DB_URL or DATABASE_URL.",
     );
+  });
+});
+
+describe("resolveActiveCandidateIndex", () => {
+  it("defaults to the primary candidate when no operator override is set", () => {
+    expect(resolveActiveCandidateIndex({})).toBe(0);
+  });
+
+  it("pins the fallback candidate only when TRR_DB_FORCE_FALLBACK is explicitly enabled", () => {
+    expect(resolveActiveCandidateIndex({ TRR_DB_FORCE_FALLBACK: "1" })).toBe(1);
+    expect(resolveActiveCandidateIndex({ TRR_DB_FORCE_FALLBACK: "true" })).toBe(1);
+    expect(resolveActiveCandidateIndex({ TRR_DB_FORCE_FALLBACK: "yes" })).toBe(1);
+    expect(resolveActiveCandidateIndex({ TRR_DB_FORCE_FALLBACK: "false" })).toBe(0);
   });
 });
 
@@ -100,15 +114,15 @@ describe("classifyConnectionClass", () => {
 });
 
 describe("resolvePostgresPoolSizing", () => {
-  it("uses modestly larger session defaults in local development", () => {
+  it("uses larger session defaults in local development", () => {
     const sizing = resolvePostgresPoolSizing(
       "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
       { NODE_ENV: "development" },
     );
 
     expect(sizing).toEqual({
-      maxConcurrentOperations: 4,
-      poolMax: 4,
+      maxConcurrentOperations: 8,
+      poolMax: 8,
     });
   });
 
@@ -119,8 +133,8 @@ describe("resolvePostgresPoolSizing", () => {
     );
 
     expect(sizing).toEqual({
-      maxConcurrentOperations: 2,
-      poolMax: 4,
+      maxConcurrentOperations: 6,
+      poolMax: 6,
     });
   });
 });

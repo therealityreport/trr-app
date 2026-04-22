@@ -3,14 +3,16 @@ import { NextRequest } from "next/server";
 
 process.env.TRR_ADMIN_ROUTE_CACHE_DISABLED = "1";
 
-const { requireAdminMock, fetchSocialBackendJsonMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
+const { requireAdminMock, toVerifiedAdminContextMock, fetchSocialBackendJsonMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   socialProxyErrorResponseMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
@@ -24,10 +26,16 @@ import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]
 describe("social account summary proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     socialProxyErrorResponseMock.mockReset();
 
-    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    requireAdminMock.mockResolvedValue({ uid: "admin-user", email: "admin@example.com" });
+    toVerifiedAdminContextMock.mockImplementation((user: { uid: string; email?: string }) => ({
+      uid: user.uid,
+      email: user.email ?? null,
+      verifiedAt: 1_700_000_000_000,
+    }));
     fetchSocialBackendJsonMock.mockResolvedValue({ total_posts: 42 });
     socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
       new Response(JSON.stringify({ error: String(error), code: "BACKEND_UNREACHABLE" }), {
@@ -50,6 +58,11 @@ describe("social account summary proxy route", () => {
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
       "/profiles/instagram/bravodailydish/summary",
       expect.objectContaining({
+        adminContext: expect.objectContaining({
+          uid: "admin-user",
+          email: "admin@example.com",
+          verifiedAt: 1_700_000_000_000,
+        }),
         fallbackError: "Failed to fetch social account profile summary",
         queryString: "detail=full",
         retries: 0,

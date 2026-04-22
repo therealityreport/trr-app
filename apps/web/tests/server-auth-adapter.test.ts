@@ -41,6 +41,7 @@ function requestWithBearerAt(url: string, token: string): NextRequest {
 describe("server auth adapter", () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.unstubAllGlobals();
     verifyIdTokenMock.mockReset();
     verifySessionCookieMock.mockReset();
     createClientMock.mockReset();
@@ -57,6 +58,7 @@ describe("server auth adapter", () => {
     process.env.ADMIN_APP_HOSTS = "localhost,127.0.0.1";
     delete process.env.ADMIN_APP_ORIGIN;
     delete process.env.ADMIN_ENFORCE_HOST;
+    delete process.env.ADMIN_AUTH_EXTERNAL_TIMEOUT_MS;
 
     createClientMock.mockReturnValue({
       auth: {
@@ -91,6 +93,40 @@ describe("server auth adapter", () => {
 
     expect(user).toBeNull();
     expect(createClientMock).not.toHaveBeenCalled();
+  });
+
+  it("aborts identity toolkit fallback after ADMIN_AUTH_EXTERNAL_TIMEOUT_MS", async () => {
+    vi.useFakeTimers();
+    process.env.NEXT_PUBLIC_FIREBASE_API_KEY = "firebase-web-api-key";
+    process.env.ADMIN_AUTH_EXTERNAL_TIMEOUT_MS = "5";
+    verifyIdTokenMock.mockRejectedValue(new Error("firebase down"));
+    const abortSpy = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            abortSpy();
+            const abortError = new Error("aborted");
+            abortError.name = "AbortError";
+            reject(abortError);
+          });
+        });
+      }) as unknown as typeof fetch,
+    );
+
+    try {
+      const auth = await import("@/lib/server/auth");
+      const request = requestWithBearer(
+        `header.${Buffer.from(JSON.stringify({ sub: "fallback-user", email: "fallback@example.com" })).toString("base64url")}.sig`,
+      );
+      const promise = auth.getUserFromRequest(request);
+      await vi.advanceTimersByTimeAsync(5);
+      await expect(promise).resolves.toBeNull();
+      expect(abortSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not attempt supabase shadow verification when TRR_CORE_SUPABASE_* is unset", async () => {

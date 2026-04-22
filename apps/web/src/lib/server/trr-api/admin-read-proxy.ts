@@ -2,7 +2,10 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
-import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
+import {
+  buildInternalAdminHeaders,
+  type VerifiedAdminContext,
+} from "@/lib/server/trr-api/internal-admin-auth";
 
 export type AdminReadRequestRole = "primary" | "secondary" | "polling";
 
@@ -96,6 +99,7 @@ export async function fetchAdminBackendJson(
     method?: "GET" | "POST";
     body?: string;
     headers?: Record<string, string>;
+    adminContext?: VerifiedAdminContext;
     queryString?: string;
     routeName?: string;
     requestRole?: AdminReadRequestRole;
@@ -124,7 +128,7 @@ export async function fetchAdminBackendJson(
   const startedAt = performance.now();
 
   try {
-    const headers = buildInternalAdminHeaders({
+    const headers = buildInternalAdminHeaders(options?.adminContext, {
       Accept: "application/json",
       "x-trr-admin-request-role": requestRole,
       ...(options?.headers ?? {}),

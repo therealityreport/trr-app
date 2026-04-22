@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdminContext } from "@/lib/server/auth";
 import {
   fetchSocialBackendJson,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
@@ -14,13 +14,14 @@ type RouteContext = {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    await requireAdmin(request);
+    const adminContext = await requireAdminContext(request);
     const { platform, handle, runId } = await context.params;
     const query = request.nextUrl.searchParams.toString();
     const path = `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(runId)}/progress${
       query ? `?${query}` : ""
     }`;
     const data = await fetchSocialBackendJson(path, {
+      adminContext,
       fallbackError: "Failed to fetch social account catalog run progress",
       retries: 1,
       timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
