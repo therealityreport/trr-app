@@ -210,13 +210,23 @@ export type SocialAccountCommentsCoverage = {
 };
 
 export type SocialAccountCommentsSavedSummary = {
-  saved_posts: number;
-  total_posts: number;
+  saved_comments: number;
+  retrieved_comments: number;
+  saved_comment_posts?: number | null;
+  retrieved_comment_posts?: number | null;
+  saved_comment_media_files?: number | null;
 };
 
 export type SocialAccountMediaCoverage = {
   saved_files: number;
   total_files: number;
+  saved_post_media_files?: number | null;
+  total_post_media_files?: number | null;
+  saved_comment_media_files?: number | null;
+  total_comment_media_files?: number | null;
+  saved_avatar_files?: number | null;
+  saved_reel_still_files?: number | null;
+  total_reel_still_files?: number | null;
 };
 
 export type SocialAccountProfileComment = {
@@ -340,6 +350,27 @@ export type SocialAccountCatalogActionScope =
   | "head_gap"
   | "frontier_resume";
 
+export type SocialAccountCatalogAttachedCommentsFollowup = {
+  run_id?: string | null;
+  state?: string | null;
+  status?: string | null;
+  source?: "new_run" | "reused_run" | "deferred_after_catalog" | null;
+};
+
+export type SocialAccountCatalogAttachedMediaFollowup = {
+  attachment_id?: string | null;
+  state?: string | null;
+  status?: string | null;
+  source?: "catalog_media_mirror" | "comments_media_followups" | null;
+  enqueued_job_ids?: string[];
+  enqueued_job_count?: number;
+};
+
+export type SocialAccountCatalogAttachedFollowups = {
+  comments?: SocialAccountCatalogAttachedCommentsFollowup | null;
+  media?: SocialAccountCatalogAttachedMediaFollowup | null;
+};
+
 export type SocialAccountCatalogRun = {
   job_id: string;
   run_id: string;
@@ -350,6 +381,12 @@ export type SocialAccountCatalogRun = {
   started_at?: string | null;
   completed_at?: string | null;
   error_message?: string | null;
+  launch_group_id?: string | null;
+  launch_state?: "pending" | "ready" | "failed" | null;
+  selected_tasks?: CatalogBackfillSelectedTask[];
+  effective_selected_tasks?: CatalogBackfillSelectedTask[];
+  comments_run_id?: string | null;
+  attached_followups?: SocialAccountCatalogAttachedFollowups | null;
 };
 
 export type SocialAccountCatalogRunProgressStage = {
@@ -529,8 +566,14 @@ export type SocialAccountCatalogRunProgressSnapshot = {
   season_id?: string | null;
   run_id: string;
   run_status: string;
+  launch_group_id?: string | null;
+  launch_state?: "pending" | "ready" | "failed" | null;
   catalog_action?: SocialAccountCatalogAction | null;
   catalog_action_scope?: SocialAccountCatalogActionScope | null;
+  selected_tasks?: CatalogBackfillSelectedTask[];
+  effective_selected_tasks?: CatalogBackfillSelectedTask[];
+  comments_run_id?: string | null;
+  attached_followups?: SocialAccountCatalogAttachedFollowups | null;
   operational_state?:
     | "blocked_auth"
     | "discovering"
@@ -745,6 +788,7 @@ export type CatalogBackfillLaunchResponse = {
   post_details_skipped_reason?: "already_materialized" | null;
   catalog_run_id?: string | null;
   comments_run_id?: string | null;
+  attached_followups?: SocialAccountCatalogAttachedFollowups | null;
   catalog_bootstrap_required?: boolean;
   comments_deferred_until_catalog_complete?: boolean;
 };

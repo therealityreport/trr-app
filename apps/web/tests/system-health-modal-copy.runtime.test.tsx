@@ -1,6 +1,6 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   usePathname: vi.fn(() => "/admin/social"),
@@ -167,6 +167,10 @@ describe("SystemHealthModal copy snapshot", () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("copies a debugger-ready snapshot of the current modal state", async () => {
     const writeText = installClipboardMock();
 
@@ -188,6 +192,29 @@ describe("SystemHealthModal copy snapshot", () => {
     expect(copiedText).toContain("\"live_status_sequence\": 17");
 
     expect(await screen.findByText("Copied System Jobs Health debug snapshot to clipboard.")).toBeInTheDocument();
+  });
+
+  it("auto-dismisses action notices after ten minutes", async () => {
+    vi.useFakeTimers();
+    const writeText = installClipboardMock();
+
+    render(<SystemHealthModal isOpen onClose={() => undefined} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy debug snapshot" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Copied System Jobs Health debug snapshot to clipboard.")).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(10 * 60 * 1000);
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Copied System Jobs Health debug snapshot to clipboard.")).not.toBeInTheDocument();
   });
 
   it("treats queue aggregate timeouts as degraded when workers are otherwise healthy", async () => {
