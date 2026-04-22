@@ -65,7 +65,7 @@ describe("ShowNewsTab runtime", () => {
     fireEvent.click(screen.getByRole("button", { name: "Latest" }));
     expect(onSetNewsSort).toHaveBeenCalledWith("latest");
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh news" }));
     expect(onRefreshNews).toHaveBeenCalledTimes(1);
 
     fireEvent.change(screen.getByLabelText("Source"), {

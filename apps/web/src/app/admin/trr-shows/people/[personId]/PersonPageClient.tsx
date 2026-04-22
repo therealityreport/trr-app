@@ -35,7 +35,6 @@ import {
 } from "@/lib/admin/operation-session";
 import {
   GettyLocalPrefetchError,
-  getGettyRemoteReadiness,
   prefetchGettyLocallyForPerson,
   type GettyLocalPrefetchProgressState,
 } from "@/lib/admin/getty-local-prefetch";
@@ -1044,6 +1043,17 @@ const parsePersonPipelineMonitorSwitchOperationId = (message: string | null | un
 const NEWS_OPERATION_RECONNECT_BACKOFF_MS = [2_000, 5_000, 10_000, 15_000] as const;
 const NEWS_PAGE_SIZE = 50;
 const MAX_PHOTO_FETCH_PAGES = 30;
+
+const formatUpdatedAgoLabel = (timestampMs: number | null): string | null => {
+  if (!timestampMs) return null;
+  const elapsedMinutes = Math.max(0, Math.round((Date.now() - timestampMs) / 60_000));
+  if (elapsedMinutes <= 0) return "Updated just now";
+  if (elapsedMinutes === 1) return "Updated 1 minute ago";
+  if (elapsedMinutes < 60) return `Updated ${elapsedMinutes} minutes ago`;
+  const elapsedHours = Math.max(1, Math.round(elapsedMinutes / 60));
+  if (elapsedHours === 1) return "Updated 1 hour ago";
+  return `Updated ${elapsedHours} hours ago`;
+};
 const TEXT_OVERLAY_DETECT_CONCURRENCY = 4;
 
 type PersonGalleryPagination = {
@@ -3494,7 +3504,7 @@ export default function PersonProfilePage() {
   const [bravoVideosError, setBravoVideosError] = useState<string | null>(null);
   const [bravoVideoSyncing, setBravoVideoSyncing] = useState(false);
   const [bravoVideoSyncWarning, setBravoVideoSyncWarning] = useState<string | null>(null);
-  const bravoVideoSyncAttemptedRef = useRef(false);
+  const [bravoVideosUpdatedAtMs, setBravoVideosUpdatedAtMs] = useState<number | null>(null);
   const bravoVideoSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const [unifiedNews, setUnifiedNews] = useState<BravoNewsItem[]>([]);
   const [newsLoaded, setNewsLoaded] = useState(false);
@@ -3503,6 +3513,7 @@ export default function PersonProfilePage() {
   const [newsNotice, setNewsNotice] = useState<string | null>(null);
   const [newsGoogleUrlMissing, setNewsGoogleUrlMissing] = useState(false);
   const [newsSyncing, setNewsSyncing] = useState(false);
+  const [newsUpdatedAtMs, setNewsUpdatedAtMs] = useState<number | null>(null);
   const [newsFacets, setNewsFacets] = useState<UnifiedNewsFacets>(EMPTY_NEWS_FACETS);
   const [newsNextCursor, setNewsNextCursor] = useState<string | null>(null);
   const [newsPageCount, setNewsPageCount] = useState(0);
@@ -3511,7 +3522,6 @@ export default function PersonProfilePage() {
   const [newsSourceFilter, setNewsSourceFilter] = useState<string>("");
   const [newsTopicFilter, setNewsTopicFilter] = useState<string>("");
   const [newsSeasonFilter, setNewsSeasonFilter] = useState<string>("");
-  const newsAutoSyncAttemptedRef = useRef(false);
   const newsSyncInFlightRef = useRef<Promise<boolean> | null>(null);
   const newsLoadInFlightRef = useRef<Promise<void> | null>(null);
   const newsLoadedQueryKeyRef = useRef<string | null>(null);
@@ -4497,7 +4507,7 @@ export default function PersonProfilePage() {
     setBravoVideosError(null);
     setBravoVideoSyncWarning(null);
     setBravoVideoSyncing(false);
-    bravoVideoSyncAttemptedRef.current = false;
+    setBravoVideosUpdatedAtMs(null);
     bravoVideoSyncInFlightRef.current = null;
     setUnifiedNews([]);
     setNewsLoaded(false);
@@ -4506,6 +4516,7 @@ export default function PersonProfilePage() {
     setNewsNotice(null);
     setNewsGoogleUrlMissing(false);
     setNewsSyncing(false);
+    setNewsUpdatedAtMs(null);
     setNewsFacets(EMPTY_NEWS_FACETS);
     setNewsNextCursor(null);
     setNewsPageCount(0);
@@ -4514,7 +4525,6 @@ export default function PersonProfilePage() {
     setNewsSourceFilter("");
     setNewsTopicFilter("");
     setNewsSeasonFilter("");
-    newsAutoSyncAttemptedRef.current = false;
     newsSyncInFlightRef.current = null;
     newsLoadInFlightRef.current = null;
     newsLoadedQueryKeyRef.current = null;
@@ -6238,8 +6248,7 @@ export default function PersonProfilePage() {
       setBravoVideosLoading(true);
       setBravoVideosError(null);
       const headers = await getAuthHeaders();
-      if (forceSync || !bravoVideoSyncAttemptedRef.current) {
-        bravoVideoSyncAttemptedRef.current = true;
+      if (forceSync) {
         await syncBravoVideoThumbnails({ force: forceSync, signal });
       }
       const videosResponse = await fetchWithTimeout(
@@ -6261,6 +6270,7 @@ export default function PersonProfilePage() {
       }
 
       setBravoVideos(Array.isArray(videosData.videos) ? videosData.videos : []);
+      setBravoVideosUpdatedAtMs(Date.now());
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) return;
       setBravoVideosError(err instanceof Error ? err.message : "Failed to fetch person videos");
@@ -6445,9 +6455,11 @@ export default function PersonProfilePage() {
         try {
           setNewsLoading(true);
           setNewsError(null);
-          if (!shouldAppend && (forceSync || !newsAutoSyncAttemptedRef.current)) {
+          if (!shouldAppend && forceSync) {
             const syncSuccess = await syncGoogleNews({ force: forceSync });
-            if (syncSuccess) newsAutoSyncAttemptedRef.current = true;
+            if (!syncSuccess) {
+              return;
+            }
           }
 
           const headers = await getAuthHeaders();
@@ -6539,6 +6551,7 @@ export default function PersonProfilePage() {
           newsCursorQueryKeyRef.current = nextCursor ? queryKey : null;
           setNewsLoaded(true);
           newsLoadedQueryKeyRef.current = queryKey;
+          setNewsUpdatedAtMs(Date.now());
         } catch (error) {
           if (requestSeq !== newsRequestSeqRef.current) return;
           const message = isAbortError(error)
@@ -7649,175 +7662,141 @@ export default function PersonProfilePage() {
             : prev
         );
       };
-      const gettyReadiness = await getGettyRemoteReadiness();
-      if (gettyReadiness.ready) {
-        Object.assign(refreshBody, {
-          getty_transport_mode: gettyReadiness.transportMode ?? "decodo_remote",
-          getty_proxy_fingerprint: gettyReadiness.proxyFingerprint ?? undefined,
-          getty_runtime_probe_status: gettyReadiness.status,
-          getty_runtime_probe_reason: gettyReadiness.reason ?? undefined,
-          getty_fallback_invoked: false,
-        });
-        setRefreshProgress((prev) =>
-          prev
-            ? {
-                ...prev,
-                phase: PERSON_REFRESH_PHASES.syncing,
-                message: "Getty remote probe healthy. Starting backend pipeline...",
-                detailMessage:
-                  gettyReadiness.proxyFingerprint
-                    ? `Using Getty remote transport ${gettyReadiness.proxyFingerprint}.`
-                    : "Using Getty remote transport.",
-              }
-            : prev,
+      Object.assign(refreshBody, {
+        getty_prefetch_attempted: true,
+        getty_prefetch_succeeded: false,
+      });
+      setRefreshProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: PERSON_REFRESH_PHASES.gettyDiscovery,
+              message: "Running Getty discovery locally...",
+              detailMessage: `Fetching Getty search candidates for "${person.full_name}" via the local Getty prefetch pipeline...`,
+            }
+          : prev
+      );
+      appendRefreshLog({
+        source: "page_refresh",
+        stage: "getty_discovery",
+        message: "Starting local Getty discovery prefetch before backend refresh.",
+        level: "info",
+        runId: requestId,
+      });
+      try {
+        const gettyPrefetch = await prefetchGettyLocallyForPerson(
+          person.full_name,
+          effectiveGalleryImportContext.showName ?? undefined,
+          { mode: "discovery", transportMode: "auto", onProgress: updateGettyDiscoveryProgress }
         );
+        Object.assign(refreshBody, gettyPrefetch.bodyPatch);
+        const discoveryToken =
+          typeof gettyPrefetch.bodyPatch.getty_prefetch_token === "string"
+            ? gettyPrefetch.bodyPatch.getty_prefetch_token
+            : null;
         appendRefreshLog({
           source: "page_refresh",
           stage: "getty_discovery",
-          message: "Getty remote probe healthy. Starting backend refresh without local prefetch.",
-          detail: gettyReadiness.proxyFingerprint ?? undefined,
+          message: `Getty discovery complete: ${gettyPrefetch.candidateManifestTotal} candidates (${gettyPrefetch.elapsedSeconds ?? "?"}s). Starting pipeline...`,
+          detail:
+            gettyPrefetch.querySummaries.length > 0
+              ? `${gettyPrefetch.querySummaries.length} query summaries captured`
+              : undefined,
           level: "info",
           runId: requestId,
-        });
-      } else {
-        Object.assign(refreshBody, {
-          getty_prefetch_attempted: true,
-          getty_prefetch_succeeded: false,
-          getty_runtime_probe_status: gettyReadiness.status,
-          getty_runtime_probe_reason: gettyReadiness.reason ?? undefined,
         });
         setRefreshProgress((prev) =>
           prev
             ? {
                 ...prev,
-                phase: PERSON_REFRESH_PHASES.gettyDiscovery,
-                message: "Running Getty discovery locally...",
-                detailMessage: `Fetching Getty search candidates for "${person.full_name}" via the codex Chrome profile...`,
+                detailMessage: `Getty discovery found ${gettyPrefetch.candidateManifestTotal} candidates. Connecting to pipeline...`,
               }
             : prev
         );
+
+        if (discoveryToken && gettyPrefetch.enrichmentPending) {
+          startGettyEnrichment = async () =>
+            (async () => {
+              appendRefreshLog({
+                source: "page_refresh",
+                stage: "getty_enrichment",
+                message: "Starting background Getty enrichment...",
+                detail: `${gettyPrefetch.detailEnrichmentTotal} editorial ids queued`,
+                level: "info",
+                runId: requestId,
+              });
+              const fullPrefetch = await prefetchGettyLocallyForPerson(
+                person.full_name,
+                effectiveGalleryImportContext.showName ?? undefined,
+                {
+                  mode: "full",
+                  prefetchToken: discoveryToken,
+                  transportMode: "auto",
+                }
+              );
+              const enrichmentResponse = await fetch(
+                `/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    getty_prefetch_token: discoveryToken,
+                    show_id: effectiveGalleryImportContext.showId ?? undefined,
+                    show_name: effectiveGalleryImportContext.showName ?? undefined,
+                  }),
+                }
+              );
+              const enrichmentData = (await enrichmentResponse
+                .json()
+                .catch(() => ({ error: "Getty enrichment failed" }))) as {
+                error?: string;
+                detail?: string;
+                getty_enrichment_completed?: number;
+                getty_enrichment_failed?: number;
+                cast_photos_mirrored?: number;
+                media_assets_mirrored?: number;
+              };
+              if (!enrichmentResponse.ok) {
+                throw new Error(
+                  enrichmentData.detail ||
+                    enrichmentData.error ||
+                    `Getty enrichment failed (${enrichmentResponse.status})`
+                );
+              }
+              appendRefreshLog({
+                source: "page_refresh",
+                stage: "getty_enrichment",
+                message: `Getty enrichment complete: ${enrichmentData.getty_enrichment_completed ?? 0} editorial ids updated.`,
+                detail: `Mirrored ${(enrichmentData.cast_photos_mirrored ?? 0) + (enrichmentData.media_assets_mirrored ?? 0)} hosted assets after enrichment. Full prefetch mode: ${fullPrefetch.prefetchMode ?? "full"}.`,
+                level: "success",
+                runId: requestId,
+              });
+            })().catch((error) => {
+              gettyEnrichmentError = error instanceof Error ? error.message : String(error);
+              appendRefreshLog({
+                source: "page_refresh",
+                stage: "getty_enrichment",
+                message: "Getty enrichment failed",
+                detail: gettyEnrichmentError,
+                level: "error",
+                runId: requestId,
+              });
+            });
+        }
+      } catch (gettyErr) {
+        Object.assign(refreshBody, {
+          getty_prefetch_error_code:
+            gettyErr instanceof GettyLocalPrefetchError ? gettyErr.code : "UNREACHABLE",
+        });
+        const errMsg = gettyErr instanceof Error ? gettyErr.message : String(gettyErr);
         appendRefreshLog({
           source: "page_refresh",
-          stage: "getty_discovery",
-          message: "Getty remote probe is blocked or unavailable. Falling back to local Getty discovery.",
-          detail: gettyReadiness.reason ?? undefined,
-          level: "info",
+          stage: "getty_local_scrape",
+          message: `${errMsg} Getty/NBCUMV refresh could not start during local Getty prefetch.`,
+          level: "error",
           runId: requestId,
         });
-        try {
-          const gettyPrefetch = await prefetchGettyLocallyForPerson(
-            person.full_name,
-            effectiveGalleryImportContext.showName ?? undefined,
-            { mode: "discovery", onProgress: updateGettyDiscoveryProgress }
-          );
-          Object.assign(refreshBody, gettyPrefetch.bodyPatch);
-          const discoveryToken =
-            typeof gettyPrefetch.bodyPatch.getty_prefetch_token === "string"
-              ? gettyPrefetch.bodyPatch.getty_prefetch_token
-              : null;
-          appendRefreshLog({
-            source: "page_refresh",
-            stage: "getty_discovery",
-            message: `Getty discovery complete: ${gettyPrefetch.candidateManifestTotal} candidates (${gettyPrefetch.elapsedSeconds ?? "?"}s). Starting pipeline...`,
-            detail:
-              gettyPrefetch.querySummaries.length > 0
-                ? `${gettyPrefetch.querySummaries.length} query summaries captured`
-                : undefined,
-            level: "info",
-            runId: requestId,
-          });
-          setRefreshProgress((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  detailMessage: `Getty discovery found ${gettyPrefetch.candidateManifestTotal} candidates. Connecting to pipeline...`,
-                }
-              : prev
-          );
-
-          if (discoveryToken && gettyPrefetch.enrichmentPending) {
-            startGettyEnrichment = async () =>
-              (async () => {
-                appendRefreshLog({
-                  source: "page_refresh",
-                  stage: "getty_enrichment",
-                  message: "Starting background Getty enrichment...",
-                  detail: `${gettyPrefetch.detailEnrichmentTotal} editorial ids queued`,
-                  level: "info",
-                  runId: requestId,
-                });
-                const fullPrefetch = await prefetchGettyLocallyForPerson(
-                  person.full_name,
-                  effectiveGalleryImportContext.showName ?? undefined,
-                  {
-                    mode: "full",
-                    prefetchToken: discoveryToken,
-                  }
-                );
-                const enrichmentResponse = await fetch(
-                  `/api/admin/trr-api/people/${personId}/refresh-images/getty-enrichment`,
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      getty_prefetch_token: discoveryToken,
-                      show_id: effectiveGalleryImportContext.showId ?? undefined,
-                      show_name: effectiveGalleryImportContext.showName ?? undefined,
-                    }),
-                  }
-                );
-                const enrichmentData = (await enrichmentResponse
-                  .json()
-                  .catch(() => ({ error: "Getty enrichment failed" }))) as {
-                  error?: string;
-                  detail?: string;
-                  getty_enrichment_completed?: number;
-                  getty_enrichment_failed?: number;
-                  cast_photos_mirrored?: number;
-                  media_assets_mirrored?: number;
-                };
-                if (!enrichmentResponse.ok) {
-                  throw new Error(
-                    enrichmentData.detail ||
-                      enrichmentData.error ||
-                      `Getty enrichment failed (${enrichmentResponse.status})`
-                  );
-                }
-                appendRefreshLog({
-                  source: "page_refresh",
-                  stage: "getty_enrichment",
-                  message: `Getty enrichment complete: ${enrichmentData.getty_enrichment_completed ?? 0} editorial ids updated.`,
-                  detail: `Mirrored ${(enrichmentData.cast_photos_mirrored ?? 0) + (enrichmentData.media_assets_mirrored ?? 0)} hosted assets after enrichment. Full prefetch mode: ${fullPrefetch.prefetchMode ?? "full"}.`,
-                  level: "success",
-                  runId: requestId,
-                });
-              })().catch((error) => {
-                gettyEnrichmentError = error instanceof Error ? error.message : String(error);
-                appendRefreshLog({
-                  source: "page_refresh",
-                  stage: "getty_enrichment",
-                  message: "Getty enrichment failed",
-                  detail: gettyEnrichmentError,
-                  level: "error",
-                  runId: requestId,
-                });
-              });
-          }
-        } catch (gettyErr) {
-          Object.assign(refreshBody, {
-            getty_prefetch_error_code:
-              gettyErr instanceof GettyLocalPrefetchError ? gettyErr.code : "UNREACHABLE",
-          });
-          const errMsg = gettyErr instanceof Error ? gettyErr.message : String(gettyErr);
-          appendRefreshLog({
-            source: "page_refresh",
-            stage: "getty_local_scrape",
-            message: `${errMsg} Getty/NBCUMV refresh could not start after local Getty fallback.`,
-            level: "error",
-            runId: requestId,
-          });
-          throw new Error(`${errMsg} Getty/NBCUMV refresh was not started.`);
-        }
+        throw new Error(`${errMsg} Getty/NBCUMV refresh was not started.`);
       }
       // Restore progress phase to syncing for the pipeline stream
       setRefreshProgress((prev) =>
@@ -11827,6 +11806,11 @@ export default function PersonProfilePage() {
                     Bravo Videos
                   </p>
                   <h3 className="text-xl font-bold text-zinc-900">{person.full_name}</h3>
+                  {formatUpdatedAgoLabel(bravoVideosUpdatedAtMs) && (
+                    <p className="mt-1 text-xs font-medium text-zinc-500">
+                      {formatUpdatedAgoLabel(bravoVideosUpdatedAtMs)}
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -11834,7 +11818,7 @@ export default function PersonProfilePage() {
                   disabled={bravoVideosLoading}
                   className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                 >
-                  {bravoVideosLoading ? "Refreshing..." : "Refresh"}
+                  {bravoVideosLoading ? "Refreshing videos..." : "Refresh videos"}
                 </button>
               </div>
 
@@ -11926,6 +11910,7 @@ export default function PersonProfilePage() {
               newsTotalCount={newsTotalCount}
               newsError={newsError}
               newsNotice={newsNotice}
+              newsUpdatedLabel={formatUpdatedAgoLabel(newsUpdatedAtMs)}
               newsGoogleUrlMissing={newsGoogleUrlMissing}
               unifiedNews={unifiedNews}
               formatPublishedDate={formatBravoPublishedDate}

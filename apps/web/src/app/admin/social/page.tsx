@@ -10,6 +10,8 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
 import type {
+  NetworkProfileSet,
+  PersonTargetSummary,
   RedditDashboardSummary,
   ShowProfileSet,
   SocialHandleSummary,
@@ -32,6 +34,7 @@ const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v1";
 const EDITABLE_SHOW_SOCIAL_PLATFORMS = [
   "instagram",
   "facebook",
+  "threads",
   "twitter",
   "tiktok",
   "youtube",
@@ -41,23 +44,102 @@ type ShowHandleDraft = Record<EditableShowSocialPlatform, string>;
 const SHOW_SOCIAL_HANDLE_FIELD_BY_PLATFORM: Record<EditableShowSocialPlatform, string> = {
   instagram: "instagram_handle",
   facebook: "facebook_handle",
+  threads: "threads_handle",
   twitter: "twitter_handle",
   tiktok: "tiktok_handle",
   youtube: "youtube_handle",
 };
+type AddHandleTargetType = "network" | "show" | "person";
+type AddHandleTargetOption = {
+  key: string;
+  label: string;
+  helperText: string | null;
+  groupLabel: "NETWORKS" | "SHOWS" | "CAST MEMBERS";
+  targetType: AddHandleTargetType;
+  targetId: string;
+};
 
 const formatPlatformLabel = (platform: SocialLandingPlatform): string => {
-  if (platform === "twitter") return "Twitter/X";
+  if (platform === "twitter") return "X/Twitter";
   return platform.charAt(0).toUpperCase() + platform.slice(1);
 };
 
 const buildEmptyShowHandleDraft = (): ShowHandleDraft => ({
   instagram: "",
   facebook: "",
+  threads: "",
   twitter: "",
   tiktok: "",
   youtube: "",
 });
+
+const coerceLandingPayload = (
+  data: Partial<SocialLandingPayload> | undefined,
+): SocialLandingPayload => ({
+  network_sets: Array.isArray(data?.network_sets) ? data.network_sets : [],
+  show_sets: Array.isArray(data?.show_sets) ? data.show_sets : [],
+  people_profiles: Array.isArray(data?.people_profiles) ? data.people_profiles : [],
+  person_targets: Array.isArray(data?.person_targets) ? data.person_targets : [],
+  shared_pipeline: {
+    sources: Array.isArray(data?.shared_pipeline?.sources)
+      ? data.shared_pipeline.sources
+      : [],
+    runs: Array.isArray(data?.shared_pipeline?.runs)
+      ? data.shared_pipeline.runs
+      : [],
+    review_items: Array.isArray(data?.shared_pipeline?.review_items)
+      ? data.shared_pipeline.review_items
+      : [],
+  },
+  reddit_dashboard: {
+    active_community_count:
+      typeof data?.reddit_dashboard?.active_community_count === "number"
+        ? data.reddit_dashboard.active_community_count
+        : 0,
+    archived_community_count:
+      typeof data?.reddit_dashboard?.archived_community_count === "number"
+        ? data.reddit_dashboard.archived_community_count
+        : 0,
+    show_count:
+      typeof data?.reddit_dashboard?.show_count === "number"
+        ? data.reddit_dashboard.show_count
+        : 0,
+  },
+});
+
+const buildAddHandleTargetOptions = (
+  networkSets: readonly NetworkProfileSet[],
+  showSets: readonly ShowProfileSet[],
+  personTargets: readonly PersonTargetSummary[],
+): AddHandleTargetOption[] => [
+  ...networkSets.map((network) => ({
+    key: `network:${network.key}`,
+    label: network.title,
+    helperText: network.description,
+    groupLabel: "NETWORKS" as const,
+    targetType: "network" as const,
+    targetId: network.key,
+  })),
+  ...showSets.map((show) => ({
+    key: `show:${show.show_id}`,
+    label: show.show_name,
+    helperText: show.fallback_note,
+    groupLabel: "SHOWS" as const,
+    targetType: "show" as const,
+    targetId: show.show_id,
+  })),
+  ...personTargets.map((person) => ({
+    key: `person:${person.person_id}`,
+    label: person.full_name,
+    helperText:
+      person.shows.length > 0
+        ? person.shows.map((show) => show.show_name).join(", ")
+        : null,
+    groupLabel: "CAST MEMBERS" as const,
+    targetType: "person" as const,
+    targetId: person.person_id,
+  })),
+];
 
 const buildShowHandleDraft = (show: ShowProfileSet): ShowHandleDraft => {
   const draft = buildEmptyShowHandleDraft();
@@ -129,36 +211,7 @@ const loadLandingData = async (
   if (!response.ok) {
     throw new Error(data?.error || "Failed to load social landing data");
   }
-  return {
-    network_sets: Array.isArray(data?.network_sets) ? data.network_sets : [],
-    show_sets: Array.isArray(data?.show_sets) ? data.show_sets : [],
-    people_profiles: Array.isArray(data?.people_profiles) ? data.people_profiles : [],
-    shared_pipeline: {
-      sources: Array.isArray(data?.shared_pipeline?.sources)
-        ? data.shared_pipeline.sources
-        : [],
-      runs: Array.isArray(data?.shared_pipeline?.runs)
-        ? data.shared_pipeline.runs
-        : [],
-      review_items: Array.isArray(data?.shared_pipeline?.review_items)
-        ? data.shared_pipeline.review_items
-        : [],
-    },
-    reddit_dashboard: {
-      active_community_count:
-        typeof data?.reddit_dashboard?.active_community_count === "number"
-          ? data.reddit_dashboard.active_community_count
-          : 0,
-      archived_community_count:
-        typeof data?.reddit_dashboard?.archived_community_count === "number"
-          ? data.reddit_dashboard.archived_community_count
-          : 0,
-      show_count:
-        typeof data?.reddit_dashboard?.show_count === "number"
-          ? data.reddit_dashboard.show_count
-          : 0,
-    },
-  };
+  return coerceLandingPayload(data);
 };
 
 const readCachedLandingData = (): SocialLandingPayload | null => {
@@ -169,36 +222,7 @@ const readCachedLandingData = (): SocialLandingPayload | null => {
     const parsed = JSON.parse(raw) as { payload?: SocialLandingPayload } | null;
     const payload = parsed?.payload;
     if (!payload || typeof payload !== "object") return null;
-    return {
-      network_sets: Array.isArray(payload.network_sets) ? payload.network_sets : [],
-      show_sets: Array.isArray(payload.show_sets) ? payload.show_sets : [],
-      people_profiles: Array.isArray(payload.people_profiles) ? payload.people_profiles : [],
-      shared_pipeline: {
-        sources: Array.isArray(payload.shared_pipeline?.sources)
-          ? payload.shared_pipeline.sources
-          : [],
-        runs: Array.isArray(payload.shared_pipeline?.runs)
-          ? payload.shared_pipeline.runs
-          : [],
-        review_items: Array.isArray(payload.shared_pipeline?.review_items)
-          ? payload.shared_pipeline.review_items
-          : [],
-      },
-      reddit_dashboard: {
-        active_community_count:
-          typeof payload.reddit_dashboard?.active_community_count === "number"
-            ? payload.reddit_dashboard.active_community_count
-            : 0,
-        archived_community_count:
-          typeof payload.reddit_dashboard?.archived_community_count === "number"
-            ? payload.reddit_dashboard.archived_community_count
-            : 0,
-        show_count:
-          typeof payload.reddit_dashboard?.show_count === "number"
-            ? payload.reddit_dashboard.show_count
-            : 0,
-      },
-    };
+    return coerceLandingPayload(payload);
   } catch {
     return null;
   }
@@ -478,6 +502,13 @@ export default function AdminSocialMediaPage() {
   const [loadingLanding, setLoadingLanding] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sharedActionState, setSharedActionState] = useState<string | null>(null);
+  const [addHandleTargetKey, setAddHandleTargetKey] = useState("");
+  const [addHandlePlatform, setAddHandlePlatform] =
+    useState<SocialLandingPlatform>("instagram");
+  const [addHandleValue, setAddHandleValue] = useState("");
+  const [savingHandle, setSavingHandle] = useState(false);
+  const [addHandleMessage, setAddHandleMessage] = useState<string | null>(null);
+  const [addHandleError, setAddHandleError] = useState<string | null>(null);
 
   useEffect(() => {
     if (checking || !user || !hasAccess) return;
@@ -608,6 +639,87 @@ export default function AdminSocialMediaPage() {
       });
   };
 
+  const networkSets = landing?.network_sets ?? [];
+  const showSets = landing?.show_sets ?? [];
+  const peopleProfiles = landing?.people_profiles ?? [];
+  const personTargets = landing?.person_targets ?? [];
+  const addHandleTargetOptions = buildAddHandleTargetOptions(
+    networkSets,
+    showSets,
+    personTargets,
+  );
+
+  useEffect(() => {
+    if (addHandleTargetOptions.length === 0) {
+      if (addHandleTargetKey) {
+        setAddHandleTargetKey("");
+      }
+      return;
+    }
+    if (
+      addHandleTargetKey &&
+      addHandleTargetOptions.some((option) => option.key === addHandleTargetKey)
+    ) {
+      return;
+    }
+    setAddHandleTargetKey(addHandleTargetOptions[0]?.key ?? "");
+  }, [addHandleTargetKey, addHandleTargetOptions]);
+
+  const selectedAddHandleTarget =
+    addHandleTargetOptions.find((option) => option.key === addHandleTargetKey) ?? null;
+
+  const saveLandingHandle = async () => {
+    if (!user) return;
+    if (!selectedAddHandleTarget) {
+      setAddHandleError("Select a network, show, or cast member.");
+      return;
+    }
+    if (!addHandleValue.trim()) {
+      setAddHandleError("Enter a username, handle, or URL.");
+      return;
+    }
+
+    setSavingHandle(true);
+    setAddHandleError(null);
+    setAddHandleMessage(null);
+    try {
+      const response = await fetchAdminWithAuth(
+        "/api/admin/social/landing",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_type: selectedAddHandleTarget.targetType,
+            target_id: selectedAddHandleTarget.targetId,
+            platform: addHandlePlatform,
+            value: addHandleValue,
+          }),
+        },
+        { allowDevAdminBypass: true, preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as
+        | ({ error?: string } & Partial<SocialLandingPayload>)
+        | undefined;
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to save social handle");
+      }
+
+      const nextPayload = coerceLandingPayload(data);
+      setLanding(nextPayload);
+      writeCachedLandingData(nextPayload);
+      setAddHandleValue("");
+      setAddHandleMessage(
+        `Saved ${formatPlatformLabel(addHandlePlatform)} for ${selectedAddHandleTarget.label}.`,
+      );
+    } catch (error) {
+      setAddHandleError(
+        error instanceof Error ? error.message : "Failed to save social handle",
+      );
+    } finally {
+      setSavingHandle(false);
+    }
+  };
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -643,9 +755,6 @@ export default function AdminSocialMediaPage() {
     );
   }
 
-  const networkSets = landing?.network_sets ?? [];
-  const showSets = landing?.show_sets ?? [];
-  const peopleProfiles = landing?.people_profiles ?? [];
   const redditDashboard = landing?.reddit_dashboard ?? {
     active_community_count: 0,
     archived_community_count: 0,
@@ -691,6 +800,126 @@ export default function AdminSocialMediaPage() {
           ) : (
             <div className="space-y-6">
               <RedditDashboardCard summary={redditDashboard} />
+
+              <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <p className={sectionEyebrowClass}>Directory</p>
+                    <h2 className="text-lg font-semibold text-zinc-900">
+                      ADD SOCIAL HANDLE
+                    </h2>
+                    <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+                      Attach a saved social handle to a network, show, or cast member.
+                      Submitting updates the matching container on this landing page.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                    {addHandleTargetOptions.length} targets
+                  </span>
+                </div>
+
+                <form
+                  className="space-y-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveLandingHandle();
+                  }}
+                >
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_220px_minmax(0,1fr)_auto] lg:items-end">
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                        NETWORK SHOW or CAST MEMBER
+                      </span>
+                      <select
+                        value={addHandleTargetKey}
+                        onChange={(event) => {
+                          setAddHandleTargetKey(event.target.value);
+                          setAddHandleError(null);
+                          setAddHandleMessage(null);
+                        }}
+                        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                      >
+                        {addHandleTargetOptions.length === 0 ? (
+                          <option value="">No targets available</option>
+                        ) : null}
+                        {(["NETWORKS", "SHOWS", "CAST MEMBERS"] as const).map((groupLabel) => {
+                          const options = addHandleTargetOptions.filter(
+                            (option) => option.groupLabel === groupLabel,
+                          );
+                          if (options.length === 0) return null;
+                          return (
+                            <optgroup key={groupLabel} label={groupLabel}>
+                              {options.map((option) => (
+                                <option key={option.key} value={option.key}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </optgroup>
+                          );
+                        })}
+                      </select>
+                      {selectedAddHandleTarget?.helperText ? (
+                        <p className="mt-2 text-xs text-zinc-500">
+                          {selectedAddHandleTarget.helperText}
+                        </p>
+                      ) : null}
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                        THE PLATFORM
+                      </span>
+                      <select
+                        value={addHandlePlatform}
+                        onChange={(event) => {
+                          setAddHandlePlatform(event.target.value as SocialLandingPlatform);
+                          setAddHandleError(null);
+                          setAddHandleMessage(null);
+                        }}
+                        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                      >
+                        {EDITABLE_SHOW_SOCIAL_PLATFORMS.map((platform) => (
+                          <option key={platform} value={platform}>
+                            {formatPlatformLabel(platform)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                        USERNAME/HANDLE (or URL)
+                      </span>
+                      <input
+                        type="text"
+                        value={addHandleValue}
+                        onChange={(event) => {
+                          setAddHandleValue(event.target.value);
+                          setAddHandleError(null);
+                          setAddHandleMessage(null);
+                        }}
+                        placeholder="@andycohen or full profile URL"
+                        className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                      />
+                    </label>
+
+                    <button
+                      type="submit"
+                      disabled={savingHandle || addHandleTargetOptions.length === 0}
+                      className="rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingHandle ? "Submitting…" : "Submit"}
+                    </button>
+                  </div>
+
+                  {addHandleError ? (
+                    <p className="text-sm text-red-600">{addHandleError}</p>
+                  ) : null}
+                  {addHandleMessage ? (
+                    <p className="text-sm text-zinc-500">{addHandleMessage}</p>
+                  ) : null}
+                </form>
+              </section>
 
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">

@@ -244,7 +244,48 @@ describe("social landing repository", () => {
         ),
     );
 
-    fetchAdminBackendJsonMock.mockImplementation(async (path: string) => {
+    fetchAdminBackendJsonMock.mockImplementation(async (path: string, options?: { body?: string }) => {
+      if (path === "/admin/shows/cast-summary") {
+        const showIds = JSON.parse(options?.body ?? "{\"show_ids\":[]}") as { show_ids?: string[] };
+        return {
+          status: 200,
+          data: {
+            shows: (showIds.show_ids ?? []).map((showId) => {
+              if (showId === "show-rhoslc") {
+                return {
+                  show_id: showId,
+                  cast_members: [
+                    {
+                      person_id: "person-heather",
+                      full_name: "Heather Gay",
+                    },
+                  ],
+                };
+              }
+              if (showId === "show-wwhl") {
+                return {
+                  show_id: showId,
+                  cast_members: [
+                    {
+                      person_id: "person-andy",
+                      full_name: "Andy Cohen",
+                    },
+                    {
+                      person_id: "person-producer",
+                      full_name: "Producer Without Handles",
+                    },
+                  ],
+                };
+              }
+              return {
+                show_id: showId,
+                cast_members: [],
+              };
+            }),
+          },
+        };
+      }
+
       if (path.includes("/admin/trr-api/shows/show-rhoslc/cast")) {
         return {
           status: 200,
@@ -368,6 +409,15 @@ describe("social landing repository", () => {
                     valid_to: null,
                     observed_at: null,
                   },
+                  {
+                    id: 6,
+                    source_id: "threads",
+                    external_id: "andycohen",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
                 ],
               ] as const;
             }
@@ -459,6 +509,11 @@ describe("social landing repository", () => {
       "Andy Cohen",
       "Heather Gay",
     ]);
+    expect(payload.person_targets.map((person) => person.full_name)).toEqual([
+      "Andy Cohen",
+      "Heather Gay",
+      "Producer Without Handles",
+    ]);
 
     const andy = payload.people_profiles.find(
       (person) => person.full_name === "Andy Cohen",
@@ -472,6 +527,10 @@ describe("social landing repository", () => {
       expect.arrayContaining([
         expect.objectContaining({
           platform: "instagram",
+          handle: "andycohen",
+        }),
+        expect.objectContaining({
+          platform: "threads",
           handle: "andycohen",
         }),
         expect.objectContaining({
@@ -528,35 +587,24 @@ describe("social landing repository", () => {
       return new Map(showIds.map((showId) => [showId, {}] as const));
     });
 
-    let activeCastReads = 0;
-    let maxActiveCastReads = 0;
-    fetchAdminBackendJsonMock.mockImplementation(async (path: string) => {
-      activeCastReads += 1;
-      maxActiveCastReads = Math.max(maxActiveCastReads, activeCastReads);
+    let castSummaryBatchCalls = 0;
+    fetchAdminBackendJsonMock.mockImplementation(async (path: string, options?: { body?: string }) => {
+      castSummaryBatchCalls += 1;
       await delay(5);
-      activeCastReads -= 1;
-      const showId = path.match(/shows\/([^/]+)\/cast/)?.[1] ?? "show-unknown";
       return {
         status: 200,
         data: {
-          cast_members: [
-            {
-              id: `cast-${showId}`,
+          shows: (JSON.parse(options?.body ?? "{\"show_ids\":[]}") as { show_ids?: string[] }).show_ids?.map(
+            (showId) => ({
               show_id: showId,
-              person_id: `person-${showId}`,
-              show_name: showId,
-              cast_member_name: `Person ${showId}`,
-              role: "Self",
-              billing_order: 1,
-              credit_category: "cast",
-              source_type: "tmdb",
-              full_name: `Person ${showId}`,
-              known_for: null,
-              photo_url: null,
-              created_at: "2026-01-01T00:00:00Z",
-              updated_at: "2026-01-01T00:00:00Z",
-            },
-          ],
+              cast_members: [
+                {
+                  person_id: `person-${showId}`,
+                  full_name: `Person ${showId}`,
+                },
+              ],
+            }),
+          ) ?? [],
         },
       };
     });
@@ -610,7 +658,7 @@ describe("social landing repository", () => {
 
     expect(payload.show_sets).toHaveLength(5);
     expect(payload.people_profiles).toHaveLength(5);
-    expect(maxActiveCastReads).toBeLessThanOrEqual(2);
+    expect(castSummaryBatchCalls).toBe(1);
     expect(showExternalIdBatchCalls).toBe(1);
     expect(personExternalIdBatchCalls).toBe(1);
     expect(personFallbackHandleBatchCalls).toBe(1);

@@ -83,6 +83,58 @@ describe("social-admin-proxy", () => {
     expect(firstHeaders.get("Authorization")).toMatch(/^Bearer /);
   });
 
+  it("does not retry mutating POST requests even when the upstream error is retryable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      headers: { get: () => null },
+      json: async () => ({ error: "temporary upstream failure" }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    await expect(
+      fetchSocialBackendJson("/ingest/active-jobs/cancel", {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: {
+          "content-type": "application/json",
+        },
+        fallbackError: "Failed to cancel active jobs",
+        retries: 3,
+        timeoutMs: 1000,
+      }),
+    ).rejects.toThrow("temporary upstream failure");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still retries idempotent GET requests on retryable upstream errors", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        headers: { get: () => null },
+        json: async () => ({ error: "temporary upstream failure" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      } as Response);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const payload = await fetchSocialBackendJson("/ingest/live-status", {
+      method: "GET",
+      fallbackError: "Failed to fetch live status",
+      retries: 3,
+      timeoutMs: 1000,
+    });
+
+    expect(payload).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("maps persistent upstream 502 to retryable standardized envelope", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

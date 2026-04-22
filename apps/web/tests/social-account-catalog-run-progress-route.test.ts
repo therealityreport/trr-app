@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, fetchSocialBackendJsonMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
-  requireAdminMock: vi.fn(),
+const { requireAdminContextMock, fetchSocialBackendJsonMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
+  requireAdminContextMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   socialProxyErrorResponseMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
-  requireAdmin: requireAdminMock,
+  requireAdminContext: requireAdminContextMock,
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
@@ -21,11 +21,15 @@ import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]
 
 describe("social account catalog run progress proxy route", () => {
   beforeEach(() => {
-    requireAdminMock.mockReset();
+    requireAdminContextMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     socialProxyErrorResponseMock.mockReset();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminContextMock.mockResolvedValue({
+      uid: "admin-user",
+      email: "admin@example.com",
+      verifiedAt: 1_700_000_000_000,
+    });
     fetchSocialBackendJsonMock.mockResolvedValue({
       run_id: "cc8db903-b725-4f86-8699-f880b351f010",
       run_status: "queued",
@@ -57,6 +61,11 @@ describe("social account catalog run progress proxy route", () => {
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
       "/profiles/tiktok/bravotv/catalog/runs/cc8db903-b725-4f86-8699-f880b351f010/progress?recent_log_limit=25",
       expect.objectContaining({
+        adminContext: expect.objectContaining({
+          uid: "admin-user",
+          email: "admin@example.com",
+          verifiedAt: 1_700_000_000_000,
+        }),
         fallbackError: "Failed to fetch social account catalog run progress",
         retries: 1,
         timeoutMs: 45_000,

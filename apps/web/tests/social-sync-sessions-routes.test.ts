@@ -129,7 +129,7 @@ describe("social sync session proxy routes", () => {
       expect.objectContaining({
         method: "POST",
         seasonIdHint: seasonId,
-        retries: 1,
+        retries: 0,
         timeoutMs: 45_000,
       }),
     );
@@ -182,7 +182,7 @@ describe("social sync session proxy routes", () => {
       expect.objectContaining({
         method: "POST",
         seasonIdHint: seasonId,
-        retries: 1,
+        retries: 0,
         timeoutMs: 45_000,
       }),
     );

@@ -84,10 +84,17 @@ export interface PersonProfileSummary {
   handles: SocialHandleSummary[];
 }
 
+export interface PersonTargetSummary {
+  person_id: string;
+  full_name: string;
+  shows: PersonProfileShowSummary[];
+}
+
 export interface SocialLandingPayload {
   network_sets: NetworkProfileSet[];
   show_sets: ShowProfileSet[];
   people_profiles: PersonProfileSummary[];
+  person_targets: PersonTargetSummary[];
   shared_pipeline: SharedPipelineSummary;
   reddit_dashboard: RedditDashboardSummary;
 }

@@ -14,6 +14,7 @@ import type {
   NetworkProfileSet,
   PersonProfileShowSummary,
   PersonProfileSummary,
+  PersonTargetSummary,
   RedditDashboardSummary,
   SharedAccountSourceSummary,
   SharedPipelineSummary,
@@ -34,12 +35,12 @@ import {
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import { fetchSocialBackendJson } from "@/lib/server/trr-api/social-admin-proxy";
+import type { VerifiedAdminContext } from "@/lib/server/trr-api/internal-admin-auth";
 import {
   listPrimaryPersonExternalIdsByPersonIds,
   listEffectivePersonSocialHandlesByPersonIds,
   listShowExternalIdsByIds,
   type PersonEffectiveSocialHandles,
-  type TrrCastMember,
 } from "@/lib/server/trr-api/trr-shows-repository";
 
 type SharedSourcesPayload = {
@@ -50,19 +51,29 @@ type SharedReviewPayload = {
   items?: SharedReviewItemSummary[];
 };
 
-type CastPayload = {
-  cast_members?: TrrCastMember[];
+type CastSummaryMember = {
+  person_id?: string | null;
+  full_name?: string | null;
 };
 
-const SOCIAL_LANDING_SHOW_BOOTSTRAP_CONCURRENCY = 2;
+type CastSummaryShow = {
+  show_id?: string | null;
+  cast_members?: CastSummaryMember[];
+};
+
+type CastSummaryBatchPayload = {
+  shows?: CastSummaryShow[];
+};
+
 type SupportedPersonSocialSource = Extract<
   PersonExternalIdSource,
-  "facebook" | "instagram" | "twitter" | "tiktok" | "youtube"
+  "facebook" | "instagram" | "threads" | "twitter" | "tiktok" | "youtube"
 >;
 
 const PERSON_SOCIAL_SOURCES: readonly SupportedPersonSocialSource[] = [
   "facebook",
   "instagram",
+  "threads",
   "twitter",
   "tiktok",
   "youtube",
@@ -74,6 +85,7 @@ const SHOW_EXTERNAL_ID_KEYS: Record<
 > = {
   facebook: ["facebook_handle", "facebook", "facebook_id"],
   instagram: ["instagram_handle", "instagram", "instagram_id"],
+  threads: ["threads_handle", "threads", "threads_id"],
   twitter: ["twitter_handle", "twitter", "x_handle", "twitter_id", "x_id"],
   tiktok: ["tiktok_handle", "tiktok", "tiktok_id"],
   youtube: ["youtube_handle", "youtube", "youtube_id"],
@@ -225,6 +237,8 @@ const buildFallbackPersonHandleSummaries = (
         return buildPersonHandleSummaryFromSource(source, handles.facebook_handle);
       case "instagram":
         return buildPersonHandleSummaryFromSource(source, handles.instagram_handle);
+      case "threads":
+        return null;
       case "twitter":
         return buildPersonHandleSummaryFromSource(source, handles.twitter_handle);
       case "tiktok":
@@ -256,32 +270,12 @@ const dedupeHandles = (
     });
 };
 
-const runWithConcurrency = async <T, R>(
-  items: readonly T[],
-  concurrency: number,
-  worker: (item: T, index: number) => Promise<R>,
-): Promise<R[]> => {
-  if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
-  const workerCount = Math.max(1, Math.min(concurrency, items.length));
-  let cursor = 0;
-
-  const runWorker = async () => {
-    while (true) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= items.length) return;
-      results[index] = await worker(items[index], index);
-    }
-  };
-
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-  return results;
-};
-
-const safeLoadSharedSources = async (): Promise<SharedAccountSourceSummary[]> => {
+const safeLoadSharedSources = async (
+  adminContext?: VerifiedAdminContext,
+): Promise<SharedAccountSourceSummary[]> => {
   try {
     const payload = await fetchSocialBackendJson("/shared/sources", {
+      adminContext,
       queryString: "source_scope=bravo&include_inactive=true",
       fallbackError: "Failed to fetch shared social account sources",
       retries: 0,
@@ -310,9 +304,12 @@ const safeLoadSharedSources = async (): Promise<SharedAccountSourceSummary[]> =>
   }
 };
 
-const safeLoadSharedRuns = async (): Promise<SharedRunSummary[]> => {
+const safeLoadSharedRuns = async (
+  adminContext?: VerifiedAdminContext,
+): Promise<SharedRunSummary[]> => {
   try {
     const payload = await fetchSocialBackendJson("/shared/ingest/runs", {
+      adminContext,
       queryString: "source_scope=bravo&limit=5",
       fallbackError: "Failed to fetch shared social ingest runs",
       retries: 0,
@@ -333,9 +330,12 @@ const safeLoadSharedRuns = async (): Promise<SharedRunSummary[]> => {
   }
 };
 
-const safeLoadSharedReviewItems = async (): Promise<SharedReviewItemSummary[]> => {
+const safeLoadSharedReviewItems = async (
+  adminContext?: VerifiedAdminContext,
+): Promise<SharedReviewItemSummary[]> => {
   try {
     const payload = await fetchSocialBackendJson("/shared/review-queue", {
+      adminContext,
       queryString: "source_scope=bravo&review_status=open&limit=10",
       fallbackError: "Failed to fetch shared social review queue",
       retries: 0,
@@ -393,21 +393,50 @@ const safeLoadShowExternalIdsMap = async (
   }
 };
 
-const safeLoadShowCast = async (showId: string): Promise<TrrCastMember[]> => {
+const safeLoadShowCastSummaryMap = async (
+  showIds: readonly string[],
+  adminContext?: VerifiedAdminContext,
+): Promise<ReadonlyMap<string, CastSummaryMember[]>> => {
+  if (showIds.length === 0) return new Map();
+
   try {
     const upstream = await fetchAdminBackendJson(
-      `/admin/trr-api/shows/${showId}/cast?limit=500&offset=0&include_photos=false&eligibility_mode=links`,
+      "/admin/shows/cast-summary",
       {
+        adminContext,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ show_ids: showIds }),
         timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
-        routeName: "show-cast",
+        routeName: "show-cast-summary",
       },
     );
-    if (upstream.status !== 200) return [];
-    const payload = upstream.data as CastPayload;
-    return Array.isArray(payload.cast_members) ? payload.cast_members : [];
+    if (upstream.status !== 200) return new Map();
+
+    const payload = upstream.data as CastSummaryBatchPayload;
+    const shows = Array.isArray(payload.shows) ? payload.shows : [];
+    return new Map(
+      shows
+        .map((show) => {
+          const showId = typeof show.show_id === "string" ? show.show_id.trim() : "";
+          if (!showId) return null;
+          return [
+            showId,
+            Array.isArray(show.cast_members) ? show.cast_members : [],
+          ] as const;
+        })
+        .filter(
+          (
+            entry,
+          ): entry is readonly [string, CastSummaryMember[]] => entry !== null,
+        ),
+    );
   } catch (error) {
-    console.warn("[social-landing] Failed to load show cast", { showId, error });
-    return [];
+    console.warn("[social-landing] Failed to load show cast summary", {
+      showIds,
+      error,
+    });
+    return new Map();
   }
 };
 
@@ -534,8 +563,11 @@ const buildShowSets = (
 
 const buildPeopleProfiles = async (
   coveredShows: readonly CoveredShow[],
-  castByShowId: ReadonlyMap<string, TrrCastMember[]>,
-): Promise<PersonProfileSummary[]> => {
+  castByShowId: ReadonlyMap<string, CastSummaryMember[]>,
+): Promise<{
+  peopleProfiles: PersonProfileSummary[];
+  personTargets: PersonTargetSummary[];
+}> => {
   const people = new Map<
     string,
     {
@@ -548,8 +580,10 @@ const buildPeopleProfiles = async (
   for (const show of coveredShows) {
     const castMembers = castByShowId.get(show.trr_show_id) ?? [];
     for (const member of castMembers) {
-      const personId = member.person_id?.trim();
-      const fullName = member.full_name?.trim();
+      const personId =
+        typeof member.person_id === "string" ? member.person_id.trim() : "";
+      const fullName =
+        typeof member.full_name === "string" ? member.full_name.trim() : "";
       if (!personId || !fullName) continue;
 
       const existing =
@@ -575,7 +609,20 @@ const buildPeopleProfiles = async (
     safeLoadEffectivePersonSocialHandlesMap(personIds),
   ]);
 
-  const hydrated = peopleList.map((person) => {
+  const personTargets = peopleList
+    .map(
+      (person) =>
+        ({
+          person_id: person.person_id,
+          full_name: person.full_name,
+          shows: [...person.shows.values()].sort((left, right) =>
+            left.show_name.localeCompare(right.show_name),
+          ),
+        }) satisfies PersonTargetSummary,
+    )
+    .sort((left, right) => left.full_name.localeCompare(right.full_name));
+
+  const hydrated = personTargets.map((person) => {
     const records = externalIdsByPersonId.get(person.person_id) ?? [];
     const handles = dedupeHandles(
       [
@@ -592,48 +639,47 @@ const buildPeopleProfiles = async (
     return {
       person_id: person.person_id,
       full_name: person.full_name,
-      shows: [...person.shows.values()].sort((left, right) =>
-        left.show_name.localeCompare(right.show_name),
-      ),
+      shows: person.shows,
       handles,
     } satisfies PersonProfileSummary;
   });
 
-  return hydrated
-    .filter((person): person is PersonProfileSummary => person !== null)
-    .sort((left, right) => left.full_name.localeCompare(right.full_name));
+  return {
+    peopleProfiles: hydrated
+      .filter((person): person is PersonProfileSummary => person !== null)
+      .sort((left, right) => left.full_name.localeCompare(right.full_name)),
+    personTargets,
+  };
 };
 
-export async function getSocialLandingPayload(): Promise<SocialLandingPayload> {
+export async function getSocialLandingPayload(
+  adminContext?: VerifiedAdminContext,
+): Promise<SocialLandingPayload> {
   const [coveredShows, redditDashboard] = await Promise.all([
     getCoveredShows(),
     safeLoadRedditDashboardSummary(),
   ]);
-  const sharedSources = await safeLoadSharedSources();
-  const sharedRuns = await safeLoadSharedRuns();
-  const sharedReviewItems = await safeLoadSharedReviewItems();
+  const sharedSources = await safeLoadSharedSources(adminContext);
+  const sharedRuns = await safeLoadSharedRuns(adminContext);
+  const sharedReviewItems = await safeLoadSharedReviewItems(adminContext);
 
   const showExternalIdsById = await safeLoadShowExternalIdsMap(
     coveredShows.map((show) => show.trr_show_id),
   );
-
-  const castPairs = await runWithConcurrency(
-    coveredShows,
-    SOCIAL_LANDING_SHOW_BOOTSTRAP_CONCURRENCY,
-    async (show) => ({
-      show_id: show.trr_show_id,
-      cast_members: await safeLoadShowCast(show.trr_show_id),
-    }),
+  const castByShowId = await safeLoadShowCastSummaryMap(
+    coveredShows.map((show) => show.trr_show_id),
+    adminContext,
   );
-
-  const castByShowId = new Map(
-    castPairs.map((entry) => [entry.show_id, entry.cast_members] as const),
+  const { peopleProfiles, personTargets } = await buildPeopleProfiles(
+    coveredShows,
+    castByShowId,
   );
 
   return {
     network_sets: buildNetworkSets(sharedSources),
     show_sets: buildShowSets(coveredShows, showExternalIdsById, sharedSources),
-    people_profiles: await buildPeopleProfiles(coveredShows, castByShowId),
+    people_profiles: peopleProfiles,
+    person_targets: personTargets,
     shared_pipeline: {
       sources: sharedSources,
       runs: sharedRuns,

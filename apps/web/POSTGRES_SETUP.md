@@ -9,13 +9,19 @@ TRR-APP runtime reads use:
 ```bash
 TRR_DB_URL=postgresql://user:password@host:port/database
 TRR_DB_FALLBACK_URL=
+TRR_DB_FORCE_FALLBACK=
 ```
 
 - `TRR_DB_URL` is the canonical runtime database URL.
-- `TRR_DB_FALLBACK_URL` is optional and is only for deliberate break-glass fallback.
+- `TRR_DB_FALLBACK_URL` is optional operator-engaged break-glass fallback.
+- Runtime request handling does not switch candidates automatically on transient query errors.
+- To engage fallback, set `TRR_DB_FORCE_FALLBACK=1` in the deployment env and redeploy. That choice stays pinned for the process lifetime until the flag is removed and the process restarts.
+- When fallback is engaged, the app emits a one-shot `postgres_pool_engaged_fallback` structured log event so operators can verify the lane selection in log drains.
 - `DATABASE_URL` is not part of the app runtime contract. The migration runner still accepts it as a compatibility-only input for older tooling flows, but it is no longer the preferred source.
 
 The app server resolves Postgres in the same order as the runtime code in [src/lib/server/postgres.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/postgres.ts): `TRR_DB_URL`, then `TRR_DB_FALLBACK_URL`.
+
+For Supavisor session-mode runtimes, the committed local defaults are now intentionally larger: `POSTGRES_POOL_MAX=8` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=8` in development, with a deployed default of `6/6`. Operators can still dial these down explicitly via env vars when a narrower lane is needed.
 
 ## What The App Migration Runner Owns
 
@@ -52,14 +58,7 @@ That means new or canonical migrations for these surfaces belong in `TRR-Backend
 - shared grants / RLS / role setup
 - shared tables that reference backend-owned schemas such as `core.*`
 
-The app runner still has a transitional compatibility mode for older environments where that backlog has not been ported yet:
-
-```bash
-cd /Users/thomashulihan/Projects/TRR/TRR-APP/apps/web
-TRR_DB_URL="postgresql://..." pnpm run db:migrate -- --include-transitional-shared-schema
-```
-
-Use that flag only when you intentionally need the legacy app bootstrap path. It is not the ownership target going forward.
+Shared-schema migrations are owned by `TRR-Backend/supabase/migrations` and run via `make supabase-db-push` or the workspace reconcile. The TRR-APP migration runner applies only app-local migrations, wraps each applied file and its `__migrations` insert in one transaction, and rejects the legacy `--include-transitional-shared-schema` flag. Backend-owned shared-schema files that still physically exist under `apps/web/db/migrations/` remain backlog only and are ignored by the app runner until they are ported out of the app repo.
 
 ## Backend-Owned Parity Checklist
 
@@ -67,7 +66,7 @@ This is the concrete backlog still living on the app side. It is not complete, a
 
 ### 1. Shared-schema SQL still sitting in `apps/web/db/migrations/`
 
-These files should be ported into backend-owned SQL migrations before the app-side transitional flag can go away:
+These files should be ported into backend-owned SQL migrations and removed from the app repo so the directory reflects real ownership:
 
 - `013_create_surveys_schema.sql`
 - `014_create_normalized_survey_tables.sql`

@@ -222,6 +222,7 @@ const healthyCookieHealth = (platform: string) => ({
 });
 
 const INSTAGRAM_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
+const TIKTOK_BACKFILL_DEFAULT_TASKS = ["post_details", "comments", "media"] as const;
 
 describe("SocialAccountProfilePage", () => {
   beforeEach(() => {
@@ -392,6 +393,56 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Pending Review")).toBeInTheDocument();
   });
 
+  it("first paint issues exactly one summary fetch and no snapshot fetch", async () => {
+    const summarySpy = vi.fn().mockResolvedValue(
+      jsonResponse({
+        ...baseSummary,
+        summary_detail: "lite" as const,
+        comments_coverage: null,
+        per_show_counts: [],
+        per_season_counts: [],
+        top_hashtags: [],
+        top_collaborators: [],
+        top_tags: [],
+      }),
+    );
+    const snapshotSpy = vi.fn();
+    const requestUrls: string[] = [];
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.includes("/summary?detail=lite")) {
+        return await summarySpy();
+      }
+      if (url.includes("/snapshot")) {
+        return await snapshotSpy();
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("instagram"));
+      }
+      if (url.includes("/live-profile-total")) {
+        return jsonResponse({
+          platform: "instagram",
+          account_handle: "thetraitorsus",
+          profile_url: "https://www.instagram.com/thetraitorsus/",
+          live_total_posts_current: 12,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="stats" />);
+
+    await waitFor(() => {
+      expect(summarySpy).toHaveBeenCalledTimes(1);
+    });
+
+    expect(snapshotSpy).not.toHaveBeenCalled();
+    expect(requestUrls.filter((url) => url.includes("/summary?detail=lite"))).toHaveLength(1);
+    expect(requestUrls.some((url) => url.includes("/snapshot"))).toBe(false);
+  });
+
   it("keeps the stats tab on lite summary until full insights are requested", async () => {
     const liteSummary = {
       ...baseSummary,
@@ -408,12 +459,8 @@ describe("SocialAccountProfilePage", () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       requestUrls.push(url);
-      if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: liteSummary,
-          catalog_run_progress: null,
-          generated_at: "2026-04-21T12:00:00.000Z",
-        });
+      if (url.includes("/summary?detail=lite")) {
+        return jsonResponse(liteSummary);
       }
       if (url.includes("/summary?detail=full")) {
         return jsonResponse(baseSummary);
@@ -450,7 +497,7 @@ describe("SocialAccountProfilePage", () => {
     expect(requestUrls.some((url) => url.includes("/summary?detail=full"))).toBe(true);
   });
 
-  it("keeps comments full-detail timeouts local to the comments panel", async () => {
+  it("does not auto-upgrade the comments tab into a full-summary fetch", async () => {
     const liteSummary = {
       ...baseSummary,
       summary_detail: "lite" as const,
@@ -465,12 +512,8 @@ describe("SocialAccountProfilePage", () => {
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: liteSummary,
-          catalog_run_progress: null,
-          generated_at: "2026-04-21T12:00:00.000Z",
-        });
+      if (url.includes("/summary?detail=lite")) {
+        return jsonResponse(liteSummary);
       }
       if (url.includes("/summary?detail=full")) {
         fullSummaryCalls += 1;
@@ -487,16 +530,22 @@ describe("SocialAccountProfilePage", () => {
           live_total_posts_current: 12,
         });
       }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
       throw new Error(`Unhandled request: ${url}`);
     });
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Retry Comments Coverage" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Comments" })).toBeInTheDocument();
     });
-    expect(fullSummaryCalls).toBe(1);
-    expect(screen.getByText("Comments coverage failed: TRR-Backend request timed out.")).toBeInTheDocument();
+    expect(fullSummaryCalls).toBe(0);
+    expect(screen.getByText("Loading comments coverage…")).toBeInTheDocument();
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 
@@ -587,11 +636,17 @@ describe("SocialAccountProfilePage", () => {
     });
   });
 
-  it("shows the Comments tab only for Instagram profiles", async () => {
+  it("shows the Comments tab only for platforms with saved discussion support", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
-        return jsonResponse({ ...baseSummary, platform: url.includes("/tiktok/") ? "tiktok" : "instagram" });
+        if (url.includes("/facebook/")) {
+          return jsonResponse({ ...baseSummary, platform: "facebook" });
+        }
+        if (url.includes("/tiktok/")) {
+          return jsonResponse({ ...baseSummary, platform: "tiktok" });
+        }
+        return jsonResponse(baseSummary);
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -605,6 +660,12 @@ describe("SocialAccountProfilePage", () => {
     rerender(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Comments" })).toBeInTheDocument();
+    });
+
+    rerender(<SocialAccountProfilePage platform="facebook" handle="bravotv" activeTab="stats" />);
+
+    await waitFor(() => {
       expect(screen.queryByRole("link", { name: "Comments" })).not.toBeInTheDocument();
     });
   });
@@ -615,7 +676,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
-      if (url.includes("/comments?page=1&page_size=25")) {
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
           items: [],
           pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
@@ -654,8 +715,227 @@ describe("SocialAccountProfilePage", () => {
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(screen.getByText("Comments sync completed. Run comments.")).toBeInTheDocument();
+      expect(
+        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/profiles/instagram/bravotv/comments/scrape"),
+        ),
+      ).toBe(true);
     });
+  });
+
+  it("hides catalog progress chrome on the comments tab", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByText("Instagram Comments")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Catalog Run Progress" })).not.toBeInTheDocument();
+  });
+
+  it("reattaches the comments tab to an already-active comments sync", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          comments_coverage: {
+            ...baseSummary.comments_coverage,
+            active_run_id: "comments-run-active-1234",
+            effective_status: "running",
+          },
+        });
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments/runs/comments-run-active-1234/progress")) {
+        return jsonResponse({
+          run_id: "comments-run-active-1234",
+          platform: "instagram",
+          account_handle: "bravotv",
+          run_status: "running",
+          job_status: "running",
+          target_source_ids: ["C123"],
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByRole("button", { name: "Syncing Comments..." })).toBeDisabled();
+    await waitFor(() => {
+      expect(
+        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+          String(input).includes("/comments/runs/comments-run-active-1234/progress"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("queues a catalog-driven discussion refresh from the comments tab for TikTok", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({ ...baseSummary, platform: "tiktok" });
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(
+          JSON.stringify({
+            source_scope: "bravo",
+            backfill_scope: "full_history",
+            selected_tasks: ["post_details", "comments", "media"],
+          }),
+        );
+        return jsonResponse({ run_id: "catalog-run-12345678", catalog_run_id: "catalog-run-12345678", status: "queued" });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByText("TikTok Discussion")).toBeInTheDocument();
+
+    const button = await screen.findByRole("button", { name: "Refresh Details + Comments + Media" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(
+        mocks.fetchAdminWithAuth.mock.calls.some(([input]) =>
+          String(input).includes("/api/admin/trr-api/social/profiles/tiktok/bravotv/catalog/backfill"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("retries a retryable timeout once before surfacing a comments-posts failure", async () => {
+    let postsCalls = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        postsCalls += 1;
+        if (postsCalls === 1) {
+          return jsonResponse(
+            {
+              error: "TRR-Backend request timed out.",
+              code: "BACKEND_REQUEST_TIMEOUT",
+              retryable: true,
+              upstream_status: 504,
+              upstream_detail_code: "REQUEST_TIMEOUT",
+            },
+            504,
+          );
+        }
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByText("Instagram Comments")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(postsCalls).toBe(2);
+    });
+    expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("No Instagram posts with comments are saved for this account yet."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders one row per post and opens a post comments modal from the post link", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(baseSummary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "post-1",
+              source_id: "DVfQnTcjsCA",
+              platform: "instagram",
+              account_handle: "bravotv",
+              content: "Recap caption for the reunion post.",
+              url: "https://www.instagram.com/p/DVfQnTcjsCA/",
+              posted_at: "2026-04-09T14:30:00.000Z",
+              saved_comments: 14,
+              metrics: {
+                likes: 842,
+                comments_count: 27,
+              },
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      if (url.includes("/comments?post_source_id=DVfQnTcjsCA&page=1&page_size=25")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "comment-1",
+              comment_id: "178",
+              post_id: "post-1",
+              post_source_id: "DVfQnTcjsCA",
+              post_url: "https://www.instagram.com/p/DVfQnTcjsCA/",
+              username: "andycohen",
+              text: "First saved comment",
+              likes: 22,
+              is_reply: false,
+              created_at: "2026-04-09T15:00:00.000Z",
+              parent_comment_id: null,
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    const postLink = await screen.findByRole("link", { name: "DVfQnTcjsCA" });
+    expect(postLink).toBeInTheDocument();
+    expect(screen.getAllByText("Comments Saved")).toHaveLength(2);
+    expect(screen.getByText("842")).toBeInTheDocument();
+    expect(screen.getByText(formatLocalDateTime("2026-04-09T14:30:00.000Z"))).toBeInTheDocument();
+
+    fireEvent.click(postLink);
+
+    const dialog = await screen.findByRole("dialog", { name: "Comments for DVfQnTcjsCA" });
+    expect(within(dialog).getByText("Recap caption for the reunion post.")).toBeInTheDocument();
+    expect(within(dialog).getByText("First saved comment")).toBeInTheDocument();
+    expect(within(dialog).getByText("14 saved")).toBeInTheDocument();
   });
 
   it("sources comments panel `Available Posts` from saved-post inventory, not the commentable subset", async () => {
@@ -682,7 +962,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/summary")) {
         return jsonResponse(divergentSummary);
       }
-      if (url.includes("/comments?page=1&page_size=25")) {
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
           items: [],
           pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
@@ -720,7 +1000,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/summary")) {
         return jsonResponse(fallbackSummary);
       }
-      if (url.includes("/comments?page=1&page_size=25")) {
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
           items: [],
           pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
@@ -736,6 +1016,102 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Commentable now: 1,099")).toBeInTheDocument();
   });
 
+  it("shows needs refresh instead of failed when the latest failed run is historical", async () => {
+    const summary = {
+      ...baseSummary,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        last_comments_run_status: "failed",
+        effective_status: "needs_refresh",
+        effective_label: "Needs refresh",
+        historical_failure: true,
+        last_attempt_status: "failed",
+        last_attempt_at: "2026-04-21T23:50:01.000Z",
+      },
+      comments_saved_summary: {
+        ...baseSummary.comments_saved_summary,
+        saved_comments: 9912,
+        retrieved_comments: 106098,
+        saved_comment_posts: 427,
+        retrieved_comment_posts: 427,
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(summary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [],
+          pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="comments" />);
+
+    expect(await screen.findByText("Needs refresh")).toBeInTheDocument();
+    expect(screen.getByText(/Last attempt failed at/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Failed$/)).not.toBeInTheDocument();
+  });
+
+  it("renders comments rows while preserving the effective needs-refresh status", async () => {
+    const summary = {
+      ...baseSummary,
+      comments_coverage: {
+        ...baseSummary.comments_coverage,
+        last_comments_run_status: "failed",
+        effective_status: "needs_refresh",
+        effective_label: "Needs refresh",
+        historical_failure: true,
+        last_attempt_status: "failed",
+        last_attempt_at: "2026-04-21T23:51:18.000Z",
+      },
+    };
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse(summary);
+      }
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "post-1",
+              source_id: "ABC123",
+              posted_at: "2026-04-20T16:01:54.000Z",
+              title: "",
+              content: "Reunion night",
+              excerpt: "",
+              url: "https://www.instagram.com/p/ABC123/",
+              metrics: { likes: 120, comments: 14, views: 0 },
+              saved_comments: 9,
+              match_mode: "owner",
+              source_surface: "materialized",
+            },
+          ],
+          pagination: { page: 1, page_size: 25, total: 1, total_pages: 1 },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="comments" />);
+
+    expect(await screen.findByText("Needs refresh")).toBeInTheDocument();
+    expect(screen.getByText(/Last attempt failed at/i)).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "ABC123" })).toHaveAttribute(
+      "href",
+      "https://www.instagram.com/p/ABC123/",
+    );
+    expect(await screen.findByText("Reunion night")).toBeInTheDocument();
+    expect(screen.queryByText(/list index out of range/i)).not.toBeInTheDocument();
+  });
+
   it("shows actionable copy when the comments worker lane is offline", async () => {
     // P2-7: When the backend returns 503 with detail.code=SOCIAL_WORKER_UNAVAILABLE,
     // the admin proxy extracts it as `upstream_detail_code`. The UI must surface
@@ -745,7 +1121,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
-      if (url.includes("/comments?page=1&page_size=25")) {
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
           items: [],
           pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
@@ -782,7 +1158,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
-      if (url.includes("/comments?page=1&page_size=25")) {
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
           items: [],
           pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
@@ -816,7 +1192,7 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it("routes the legacy posts tab to catalog actions for Instagram accounts", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
@@ -871,7 +1247,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
-      if (url.includes("/comments?page=1&page_size=25")) {
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse({
           items: [],
           pagination: { page: 1, page_size: 25, total: 0, total_pages: 1 },
@@ -899,7 +1275,7 @@ describe("SocialAccountProfilePage", () => {
       if (url.includes("/summary")) {
         return jsonResponse(baseSummary);
       }
-      if (url.includes("/comments?page=1&page_size=25")) {
+      if (url.includes("/posts?page=1&page_size=25&comments_only=true")) {
         return jsonResponse(
           {
             error: "Database service unavailable: runtime DB configuration is incomplete. Set TRR_DB_URL and optional TRR_DB_FALLBACK_URL.",
@@ -1070,30 +1446,11 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.queryByText("TRR-Backend request timed out.")).not.toBeInTheDocument();
   });
 
-  it("keeps the snapshot-backed shell visible when the live lite summary times out afterward", async () => {
+  it("shows the timeout-specific summary banner when the first-paint lite summary times out", async () => {
     let liveSummaryCalls = 0;
-    const liteSummary = {
-      ...baseSummary,
-      summary_detail: "lite" as const,
-      comments_saved_summary: null,
-      media_coverage: null,
-      comments_coverage: null,
-      per_show_counts: [],
-      per_season_counts: [],
-      top_hashtags: [],
-      top_collaborators: [],
-      top_tags: [],
-    };
 
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: liteSummary,
-          catalog_run_progress: null,
-          generated_at: "2026-04-21T12:00:00.000Z",
-        });
-      }
       if (url.includes("/summary")) {
         liveSummaryCalls += 1;
         return jsonResponse(
@@ -1113,12 +1470,11 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravodailydish" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("12 / 12")).toBeInTheDocument();
+      expect(screen.getByText("Summary read timed out before completion. Retry in a moment.")).toBeInTheDocument();
     });
 
     expect(liveSummaryCalls).toBe(1);
-    expect(screen.queryByText("Summary read timed out before completion. Retry in a moment.")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Loads with full profile insights.").length).toBeGreaterThan(0);
+    expect(screen.queryByText("12 / 12")).not.toBeInTheDocument();
   });
 
   it("shows a timeout-specific summary banner when the lite summary fallback also times out", async () => {
@@ -1404,6 +1760,130 @@ describe("SocialAccountProfilePage", () => {
           "Instagram backfill accepted. Task selection is still being finalized. Launch launch-g · Catalog catalog-.",
         ),
       ).toBeInTheDocument();
+    });
+  });
+
+  it("queues a TikTok full-history catalog backfill with all selected tasks from one click", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravotv",
+          profile_url: "https://www.tiktok.com/@bravotv",
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("tiktok"));
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(
+          JSON.stringify({
+            source_scope: "bravo",
+            backfill_scope: "full_history",
+            selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
+          }),
+        );
+        return jsonResponse({
+          run_id: "catalog-run-tiktok-12345678",
+          status: "queued",
+          catalog_run_id: "catalog-run-tiktok-12345678",
+          selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
+          effective_selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
+          comments_run_id: null,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    const button = await screen.findByRole("button", { name: "Backfill Posts" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByText("TikTok backfill queued for Post Details, Comments, Media. Catalog catalog-.")).toBeInTheDocument();
+    });
+  });
+
+  it("auto-refreshes unhealthy TikTok cookies before starting backfill", async () => {
+    const cookieHealthResponses = [
+      {
+        platform: "tiktok",
+        required: true,
+        healthy: false,
+        reason: "expired",
+        refresh_supported: true,
+        refresh_available: true,
+        refresh_action: "cookie_refresh",
+        refresh_label: "Refresh Cookies",
+        source_kind: "default_file",
+      },
+      healthyCookieHealth("tiktok"),
+    ];
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          platform: "tiktok",
+          account_handle: "bravotv",
+          profile_url: "https://www.tiktok.com/@bravotv",
+        });
+      }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(cookieHealthResponses.shift() ?? healthyCookieHealth("tiktok"));
+      }
+      if (url.includes("/cookies/refresh")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          success: true,
+          healthy: true,
+          reason: null,
+          refresh_action: "cookie_refresh",
+        });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(
+          JSON.stringify({
+            source_scope: "bravo",
+            backfill_scope: "full_history",
+            selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
+          }),
+        );
+        return jsonResponse({
+          run_id: "catalog-run-tiktok-auto-repair",
+          status: "queued",
+          catalog_run_id: "catalog-run-tiktok-auto-repair",
+          selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
+          effective_selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
+          comments_run_id: null,
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            platform: "tiktok",
+            account_handle: "bravotv",
+            profile_url: "https://www.tiktok.com/@bravotv",
+          },
+          catalog_run_progress: null,
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Backfill Posts" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("TikTok backfill queued for Post Details, Comments, Media. Catalog catalog-.")).toBeInTheDocument();
     });
   });
 
@@ -1713,8 +2193,10 @@ describe("SocialAccountProfilePage", () => {
     const progressHeading = await screen.findByText("Catalog Run Progress");
     const progressSection = progressHeading.closest("section");
     expect(progressSection).not.toBeNull();
-    expect(within(progressSection as HTMLElement).getByText("Reused")).toBeInTheDocument();
-    expect(within(progressSection as HTMLElement).getByText("2 repair jobs")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(progressSection as HTMLElement).getByText("Reused")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getByText("2 repair jobs")).toBeInTheDocument();
+    });
   });
 
   it("does not POST comments scrape from the page when catalog completion is backend-driven", async () => {
@@ -1862,6 +2344,88 @@ describe("SocialAccountProfilePage", () => {
       "href",
       "https://www.instagram.com/p/source-1/",
     );
+  });
+
+  it("renders saved discussion inside catalog detail for supported non-instagram platforms", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({ ...baseSummary, platform: "tiktok" });
+      }
+      if (url.includes("/catalog/posts/source-1/detail")) {
+        return jsonResponse({
+          platform: "tiktok",
+          account_handle: "bravotv",
+          source_id: "source-1",
+          source_surface: "materialized",
+          title: "After show clip",
+          content: "Caption copy for the saved post.",
+          permalink: "https://www.tiktok.com/@bravotv/video/source-1",
+          posted_at: "2026-04-01T12:00:00Z",
+          saved_metrics: {
+            likes: 321,
+            comments_count: 17,
+            views: 1400,
+            engagement: 338,
+          },
+          discussion_items: [
+            {
+              id: "comment-1",
+              comment_id: "comment-1",
+              username: "bravofan",
+              display_name: "Bravo Fan",
+              discussion_type: "comment",
+              text: "Saved TikTok comment",
+              created_at: "2026-04-01T12:30:00Z",
+            },
+          ],
+          total_comments_in_db: 1,
+          hosted_media_urls: ["https://cdn.example.com/post.mp4"],
+          source_media_urls: ["https://tiktok.example.com/post.mp4"],
+        });
+      }
+      if (url.includes("/catalog/posts")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "catalog-1",
+              source_id: "source-1",
+              platform: "tiktok",
+              account_handle: "bravotv",
+              title: "After show clip",
+              content: "Caption preview",
+              assignment_status: "assigned",
+              show_name: "RHOSLC",
+              season_number: 6,
+              posted_at: "2026-04-01T12:00:00Z",
+              metrics: {
+                likes: 321,
+                comments_count: 17,
+              },
+            },
+          ],
+          pagination: {
+            page: 1,
+            page_size: 25,
+            total: 1,
+            total_pages: 1,
+          },
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="tiktok" handle="bravotv" activeTab="catalog" />);
+
+    const rowTitle = await screen.findByText("After show clip");
+    fireEvent.click(rowTitle);
+
+    await waitFor(() => {
+      expect(screen.getByText("Catalog Detail")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Saved Discussion")).toBeInTheDocument();
+    expect(screen.getByText("Saved TikTok comment")).toBeInTheDocument();
+    expect(screen.getByText("Bravo Fan")).toBeInTheDocument();
   });
 
   it("renders Instagram auth repair CTA in the cookie preflight card when cookies are unhealthy", async () => {
@@ -4369,6 +4933,7 @@ it("sends the explicit local TikTok backfill payload when Retry Locally is click
         backfill_scope: "full_history",
         allow_inline_dev_fallback: true,
         execution_preference: "prefer_local_inline",
+        selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
       },
     ]);
   });
@@ -5616,6 +6181,59 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
   });
 
+  it("optimistically hides a dismissed run before the dismiss request resolves", async () => {
+    let resolveDismiss: ((value: Response) => void) | null = null;
+    const dismissResponse = new Promise<Response>((resolve) => {
+      resolveDismiss = resolve;
+    });
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          catalog_recent_runs: [
+            {
+              run_id: "run-dismiss-now",
+              status: "cancelled",
+              created_at: "2026-03-19T22:00:00.000Z",
+              completed_at: "2026-03-19T23:00:00.000Z",
+            },
+          ],
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            catalog_recent_runs: [],
+          },
+          catalog_run_progress: null,
+          generated_at: "2026-03-19T23:00:00.000Z",
+        });
+      }
+      if (url.includes("/catalog/runs/run-dismiss-now/dismiss")) {
+        expect(init?.method).toBe("POST");
+        return dismissResponse;
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+
+    const dismissButtons = await screen.findAllByRole("button", { name: "Dismiss" });
+    expect(dismissButtons).toHaveLength(2);
+
+    await act(async () => {
+      fireEvent.click(dismissButtons[0]);
+    });
+
+    expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { name: "Dismiss" })).toHaveLength(0);
+    resolveDismiss = null;
+    unmount();
+  });
+
   it("shows restart backfill after a terminal catalog run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -6529,10 +7147,128 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
   });
 
+  it("hydrates terminal progress for displayed completed runs without an active polling target", async () => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/snapshot") && url.includes("run_id=4485bca3-ebdc-4a6c-8696-1df2263f7cbf")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            total_posts: 431,
+            live_total_posts: 431,
+            catalog_recent_runs: [
+              {
+                run_id: "4485bca3-ebdc-4a6c-8696-1df2263f7cbf",
+                status: "completed",
+                created_at: "2026-04-21T15:12:51.564Z",
+              },
+            ],
+          },
+          catalog_run_progress: {
+            run_id: "4485bca3-ebdc-4a6c-8696-1df2263f7cbf",
+            run_status: "completed",
+            source_scope: "bravo",
+            created_at: "2026-04-21T15:12:51.564Z",
+            stages: {
+              shared_account_posts: {
+                jobs_total: 1,
+                jobs_completed: 1,
+                jobs_failed: 0,
+                jobs_active: 0,
+                jobs_running: 0,
+                jobs_waiting: 0,
+                scraped_count: 33,
+                saved_count: 33,
+              },
+            },
+            per_handle: [],
+            recent_log: [],
+            post_progress: {
+              completed_posts: 33,
+              matched_posts: 33,
+              total_posts: 431,
+            },
+            summary: {
+              total_jobs: 1,
+              completed_jobs: 1,
+              failed_jobs: 0,
+              active_jobs: 0,
+              items_found_total: 33,
+            },
+          },
+          generated_at: "2026-04-21T15:23:31.126Z",
+        });
+      }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            account_handle: "thetraitorsus",
+            profile_url: "https://www.instagram.com/thetraitorsus/",
+            total_posts: 431,
+            live_total_posts: 431,
+            catalog_recent_runs: [
+              {
+                run_id: "4485bca3-ebdc-4a6c-8696-1df2263f7cbf",
+                status: "completed",
+                created_at: "2026-04-21T15:12:51.564Z",
+              },
+            ],
+          },
+          generated_at: "2026-04-21T15:13:00.000Z",
+        });
+      }
+      if (url.includes("/summary")) {
+        return jsonResponse({
+          ...baseSummary,
+          account_handle: "thetraitorsus",
+          profile_url: "https://www.instagram.com/thetraitorsus/",
+          total_posts: 431,
+          live_total_posts: 431,
+          catalog_recent_runs: [
+            {
+              run_id: "4485bca3-ebdc-4a6c-8696-1df2263f7cbf",
+              status: "completed",
+              created_at: "2026-04-21T15:12:51.564Z",
+            },
+          ],
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<SocialAccountProfilePage platform="instagram" handle="thetraitorsus" activeTab="catalog" />);
+
+    const progressCard = await screen.findByText("Catalog Run Progress");
+    const progressSection = progressCard.closest("section");
+    expect(progressSection).not.toBeNull();
+
+    await waitFor(() => {
+      expect(within(progressSection as HTMLElement).getAllByText("Completed").length).toBeGreaterThan(0);
+      expect(within(progressSection as HTMLElement).getByText("8%")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getByText("33 / 431 posts checked")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getByText("33 persisted")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getByText("Shard Workers")).toBeInTheDocument();
+    });
+
+    expect(
+      mocks.fetchAdminWithAuth.mock.calls.some(([request]) =>
+        String(request).includes("/snapshot?detail=lite&run_id=4485bca3-ebdc-4a6c-8696-1df2263f7cbf"),
+      ),
+    ).toBe(true);
+    expect(
+      within(progressSection as HTMLElement).queryByText("This completed run did not report stage-level progress telemetry."),
+    ).not.toBeInTheDocument();
+
+    const progressBar = progressSection?.querySelector("div.mt-4.h-2.overflow-hidden.rounded-full.bg-zinc-100 > div");
+    expect(progressBar).not.toBeNull();
+    expect(progressBar).toHaveStyle({ width: "8%" });
+  });
+
   it("does not show loading fallback copy for completed runs with no stage telemetry", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/snapshot")) {
+      if (url.includes("/snapshot") && url.includes("run_id=run-completed-no-stage-telemetry")) {
         return jsonResponse({
           summary: {
             ...baseSummary,
@@ -6571,6 +7307,23 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           generated_at: "2026-04-21T11:40:00.000Z",
         });
       }
+      if (url.includes("/snapshot")) {
+        return jsonResponse({
+          summary: {
+            ...baseSummary,
+            total_posts: 431,
+            live_total_posts: 431,
+            catalog_recent_runs: [
+              {
+                run_id: "run-completed-no-stage-telemetry",
+                status: "completed",
+                created_at: "2026-04-21T11:35:00.000Z",
+              },
+            ],
+          },
+          generated_at: "2026-04-21T11:36:00.000Z",
+        });
+      }
       if (url.includes("/summary")) {
         return jsonResponse({
           ...baseSummary,
@@ -6583,30 +7336,6 @@ it("prefers terminal cancelled status labels over stale recovering state", async
               created_at: "2026-04-21T11:35:00.000Z",
             },
           ],
-        });
-      }
-      if (url.includes("/catalog/runs/run-completed-no-stage-telemetry/progress")) {
-        return jsonResponse({
-          run_id: "run-completed-no-stage-telemetry",
-          run_status: "completed",
-          source_scope: "bravo",
-          created_at: "2026-04-21T11:35:00.000Z",
-          stages: {},
-          per_handle: [],
-          recent_log: [],
-          post_progress: {
-            completed_posts: 0,
-            matched_posts: 0,
-            saved_posts: 0,
-            total_posts: 431,
-          },
-          summary: {
-            total_jobs: 0,
-            completed_jobs: 0,
-            failed_jobs: 0,
-            active_jobs: 0,
-            items_found_total: 0,
-          },
         });
       }
       throw new Error(`Unhandled request: ${url}`);
@@ -7213,7 +7942,7 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
   });
   expect(screen.queryByRole("button", { name: "Retry Locally" })).not.toBeInTheDocument();
   expect(
-    screen.queryByText(/Catalog launch is blocked until Instagram auth is repaired/i),
+    screen.queryByText(/Catalog launch is blocked until the required auth is repaired/i),
   ).not.toBeInTheDocument();
 });
 

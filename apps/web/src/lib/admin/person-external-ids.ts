@@ -7,6 +7,7 @@ export const PERSON_EXTERNAL_ID_SOURCES = [
   "fandom",
   "facebook",
   "instagram",
+  "threads",
   "twitter",
   "tiktok",
   "youtube",
@@ -45,6 +46,7 @@ const SOURCE_LABELS: Record<PersonExternalIdSource, string> = {
   fandom: "Fandom",
   facebook: "Facebook",
   instagram: "Instagram",
+  threads: "Threads",
   twitter: "Twitter/X",
   tiktok: "TikTok",
   youtube: "YouTube",
@@ -134,6 +136,11 @@ const normalizeSocialPathValue = (source: PersonExternalIdSource, value: string)
     return parsed.searchParams.get("screen_name")?.trim() || pathSegments[0] || trimmed;
   }
 
+  if (source === "threads") {
+    const first = pathSegments[0] ?? trimmed;
+    return first.replace(/^@+/, "");
+  }
+
   if (source === "instagram") {
     return pathSegments[0] ?? trimmed;
   }
@@ -181,6 +188,7 @@ export const normalizePersonExternalIdValue = (
     }
     case "facebook":
     case "instagram":
+    case "threads":
     case "twitter":
     case "tiktok": {
       return normalizeSocialPathValue(source, trimmed).replace(/^@+/, "");
@@ -204,6 +212,8 @@ const buildSocialUrl = (source: PersonExternalIdSource, value: string): string |
       return `https://www.facebook.com/${normalized}`;
     case "instagram":
       return `https://www.instagram.com/${normalized}`;
+    case "threads":
+      return `https://www.threads.net/@${normalized}`;
     case "twitter":
       return `https://x.com/${normalized}`;
     case "tiktok":
@@ -246,6 +256,7 @@ export const buildPersonExternalIdUrl = (
       return URL_PREFIX_RE.test(normalized) ? normalized : null;
     case "facebook":
     case "instagram":
+    case "threads":
     case "twitter":
     case "tiktok":
     case "youtube":
@@ -290,6 +301,7 @@ export const buildLegacyExternalIdsFromRecords = (
       }
       case "facebook":
       case "instagram":
+      case "threads":
       case "twitter":
       case "tiktok":
       case "youtube":

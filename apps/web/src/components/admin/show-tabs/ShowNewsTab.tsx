@@ -66,6 +66,7 @@ interface ShowNewsTabProps {
   newsTotalCount: number;
   newsError: string | null;
   newsNotice: string | null;
+  newsUpdatedLabel?: string | null;
   newsGoogleUrlMissing: boolean;
   unifiedNews: UnifiedNewsItem[];
   formatPublishedDate: (value: string | null | undefined) => string | null;
@@ -103,6 +104,7 @@ export default function ShowNewsTab({
   newsTotalCount,
   newsError,
   newsNotice,
+  newsUpdatedLabel,
   newsGoogleUrlMissing,
   unifiedNews,
   formatPublishedDate,
@@ -123,6 +125,9 @@ export default function ShowNewsTab({
               Unified News Feed
             </p>
             <h3 className="text-xl font-bold text-zinc-900">{showName}</h3>
+            {newsUpdatedLabel ? (
+              <p className="mt-1 text-xs font-medium text-zinc-500">{newsUpdatedLabel}</p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1">
@@ -155,7 +160,7 @@ export default function ShowNewsTab({
               disabled={newsLoading || newsSyncing}
               className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
             >
-              {newsLoading || newsSyncing ? "Refreshing..." : "Refresh"}
+              {newsLoading || newsSyncing ? "Refreshing news..." : "Refresh news"}
             </button>
           </div>
         </div>

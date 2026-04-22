@@ -78,6 +78,166 @@ const jsonResponse = (body: unknown): Response =>
     headers: { "Content-Type": "application/json" },
   });
 
+const buildInitialLandingPayload = () => ({
+  network_sets: [
+    {
+      key: "bravo-tv",
+      title: "Bravo TV",
+      description: "Shared Bravo social handles used in sends and profile backfills.",
+      handles: [
+        {
+          platform: "instagram",
+          handle: "bravotv",
+          display_label: "@bravotv",
+          href: "/social/instagram/bravotv",
+          external: false,
+        },
+        {
+          platform: "instagram",
+          handle: "bravowwhl",
+          display_label: "@bravowwhl",
+          href: "/social/instagram/bravowwhl",
+          external: false,
+        },
+      ],
+    },
+  ],
+  show_sets: [
+    {
+      show_id: "show-1",
+      show_name: "The Traitors",
+      canonical_slug: "the-traitors",
+      alternative_names: [],
+      handles: [],
+      fallback_note: "Shared coverage via Bravo TV",
+    },
+    {
+      show_id: "show-2",
+      show_name: "Watch What Happens Live with Andy Cohen",
+      canonical_slug: "watch-what-happens-live-with-andy-cohen",
+      alternative_names: ["WWHL"],
+      handles: [
+        {
+          platform: "instagram",
+          handle: "bravowwhl",
+          display_label: "@bravowwhl",
+          href: "/social/instagram/bravowwhl",
+          external: false,
+        },
+      ],
+      fallback_note: null,
+    },
+  ],
+  people_profiles: [
+    {
+      person_id: "person-1",
+      full_name: "Andy Cohen",
+      shows: [
+        {
+          show_id: "show-2",
+          show_name: "Watch What Happens Live with Andy Cohen",
+          canonical_slug: "watch-what-happens-live-with-andy-cohen",
+        },
+      ],
+      handles: [
+        {
+          platform: "instagram",
+          handle: "andycohen",
+          display_label: "@andycohen",
+          href: "https://www.instagram.com/andycohen",
+          external: true,
+        },
+      ],
+    },
+  ],
+  person_targets: [
+    {
+      person_id: "person-1",
+      full_name: "Andy Cohen",
+      shows: [
+        {
+          show_id: "show-2",
+          show_name: "Watch What Happens Live with Andy Cohen",
+          canonical_slug: "watch-what-happens-live-with-andy-cohen",
+        },
+      ],
+    },
+    {
+      person_id: "person-2",
+      full_name: "Producer Without Handles",
+      shows: [
+        {
+          show_id: "show-1",
+          show_name: "The Traitors",
+          canonical_slug: "the-traitors",
+        },
+      ],
+    },
+  ],
+  shared_pipeline: {
+    sources: [
+      {
+        id: "source-1",
+        platform: "instagram",
+        source_scope: "bravo",
+        account_handle: "bravotv",
+        is_active: true,
+        scrape_priority: 10,
+      },
+    ],
+    runs: [
+      {
+        id: "run-1",
+        status: "completed",
+        ingest_mode: "shared_account_async",
+        created_at: "2026-03-20T12:00:00.000Z",
+      },
+    ],
+    review_items: [
+      {
+        id: "review-1",
+        platform: "instagram",
+        source_id: "source-1",
+        source_account: "bravotv",
+        review_reason: "unmatched_show",
+        review_status: "open",
+      },
+    ],
+  },
+  reddit_dashboard: {
+    active_community_count: 0,
+    archived_community_count: 0,
+    show_count: 0,
+  },
+});
+
+const buildUpdatedLandingPayload = () => ({
+  ...buildInitialLandingPayload(),
+  people_profiles: [
+    ...buildInitialLandingPayload().people_profiles,
+    {
+      person_id: "person-2",
+      full_name: "Producer Without Handles",
+      shows: [
+        {
+          show_id: "show-1",
+          show_name: "The Traitors",
+          canonical_slug: "the-traitors",
+        },
+      ],
+      handles: [
+        {
+          platform: "threads",
+          handle: "producerhandles",
+          display_label: "@producerhandles",
+          href: "https://www.threads.net/@producerhandles",
+          external: true,
+        },
+      ],
+    },
+  ],
+});
+
 describe("admin social page auth bypass", () => {
   beforeEach(() => {
     mocks.fetchAdminWithAuth.mockReset();
@@ -92,110 +252,18 @@ describe("admin social page auth bypass", () => {
         }
 
         const url = String(input);
-        if (url === "/api/admin/social/landing") {
-          return jsonResponse({
-            network_sets: [
-              {
-                key: "bravo-tv",
-                title: "Bravo TV",
-                description: "Shared Bravo social handles used in sends and profile backfills.",
-                handles: [
-                  {
-                    platform: "instagram",
-                    handle: "bravotv",
-                    display_label: "@bravotv",
-                    href: "/social/instagram/bravotv",
-                    external: false,
-                  },
-                  {
-                    platform: "instagram",
-                    handle: "bravowwhl",
-                    display_label: "@bravowwhl",
-                    href: "/social/instagram/bravowwhl",
-                    external: false,
-                  },
-                ],
-              },
-            ],
-            show_sets: [
-              {
-                show_id: "show-1",
-                show_name: "The Traitors",
-                canonical_slug: "the-traitors",
-                alternative_names: [],
-                handles: [],
-                fallback_note: "Shared coverage via Bravo TV",
-              },
-              {
-                show_id: "show-2",
-                show_name: "Watch What Happens Live with Andy Cohen",
-                canonical_slug: "watch-what-happens-live-with-andy-cohen",
-                alternative_names: ["WWHL"],
-                handles: [
-                  {
-                    platform: "instagram",
-                    handle: "bravowwhl",
-                    display_label: "@bravowwhl",
-                    href: "/social/instagram/bravowwhl",
-                    external: false,
-                  },
-                ],
-                fallback_note: null,
-              },
-            ],
-            people_profiles: [
-              {
-                person_id: "person-1",
-                full_name: "Andy Cohen",
-                shows: [
-                  {
-                    show_id: "show-2",
-                    show_name: "Watch What Happens Live with Andy Cohen",
-                    canonical_slug: "watch-what-happens-live-with-andy-cohen",
-                  },
-                ],
-                handles: [
-                  {
-                    platform: "instagram",
-                    handle: "andycohen",
-                    display_label: "@andycohen",
-                    href: "https://www.instagram.com/andycohen",
-                    external: true,
-                  },
-                ],
-              },
-            ],
-            shared_pipeline: {
-              sources: [
-                {
-                  id: "source-1",
-                  platform: "instagram",
-                  source_scope: "bravo",
-                  account_handle: "bravotv",
-                  is_active: true,
-                  scrape_priority: 10,
-                },
-              ],
-              runs: [
-                {
-                  id: "run-1",
-                  status: "completed",
-                  ingest_mode: "shared_account_async",
-                  created_at: "2026-03-20T12:00:00.000Z",
-                },
-              ],
-              review_items: [
-                {
-                  id: "review-1",
-                  platform: "instagram",
-                  source_id: "source-1",
-                  source_account: "bravotv",
-                  review_reason: "unmatched_show",
-                  review_status: "open",
-                },
-              ],
-            },
+        if (url === "/api/admin/social/landing" && init?.method === "POST") {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            target_type: "person",
+            target_id: "person-2",
+            platform: "threads",
+            value: "https://www.threads.net/@producerhandles",
           });
+          return jsonResponse(buildUpdatedLandingPayload());
+        }
+
+        if (url === "/api/admin/social/landing") {
+          return jsonResponse(buildInitialLandingPayload());
         }
 
         if (url.includes("/social/shared/ingest")) {
@@ -215,12 +283,12 @@ describe("admin social page auth bypass", () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("NETWORKS")).toBeInTheDocument();
-      expect(screen.getByText("SHOWS")).toBeInTheDocument();
-      expect(screen.getByText("PEOPLE")).toBeInTheDocument();
-      expect(screen.getByText("Bravo TV")).toBeInTheDocument();
-      expect(screen.getByText("The Traitors")).toBeInTheDocument();
-      expect(screen.getByText("Andy Cohen")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "NETWORKS" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "SHOWS" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Bravo TV" })).toBeInTheDocument();
+      expect(screen.getAllByText("The Traitors").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Andy Cohen").length).toBeGreaterThan(0);
     });
 
     expect(
@@ -257,6 +325,45 @@ describe("admin social page auth bypass", () => {
       String(input).includes("/social/shared/ingest"),
     );
     expect(ingestCall?.[2]).toMatchObject({
+      allowDevAdminBypass: true,
+      preferredUser: mocks.guardState.user,
+    });
+  });
+
+  it("adds a handle for a cast member and updates the matching landing container", async () => {
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ADD SOCIAL HANDLE")).toBeInTheDocument();
+      expect(screen.queryByText("@producerhandles")).not.toBeInTheDocument();
+    });
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: /NETWORK SHOW or CAST MEMBER/i }),
+      {
+        target: { value: "person:person-2" },
+      },
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "THE PLATFORM" }), {
+      target: { value: "threads" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "USERNAME/HANDLE (or URL)" }), {
+      target: { value: "https://www.threads.net/@producerhandles" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Saved Threads for Producer Without Handles."),
+      ).toBeInTheDocument();
+      expect(screen.getByText("@producerhandles")).toBeInTheDocument();
+    });
+
+    const saveCall = mocks.fetchAdminWithAuth.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/admin/social/landing" && init?.method === "POST",
+    );
+    expect(saveCall?.[2]).toMatchObject({
       allowDevAdminBypass: true,
       preferredUser: mocks.guardState.user,
     });

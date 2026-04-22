@@ -47,7 +47,9 @@ import {
   type SocialAccountProfileCollaboratorTagAggregate,
   type SocialProfileCookieHealth,
   type SocialProfileCookieRefreshResult,
+  SOCIAL_ACCOUNT_CATALOG_DETAIL_ENABLED_PLATFORMS,
   SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS,
+  SOCIAL_ACCOUNT_COMMENTS_ENABLED_PLATFORMS,
   SOCIAL_ACCOUNT_PLATFORM_LABELS,
   SOCIAL_ACCOUNT_PROFILE_TAB_LABELS,
   SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS,
@@ -253,6 +255,11 @@ const INSTAGRAM_BACKFILL_TASK_OPTIONS: ReadonlyArray<BackfillTaskOption> = [
   },
 ];
 const INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = [
+  "post_details",
+  "comments",
+  "media",
+];
+const TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS: CatalogBackfillSelectedTask[] = [
   "post_details",
   "comments",
   "media",
@@ -1190,8 +1197,8 @@ const getCatalogLaunchGuardMessage = (
   if (operationalState === "blocked_auth") {
     const reason = formatDiagnosticToken(progress?.repairable_reason);
     return reason
-      ? `Catalog launch is blocked until Instagram auth is repaired. Reason: ${reason}.`
-      : "Catalog launch is blocked until Instagram auth is repaired.";
+      ? `Catalog launch is blocked until the required auth is repaired. Reason: ${reason}.`
+      : "Catalog launch is blocked until the required auth is repaired.";
   }
   const dispatchMessage = getCatalogDispatchStatusMessage(progress);
   if (dispatchMessage?.tone === "red") {
@@ -1299,9 +1306,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [catalogProgressSaturationActive, setCatalogProgressSaturationActive] = useState(false);
   const [cancellingCatalogRun, setCancellingCatalogRun] = useState(false);
   const [dismissingCatalogRunId, setDismissingCatalogRunId] = useState<string | null>(null);
+  const [pendingDismissedCatalogRunIds, setPendingDismissedCatalogRunIds] = useState<Set<string>>(new Set());
   const [catalogProgressLastSuccessAt, setCatalogProgressLastSuccessAt] = useState<string | null>(null);
   const [catalogLogsExpanded, setCatalogLogsExpanded] = useState(false);
   const catalogTerminalSummaryRefreshRunIdRef = useRef<string | null>(null);
+  const catalogTerminalProgressHydrationAttemptedRunIdRef = useRef<string | null>(null);
   const catalogRuntimePivotRef = useRef<string | null>(null);
   const catalogFreshnessProbeKeyRef = useRef<string | null>(null);
   const hashtagResponseCacheRef = useRef<
@@ -1332,24 +1341,32 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const autoFullSummaryAttemptedRef = useRef<string | null>(null);
 
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
-  const supportsComments = platform === "instagram";
+  const supportsCatalogDetail = SOCIAL_ACCOUNT_CATALOG_DETAIL_ENABLED_PLATFORMS.includes(platform);
+  const supportsComments = SOCIAL_ACCOUNT_COMMENTS_ENABLED_PLATFORMS.includes(platform);
   const supportsSocialBlade = SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS.includes(platform);
   const selectedTab: SocialAccountProfileTab = supportsCatalog && activeTab === "posts" ? "catalog" : activeTab;
+  const shouldShowCatalogRunProgressCard = selectedTab !== "comments";
   const hasSummary = summary !== null;
   const hasFullSummary = Boolean(summary && (summary.summary_detail ?? "full") === "full");
   const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
   const shouldDeferSecondaryCatalogReads =
     !hasSummary || summaryLoading || summarySaturationActive || catalogProgressSaturationActive;
-  const commentsTabNeedsFullSummary = selectedTab === "comments" && supportsComments;
   const hashtagsRequestKey = `hashtags:${platform}:${handle}:${hashtagWindow}`;
   const hashtagTimelineRequestKey = `hashtags-timeline:${platform}:${handle}:${hashtagWindow}`;
   const collaboratorsRequestKey = `collaborators-tags:${platform}:${handle}`;
+  const visibleCatalogRecentRuns = useMemo(() => {
+    const runs = summary?.catalog_recent_runs ?? [];
+    if (pendingDismissedCatalogRunIds.size === 0) {
+      return runs;
+    }
+    return runs.filter((run) => !pendingDismissedCatalogRunIds.has(String(run.run_id || "").trim()));
+  }, [pendingDismissedCatalogRunIds, summary?.catalog_recent_runs]);
   const activeCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
-    const runs = summary?.catalog_recent_runs ?? [];
+    const runs = visibleCatalogRecentRuns;
     return runs.find((run) => ACTIVE_CATALOG_RUN_STATUSES.has(String(run.status || "").trim().toLowerCase())) ?? null;
-  }, [summary?.catalog_recent_runs]);
+  }, [visibleCatalogRecentRuns]);
   const latestCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
-    const runs = summary?.catalog_recent_runs ?? [];
+    const runs = visibleCatalogRecentRuns;
     const normalize = (s: string | undefined | null) => String(s || "").trim().toLowerCase();
     const completed = runs.find((r) => normalize(r.status) === "completed");
     if (completed) return completed;
@@ -1359,7 +1376,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       return runs[0] ?? null;
     }
     return null;
-  }, [summary?.catalog_recent_runs]);
+  }, [visibleCatalogRecentRuns]);
   const latestCatalogRunStatus = useMemo(() => normalizeCatalogRunStatus(latestCatalogRun?.status), [latestCatalogRun?.status]);
   const activeCatalogRunStatusNormalized = useMemo(
     () => normalizeCatalogRunStatus(activeCatalogRun?.status),
@@ -1376,6 +1393,32 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const activeCatalogRunId = useMemo(() => {
     return activeCatalogRun?.run_id?.trim() || null;
   }, [activeCatalogRun?.run_id]);
+  const displayedCatalogRunSummary = useMemo<SocialAccountCatalogRun | null>(() => {
+    const runs = visibleCatalogRecentRuns;
+    if (selectedCatalogRunId) {
+      return runs.find((run) => run.run_id === selectedCatalogRunId) ?? null;
+    }
+    if (activeCatalogRunId) {
+      return runs.find((run) => run.run_id === activeCatalogRunId) ?? null;
+    }
+    if (latestCatalogRunId) {
+      return runs.find((run) => run.run_id === latestCatalogRunId) ?? null;
+    }
+    return null;
+  }, [
+    activeCatalogRunId,
+    latestCatalogRunId,
+    selectedCatalogRunId,
+    visibleCatalogRecentRuns,
+  ]);
+  const displayedCatalogRunId = useMemo(() => {
+    return (
+      selectedCatalogRunId ||
+      activeCatalogRunId ||
+      latestCatalogRunId ||
+      null
+    );
+  }, [activeCatalogRunId, latestCatalogRunId, selectedCatalogRunId]);
   const backgroundCatalogRunId = useMemo(() => {
     return selectedCatalogRunId || activeCatalogRunId || null;
   }, [activeCatalogRunId, selectedCatalogRunId]);
@@ -1429,6 +1472,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogProgressLastSuccessAt(null);
     setCatalogLogsExpanded(false);
     catalogTerminalSummaryRefreshRunIdRef.current = null;
+    catalogTerminalProgressHydrationAttemptedRunIdRef.current = null;
     catalogFreshnessProbeKeyRef.current = null;
     setHashtagTimeline(null);
     setHashtagTimelineError(null);
@@ -1747,10 +1791,8 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setHashtagTimeline(data);
   }, [fetchAdminWithAuth, handle, hashtagTimelineRequestKey, hashtagWindow, platform, user]);
 
-  // Keep stable refs to the loaders so the loadSummary effect below can call them
-  // without re-running every time their identity changes. Re-running would trigger
-  // duplicate summary fetches whenever e.g. `backgroundCatalogRunId` changes
-  // `fetchProfileSnapshot`'s identity mid-session.
+  // Keep stable refs to the loaders so effects can call them without re-running
+  // every time their identity changes mid-session.
   const refreshSummaryRef = useRef(refreshSummary);
   const fetchProfileSnapshotRef = useRef(fetchProfileSnapshot);
   useEffect(() => {
@@ -1767,38 +1809,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const loadSummary = async () => {
       setSummaryLoading(true);
       setSummaryError(null);
-      let snapshotHydrated = false;
-      const snapshotPromise = fetchProfileSnapshotRef.current()
-        .then((snapshot) => {
-          if (cancelled) return;
-          if (snapshot.payload.summary) {
-            snapshotHydrated = true;
-            setSummary(snapshot.payload.summary);
-            setSummaryUninitialized(false);
-            setSummaryError(null);
-          }
-          if (snapshot.payload.catalog_run_progress) {
-            setCatalogRunProgress(snapshot.payload.catalog_run_progress);
-            setCatalogRunProgressError(null);
-            setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
-          }
-        })
-        .catch(() => {
-          // Best-effort snapshot hydration only.
-        });
       try {
         await refreshSummaryRef.current({ detail: "lite" });
         if (cancelled) return;
         setSummarySaturationActive(false);
         setSummaryError(null);
       } catch (error) {
-        await snapshotPromise.catch(() => undefined);
         if (cancelled) return;
-        if (snapshotHydrated) {
-          setSummarySaturationActive(false);
-          setSummaryError(null);
-          return;
-        }
         setSummaryUninitialized(false);
         if (!isBackendSaturationError(error)) {
           setSummarySaturationActive(false);
@@ -1809,7 +1826,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           ),
         );
       } finally {
-        void snapshotPromise;
         if (!cancelled) setSummaryLoading(false);
       }
     };
@@ -1819,42 +1835,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       cancelled = true;
     };
   }, [checking, handle, hasAccess, platform, user]);
-
-  useEffect(() => {
-    if (
-      checking ||
-      !user ||
-      !hasAccess ||
-      !commentsTabNeedsFullSummary ||
-      !summary ||
-      summaryUninitialized ||
-      hasFullSummary ||
-      summaryLoading ||
-      fullSummaryLoading
-    ) {
-      return;
-    }
-
-    const requestKey = `${platform}:${handle}:comments`;
-    if (autoFullSummaryAttemptedRef.current === requestKey) {
-      return;
-    }
-    autoFullSummaryAttemptedRef.current = requestKey;
-    void loadFullSummary();
-  }, [
-    checking,
-    commentsTabNeedsFullSummary,
-    fullSummaryLoading,
-    handle,
-    hasAccess,
-    hasFullSummary,
-    loadFullSummary,
-    platform,
-    summary,
-    summaryLoading,
-    summaryUninitialized,
-    user,
-  ]);
 
   useEffect(() => {
     if (
@@ -1941,7 +1921,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       return;
     }
     const liveCatalogTotal = Number(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts ?? 0);
-    const hasCatalogHistory = Number(summary?.catalog_recent_runs?.length ?? 0) > 0;
+    const hasCatalogHistory = visibleCatalogRecentRuns.length > 0;
     if (liveCatalogTotal > 0 || !hasCatalogHistory) {
       setCatalogCardPreview(null);
       return;
@@ -1982,7 +1962,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     handle,
     hasAccess,
     platform,
-    summary?.catalog_recent_runs,
+    visibleCatalogRecentRuns,
     summary?.catalog_total_posts,
     summary?.live_catalog_total_posts,
     summaryUninitialized,
@@ -2708,34 +2688,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     return activeCatalogRunId !== null && ACTIVE_CATALOG_RUN_STATUSES.has(activeCatalogRunDisplayStatus || "");
   }, [activeCatalogRunDisplayStatus, activeCatalogRunId]);
 
-  const displayedCatalogRunSummary = useMemo<SocialAccountCatalogRun | null>(() => {
-    const runs = summary?.catalog_recent_runs ?? [];
-    if (selectedCatalogRunId) {
-      return runs.find((run) => run.run_id === selectedCatalogRunId) ?? null;
-    }
-    if (activeCatalogRunId) {
-      return runs.find((run) => run.run_id === activeCatalogRunId) ?? null;
-    }
-    if (latestCatalogRunId) {
-      return runs.find((run) => run.run_id === latestCatalogRunId) ?? null;
-    }
-    return null;
-  }, [
-    activeCatalogRunId,
-    latestCatalogRunId,
-    selectedCatalogRunId,
-    summary?.catalog_recent_runs,
-  ]);
-
-  const displayedCatalogRunId = useMemo(() => {
-    return (
-      selectedCatalogRunId ||
-      activeCatalogRunId ||
-      latestCatalogRunId ||
-      null
-    );
-  }, [activeCatalogRunId, latestCatalogRunId, selectedCatalogRunId]);
-
   const displayedCatalogRunStatus = useMemo(() => {
     const selectedRunId = displayedCatalogRunId?.trim() ?? "";
     const progressStatus =
@@ -2759,6 +2711,67 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogRunProgress?.run_status,
     catalogProgressRunId,
     displayedCatalogRunId,
+  ]);
+
+  useEffect(() => {
+    if (checking || !user || !hasAccess || !supportsCatalog) return;
+    const normalizedDisplayedRunId = String(displayedCatalogRunId || "").trim();
+    if (!normalizedDisplayedRunId) return;
+    if (normalizedDisplayedRunId === String(backgroundCatalogRunId || "").trim()) return;
+    if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus)) return;
+    if (summaryUninitialized) return;
+    if (catalogRunProgress?.run_id === normalizedDisplayedRunId) {
+      catalogTerminalProgressHydrationAttemptedRunIdRef.current = null;
+      return;
+    }
+    if (catalogTerminalProgressHydrationAttemptedRunIdRef.current === normalizedDisplayedRunId) return;
+
+    let cancelled = false;
+    catalogTerminalProgressHydrationAttemptedRunIdRef.current = normalizedDisplayedRunId;
+    setCatalogRunProgressLoading(true);
+
+    void fetchProfileSnapshotRef.current({ runId: normalizedDisplayedRunId, detail: "lite" })
+      .then((snapshot) => {
+        if (cancelled) return;
+        if (snapshot.payload.summary) {
+          setSummary(snapshot.payload.summary);
+          setSummaryUninitialized(false);
+          setSummaryError(null);
+        }
+        if (snapshot.payload.catalog_run_progress) {
+          setCatalogProgressSaturationActive(false);
+          setCatalogRunProgress(snapshot.payload.catalog_run_progress);
+          setCatalogRunProgressError(null);
+          setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const requestError = toSocialAccountRequestError(error, "Failed to load catalog run progress");
+        if (isBackendSaturationError(requestError)) {
+          setCatalogProgressSaturationActive(true);
+        }
+        setCatalogRunProgressError(requestError.message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCatalogRunProgressLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    backgroundCatalogRunId,
+    catalogRunProgress?.run_id,
+    checking,
+    displayedCatalogRunId,
+    displayedCatalogRunStatus,
+    hasAccess,
+    summaryUninitialized,
+    supportsCatalog,
+    user,
   ]);
 
   const catalogReplacementRunId = useMemo(() => {
@@ -2845,7 +2858,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       return progressLabel;
     }
     if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() === "blocked_auth") {
-      return "Instagram auth blocked";
+      return `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform]} auth blocked`;
     }
     if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() === "runtime_superseded") {
       return "Runtime superseded";
@@ -2860,7 +2873,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       return "Catalog fetch complete";
     }
     return null;
-  }, [catalogRunProgress, displayedCatalogRunStatus]);
+  }, [catalogRunProgress, displayedCatalogRunStatus, platform]);
 
   const catalogDispatchStatusMessage = useMemo(() => {
     return getCatalogDispatchStatusMessage(catalogRunProgress);
@@ -2875,28 +2888,38 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (String(catalogRunProgress?.operational_state || "").trim().toLowerCase() !== "blocked_auth") {
       return null;
     }
+    const repairAction = catalogRunProgress?.repair_action;
     const repairStatus = String(catalogRunProgress?.repair_status || "").trim().toLowerCase();
     const resumeStage = String(catalogRunProgress?.resume_stage || "").trim().toLowerCase();
     const repairReason = String(catalogRunProgress?.repairable_reason || "").trim().replaceAll("_", " ");
     const repairCommand = String(catalogRunProgress?.repair_environment?.repair_command || "").trim();
-    const canRepair = catalogRunProgress?.repair_action === "repair_instagram_auth";
+    const canRepair = Boolean(repairAction) && Boolean(catalogRunProgress?.repair_environment?.supported);
+    const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform];
+    const repairButtonLabel = repairAction === "repair_instagram_auth" ? "Repair Instagram Auth" : "Refresh Cookies";
     const resumeLabel =
       resumeStage === "posts" ? "Auth repaired, resuming from saved frontier." : "Auth repaired, restarting discovery.";
     return {
+      title: repairAction === "repair_instagram_auth" ? "Instagram Auth Blocked" : `${platformLabel} Cookie Repair Required`,
+      repairAction,
+      repairButtonLabel,
       canRepair,
       repairStatus,
       repairReason,
       repairCommand,
       detail:
         repairStatus === "running" ?
-          "Repairing auth. A local headed Chrome window will open for confirmation."
+          repairAction === "repair_instagram_auth" ?
+            "Repairing auth. A local headed Chrome window will open for confirmation."
+          : `Refreshing ${platformLabel} cookies. A local headed Chrome window will open for confirmation.`
         : repairStatus === "succeeded" || catalogRunProgress?.auto_resume_pending ?
           resumeLabel
         : canRepair ?
-          "Instagram blocked this catalog run before history fetch could continue. A local headed Chrome window will open for confirmation."
-        : "Instagram blocked this catalog run before history fetch could continue.",
+          repairAction === "repair_instagram_auth" ?
+            "Instagram blocked this catalog run before history fetch could continue. A local headed Chrome window will open for confirmation."
+          : `${platformLabel} cookies must be refreshed before this catalog run can continue. A local headed Chrome window will open for confirmation.`
+        : `${platformLabel} auth must be repaired before this catalog run can continue.`,
     };
-  }, [catalogRunProgress]);
+  }, [catalogRunProgress, platform]);
   const catalogAlertCodes = useMemo(() => {
     return new Set(
       (catalogRunProgress?.alerts ?? [])
@@ -3829,11 +3852,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [cookieHealth?.refresh_action, cookieHealth?.refresh_label, fetchAdminWithAuth, fetchCookieHealth, handle, platform, user]);
 
   const buildFullHistoryBackfillRequest = useCallback(
-    (selectedTasks: CatalogBackfillSelectedTask[] = [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]): CatalogBackfillRequest => ({
-      source_scope: activeCatalogSourceScope,
-      backfill_scope: "full_history",
-      ...(platform === "instagram" ? { selected_tasks: selectedTasks } : {}),
-    }),
+    (selectedTasks?: CatalogBackfillSelectedTask[]): CatalogBackfillRequest => {
+      const defaultSelectedTasks =
+        platform === "instagram" ? [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]
+        : platform === "tiktok" ? [...TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS]
+        : undefined;
+      const resolvedSelectedTasks = selectedTasks ?? defaultSelectedTasks;
+      return {
+        source_scope: activeCatalogSourceScope,
+        backfill_scope: "full_history",
+        ...(resolvedSelectedTasks ? { selected_tasks: resolvedSelectedTasks } : {}),
+      };
+    },
     [activeCatalogSourceScope, platform],
   );
 
@@ -3841,14 +3871,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     (
       dateStart: string,
       dateEnd: string,
-      selectedTasks: CatalogBackfillSelectedTask[] = [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS],
-    ): CatalogBackfillRequest => ({
-      source_scope: activeCatalogSourceScope,
-      backfill_scope: "bounded_window",
-      date_start: dateStart,
-      date_end: dateEnd,
-      ...(platform === "instagram" ? { selected_tasks: selectedTasks } : {}),
-    }),
+      selectedTasks?: CatalogBackfillSelectedTask[],
+    ): CatalogBackfillRequest => {
+      const defaultSelectedTasks =
+        platform === "instagram" ? [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS]
+        : platform === "tiktok" ? [...TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS]
+        : undefined;
+      const resolvedSelectedTasks = selectedTasks ?? defaultSelectedTasks;
+      return {
+        source_scope: activeCatalogSourceScope,
+        backfill_scope: "bounded_window",
+        date_start: dateStart,
+        date_end: dateEnd,
+        ...(resolvedSelectedTasks ? { selected_tasks: resolvedSelectedTasks } : {}),
+      };
+    },
     [activeCatalogSourceScope, platform],
   );
 
@@ -3952,7 +3989,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             );
           }
         } else if (action === "backfill") {
-          setCatalogActionMessage(`Post backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)}).` : "."}`);
+          const selectedTaskSet =
+            data.effective_selected_tasks ??
+            data.selected_tasks ??
+            ("selected_tasks" in requestBody ? requestBody.selected_tasks ?? [] : []);
+          const selectedTaskLabels = selectedTaskSet.map((task) => formatBackfillTaskLabel(task)).join(", ");
+          const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform];
+          if (platform === "tiktok" && selectedTaskLabels) {
+            setCatalogActionMessage(
+              `${platformLabel} backfill queued for ${selectedTaskLabels}.${
+                catalogRunId ? ` Catalog ${catalogRunId.slice(0, 8)}.` : queuedRunId ? ` (${queuedRunId.slice(0, 8)}).` : ""
+              }`,
+            );
+          } else {
+            setCatalogActionMessage(`Post backfill queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)}).` : "."}`);
+          }
         } else {
           setCatalogActionMessage(
             action === "sync_newer"
@@ -4010,12 +4061,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
     if (platformRequiresCookies && effectiveCookieHealth?.healthy === false) {
       const canAutoRepairBeforeLaunch =
-        platform === "instagram" &&
         effectiveCookieHealth.refresh_available &&
-        effectiveCookieHealth.refresh_action === "instagram_auth_repair";
+        (effectiveCookieHealth.refresh_action === "instagram_auth_repair" ||
+          effectiveCookieHealth.refresh_action === "cookie_refresh");
       if (canAutoRepairBeforeLaunch) {
+        const refreshAction = effectiveCookieHealth.refresh_action;
+        const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform];
         pendingCatalogActionAfterCookieRepairRef.current = { action, requestBody };
-        setCatalogActionMessage("Instagram auth must be repaired before Backfill can start.");
+        setCatalogActionMessage(
+          refreshAction === "instagram_auth_repair" ?
+            "Instagram auth must be repaired before Backfill can start."
+          : `${platformLabel} cookies must be refreshed before Backfill can start.`,
+        );
         const { refreshResult, refreshedHealth } = await handleCookieRefresh();
         const pendingAction = pendingCatalogActionAfterCookieRepairRef.current;
         pendingCatalogActionAfterCookieRepairRef.current = null;
@@ -4023,14 +4080,26 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           return;
         }
         if (!refreshResult?.success) {
-          setCatalogActionMessage("Backfill was not started because Instagram auth repair failed.");
+          setCatalogActionMessage(
+            refreshAction === "instagram_auth_repair" ?
+              "Backfill was not started because Instagram auth repair failed."
+            : `Backfill was not started because ${platformLabel} cookies could not be refreshed.`,
+          );
           return;
         }
         if (refreshedHealth?.healthy !== true) {
-          setCatalogActionMessage("Backfill was not started because Instagram auth is still unhealthy after repair.");
+          setCatalogActionMessage(
+            refreshAction === "instagram_auth_repair" ?
+              "Backfill was not started because Instagram auth is still unhealthy after repair."
+            : `Backfill was not started because ${platformLabel} cookies are still unhealthy after refresh.`,
+          );
           return;
         }
-        setCatalogActionMessage("Instagram auth is repaired. Starting Backfill…");
+        setCatalogActionMessage(
+          refreshAction === "instagram_auth_repair" ?
+            "Instagram auth is repaired. Starting Backfill…"
+          : `${platformLabel} cookies are refreshed. Starting Backfill…`,
+        );
         await startCatalogActionRequest(pendingAction.action, pendingAction.requestBody);
         return;
       }
@@ -4281,21 +4350,28 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         error?: string;
         message?: string;
         detail?: { message?: string };
+        repair_action?: SocialAccountCatalogRunProgressSnapshot["repair_action"];
         repair_status?: string;
         resume_stage?: string | null;
       };
       if (!response.ok) {
         throw new Error(
-          data.error || data.message || data.detail?.message || "Failed to repair Instagram auth for this catalog run",
+          data.error || data.message || data.detail?.message || "Failed to repair auth for this catalog run",
         );
       }
-      setCatalogActionMessage("Repairing auth… A local headed Chrome window will open for confirmation.");
+      const repairAction = data.repair_action || catalogRunProgress?.repair_action || "repair_instagram_auth";
+      const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform];
+      setCatalogActionMessage(
+        repairAction === "repair_instagram_auth" ?
+          "Repairing auth… A local headed Chrome window will open for confirmation."
+        : `Refreshing ${platformLabel} cookies… A local headed Chrome window will open for confirmation.`,
+      );
       setCatalogRunProgress((current) =>
         current && current.run_id === normalizedRunId ?
           {
             ...current,
             operational_state: "blocked_auth",
-            repair_action: "repair_instagram_auth",
+            repair_action: repairAction,
             repair_status: (data.repair_status as SocialAccountCatalogRunProgressSnapshot["repair_status"]) || "running",
             resume_stage:
               (data.resume_stage as SocialAccountCatalogRunProgressSnapshot["resume_stage"]) || current.resume_stage,
@@ -4305,7 +4381,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       await refreshProfileSnapshotNow({ runId: normalizedRunId }).catch(() => {});
     } catch (error) {
       setCatalogActionMessage(
-        error instanceof Error ? error.message : "Failed to repair Instagram auth for this catalog run",
+        error instanceof Error ? error.message : "Failed to repair auth for this catalog run",
       );
     } finally {
       setRunningCatalogAction(null);
@@ -4345,8 +4421,18 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const dismissCatalogRun = async (runId: string) => {
     const normalizedRunId = runId.trim();
     if (!user || !normalizedRunId) return;
+    const wasDisplayedRun = displayedCatalogRunId === normalizedRunId;
     setDismissingCatalogRunId(normalizedRunId);
     setCatalogActionMessage(null);
+    setPendingDismissedCatalogRunIds((current) => new Set(current).add(normalizedRunId));
+    if (catalogProgressRunId === normalizedRunId) {
+      setCatalogProgressRunId(null);
+    }
+    if (catalogRunProgress?.run_id === normalizedRunId) {
+      setCatalogRunProgress(null);
+      setCatalogRunProgressError(null);
+    }
+    setCatalogProgressLastSuccessAt(null);
     try {
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(normalizedRunId)}/dismiss`,
@@ -4359,24 +4445,19 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       if (!response.ok) {
         throw new Error(data.error || "Failed to dismiss catalog run");
       }
-      if (catalogProgressRunId === normalizedRunId) {
-        setCatalogProgressRunId(null);
-      }
-      if (catalogRunProgress?.run_id === normalizedRunId) {
-        setCatalogRunProgress(null);
-        setCatalogRunProgressError(null);
-      }
-      setCatalogProgressLastSuccessAt(null);
-      setSummary((current) => {
-        if (!current) return current;
-        return {
-          ...current,
-          catalog_recent_runs: (current.catalog_recent_runs ?? []).filter((run) => run.run_id !== normalizedRunId),
-        };
-      });
       setCatalogActionMessage(`Dismissed run ${shortRunId(normalizedRunId)}.`);
       await refreshProfileSnapshotNow().catch(() => {});
     } catch (error) {
+      setPendingDismissedCatalogRunIds((current) => {
+        const next = new Set(current);
+        next.delete(normalizedRunId);
+        return next;
+      });
+      if (wasDisplayedRun) {
+        setCatalogProgressRunId(normalizedRunId);
+        setCatalogProgressRequestNonce((current) => current + 1);
+      }
+      await refreshProfileSnapshotNow({ runId: normalizedRunId }).catch(() => {});
       setCatalogActionMessage(error instanceof Error ? error.message : "Failed to dismiss catalog run");
     } finally {
       setDismissingCatalogRunId(null);
@@ -4948,7 +5029,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             </section>
           ) : null}
 
-          {hasSummary && supportsCatalog && displayedCatalogRunId ? (
+          {shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && displayedCatalogRunId ? (
             <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -5041,7 +5122,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   ) : null}
                   {catalogBlockedAuthPresentation ? (
                     <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-900">
-                      <p className="font-semibold">Instagram Auth Blocked</p>
+                      <p className="font-semibold">{catalogBlockedAuthPresentation.title}</p>
                       <p className="mt-1">{catalogBlockedAuthPresentation.detail}</p>
                       {catalogBlockedAuthPresentation.repairReason ? (
                         <p className="mt-2 text-xs text-red-800">
@@ -5055,7 +5136,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           disabled={catalogActionsBlocked}
                           className="mt-3 inline-flex rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {runningCatalogAction === "repair_auth" ? "Repairing auth…" : "Repair Instagram Auth"}
+                          {runningCatalogAction === "repair_auth" ? "Repairing auth…" : catalogBlockedAuthPresentation.repairButtonLabel}
                         </button>
                       ) : catalogBlockedAuthPresentation.repairCommand ? (
                         <p className="mt-3 text-xs text-red-800">
@@ -5375,7 +5456,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 </div>
               ) : null}
             </section>
-          ) : hasSummary && supportsCatalog ? (
+          ) : shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog ? (
             <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -5634,13 +5715,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                 <tr
                                   key={item.id}
                                   onClick={() => {
-                                    if (platform === "instagram") {
+                                    if (supportsCatalogDetail) {
                                       void openCatalogDetail(item.source_id);
                                     }
                                   }}
-                                  className={`${
-                                    platform === "instagram" ? "cursor-pointer hover:bg-zinc-50" : ""
-                                  }`}
+                                  className={`${supportsCatalogDetail ? "cursor-pointer hover:bg-zinc-50" : ""}`}
                                 >
                                   <td className="py-4 pr-4 align-top">
                                     <div className="max-w-xl">
@@ -5702,10 +5781,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                   <h2 className="text-lg font-semibold text-zinc-900">Recent Catalog Runs</h2>
                   <div className="mt-4 space-y-2">
-                    {(summary?.catalog_recent_runs ?? []).length === 0 ? (
+                    {visibleCatalogRecentRuns.length === 0 ? (
                       <p className="text-sm text-zinc-500">No catalog runs recorded yet.</p>
                     ) : (
-                      (summary?.catalog_recent_runs ?? []).map((run) => (
+                      visibleCatalogRecentRuns.map((run) => (
                         <div key={run.job_id || run.run_id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
                           <div className="flex items-start justify-between gap-3">
                             <div>
@@ -6349,7 +6428,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Catalog Detail</p>
                     <h2 className="mt-1 text-xl font-semibold text-zinc-900">
-                      {catalogDetail?.title || catalogDetail?.source_id || "Instagram Post"}
+                      {catalogDetail?.title || catalogDetail?.source_id || `${SOCIAL_ACCOUNT_PLATFORM_LABELS[platform] ?? platform} Post`}
                     </h2>
                   </div>
                   <button
@@ -6425,6 +6504,39 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                           <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
                             {catalogDetail.content || "No caption saved for this post."}
                           </p>
+                        </section>
+
+                        <section className="rounded-2xl border border-zinc-200 bg-white p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-500">Saved Discussion</h3>
+                            <p className="text-xs text-zinc-500">
+                              {formatInteger(
+                                catalogDetail.total_comments_in_db ??
+                                  catalogDetail.saved_comments ??
+                                  catalogDetail.discussion_items?.length ??
+                                  0,
+                              )}{" "}
+                              items
+                            </p>
+                          </div>
+                          <div className="mt-3 space-y-3">
+                            {(catalogDetail.discussion_items ?? []).length === 0 ? (
+                              <p className="text-sm text-zinc-500">No saved discussion items are available for this post yet.</p>
+                            ) : (
+                              (catalogDetail.discussion_items ?? []).slice(0, 20).map((item) => (
+                                <div key={item.id} className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                                  <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+                                    <span>{item.display_name || item.username || "Unknown"}</span>
+                                    {item.discussion_type ? <span>{item.discussion_type.replace(/_/g, " ")}</span> : null}
+                                    {item.created_at ? <span>{formatDateTime(item.created_at)}</span> : null}
+                                  </div>
+                                  <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700">
+                                    {item.text || "No text"}
+                                  </p>
+                                </div>
+                              ))
+                            )}
+                          </div>
                         </section>
                       </div>
 

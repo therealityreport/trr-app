@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildInternalAdminHeaders,
   getInternalAdminBearerToken,
+  resolveVerifiedAdminContext,
 } from "@/lib/server/trr-api/internal-admin-auth";
 
 const decodeJwtPayload = (token: string): Record<string, unknown> => {
@@ -77,5 +78,28 @@ describe("internal-admin-auth", () => {
     expect(secondClaims.aud).toBe("audience-two");
     expect(firstClaims.sub).toBe("trr-app-internal-admin");
     expect(secondClaims.scope).toBe("internal_admin");
+  });
+
+  it("preserves verified admin context in minted headers", () => {
+    const headers = buildInternalAdminHeaders(
+      {
+        uid: "admin-123",
+        email: "admin@example.com",
+        verifiedAt: 1_700_000_000_000,
+      },
+      {
+        Accept: "application/json",
+      },
+    );
+
+    expect(headers.get("Accept")).toBe("application/json");
+    expect(headers.get("x-trr-admin-uid")).toBe("admin-123");
+    expect(headers.get("x-trr-admin-email")).toBe("admin@example.com");
+    expect(headers.get("x-trr-admin-verified-at")).toBe("1700000000000");
+    expect(resolveVerifiedAdminContext(headers)).toEqual({
+      uid: "admin-123",
+      email: "admin@example.com",
+      verifiedAt: 1_700_000_000_000,
+    });
   });
 });

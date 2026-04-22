@@ -6,7 +6,10 @@ import {
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
-import { buildInternalAdminHeaders } from "@/lib/server/trr-api/internal-admin-auth";
+import {
+  buildInternalAdminHeaders,
+  type VerifiedAdminContext,
+} from "@/lib/server/trr-api/internal-admin-auth";
 import { getSeasonByShowAndNumber } from "@/lib/server/trr-api/trr-shows-repository";
 import { getBackendApiUrl } from "@/lib/server/trr-api/backend";
 
@@ -228,6 +231,12 @@ const sleep = async (ms: number): Promise<void> => {
 
 const isRetryableUpstreamStatus = (status: number): boolean => {
   return status === 429 || status === 502 || status === 503 || status === 504;
+};
+
+const AUTO_RETRY_ELIGIBLE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+const isAutoRetryEligible = (method: string | undefined): boolean => {
+  return AUTO_RETRY_ELIGIBLE_METHODS.has(String(method ?? "GET").toUpperCase());
 };
 
 const parseRetryAfterSeconds = (value: string | null): number | undefined => {
@@ -483,11 +492,13 @@ type FetchWithRetryOptions = {
 };
 
 type SeasonBackendOptions = FetchWithRetryOptions & {
+  adminContext?: VerifiedAdminContext;
   queryString?: string;
   seasonIdHint?: string | null;
 };
 
 type SocialBackendOptions = FetchWithRetryOptions & {
+  adminContext?: VerifiedAdminContext;
   queryString?: string;
 };
 
@@ -512,7 +523,8 @@ async function fetchBackend(
   backendUrl: string,
   options: FetchWithRetryOptions,
 ): Promise<Response> {
-  const retries = Math.max(0, options.retries ?? 0);
+  const method = options.method ?? "GET";
+  const retries = isAutoRetryEligible(method) ? Math.max(0, options.retries ?? 0) : 0;
   const maxAttempts = retries + 1;
   const timeoutMs = options.timeoutMs ?? 30_000;
   const requestHeaders = new Headers(options.headers);
@@ -527,7 +539,7 @@ async function fetchBackend(
       const response = await fetchWithTimeout(
         backendUrl,
         {
-          method: options.method ?? "GET",
+          method,
           headers: requestHeaders,
           body: options.body,
           cache: "no-store",
@@ -716,7 +728,7 @@ export const fetchSeasonBackendJson = async (
   const response = await fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: buildInternalAdminHeaders({
+    headers: buildInternalAdminHeaders(options.adminContext, {
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
     }),
@@ -736,7 +748,7 @@ export const fetchSocialBackendJson = async (
   const response = await fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: buildInternalAdminHeaders({
+    headers: buildInternalAdminHeaders(options.adminContext, {
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
     }),
@@ -758,7 +770,7 @@ export const fetchSeasonBackendResponse = async (
   return fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: buildInternalAdminHeaders({
+    headers: buildInternalAdminHeaders(options.adminContext, {
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
     }),

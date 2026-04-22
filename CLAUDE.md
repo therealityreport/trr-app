@@ -1,1 +1,1 @@
-AGENTS.md
+trr-app-brain/BRAIN.md

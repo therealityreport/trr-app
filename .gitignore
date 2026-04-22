@@ -33,3 +33,5 @@ apps/web/.cache/
 
 # Git worktrees
 /.worktrees/
+trr-app-brain/sessions/
+.loom-backup/

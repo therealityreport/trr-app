@@ -18,6 +18,10 @@ import { adminAuth } from "@/lib/firebaseAdmin";
 import { DEFAULT_ADMIN_DISPLAY_NAMES, DEFAULT_ADMIN_UIDS } from "@/lib/admin/constants";
 import { normalizeDisplayNameKey } from "@/lib/admin/display-names";
 import { getTrrAdminServiceKey, getTrrAdminUrl } from "@/lib/server/supabase-trr-admin";
+import {
+  resolveVerifiedAdminContext,
+  type VerifiedAdminContext,
+} from "@/lib/server/trr-api/internal-admin-auth";
 
 export type AuthProvider = "firebase" | "supabase";
 export type AuthTokenClaims = {
@@ -100,6 +104,10 @@ const AUTH_SHADOW_MODE = (process.env.TRR_AUTH_SHADOW_MODE ?? "false").toLowerCa
 const USE_EMULATORS = (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS ?? "false").toLowerCase() === "true";
 const HAS_SERVICE_ACCOUNT = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT) || USE_EMULATORS;
 const FIREBASE_WEB_API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "";
+const ADMIN_AUTH_EXTERNAL_TIMEOUT_MS = (() => {
+  const parsed = Number.parseInt(process.env.ADMIN_AUTH_EXTERNAL_TIMEOUT_MS ?? "3000", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3000;
+})();
 const AUTH_DIAGNOSTICS_PERSIST_ENABLED =
   (process.env.TRR_AUTH_DIAGNOSTICS_PERSIST ?? "true").toLowerCase() !== "false" &&
   process.env.NODE_ENV !== "test";
@@ -225,7 +233,31 @@ async function verifySupabaseToken(token: string): Promise<AuthTokenClaims | nul
   const client = await getSupabaseVerificationClient();
   if (!client) return null;
   try {
-    const { data, error } = await client.auth.getUser(token);
+    const result = await Promise.race<
+      | {
+          data: {
+            user: {
+              id: string;
+              email?: string | null;
+              user_metadata?: Record<string, unknown> | null;
+              app_metadata?: Record<string, unknown> | null;
+              identities?: unknown[] | null;
+            } | null;
+          };
+          error: unknown;
+        }
+      | null
+    >([
+      client.auth.getUser(token),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), ADMIN_AUTH_EXTERNAL_TIMEOUT_MS);
+      }),
+    ]);
+    if (!result) {
+      console.warn("[auth] Supabase token verification timed out");
+      return null;
+    }
+    const { data, error } = result;
     if (error || !data.user) {
       return null;
     }
@@ -286,6 +318,8 @@ async function verifyIdTokenWithoutAdmin(token: string): Promise<AuthTokenClaims
   if (!FIREBASE_WEB_API_KEY) return null;
   const payload = decodeJwtPayload(token);
   if (!payload) return null;
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), ADMIN_AUTH_EXTERNAL_TIMEOUT_MS);
   try {
     const res = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
@@ -293,6 +327,7 @@ async function verifyIdTokenWithoutAdmin(token: string): Promise<AuthTokenClaims
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ idToken: token }),
+        signal: abortController.signal,
       },
     );
     if (!res.ok) {
@@ -328,8 +363,14 @@ async function verifyIdTokenWithoutAdmin(token: string): Promise<AuthTokenClaims
     }
     return decoded as AuthTokenClaims;
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      console.warn("[auth] Identity Toolkit lookup aborted after timeout");
+      return null;
+    }
     console.error("[auth] Failed fallback token verification", error);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -553,6 +594,21 @@ function buildDevBypassUser(provider: AuthProvider = "firebase"): AuthenticatedU
   };
 }
 
+function buildPropagatedAuthenticatedUser(context: VerifiedAdminContext): AuthenticatedUser {
+  return {
+    uid: context.uid,
+    email: context.email ?? undefined,
+    provider: "firebase",
+    token: {
+      uid: context.uid,
+      sub: context.uid,
+      ...(context.email ? { email: context.email } : {}),
+      verified_admin_context: true,
+      verified_at: context.verifiedAt,
+    },
+  };
+}
+
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
@@ -583,6 +639,16 @@ export async function requireUser(request: NextRequest): Promise<AuthenticatedUs
     throw new Error("unauthorized");
   }
   return user;
+}
+
+export function toVerifiedAdminContext(
+  user: Pick<AuthenticatedUser, "uid" | "email">,
+): VerifiedAdminContext {
+  return {
+    uid: user.uid,
+    email: _normalizeOptionalString(user.email),
+    verifiedAt: Date.now(),
+  };
 }
 
 function parseAllowlist(raw: string | undefined, lowercase = true): Set<string> {
@@ -666,6 +732,11 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
     throw new Error("forbidden");
   }
 
+  const propagatedContext = resolveVerifiedAdminContext(request.headers);
+  if (propagatedContext) {
+    return buildPropagatedAuthenticatedUser(propagatedContext);
+  }
+
   if (isDevAdminBypassEnabled(request)) {
     const parsed = parseTokenFromRequest(request);
     if (parsed?.token.trim() === "dev-admin-bypass") {
@@ -687,4 +758,12 @@ export async function requireAdmin(request: NextRequest): Promise<AuthenticatedU
     throw new Error("forbidden");
   }
   return user;
+}
+
+export async function requireAdminContext(request: NextRequest): Promise<VerifiedAdminContext> {
+  const propagatedContext = resolveVerifiedAdminContext(request.headers);
+  if (propagatedContext) {
+    return propagatedContext;
+  }
+  return toVerifiedAdminContext(await requireAdmin(request));
 }

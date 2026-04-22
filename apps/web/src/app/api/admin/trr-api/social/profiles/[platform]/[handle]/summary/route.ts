@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/server/auth";
+import { requireAdmin, toVerifiedAdminContext } from "@/lib/server/auth";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -26,6 +26,7 @@ type RouteContext = {
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const user = await requireAdmin(request);
+    const adminContext = toVerifiedAdminContext(user);
     const { platform, handle } = await context.params;
     const cacheKey = buildUserScopedRouteCacheKey(
       user.uid,
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         const payload = await fetchSocialBackendJson(
           `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
           {
+            adminContext,
             fallbackError: "Failed to fetch social account profile summary",
             queryString: request.nextUrl.searchParams.toString(),
             retries: 0,
