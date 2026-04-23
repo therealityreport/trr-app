@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
       staleIfErrorTtlMs: LIVE_STATUS_SNAPSHOT_STALE_MS,
       forceRefresh,
       fetcher: async () =>
-        await fetchSocialBackendJson("/socials/live-status", {
+        await fetchSocialBackendJson("/live-status", {
           fallbackError: "Failed to fetch social live status",
           retries: 0,
           timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,

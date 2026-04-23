@@ -12,27 +12,32 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
+  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS: 5_000,
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
-  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 45_000,
 }));
 
 import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/progress/route";
 
 describe("social account catalog run progress proxy route", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     requireAdminContextMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     socialProxyErrorResponseMock.mockReset();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     requireAdminContextMock.mockResolvedValue({
-      uid: "admin-user",
+      uid: "admin-1",
       email: "admin@example.com",
-      verifiedAt: 1_700_000_000_000,
+      displayName: "Admin",
     });
     fetchSocialBackendJsonMock.mockResolvedValue({
-      run_id: "cc8db903-b725-4f86-8699-f880b351f010",
-      run_status: "queued",
+      run_id: "run-123",
+      run_status: "running",
+      run_state: "running",
+      completed_posts: 12,
+      total_posts: 100,
     });
     socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
       new Response(JSON.stringify({ error: String(error), code: "BACKEND_UNREACHABLE" }), {
@@ -42,57 +47,67 @@ describe("social account catalog run progress proxy route", () => {
     );
   });
 
-  it("forwards the progress query with retry-safe timeout settings", async () => {
+  it("forwards progress polling with the fast timeout and no retry", async () => {
     const response = await GET(
       new NextRequest(
-        "http://localhost/api/admin/trr-api/social/profiles/tiktok/bravotv/catalog/runs/cc8db903-b725-4f86-8699-f880b351f010/progress?recent_log_limit=25",
-        { method: "GET" },
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/runs/run-123/progress?recent_log_limit=25",
       ),
       {
-        params: Promise.resolve({
-          platform: "tiktok",
-          handle: "bravotv",
-          runId: "cc8db903-b725-4f86-8699-f880b351f010",
-        }),
+        params: Promise.resolve({ platform: "instagram", handle: "bravotv", runId: "run-123" }),
       },
     );
 
     expect(response.status).toBe(200);
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
-      "/profiles/tiktok/bravotv/catalog/runs/cc8db903-b725-4f86-8699-f880b351f010/progress?recent_log_limit=25",
+      "/profiles/instagram/bravotv/catalog/runs/run-123/progress?recent_log_limit=25",
       expect.objectContaining({
-        adminContext: expect.objectContaining({
-          uid: "admin-user",
-          email: "admin@example.com",
-          verifiedAt: 1_700_000_000_000,
-        }),
+        adminContext: expect.objectContaining({ uid: "admin-1" }),
         fallbackError: "Failed to fetch social account catalog run progress",
-        retries: 1,
-        timeoutMs: 45_000,
+        retries: 0,
+        timeoutMs: 5_000,
       }),
     );
   });
 
-  it("returns standardized proxy errors when the backend request fails", async () => {
+  it("returns standardized proxy errors", async () => {
     fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("fetch failed"));
 
     const response = await GET(
-      new NextRequest(
-        "http://localhost/api/admin/trr-api/social/profiles/tiktok/bravotv/catalog/runs/cc8db903-b725-4f86-8699-f880b351f010/progress?recent_log_limit=25",
-        { method: "GET" },
-      ),
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/runs/run-123/progress"),
       {
-        params: Promise.resolve({
-          platform: "tiktok",
-          handle: "bravotv",
-          runId: "cc8db903-b725-4f86-8699-f880b351f010",
-        }),
+        params: Promise.resolve({ platform: "instagram", handle: "bravotv", runId: "run-123" }),
       },
     );
-
     const payload = (await response.json()) as { code?: string };
+
     expect(response.status).toBe(502);
     expect(payload.code).toBe("BACKEND_UNREACHABLE");
     expect(socialProxyErrorResponseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs timing diagnostics for slow progress proxy calls", async () => {
+    const consoleInfo = vi.mocked(console.info);
+
+    const response = await GET(
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/runs/run-123/progress"),
+      {
+        params: Promise.resolve({ platform: "instagram", handle: "bravotv", runId: "run-123" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "[api] Social account catalog run progress timing",
+      expect.objectContaining({
+        platform: "instagram",
+        handle: "bravotv",
+        run_id: "run-123",
+        auth_ms: expect.any(Number),
+        params_ms: expect.any(Number),
+        upstream_ms: expect.any(Number),
+        response_ms: expect.any(Number),
+        total_ms: expect.any(Number),
+      }),
+    );
   });
 });

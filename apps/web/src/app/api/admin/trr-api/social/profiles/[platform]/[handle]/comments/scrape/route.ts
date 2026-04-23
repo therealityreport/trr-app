@@ -15,7 +15,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     await requireAdmin(request);
     const { platform, handle } = await context.params;
-    const body = await request.text();
+    const body = JSON.stringify((await request.json().catch(() => ({}))) as Record<string, unknown>);
     const data = await fetchSocialBackendJson(
       `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/comments/scrape`,
       {

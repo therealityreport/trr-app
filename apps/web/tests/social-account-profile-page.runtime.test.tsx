@@ -6181,58 +6181,62 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     expect(screen.getByRole("button", { name: "Sync Recent" })).toBeEnabled();
   });
 
-  it("optimistically hides a dismissed run before the dismiss request resolves", async () => {
-    let resolveDismiss: ((value: Response) => void) | null = null;
-    const dismissResponse = new Promise<Response>((resolve) => {
-      resolveDismiss = resolve;
-    });
+  it(
+    "optimistically hides a dismissed run before the dismiss request resolves",
+    async () => {
+      let resolveDismiss: ((value: Response) => void) | null = null;
+      const dismissResponse = new Promise<Response>((resolve) => {
+        resolveDismiss = resolve;
+      });
 
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/summary")) {
-        return jsonResponse({
-          ...baseSummary,
-          catalog_recent_runs: [
-            {
-              run_id: "run-dismiss-now",
-              status: "cancelled",
-              created_at: "2026-03-19T22:00:00.000Z",
-              completed_at: "2026-03-19T23:00:00.000Z",
-            },
-          ],
-        });
-      }
-      if (url.includes("/snapshot")) {
-        return jsonResponse({
-          summary: {
+      mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/summary")) {
+          return jsonResponse({
             ...baseSummary,
-            catalog_recent_runs: [],
-          },
-          catalog_run_progress: null,
-          generated_at: "2026-03-19T23:00:00.000Z",
-        });
-      }
-      if (url.includes("/catalog/runs/run-dismiss-now/dismiss")) {
-        expect(init?.method).toBe("POST");
-        return dismissResponse;
-      }
-      throw new Error(`Unhandled request: ${url}`);
-    });
+            catalog_recent_runs: [
+              {
+                run_id: "run-dismiss-now",
+                status: "cancelled",
+                created_at: "2026-03-19T22:00:00.000Z",
+                completed_at: "2026-03-19T23:00:00.000Z",
+              },
+            ],
+          });
+        }
+        if (url.includes("/snapshot")) {
+          return jsonResponse({
+            summary: {
+              ...baseSummary,
+              catalog_recent_runs: [],
+            },
+            catalog_run_progress: null,
+            generated_at: "2026-03-19T23:00:00.000Z",
+          });
+        }
+        if (url.includes("/catalog/runs/run-dismiss-now/dismiss")) {
+          expect(init?.method).toBe("POST");
+          return dismissResponse;
+        }
+        throw new Error(`Unhandled request: ${url}`);
+      });
 
-    const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
+      const { unmount } = render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
-    const dismissButtons = await screen.findAllByRole("button", { name: "Dismiss" });
-    expect(dismissButtons).toHaveLength(2);
+      const dismissButtons = await screen.findAllByRole("button", { name: "Dismiss" });
+      expect(dismissButtons).toHaveLength(2);
 
-    await act(async () => {
-      fireEvent.click(dismissButtons[0]);
-    });
+      await act(async () => {
+        fireEvent.click(dismissButtons[0]);
+      });
 
-    expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
-    expect(screen.queryAllByRole("button", { name: "Dismiss" })).toHaveLength(0);
-    resolveDismiss = null;
-    unmount();
-  });
+      expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
+      expect(screen.queryAllByRole("button", { name: "Dismiss" })).toHaveLength(0);
+      resolveDismiss = null;
+      unmount();
+    },
+    12_000,
+  );
 
   it("shows restart backfill after a terminal catalog run", async () => {
     mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {

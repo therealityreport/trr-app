@@ -1560,6 +1560,35 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     }
   }, [refreshSummary, user]);
 
+  const fetchCatalogRunProgressSnapshot = useCallback(
+    async (runId: string, options?: { signal?: AbortSignal; recentLogLimit?: number }) => {
+      if (!user) {
+        throw new Error("Missing admin user");
+      }
+      const normalizedRunId = String(runId || "").trim();
+      if (!normalizedRunId) {
+        throw new Error("Missing catalog run id");
+      }
+      const query = new URLSearchParams({
+        recent_log_limit: String(options?.recentLogLimit ?? 25),
+      });
+      const response = await fetchAdminWithAuth(
+        `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(normalizedRunId)}/progress?${query.toString()}`,
+        { signal: options?.signal },
+        { preferredUser: user },
+      );
+      const data = (await response.json().catch(() => ({}))) as CatalogRunProgressResponse;
+      if (!response.ok) {
+        throw buildSocialAccountRequestError(
+          toProxyErrorPayload(data),
+          "Failed to load catalog run progress",
+        );
+      }
+      return data as SocialAccountCatalogRunProgressSnapshot;
+    },
+    [fetchAdminWithAuth, handle, platform, user],
+  );
+
   const fetchProfileSnapshot = useCallback(
     async (options?: { signal?: AbortSignal; forceRefresh?: boolean; runId?: string | null; detail?: SummaryFetchDetail }) => {
       if (!user) {
@@ -2731,19 +2760,24 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setCatalogRunProgressLoading(true);
 
     void fetchProfileSnapshotRef.current({ runId: normalizedDisplayedRunId, detail: "lite" })
-      .then((snapshot) => {
+      .then(async (snapshot) => {
         if (cancelled) return;
         if (snapshot.payload.summary) {
           setSummary(snapshot.payload.summary);
           setSummaryUninitialized(false);
           setSummaryError(null);
         }
-        if (snapshot.payload.catalog_run_progress) {
-          setCatalogProgressSaturationActive(false);
-          setCatalogRunProgress(snapshot.payload.catalog_run_progress);
-          setCatalogRunProgressError(null);
-          setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
-        }
+        const progress =
+          snapshot.payload.catalog_run_progress ??
+          (displayedCatalogRunStatus === "completed"
+            ? null
+            : await fetchCatalogRunProgressSnapshot(normalizedDisplayedRunId));
+        if (cancelled) return;
+        if (!progress) return;
+        setCatalogProgressSaturationActive(false);
+        setCatalogRunProgress(progress);
+        setCatalogRunProgressError(null);
+        setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
       })
       .catch((error) => {
         if (cancelled) return;
@@ -2768,6 +2802,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     checking,
     displayedCatalogRunId,
     displayedCatalogRunStatus,
+    fetchCatalogRunProgressSnapshot,
     hasAccess,
     summaryUninitialized,
     supportsCatalog,
@@ -3180,29 +3215,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (!backgroundCatalogRunId || !user) throw snapshotError;
         const normalizedRunId = String(backgroundCatalogRunId).trim();
         if (!normalizedRunId) throw snapshotError;
-        const response = await fetchAdminWithAuth(
-          `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(normalizedRunId)}/progress?recent_log_limit=25`,
-          { signal },
-          { preferredUser: user },
-        );
-        const progressBody = (await response.json().catch(() => null)) as
-          | SocialAccountCatalogRunProgressSnapshot
-          | ProxyErrorPayload
-          | null;
-        if (!response.ok) {
-          // Propagate the real progress error so that saturation signals
-          // (code: BACKEND_SATURATED, retry_after_seconds) reach the polling
-          // backoff logic instead of being masked by the snapshot error.
-          throw buildSocialAccountRequestError(
-            toProxyErrorPayload(progressBody),
-            "Failed to load catalog run progress",
-          );
-        }
-        if (!progressBody) throw snapshotError;
+        const progressBody = await fetchCatalogRunProgressSnapshot(normalizedRunId, { signal });
         return {
           payload: {
             summary: null,
-            catalog_run_progress: progressBody as SocialAccountCatalogRunProgressSnapshot,
+            catalog_run_progress: progressBody,
             generated_at: new Date().toISOString(),
           } as SocialAccountProfileSnapshot,
           cacheStatus: "fallback-direct",
