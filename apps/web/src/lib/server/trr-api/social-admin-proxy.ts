@@ -93,8 +93,10 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 export const SOCIAL_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_SHORT_TIMEOUT_MS", 10_000);
 export const SOCIAL_PROXY_DEFAULT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_DEFAULT_TIMEOUT_MS", 25_000);
 export const SOCIAL_PROXY_LONG_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_LONG_TIMEOUT_MS", 60_000);
+export const SOCIAL_PROXY_PROGRESS_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROGRESS_PROXY_TIMEOUT_MS", 5_000);
 
 const readTimeoutTier = (timeoutMs: number): string => {
+  if (timeoutMs === SOCIAL_PROXY_PROGRESS_TIMEOUT_MS) return "progress";
   if (timeoutMs === SOCIAL_PROXY_SHORT_TIMEOUT_MS) return "short";
   if (timeoutMs === SOCIAL_PROXY_DEFAULT_TIMEOUT_MS) return "default";
   if (timeoutMs === SOCIAL_PROXY_LONG_TIMEOUT_MS) return "long";
@@ -502,6 +504,15 @@ type SocialBackendOptions = FetchWithRetryOptions & {
   queryString?: string;
 };
 
+const buildProxyHeaders = (
+  adminContext: VerifiedAdminContext | undefined,
+  headers?: HeadersInit,
+): Headers => {
+  return adminContext
+    ? buildInternalAdminHeaders(adminContext, headers)
+    : buildInternalAdminHeaders(headers);
+};
+
 async function fetchWithTimeout(
   input: string,
   init: RequestInit,
@@ -728,7 +739,7 @@ export const fetchSeasonBackendJson = async (
   const response = await fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: buildInternalAdminHeaders(options.adminContext, {
+    headers: buildProxyHeaders(options.adminContext, {
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
     }),
@@ -748,7 +759,7 @@ export const fetchSocialBackendJson = async (
   const response = await fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: buildInternalAdminHeaders(options.adminContext, {
+    headers: buildProxyHeaders(options.adminContext, {
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
     }),
@@ -770,7 +781,7 @@ export const fetchSeasonBackendResponse = async (
   return fetchBackend(backendUrl, {
     ...options,
     traceId,
-    headers: buildInternalAdminHeaders(options.adminContext, {
+    headers: buildProxyHeaders(options.adminContext, {
       "x-trace-id": traceId,
       ...(options.headers ?? {}),
     }),

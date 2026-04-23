@@ -76,10 +76,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
           recentRuns.find((run) => String(run.run_id ?? "").trim() === explicitRunId)?.status ?? null;
         const shouldLoadExplicitRunProgress =
           explicitRunId.length > 0 &&
-          (!explicitRunStatus || ACTIVE_CATALOG_RUN_STATUSES.has(String(explicitRunStatus).trim().toLowerCase()));
-        const progressRunId = shouldLoadExplicitRunProgress
-          ? explicitRunId
-          : typeof inferredRunId === "string" && inferredRunId.trim().length > 0
+          Boolean(explicitRunStatus) &&
+          ACTIVE_CATALOG_RUN_STATUSES.has(String(explicitRunStatus).trim().toLowerCase());
+        const progressRunId =
+          explicitRunId.length > 0
+            ? shouldLoadExplicitRunProgress
+              ? explicitRunId
+              : ""
+            : typeof inferredRunId === "string" && inferredRunId.trim().length > 0
             ? inferredRunId.trim()
             : "";
 

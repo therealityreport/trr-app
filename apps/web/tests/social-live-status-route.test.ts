@@ -56,6 +56,14 @@ describe("social live status route", () => {
     expect(typeof secondPayload.generated_at).toBe("string");
     expect(typeof secondPayload.cache_age_ms).toBe("number");
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledTimes(1);
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/live-status",
+      expect.objectContaining({
+        fallbackError: "Failed to fetch social live status",
+        retries: 0,
+        timeoutMs: 25_000,
+      }),
+    );
   });
 
   it("forces a refresh when refresh=1 is present", async () => {

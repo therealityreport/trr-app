@@ -15,9 +15,10 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
 }));
 
 import {
-  fetchSocialBackendJson,
   fetchSeasonBackendJson,
+  fetchSocialBackendJson,
   resetSeasonIdResolutionCacheForTests,
+  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
 
@@ -106,6 +107,10 @@ describe("social-admin-proxy", () => {
     ).rejects.toThrow("temporary upstream failure");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const forwardedHeaders = new Headers(requestInit?.headers);
+    expect(forwardedHeaders.get("content-type")).toBe("application/json");
+    expect(requestInit?.body).toBe(JSON.stringify({}));
   });
 
   it("still retries idempotent GET requests on retryable upstream errors", async () => {
@@ -492,6 +497,44 @@ describe("social-admin-proxy", () => {
             code: "UND_ERR_ABORTED",
             reason: "timeout",
           }),
+        }),
+      }),
+    );
+  });
+
+  it("classifies the catalog progress timeout tier separately", async () => {
+    getBackendApiUrlMock.mockImplementation((path: string) => `http://backend.local/api/v1${path}`);
+    const abortError = new Error("signal aborted");
+    abortError.name = "AbortError";
+    const fetchMock = vi.fn().mockRejectedValue(abortError);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    let thrown: unknown;
+    try {
+      await fetchSocialBackendJson("/profiles/instagram/bravotv/catalog/runs/run-1/progress", {
+        fallbackError: "Failed to fetch social account catalog run progress",
+        retries: 0,
+        timeoutMs: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    const response = socialProxyErrorResponse(thrown, "[test] catalog progress timeout");
+    const payload = (await response.json()) as { code?: string; trace_id?: string };
+    const consoleErrorMock = vi.mocked(console.error);
+    const [, logPayload] = consoleErrorMock.mock.calls.at(-1) ?? [];
+
+    expect(response.status).toBe(504);
+    expect(payload.code).toBe("UPSTREAM_TIMEOUT");
+    expect(logPayload).toEqual(
+      expect.objectContaining({
+        code: "UPSTREAM_TIMEOUT",
+        trace_id: payload.trace_id,
+        context: expect.objectContaining({
+          backend_path: "/api/v1/admin/socials/profiles/instagram/bravotv/catalog/runs/run-1/progress",
+          timeout_ms: 5_000,
+          timeout_tier: "progress",
         }),
       }),
     );

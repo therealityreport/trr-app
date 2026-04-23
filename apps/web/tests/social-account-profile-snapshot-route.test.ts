@@ -156,6 +156,32 @@ describe("social account profile snapshot route", () => {
     });
   });
 
+  it("does not nest catalog progress for explicit runs missing from the summary snapshot", async () => {
+    mocks.getSummary.mockResolvedValue(
+      NextResponse.json({
+        catalog_recent_runs: [],
+      }),
+    );
+
+    const response = await GET(
+      new NextRequest(
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/snapshot?run_id=run-completed-1&recent_log_limit=10",
+      ),
+      {
+        params: Promise.resolve({
+          platform: "instagram",
+          handle: "bravotv",
+        }),
+      },
+    );
+
+    expect(mocks.getCatalogRunProgress).not.toHaveBeenCalled();
+    const payload = (await response.json()) as {
+      catalog_run_progress?: unknown;
+    };
+    expect(payload.catalog_run_progress).toBeNull();
+  });
+
   it("forwards the requested summary detail to the nested summary subrequest", async () => {
     mocks.getSummary.mockResolvedValue(NextResponse.json({ catalog_recent_runs: [] }));
 
