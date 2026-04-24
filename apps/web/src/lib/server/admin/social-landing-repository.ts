@@ -536,6 +536,10 @@ const safeLoadCastSocialBladeRows = async (
         .filter(Boolean),
     ),
   ];
+  const socialBladePlatforms = CAST_SOCIALBLADE_PLATFORMS.map((platform) =>
+    platform.toLowerCase(),
+  );
+  const socialBladePersonIds = [...new Set(personIds)];
 
   try {
     const result = await query<SocialBladeSummaryRow>(
@@ -549,20 +553,20 @@ const safeLoadCastSocialBladeRows = async (
           stats_refreshed,
           raw_response->>'socialblade_url' AS socialblade_url
         FROM pipeline.socialblade_growth_data
-        WHERE lower(platform) = ANY($1::text[])
+        WHERE platform = ANY($1::text[])
           AND (
-            person_id::text = ANY($2::text[])
+            person_id = ANY($2::uuid[])
             OR (
               person_id IS NULL
               AND concat(
-                lower(platform),
+                platform,
                 ':',
                 lower(regexp_replace(ltrim(account_handle, '@'), '[^a-zA-Z0-9._-]', '', 'g'))
               ) = ANY($3::text[])
             )
           )
       `,
-      [[...CAST_SOCIALBLADE_PLATFORMS], [...new Set(personIds)], accountKeys],
+      [socialBladePlatforms, socialBladePersonIds, accountKeys],
     );
     return result.rows;
   } catch (error) {

@@ -745,7 +745,12 @@ describe("social landing repository", () => {
     expect(sql).toContain("regexp_replace(ltrim(account_handle, '@')");
     expect(sql).toContain("person_id IS NULL");
     expect(sql).toContain("concat(");
+    expect(sql).toContain("WHERE platform = ANY($1::text[])");
+    expect(sql).toContain("person_id = ANY($2::uuid[])");
+    expect(sql).not.toContain("WHERE lower(platform) = ANY");
+    expect(sql).not.toContain("person_id::text = ANY");
     expect(sql).not.toMatch(/\baccount_handle\s*=\s*ANY\(\$3::text\[\]\)/);
+    expect(params[0]).toEqual(["instagram", "youtube", "facebook"]);
     expect(params[2]).toContain("youtube:andycohen");
 
     expect(payload.cast_socialblade_shows).toEqual([
