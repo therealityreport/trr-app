@@ -114,27 +114,43 @@ describe("classifyConnectionClass", () => {
 });
 
 describe("resolvePostgresPoolSizing", () => {
-  it("uses larger session defaults in local development", () => {
+  it("keeps session defaults bounded in local development", () => {
     const sizing = resolvePostgresPoolSizing(
       "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
       { NODE_ENV: "development" },
     );
 
     expect(sizing).toEqual({
-      maxConcurrentOperations: 8,
-      poolMax: 8,
+      maxConcurrentOperations: 4,
+      poolMax: 4,
     });
   });
 
-  it("keeps deployed session defaults conservative", () => {
+  it("keeps deployed session defaults inside the Supabase capacity budget", () => {
     const sizing = resolvePostgresPoolSizing(
       "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
       { NODE_ENV: "production" },
     );
 
     expect(sizing).toEqual({
-      maxConcurrentOperations: 6,
-      poolMax: 6,
+      maxConcurrentOperations: 2,
+      poolMax: 4,
+    });
+  });
+
+  it("honors explicit local debug pool overrides", () => {
+    const sizing = resolvePostgresPoolSizing(
+      "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      {
+        NODE_ENV: "development",
+        POSTGRES_POOL_MAX: "2",
+        POSTGRES_MAX_CONCURRENT_OPERATIONS: "2",
+      },
+    );
+
+    expect(sizing).toEqual({
+      maxConcurrentOperations: 2,
+      poolMax: 2,
     });
   });
 });

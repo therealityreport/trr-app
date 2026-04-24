@@ -80,6 +80,9 @@ const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app-server";
 // (autocommit per statement) and remain schema-qualified in the codebase, so
 // the server default is acceptable there.
 const DEFAULT_TRANSACTION_SEARCH_PATH = "public, core, firebase_surveys";
+const DEFAULT_SESSION_POOL_MAX = 4;
+const DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_LOCAL = 4;
+const DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_DEPLOYED = 2;
 
 const classifyHostClass = (connectionString: string): CandidateDetail["hostClass"] => {
   const host = parseConnectionHostname(connectionString);
@@ -235,13 +238,16 @@ export const resolvePostgresPoolSizing = (
 ): PostgresPoolSizing => {
   const isDevelopment = env.NODE_ENV === "development";
   const isSessionPooler = isSupavisorSessionPoolerConnectionString(connectionString);
+  const defaultSessionMaxConcurrentOperations = isDevelopment
+    ? DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_LOCAL
+    : DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_DEPLOYED;
   return {
     maxConcurrentOperations:
       parsePositiveInt(env.POSTGRES_MAX_CONCURRENT_OPERATIONS) ??
-      (isSessionPooler ? (isDevelopment ? 8 : 6) : isDevelopment ? 8 : 12),
+      (isSessionPooler ? defaultSessionMaxConcurrentOperations : isDevelopment ? 8 : 12),
     poolMax:
       parsePositiveInt(env.POSTGRES_POOL_MAX) ??
-      (isSessionPooler ? (isDevelopment ? 8 : 6) : isDevelopment ? 8 : 10),
+      (isSessionPooler ? DEFAULT_SESSION_POOL_MAX : isDevelopment ? 8 : 10),
   };
 };
 
