@@ -8,6 +8,7 @@ const {
   listRedditCommunitiesMock,
   fetchSocialBackendJsonMock,
   fetchAdminBackendJsonMock,
+  queryMock,
 } = vi.hoisted(() => ({
   getCoveredShowsMock: vi.fn(),
   listPrimaryPersonExternalIdsByPersonIdsMock: vi.fn(),
@@ -16,6 +17,7 @@ const {
   listRedditCommunitiesMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   fetchAdminBackendJsonMock: vi.fn(),
+  queryMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/admin/covered-shows-repository", () => ({
@@ -42,6 +44,10 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   fetchAdminBackendJson: fetchAdminBackendJsonMock,
 }));
 
+vi.mock("@/lib/server/postgres", () => ({
+  query: queryMock,
+}));
+
 import { getSocialLandingPayload } from "@/lib/server/admin/social-landing-repository";
 
 const delay = (ms: number) =>
@@ -58,6 +64,7 @@ describe("social landing repository", () => {
     listRedditCommunitiesMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     fetchAdminBackendJsonMock.mockReset();
+    queryMock.mockReset();
 
     getCoveredShowsMock.mockResolvedValue([
       {
@@ -445,6 +452,7 @@ describe("social landing repository", () => {
     );
 
     listEffectivePersonSocialHandlesByPersonIdsMock.mockResolvedValue(new Map());
+    queryMock.mockResolvedValue({ rows: [] });
   });
 
   it("builds networks, shows, and people with WWHL duplication and handle filtering", async () => {
@@ -714,5 +722,148 @@ describe("social landing repository", () => {
         }),
       ]),
     );
+  });
+
+  it("includes a show when a cast member matches a SocialBlade row by person_id", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: "person-heather",
+          platform: "instagram",
+          account_handle: "heathergay",
+          scraped_at: "2026-04-20T12:00:00.000Z",
+          updated_at: "2026-04-20T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/instagram/user/heathergay",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+    expect(sql).toContain("regexp_replace(ltrim(account_handle, '@')");
+    expect(sql).toContain("person_id IS NULL");
+    expect(sql).toContain("concat(");
+    expect(sql).not.toMatch(/\baccount_handle\s*=\s*ANY\(\$3::text\[\]\)/);
+    expect(params[2]).toContain("youtube:andycohen");
+
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-rhoslc",
+        show_name: "The Real Housewives of Salt Lake City",
+        platform_counts: { instagram: 1 },
+        cast_member_count: 1,
+        latest_scraped_at: "2026-04-20T12:00:00.000Z",
+        members: [
+          expect.objectContaining({
+            person_id: "person-heather",
+            full_name: "Heather Gay",
+            photo_url: null,
+            accounts: [
+              expect.objectContaining({
+                platform: "instagram",
+                handle: "heathergay",
+                display_label: "@heathergay",
+                account_href: "/social/instagram/heathergay/socialblade",
+                socialblade_url:
+                  "https://socialblade.com/instagram/user/heathergay",
+                stats_refreshed: true,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("matches account-only SocialBlade rows by normalized platform and handle", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: null,
+          platform: "youtube",
+          account_handle: "@AndyCohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          stats_refreshed: false,
+          socialblade_url: null,
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-wwhl",
+        platform_counts: { youtube: 1 },
+        members: [
+          expect.objectContaining({
+            person_id: "person-andy",
+            full_name: "Andy Cohen",
+            accounts: [
+              expect.objectContaining({
+                platform: "youtube",
+                handle: "andycohen",
+                display_label: "andycohen",
+                account_href: "/social/youtube/andycohen/socialblade",
+                stats_refreshed: false,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("omits unsupported platforms and shows with no SocialBlade rows", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: "person-heather",
+          platform: "tiktok",
+          account_handle: "heathergay",
+          scraped_at: "2026-04-22T12:00:00.000Z",
+          updated_at: "2026-04-22T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://example.test/unsupported",
+        },
+        {
+          person_id: null,
+          platform: "facebook",
+          account_handle: "unmatched-account",
+          scraped_at: "2026-04-22T13:00:00.000Z",
+          updated_at: "2026-04-22T13:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: null,
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([]);
+  });
+
+  it("returns an empty cast SocialBlade section when storage is unavailable without breaking the landing payload", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    queryMock.mockRejectedValue(new Error("relation does not exist"));
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([]);
+    expect(payload.network_sets).toHaveLength(1);
+    expect(payload.show_sets).toHaveLength(2);
+    expect(payload.people_profiles.map((person) => person.full_name)).toEqual([
+      "Andy Cohen",
+      "Heather Gay",
+    ]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[social-landing] Failed to load cast SocialBlade rows",
+      expect.any(Error),
+    );
+
+    warnSpy.mockRestore();
   });
 });

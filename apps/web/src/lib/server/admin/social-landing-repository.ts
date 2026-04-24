@@ -6,11 +6,16 @@ import {
   type PersonExternalIdRecord,
   type PersonExternalIdSource,
 } from "@/lib/admin/person-external-ids";
+import { SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS } from "@/lib/admin/social-account-profile";
 import {
   buildSocialAccountProfileUrl,
   normalizeSocialAccountProfileHandle,
 } from "@/lib/admin/show-admin-routes";
 import type {
+  CastSocialBladeAccountSummary,
+  CastSocialBladeMemberSummary,
+  CastSocialBladePlatform,
+  CastSocialBladeShowSummary,
   NetworkProfileSet,
   PersonProfileShowSummary,
   PersonProfileSummary,
@@ -42,6 +47,7 @@ import {
   listShowExternalIdsByIds,
   type PersonEffectiveSocialHandles,
 } from "@/lib/server/trr-api/trr-shows-repository";
+import { query } from "@/lib/server/postgres";
 
 type SharedSourcesPayload = {
   sources?: SharedAccountSourceSummary[];
@@ -54,6 +60,7 @@ type SharedReviewPayload = {
 type CastSummaryMember = {
   person_id?: string | null;
   full_name?: string | null;
+  photo_url?: string | null;
 };
 
 type CastSummaryShow = {
@@ -70,6 +77,16 @@ type SupportedPersonSocialSource = Extract<
   "facebook" | "instagram" | "threads" | "twitter" | "tiktok" | "youtube"
 >;
 
+type SocialBladeSummaryRow = Record<string, unknown> & {
+  person_id: string | null;
+  platform: string | null;
+  account_handle: string | null;
+  scraped_at: string | Date | null;
+  updated_at: string | Date | null;
+  stats_refreshed: boolean | null;
+  socialblade_url: string | null;
+};
+
 const PERSON_SOCIAL_SOURCES: readonly SupportedPersonSocialSource[] = [
   "facebook",
   "instagram",
@@ -78,6 +95,14 @@ const PERSON_SOCIAL_SOURCES: readonly SupportedPersonSocialSource[] = [
   "tiktok",
   "youtube",
 ] as const;
+
+const CAST_SOCIALBLADE_PLATFORMS =
+  SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS.filter(
+    (platform): platform is CastSocialBladePlatform =>
+      platform === "instagram" ||
+      platform === "youtube" ||
+      platform === "facebook",
+  );
 
 const SHOW_EXTERNAL_ID_KEYS: Record<
   SupportedPersonSocialSource,
@@ -465,6 +490,78 @@ const safeLoadEffectivePersonSocialHandlesMap = async (
   }
 };
 
+const toIsoStringOrNull = (value: string | Date | null | undefined): string | null => {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+};
+
+const normalizeCastSocialBladePlatform = (
+  value: string | null | undefined,
+): CastSocialBladePlatform | null => {
+  const platform = normalizePlatform(value);
+  return platform && CAST_SOCIALBLADE_PLATFORMS.includes(platform as CastSocialBladePlatform)
+    ? (platform as CastSocialBladePlatform)
+    : null;
+};
+
+const buildSocialBladeAccountKey = (
+  platform: CastSocialBladePlatform,
+  handle: string,
+): string => `${platform}:${handle}`.toLowerCase();
+
+const safeLoadCastSocialBladeRows = async (
+  personIds: readonly string[],
+  handles: readonly SocialHandleSummary[],
+): Promise<SocialBladeSummaryRow[]> => {
+  if (personIds.length === 0 && handles.length === 0) return [];
+
+  const accountKeys = [
+    ...new Set(
+      handles
+        .map((handle) => {
+          const platform = normalizeCastSocialBladePlatform(handle.platform);
+          return platform ? buildSocialBladeAccountKey(platform, handle.handle) : null;
+        })
+        .filter(Boolean),
+    ),
+  ];
+
+  try {
+    const result = await query<SocialBladeSummaryRow>(
+      `
+        SELECT
+          person_id::text AS person_id,
+          platform,
+          account_handle,
+          scraped_at,
+          updated_at,
+          stats_refreshed,
+          raw_response->>'socialblade_url' AS socialblade_url
+        FROM pipeline.socialblade_growth_data
+        WHERE lower(platform) = ANY($1::text[])
+          AND (
+            person_id::text = ANY($2::text[])
+            OR (
+              person_id IS NULL
+              AND concat(
+                lower(platform),
+                ':',
+                lower(regexp_replace(ltrim(account_handle, '@'), '[^a-zA-Z0-9._-]', '', 'g'))
+              ) = ANY($3::text[])
+            )
+          )
+      `,
+      [[...CAST_SOCIALBLADE_PLATFORMS], [...new Set(personIds)], accountKeys],
+    );
+    return result.rows;
+  } catch (error) {
+    console.warn("[social-landing] Failed to load cast SocialBlade rows", error);
+    return [];
+  }
+};
+
 const extractShowHandles = (
   externalIdsValue: Record<string, unknown> | null | undefined,
 ): SocialHandleSummary[] => {
@@ -567,6 +664,7 @@ const buildPeopleProfiles = async (
 ): Promise<{
   peopleProfiles: PersonProfileSummary[];
   personTargets: PersonTargetSummary[];
+  personHandlesByPersonId: ReadonlyMap<string, SocialHandleSummary[]>;
 }> => {
   const people = new Map<
     string,
@@ -622,6 +720,7 @@ const buildPeopleProfiles = async (
     )
     .sort((left, right) => left.full_name.localeCompare(right.full_name));
 
+  const personHandlesByPersonId = new Map<string, SocialHandleSummary[]>();
   const hydrated = personTargets.map((person) => {
     const records = externalIdsByPersonId.get(person.person_id) ?? [];
     const handles = dedupeHandles(
@@ -634,6 +733,7 @@ const buildPeopleProfiles = async (
         ),
       ],
     );
+    personHandlesByPersonId.set(person.person_id, handles);
     if (handles.length === 0) return null;
 
     return {
@@ -649,7 +749,165 @@ const buildPeopleProfiles = async (
       .filter((person): person is PersonProfileSummary => person !== null)
       .sort((left, right) => left.full_name.localeCompare(right.full_name)),
     personTargets,
+    personHandlesByPersonId,
   };
+};
+
+const buildCastSocialBladeAccountSummary = (
+  row: SocialBladeSummaryRow,
+): CastSocialBladeAccountSummary | null => {
+  const platform = normalizeCastSocialBladePlatform(row.platform);
+  if (!platform || typeof row.account_handle !== "string") return null;
+  const handle = toCanonicalInternalHandle(platform, row.account_handle);
+  if (!handle) return null;
+
+  return {
+    platform,
+    handle,
+    display_label: formatHandleLabel(platform, handle),
+    account_href: buildSocialAccountProfileUrl({
+      platform,
+      handle,
+      tab: "socialblade",
+    }),
+    socialblade_url:
+      typeof row.socialblade_url === "string" && row.socialblade_url.trim()
+        ? row.socialblade_url.trim()
+        : null,
+    scraped_at: toIsoStringOrNull(row.scraped_at),
+    updated_at: toIsoStringOrNull(row.updated_at),
+    stats_refreshed: row.stats_refreshed === true,
+  };
+};
+
+const latestTimestamp = (values: readonly (string | null)[]): string | null => {
+  let latest: string | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!value) continue;
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp) || timestamp <= latestMs) continue;
+    latest = value;
+    latestMs = timestamp;
+  }
+  return latest;
+};
+
+const buildCastSocialBladeShows = async (
+  coveredShows: readonly CoveredShow[],
+  castByShowId: ReadonlyMap<string, CastSummaryMember[]>,
+  personHandlesByPersonId: ReadonlyMap<string, SocialHandleSummary[]>,
+): Promise<CastSocialBladeShowSummary[]> => {
+  const personIds = [...personHandlesByPersonId.keys()];
+  const socialBladeRows = await safeLoadCastSocialBladeRows(
+    personIds,
+    [...personHandlesByPersonId.values()].flat(),
+  );
+
+  const rowsByPersonId = new Map<string, SocialBladeSummaryRow[]>();
+  const accountOnlyRowsByKey = new Map<string, SocialBladeSummaryRow[]>();
+  for (const row of socialBladeRows) {
+    const platform = normalizeCastSocialBladePlatform(row.platform);
+    if (!platform || typeof row.account_handle !== "string") continue;
+    const handle = toCanonicalInternalHandle(platform, row.account_handle);
+    if (!handle) continue;
+
+    const personId = typeof row.person_id === "string" ? row.person_id.trim() : "";
+    if (personId) {
+      const rows = rowsByPersonId.get(personId) ?? [];
+      rows.push(row);
+      rowsByPersonId.set(personId, rows);
+      continue;
+    }
+
+    const key = buildSocialBladeAccountKey(platform, handle);
+    const rows = accountOnlyRowsByKey.get(key) ?? [];
+    rows.push(row);
+    accountOnlyRowsByKey.set(key, rows);
+  }
+
+  return [...coveredShows]
+    .sort((left, right) => left.show_name.localeCompare(right.show_name))
+    .map((show) => {
+      const members = (castByShowId.get(show.trr_show_id) ?? [])
+        .map((member): CastSocialBladeMemberSummary | null => {
+          const personId =
+            typeof member.person_id === "string" ? member.person_id.trim() : "";
+          const fullName =
+            typeof member.full_name === "string" ? member.full_name.trim() : "";
+          if (!personId || !fullName) return null;
+
+          const rowCandidates: SocialBladeSummaryRow[] = [
+            ...(rowsByPersonId.get(personId) ?? []),
+          ];
+          for (const handle of personHandlesByPersonId.get(personId) ?? []) {
+            const platform = normalizeCastSocialBladePlatform(handle.platform);
+            if (!platform) continue;
+            rowCandidates.push(
+              ...(accountOnlyRowsByKey.get(
+                buildSocialBladeAccountKey(platform, handle.handle),
+              ) ?? []),
+            );
+          }
+
+          const seenAccounts = new Set<string>();
+          const accounts = rowCandidates
+            .map((row) => buildCastSocialBladeAccountSummary(row))
+            .filter((account): account is CastSocialBladeAccountSummary => {
+              if (!account) return false;
+              const key = buildSocialBladeAccountKey(account.platform, account.handle);
+              if (seenAccounts.has(key)) return false;
+              seenAccounts.add(key);
+              return true;
+            })
+            .sort((left, right) => {
+              if (left.platform !== right.platform) {
+                return left.platform.localeCompare(right.platform);
+              }
+              return left.handle.localeCompare(right.handle);
+            });
+
+          if (accounts.length === 0) return null;
+          return {
+            person_id: personId,
+            full_name: fullName,
+            photo_url:
+              typeof member.photo_url === "string" && member.photo_url.trim()
+                ? member.photo_url.trim()
+                : null,
+            accounts,
+          };
+        })
+        .filter(
+          (member): member is CastSocialBladeMemberSummary => member !== null,
+        )
+        .sort((left, right) => left.full_name.localeCompare(right.full_name));
+
+      if (members.length === 0) return null;
+
+      const platformCounts: Partial<Record<CastSocialBladePlatform, number>> = {};
+      for (const member of members) {
+        for (const account of member.accounts) {
+          platformCounts[account.platform] =
+            (platformCounts[account.platform] ?? 0) + 1;
+        }
+      }
+
+      return {
+        show_id: show.trr_show_id,
+        show_name: show.show_name,
+        canonical_slug: show.canonical_slug ?? null,
+        platform_counts: platformCounts,
+        cast_member_count: members.length,
+        latest_scraped_at: latestTimestamp(
+          members.flatMap((member) =>
+            member.accounts.map((account) => account.scraped_at),
+          ),
+        ),
+        members,
+      } satisfies CastSocialBladeShowSummary;
+    })
+    .filter((show): show is CastSocialBladeShowSummary => show !== null);
 };
 
 export async function getSocialLandingPayload(
@@ -670,9 +928,14 @@ export async function getSocialLandingPayload(
     coveredShows.map((show) => show.trr_show_id),
     adminContext,
   );
-  const { peopleProfiles, personTargets } = await buildPeopleProfiles(
+  const { peopleProfiles, personTargets, personHandlesByPersonId } = await buildPeopleProfiles(
     coveredShows,
     castByShowId,
+  );
+  const castSocialBladeShows = await buildCastSocialBladeShows(
+    coveredShows,
+    castByShowId,
+    personHandlesByPersonId,
   );
 
   return {
@@ -680,6 +943,7 @@ export async function getSocialLandingPayload(
     show_sets: buildShowSets(coveredShows, showExternalIdsById, sharedSources),
     people_profiles: peopleProfiles,
     person_targets: personTargets,
+    cast_socialblade_shows: castSocialBladeShows,
     shared_pipeline: {
       sources: sharedSources,
       runs: sharedRuns,

@@ -30,7 +30,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
-const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v1";
+const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v2";
 const EDITABLE_SHOW_SOCIAL_PLATFORMS = [
   "instagram",
   "facebook",
@@ -80,6 +80,9 @@ const coerceLandingPayload = (
   show_sets: Array.isArray(data?.show_sets) ? data.show_sets : [],
   people_profiles: Array.isArray(data?.people_profiles) ? data.people_profiles : [],
   person_targets: Array.isArray(data?.person_targets) ? data.person_targets : [],
+  cast_socialblade_shows: Array.isArray(data?.cast_socialblade_shows)
+    ? data.cast_socialblade_shows
+    : [],
   shared_pipeline: {
     sources: Array.isArray(data?.shared_pipeline?.sources)
       ? data.shared_pipeline.sources
