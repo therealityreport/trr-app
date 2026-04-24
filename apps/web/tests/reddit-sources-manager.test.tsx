@@ -1197,9 +1197,11 @@ describe("RedditSourcesManager", () => {
     const episodeCard = await screen.findByRole("button", { name: "Episode 2" });
     const episodeArticle = episodeCard.closest("article");
     expect(episodeArticle).not.toBeNull();
-    expect(within(episodeArticle as HTMLElement).getByText(/24 tracked flair posts in window · 7 unassigned tracked posts/i)).toBeInTheDocument();
-    expect(within(episodeArticle as HTMLElement).getByText("WWHL · 5")).toBeInTheDocument();
-    expect(within(episodeArticle as HTMLElement).getByText("Bravo · 2")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(episodeArticle as HTMLElement).getByText(/24 tracked flair posts in window · 7 unassigned tracked posts/i)).toBeInTheDocument();
+      expect(within(episodeArticle as HTMLElement).getByText("WWHL · 5")).toBeInTheDocument();
+      expect(within(episodeArticle as HTMLElement).getByText("Bravo · 2")).toBeInTheDocument();
+    });
     expect(within(episodeArticle as HTMLElement).queryByText("Salt Lake City · 99")).not.toBeInTheDocument();
   });
 

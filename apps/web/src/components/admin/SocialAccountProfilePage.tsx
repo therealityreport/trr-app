@@ -304,13 +304,32 @@ const formatDateTime = (value?: string | null): string => {
   return parsed.toLocaleString();
 };
 
-const buildLocalCatalogCommand = (
+export const defaultLocalCatalogCommandSelectedTasks = (
+  platform: SocialPlatformSlug,
+  action: "backfill" | "fill_missing_posts",
+): CatalogBackfillSelectedTask[] => {
+  if (action !== "backfill") {
+    return [];
+  }
+  if (platform === "instagram") {
+    return [...INSTAGRAM_BACKFILL_DEFAULT_SELECTED_TASKS];
+  }
+  if (platform === "tiktok") {
+    return [...TIKTOK_BACKFILL_DEFAULT_SELECTED_TASKS];
+  }
+  return [];
+};
+
+export const buildLocalCatalogCommand = (
   platform: SocialPlatformSlug,
   handle: string,
   sourceScope: string,
   action: "backfill" | "fill_missing_posts",
-): string =>
-  `cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/local_catalog_action.py --platform ${platform} --account ${handle} --source-scope ${sourceScope} --action ${action}`;
+  selectedTasks: CatalogBackfillSelectedTask[] = [],
+): string => {
+  const selectedTaskArgs = selectedTasks.map((task) => ` --selected-task ${task}`).join("");
+  return `cd ~/Projects/TRR/TRR-Backend && source .venv/bin/activate && python3 scripts/socials/local_catalog_action.py --platform ${platform} --account ${handle} --source-scope ${sourceScope} --action ${action}${selectedTaskArgs}`;
+};
 
 const formatDiagnosticToken = (value?: string | null): string => {
   const normalized = String(value || "").trim();
@@ -4251,7 +4270,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       return;
     }
     try {
-      await clipboard.writeText(buildLocalCatalogCommand(platform, handle, activeCatalogSourceScope, action));
+      const selectedTasks = defaultLocalCatalogCommandSelectedTasks(platform, action);
+      await clipboard.writeText(
+        buildLocalCatalogCommand(platform, handle, activeCatalogSourceScope, action, selectedTasks),
+      );
       setCatalogActionMessage(
         action === "backfill"
           ? "Copied Backfill Posts terminal command."

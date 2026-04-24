@@ -21,7 +21,7 @@ TRR_DB_FORCE_FALLBACK=
 
 The app server resolves Postgres in the same order as the runtime code in [src/lib/server/postgres.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/postgres.ts): `TRR_DB_URL`, then `TRR_DB_FALLBACK_URL`.
 
-For Supavisor session-mode runtimes, the committed local defaults are now intentionally larger: `POSTGRES_POOL_MAX=8` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=8` in development, with a deployed default of `6/6`. Operators can still dial these down explicitly via env vars when a narrower lane is needed.
+For Supavisor session-mode runtimes, the committed local defaults are intentionally bounded: `POSTGRES_POOL_MAX=4` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=4` in development, with deployed session-pooler defaults of `POSTGRES_POOL_MAX=4` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=2`. Operators can dial these down explicitly via env vars when a narrower lane is needed.
 
 ## What The App Migration Runner Owns
 
