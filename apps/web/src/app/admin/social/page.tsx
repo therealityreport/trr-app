@@ -272,6 +272,22 @@ const CastSocialBladeSection = ({
   shows: readonly CastSocialBladeShowSummary[];
 }) => {
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const firstAvailableShowId = shows[0]?.show_id ?? null;
+    setSelectedShowId((currentShowId) => {
+      if (
+        currentShowId &&
+        shows.some((show) => show.show_id === currentShowId)
+      ) {
+        return currentShowId;
+      }
+      return currentShowId === firstAvailableShowId
+        ? currentShowId
+        : firstAvailableShowId;
+    });
+  }, [shows]);
+
   const selectedShow =
     shows.find((show) => show.show_id === selectedShowId) ?? shows[0] ?? null;
 
