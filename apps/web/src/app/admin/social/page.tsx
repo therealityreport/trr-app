@@ -840,6 +840,7 @@ export default function AdminSocialMediaPage() {
 
       const payload = await loadLandingData(user);
       setLanding(payload);
+      writeCachedLandingData(payload);
     } catch (error) {
       setSharedActionState(
         error instanceof Error

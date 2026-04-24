@@ -281,6 +281,8 @@ const buildUpdatedLandingPayload = () => ({
 });
 
 describe("admin social page auth bypass", () => {
+  const landingCacheKey = "trr-admin-social-landing:v2";
+
   beforeEach(() => {
     window.localStorage.clear();
     mocks.fetchAdminWithAuth.mockReset();
@@ -320,6 +322,65 @@ describe("admin social page auth bypass", () => {
         throw new Error(`Unhandled request: ${url}`);
       },
     );
+  });
+
+  it("updates the cached landing payload after running shared ingest", async () => {
+    let landingLoadCount = 0;
+    const refreshedPayload = buildUpdatedLandingPayload();
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input, init, options) => {
+      if (!options?.allowDevAdminBypass) {
+        throw new Error("Not authenticated");
+      }
+
+      const url = String(input);
+      if (url === "/api/admin/social/landing") {
+        landingLoadCount += 1;
+        return jsonResponse(
+          landingLoadCount === 1 ? buildInitialLandingPayload() : refreshedPayload,
+        );
+      }
+
+      if (url.includes("/social/shared/ingest")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          message: "Shared ingest queued",
+          run_id: "run-queued-1",
+        });
+      }
+
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      const cached = JSON.parse(
+        window.localStorage.getItem(landingCacheKey) || "null",
+      ) as { payload?: ReturnType<typeof buildInitialLandingPayload> } | null;
+      expect(cached?.payload?.people_profiles).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Shared Ingest" }));
+
+    await waitFor(() => {
+      const cached = JSON.parse(
+        window.localStorage.getItem(landingCacheKey) || "null",
+      ) as { payload?: ReturnType<typeof buildUpdatedLandingPayload> } | null;
+      expect(cached?.payload).toMatchObject({
+        people_profiles: expect.arrayContaining([
+          expect.objectContaining({
+            person_id: "person-2",
+            handles: [
+              expect.objectContaining({
+                platform: "threads",
+                handle: "producerhandles",
+              }),
+            ],
+          }),
+        ]),
+      });
+    });
   });
 
   it("uses the dev-admin bypass for landing loads and shared ingest actions", async () => {
