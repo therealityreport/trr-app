@@ -742,21 +742,26 @@ describe("social landing repository", () => {
     const payload = await getSocialLandingPayload();
     const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
 
-    expect(sql).toContain("regexp_replace(ltrim(account_handle, '@')");
-    expect(sql).toContain("'^(user|c|channel)/'");
-    expect(sql).toContain("concat(");
     expect(sql).toContain("WHERE platform = ANY($1::text[])");
     expect(sql).toContain("person_id = ANY($2::uuid[])");
+    expect(sql).toMatch(/\baccount_handle\s*=\s*ANY\(\$3::text\[\]\)/);
     expect(sql).toContain("id::text AS id");
     expect(sql).toContain("ORDER BY");
     expect(sql).toContain("id ASC");
     expect(sql).not.toContain("WHERE lower(platform) = ANY");
     expect(sql).not.toContain("person_id::text = ANY");
     expect(sql).not.toContain("person_id IS NULL");
-    expect(sql).not.toMatch(/\baccount_handle\s*=\s*ANY\(\$3::text\[\]\)/);
+    expect(sql).not.toContain("regexp_replace");
+    expect(sql).not.toContain("ltrim(account_handle");
+    expect(sql).not.toContain("lower(account_handle");
+    expect(sql).not.toContain("concat(");
     expect(params[0]).toEqual(["instagram", "youtube", "facebook"]);
-    expect(params[2]).toContain("youtube:andycohen");
-    expect(params[2]).toContain("youtube:userandycohen");
+    expect(params[2]).toContain("andycohen");
+    expect(params[2]).toContain("@andycohen");
+    expect(params[2]).toContain("user/andycohen");
+    expect(params[2]).toContain("c/andycohen");
+    expect(params[2]).toContain("channel/andycohen");
+    expect(params[2]).toContain("userandycohen");
 
     expect(payload.cast_socialblade_shows).toEqual([
       expect.objectContaining({
@@ -863,6 +868,112 @@ describe("social landing repository", () => {
                 display_label: "andycohen",
                 account_href: "/social/youtube/andycohen/socialblade",
                 stats_refreshed: false,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("omits account-only SocialBlade rows for ambiguous current handles", async () => {
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) =>
+        new Map(
+          personIds.map((personId) => {
+            if (personId === "person-andy" || personId === "person-producer") {
+              return [
+                personId,
+                [
+                  {
+                    id: personId === "person-andy" ? 8 : 9,
+                    source_id: "youtube",
+                    external_id: "@sharedchannel",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
+            return [personId, []] as const;
+          }),
+        ),
+    );
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: null,
+          platform: "youtube",
+          account_handle: "sharedchannel",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/sharedchannel",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([]);
+  });
+
+  it("allows person-specific SocialBlade rows for ambiguous current handles", async () => {
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) =>
+        new Map(
+          personIds.map((personId) => {
+            if (personId === "person-andy" || personId === "person-producer") {
+              return [
+                personId,
+                [
+                  {
+                    id: personId === "person-andy" ? 8 : 9,
+                    source_id: "youtube",
+                    external_id: "@sharedchannel",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
+            return [personId, []] as const;
+          }),
+        ),
+    );
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: "person-andy",
+          platform: "youtube",
+          account_handle: "sharedchannel",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/sharedchannel",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-wwhl",
+        platform_counts: { youtube: 1 },
+        members: [
+          expect.objectContaining({
+            person_id: "person-andy",
+            full_name: "Andy Cohen",
+            accounts: [
+              expect.objectContaining({
+                platform: "youtube",
+                handle: "sharedchannel",
+                account_href: "/social/youtube/sharedchannel/socialblade",
               }),
             ],
           }),

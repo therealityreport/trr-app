@@ -520,6 +520,26 @@ type SocialBladeCurrentLookupEntry = {
   matchRank: number;
 };
 
+type NormalizedSocialBladeHandle = {
+  platform: CastSocialBladePlatform;
+  handle: string;
+};
+
+const normalizeSocialBladeCurrentHandles = (
+  handles: readonly SocialHandleSummary[],
+): NormalizedSocialBladeHandle[] =>
+  handles
+    .map((handle) => {
+      const platform = normalizeCastSocialBladePlatform(handle.platform);
+      const normalizedHandle = normalizeSocialAccountProfileHandle(handle.handle);
+      return platform && normalizedHandle
+        ? { platform, handle: normalizedHandle }
+        : null;
+    })
+    .filter(
+      (handle): handle is NormalizedSocialBladeHandle => handle !== null,
+    );
+
 const buildSocialBladeLegacyAliasKeys = (
   platform: CastSocialBladePlatform,
   handle: string,
@@ -530,27 +550,44 @@ const buildSocialBladeLegacyAliasKeys = (
   );
 };
 
-const buildCurrentSocialBladeLookupEntries = (
-  targetHandles: readonly SocialHandleSummary[],
-  allHandles: readonly SocialHandleSummary[] = targetHandles,
-): SocialBladeCurrentLookupEntry[] => {
-  const normalizeHandles = (handles: readonly SocialHandleSummary[]) =>
-    handles
-      .map((handle) => {
-        const platform = normalizeCastSocialBladePlatform(handle.platform);
-        const normalizedHandle = normalizeSocialAccountProfileHandle(handle.handle);
-        return platform && normalizedHandle
-          ? { platform, handle: normalizedHandle }
-          : null;
-      })
-      .filter(
-        (
-          handle,
-        ): handle is { platform: CastSocialBladePlatform; handle: string } =>
-          handle !== null,
-      );
+const buildSocialBladeAccountHandleCandidates = (
+  handles: readonly NormalizedSocialBladeHandle[],
+): string[] => {
+  const candidates = new Set<string>();
+  for (const handle of handles) {
+    candidates.add(handle.handle);
+    candidates.add(`@${handle.handle}`);
+    if (handle.platform === "youtube") {
+      for (const prefix of ["user", "c", "channel"]) {
+        candidates.add(`${prefix}/${handle.handle}`);
+        candidates.add(`${prefix}${handle.handle}`);
+      }
+    }
+  }
+  return [...candidates].sort((left, right) => left.localeCompare(right));
+};
 
-  const allCurrentHandles = normalizeHandles(allHandles);
+type SocialBladeCurrentLookup = {
+  entriesByPersonId: ReadonlyMap<string, SocialBladeCurrentLookupEntry[]>;
+  ownersByKey: ReadonlyMap<string, ReadonlySet<string>>;
+  accountHandleCandidates: string[];
+};
+
+const buildCurrentSocialBladeLookup = (
+  handlesByPersonId: ReadonlyMap<string, readonly SocialHandleSummary[]>,
+): SocialBladeCurrentLookup => {
+  const normalizedHandlesByPersonId = new Map<
+    string,
+    NormalizedSocialBladeHandle[]
+  >();
+  const allCurrentHandles: NormalizedSocialBladeHandle[] = [];
+
+  for (const [personId, handles] of handlesByPersonId) {
+    const normalizedHandles = normalizeSocialBladeCurrentHandles(handles);
+    normalizedHandlesByPersonId.set(personId, normalizedHandles);
+    allCurrentHandles.push(...normalizedHandles);
+  }
+
   const exactKeys = new Set(
     allCurrentHandles.map((handle) =>
       buildSocialBladeAccountKey(handle.platform, handle.handle),
@@ -566,20 +603,34 @@ const buildCurrentSocialBladeLookupEntries = (
     }
   }
 
-  const entries = new Map<string, SocialBladeCurrentLookupEntry>();
-  for (const handle of normalizeHandles(targetHandles)) {
-    const exactKey = buildSocialBladeAccountKey(handle.platform, handle.handle);
-    entries.set(exactKey, { key: exactKey, ...handle, matchRank: 0 });
-    for (const aliasKey of buildSocialBladeLegacyAliasKeys(
-      handle.platform,
-      handle.handle,
-    )) {
-      if (exactKeys.has(aliasKey)) continue;
-      if ((aliasCounts.get(aliasKey) ?? 0) !== 1) continue;
-      entries.set(aliasKey, { key: aliasKey, ...handle, matchRank: 1 });
+  const mutableOwnersByKey = new Map<string, Set<string>>();
+  const entriesByPersonId = new Map<string, SocialBladeCurrentLookupEntry[]>();
+  for (const [personId, handles] of normalizedHandlesByPersonId) {
+    const entries = new Map<string, SocialBladeCurrentLookupEntry>();
+    for (const handle of handles) {
+      const exactKey = buildSocialBladeAccountKey(handle.platform, handle.handle);
+      const owners = mutableOwnersByKey.get(exactKey) ?? new Set<string>();
+      owners.add(personId);
+      mutableOwnersByKey.set(exactKey, owners);
+      entries.set(exactKey, { key: exactKey, ...handle, matchRank: 0 });
+      for (const aliasKey of buildSocialBladeLegacyAliasKeys(
+        handle.platform,
+        handle.handle,
+      )) {
+        if (exactKeys.has(aliasKey)) continue;
+        if ((aliasCounts.get(aliasKey) ?? 0) !== 1) continue;
+        entries.set(aliasKey, { key: aliasKey, ...handle, matchRank: 1 });
+      }
     }
+    entriesByPersonId.set(personId, [...entries.values()]);
   }
-  return [...entries.values()];
+
+  return {
+    entriesByPersonId,
+    ownersByKey: mutableOwnersByKey,
+    accountHandleCandidates:
+      buildSocialBladeAccountHandleCandidates(allCurrentHandles),
+  };
 };
 
 const normalizeSocialBladeRowHandle = (
@@ -608,17 +659,15 @@ const buildSocialBladeRowAccountKey = (
 
 const safeLoadCastSocialBladeRows = async (
   personIds: readonly string[],
-  handles: readonly SocialHandleSummary[],
+  accountHandleCandidates: readonly string[],
 ): Promise<SocialBladeSummaryRow[]> => {
-  if (personIds.length === 0 && handles.length === 0) return [];
+  if (personIds.length === 0 && accountHandleCandidates.length === 0) return [];
 
-  const accountKeys = buildCurrentSocialBladeLookupEntries(handles).map(
-    (entry) => entry.key,
-  );
   const socialBladePlatforms = CAST_SOCIALBLADE_PLATFORMS.map((platform) =>
     platform.toLowerCase(),
   );
   const socialBladePersonIds = [...new Set(personIds)];
+  const socialBladeAccountHandles = [...new Set(accountHandleCandidates)];
 
   try {
     const result = await query<SocialBladeSummaryRow>(
@@ -638,18 +687,7 @@ const safeLoadCastSocialBladeRows = async (
           AND (
             person_id = ANY($2::uuid[])
             OR (
-              concat(
-                platform,
-                ':',
-                lower(
-                  regexp_replace(
-                    regexp_replace(ltrim(account_handle, '@'), '^(user|c|channel)/', '', 'i'),
-                    '[^a-zA-Z0-9._-]',
-                    '',
-                    'g'
-                  )
-                )
-              ) = ANY($3::text[])
+              account_handle = ANY($3::text[])
             )
           )
         ORDER BY
@@ -661,7 +699,7 @@ const safeLoadCastSocialBladeRows = async (
           created_at DESC NULLS LAST,
           id ASC
       `,
-      [socialBladePlatforms, socialBladePersonIds, accountKeys],
+      [socialBladePlatforms, socialBladePersonIds, socialBladeAccountHandles],
     );
     return result.rows;
   } catch (error) {
@@ -969,9 +1007,10 @@ const buildCastSocialBladeShows = async (
   personHandlesByPersonId: ReadonlyMap<string, SocialHandleSummary[]>,
 ): Promise<CastSocialBladeShowSummary[]> => {
   const personIds = [...personHandlesByPersonId.keys()];
+  const currentLookup = buildCurrentSocialBladeLookup(personHandlesByPersonId);
   const socialBladeRows = await safeLoadCastSocialBladeRows(
     personIds,
-    [...personHandlesByPersonId.values()].flat(),
+    currentLookup.accountHandleCandidates,
   );
 
   const rowsByAccountKey = new Map<string, SocialBladeSummaryRow[]>();
@@ -994,25 +1033,23 @@ const buildCastSocialBladeShows = async (
             typeof member.full_name === "string" ? member.full_name.trim() : "";
           if (!personId || !fullName) return null;
 
-          const currentAccountsByKey = new Map<string, SocialBladeCurrentLookupEntry>();
-          for (const handle of personHandlesByPersonId.get(personId) ?? []) {
-            for (const entry of buildCurrentSocialBladeLookupEntries(
-              [handle],
-              [...personHandlesByPersonId.values()].flat(),
-            )) {
-              currentAccountsByKey.set(entry.key, entry);
-            }
-          }
+          const currentAccounts =
+            currentLookup.entriesByPersonId.get(personId) ?? [];
 
           const rowCandidates: CastSocialBladeRowCandidate[] = [];
-          for (const [accountKey, currentAccount] of currentAccountsByKey) {
-            rowCandidates.push(
-              ...(rowsByAccountKey.get(accountKey) ?? []).map((row) => ({
+          for (const currentAccount of currentAccounts) {
+            const owners = currentLookup.ownersByKey.get(currentAccount.key);
+            const isAmbiguousCurrentHandle = owners ? owners.size > 1 : false;
+            for (const row of rowsByAccountKey.get(currentAccount.key) ?? []) {
+              if (isAmbiguousCurrentHandle && row.person_id !== personId) {
+                continue;
+              }
+              rowCandidates.push({
                 row,
                 matchedHandle: currentAccount.handle,
                 matchRank: currentAccount.matchRank,
-              })),
-            );
+              });
+            }
           }
 
           const seenAccounts = new Set<string>();
