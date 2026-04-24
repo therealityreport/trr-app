@@ -150,6 +150,48 @@ const buildInitialLandingPayload = () => ({
       ],
     },
   ],
+  cast_socialblade_shows: [
+    {
+      show_id: "show-rhoslc",
+      show_name: "RHOSLC",
+      canonical_slug: "real-housewives-of-salt-lake-city",
+      platform_counts: {
+        instagram: 1,
+        youtube: 1,
+      },
+      cast_member_count: 1,
+      latest_scraped_at: "2026-04-24T14:30:00.000Z",
+      members: [
+        {
+          person_id: "person-heather-gay",
+          full_name: "Heather Gay",
+          photo_url: "https://example.com/heather-gay.jpg",
+          accounts: [
+            {
+              platform: "instagram",
+              handle: "heathergay",
+              display_label: "@heathergay",
+              account_href: "/social/instagram/heathergay",
+              socialblade_url: "https://socialblade.com/instagram/user/heathergay",
+              scraped_at: "2026-04-24T14:30:00.000Z",
+              updated_at: "2026-04-24T14:45:00.000Z",
+              stats_refreshed: true,
+            },
+            {
+              platform: "youtube",
+              handle: "heathergay",
+              display_label: "@heathergay",
+              account_href: "/social/youtube/heathergay",
+              socialblade_url: "https://socialblade.com/youtube/c/heathergay",
+              scraped_at: "2026-04-23T14:30:00.000Z",
+              updated_at: "2026-04-23T14:45:00.000Z",
+              stats_refreshed: false,
+            },
+          ],
+        },
+      ],
+    },
+  ],
   person_targets: [
     {
       person_id: "person-1",
@@ -240,6 +282,7 @@ const buildUpdatedLandingPayload = () => ({
 
 describe("admin social page auth bypass", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     mocks.fetchAdminWithAuth.mockReset();
     mocks.fetchAdminWithAuth.mockImplementation(
       async (
@@ -327,6 +370,54 @@ describe("admin social page auth bypass", () => {
     expect(ingestCall?.[2]).toMatchObject({
       allowDevAdminBypass: true,
       preferredUser: mocks.guardState.user,
+    });
+  });
+
+  it("renders cast SocialBlade shows and reveals grouped platform accounts", async () => {
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "CAST SOCIALBLADE" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /RHOSLC/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Heather Gay")).toBeInTheDocument();
+      expect(screen.getAllByText("Instagram").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("YouTube").length).toBeGreaterThan(0);
+    });
+
+    expect(screen.getByRole("img", { name: "Heather Gay profile" })).toHaveAttribute(
+      "src",
+      "https://example.com/heather-gay.jpg",
+    );
+    expect(screen.getByRole("link", { name: "Instagram @heathergay" })).toHaveAttribute(
+      "href",
+      "/social/instagram/heathergay",
+    );
+  });
+
+  it("keeps a quiet cast SocialBlade empty state when the landing payload has no cast rows", async () => {
+    mocks.fetchAdminWithAuth.mockImplementationOnce(async () =>
+      jsonResponse({
+        ...buildInitialLandingPayload(),
+        cast_socialblade_shows: [],
+      }),
+    );
+
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "CAST SOCIALBLADE" })).toBeInTheDocument();
+      expect(
+        screen.getByText("No cast SocialBlade rows are available yet."),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "NETWORKS" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
     });
   });
 
