@@ -138,6 +138,29 @@ describe("resolvePostgresPoolSizing", () => {
     });
   });
 
+  it("keeps preview session defaults inside the Supabase capacity budget", () => {
+    const sizing = resolvePostgresPoolSizing(
+      "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      { NODE_ENV: "production", VERCEL_ENV: "preview" },
+    );
+
+    expect(sizing).toEqual({
+      maxConcurrentOperations: 2,
+      poolMax: 4,
+    });
+  });
+
+  it("keeps direct local development defaults at local Postgres capacity", () => {
+    const sizing = resolvePostgresPoolSizing("postgresql://postgres:secret@localhost:5432/postgres", {
+      NODE_ENV: "development",
+    });
+
+    expect(sizing).toEqual({
+      maxConcurrentOperations: 8,
+      poolMax: 8,
+    });
+  });
+
   it("honors explicit local debug pool overrides", () => {
     const sizing = resolvePostgresPoolSizing(
       "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
