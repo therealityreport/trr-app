@@ -511,6 +511,20 @@ const buildSocialBladeAccountKey = (
   handle: string,
 ): string => `${platform}:${handle}`.toLowerCase();
 
+const buildSocialBladeLookupKeys = (
+  platform: CastSocialBladePlatform,
+  handle: string,
+): string[] => {
+  const baseKey = buildSocialBladeAccountKey(platform, handle);
+  if (platform !== "youtube") return [baseKey];
+  return [
+    baseKey,
+    buildSocialBladeAccountKey(platform, `user${handle}`),
+    buildSocialBladeAccountKey(platform, `c${handle}`),
+    buildSocialBladeAccountKey(platform, `channel${handle}`),
+  ];
+};
+
 const normalizeSocialBladeRowHandle = (
   platform: CastSocialBladePlatform,
   value: string,
@@ -543,12 +557,10 @@ const safeLoadCastSocialBladeRows = async (
 
   const accountKeys = [
     ...new Set(
-      handles
-        .map((handle) => {
+      handles.flatMap((handle) => {
           const platform = normalizeCastSocialBladePlatform(handle.platform);
-          return platform ? buildSocialBladeAccountKey(platform, handle.handle) : null;
-        })
-        .filter(Boolean),
+          return platform ? buildSocialBladeLookupKeys(platform, handle.handle) : [];
+        }),
     ),
   ];
   const socialBladePlatforms = CAST_SOCIALBLADE_PLATFORMS.map((platform) =>
@@ -572,8 +584,7 @@ const safeLoadCastSocialBladeRows = async (
           AND (
             person_id = ANY($2::uuid[])
             OR (
-              person_id IS NULL
-              AND concat(
+              concat(
                 platform,
                 ':',
                 lower(
@@ -847,23 +858,13 @@ const buildCastSocialBladeShows = async (
     [...personHandlesByPersonId.values()].flat(),
   );
 
-  const rowsByPersonId = new Map<string, SocialBladeSummaryRow[]>();
-  const accountOnlyRowsByKey = new Map<string, SocialBladeSummaryRow[]>();
+  const rowsByAccountKey = new Map<string, SocialBladeSummaryRow[]>();
   for (const row of socialBladeRows) {
     const rowAccountKey = buildSocialBladeRowAccountKey(row);
     if (!rowAccountKey) continue;
-
-    const personId = typeof row.person_id === "string" ? row.person_id.trim() : "";
-    if (personId) {
-      const rows = rowsByPersonId.get(personId) ?? [];
-      rows.push(row);
-      rowsByPersonId.set(personId, rows);
-      continue;
-    }
-
-    const rows = accountOnlyRowsByKey.get(rowAccountKey) ?? [];
+    const rows = rowsByAccountKey.get(rowAccountKey) ?? [];
     rows.push(row);
-    accountOnlyRowsByKey.set(rowAccountKey, rows);
+    rowsByAccountKey.set(rowAccountKey, rows);
   }
 
   return [...coveredShows]
@@ -884,25 +885,18 @@ const buildCastSocialBladeShows = async (
           for (const handle of personHandlesByPersonId.get(personId) ?? []) {
             const platform = normalizeCastSocialBladePlatform(handle.platform);
             if (!platform) continue;
-            currentAccountsByKey.set(buildSocialBladeAccountKey(platform, handle.handle), {
-              platform,
-              handle: handle.handle,
-            });
+            for (const accountKey of buildSocialBladeLookupKeys(platform, handle.handle)) {
+              currentAccountsByKey.set(accountKey, {
+                platform,
+                handle: handle.handle,
+              });
+            }
           }
 
           const rowCandidates: CastSocialBladeRowCandidate[] = [];
-          for (const row of rowsByPersonId.get(personId) ?? []) {
-            const rowAccountKey = buildSocialBladeRowAccountKey(row);
-            const currentAccount = rowAccountKey
-              ? currentAccountsByKey.get(rowAccountKey)
-              : null;
-            if (currentAccount) {
-              rowCandidates.push({ row, matchedHandle: currentAccount.handle });
-            }
-          }
           for (const [accountKey, currentAccount] of currentAccountsByKey) {
             rowCandidates.push(
-              ...(accountOnlyRowsByKey.get(accountKey) ?? []).map((row) => ({
+              ...(rowsByAccountKey.get(accountKey) ?? []).map((row) => ({
                 row,
                 matchedHandle: currentAccount.handle,
               })),

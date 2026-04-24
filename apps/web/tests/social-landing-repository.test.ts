@@ -744,15 +744,16 @@ describe("social landing repository", () => {
 
     expect(sql).toContain("regexp_replace(ltrim(account_handle, '@')");
     expect(sql).toContain("'^(user|c|channel)/'");
-    expect(sql).toContain("person_id IS NULL");
     expect(sql).toContain("concat(");
     expect(sql).toContain("WHERE platform = ANY($1::text[])");
     expect(sql).toContain("person_id = ANY($2::uuid[])");
     expect(sql).not.toContain("WHERE lower(platform) = ANY");
     expect(sql).not.toContain("person_id::text = ANY");
+    expect(sql).not.toContain("person_id IS NULL");
     expect(sql).not.toMatch(/\baccount_handle\s*=\s*ANY\(\$3::text\[\]\)/);
     expect(params[0]).toEqual(["instagram", "youtube", "facebook"]);
     expect(params[2]).toContain("youtube:andycohen");
+    expect(params[2]).toContain("youtube:userandycohen");
 
     expect(payload.cast_socialblade_shows).toEqual([
       expect.objectContaining({
@@ -867,6 +868,45 @@ describe("social landing repository", () => {
     ]);
   });
 
+  it("assigns a matching handle row to the current cast member when row person_id is stale", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: "person-stale-owner",
+          platform: "youtube",
+          account_handle: "andycohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-wwhl",
+        platform_counts: { youtube: 1 },
+        members: [
+          expect.objectContaining({
+            person_id: "person-andy",
+            full_name: "Andy Cohen",
+            accounts: [
+              expect.objectContaining({
+                platform: "youtube",
+                handle: "andycohen",
+                account_href: "/social/youtube/andycohen/socialblade",
+                stats_refreshed: true,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("matches legacy account-only YouTube SocialBlade route handles to current cast handles", async () => {
     queryMock.mockResolvedValue({
       rows: [
@@ -874,6 +914,47 @@ describe("social landing repository", () => {
           person_id: null,
           platform: "youtube",
           account_handle: "user/AndyCohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-wwhl",
+        platform_counts: { youtube: 1 },
+        members: [
+          expect.objectContaining({
+            person_id: "person-andy",
+            full_name: "Andy Cohen",
+            accounts: [
+              expect.objectContaining({
+                platform: "youtube",
+                handle: "andycohen",
+                display_label: "andycohen",
+                account_href: "/social/youtube/andycohen/socialblade",
+                socialblade_url: "https://socialblade.com/youtube/user/andycohen",
+                stats_refreshed: true,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("matches persisted stripped legacy YouTube SocialBlade handles to current cast handles", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: null,
+          platform: "youtube",
+          account_handle: "userandycohen",
           scraped_at: "2026-04-21T12:00:00.000Z",
           updated_at: "2026-04-21T12:05:00.000Z",
           stats_refreshed: true,
