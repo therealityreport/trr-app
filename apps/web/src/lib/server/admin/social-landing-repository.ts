@@ -529,6 +529,30 @@ const buildSocialBladeAccountKey = (
   handle: string,
 ): string => `${platform}:${handle}`.toLowerCase();
 
+const buildCompactTitleCaseNameHandle = (
+  fullName: string,
+  canonicalHandle: string,
+): string | null => {
+  const nameParts = fullName
+    .trim()
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+  if (nameParts.length < 2) return null;
+
+  const compactName = nameParts
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join("");
+  if (
+    !compactName ||
+    compactName === canonicalHandle ||
+    normalizeSocialAccountProfileHandle(compactName) !== canonicalHandle
+  ) {
+    return null;
+  }
+
+  return compactName;
+};
+
 type SocialBladeCurrentLookupEntry = {
   key: string;
   platform: CastSocialBladePlatform;
@@ -793,6 +817,24 @@ const addRawSocialBladeHandleCandidate = (
   candidatesByKey.set(key, candidates);
 };
 
+const addNameCasedSocialBladeHandleCandidate = (
+  candidatesByKey: Map<string, string[]>,
+  platform: CastSocialBladePlatform,
+  canonicalHandle: string,
+  fullName: string,
+): void => {
+  const nameCasedHandle = buildCompactTitleCaseNameHandle(
+    fullName,
+    canonicalHandle,
+  );
+  if (!nameCasedHandle) return;
+
+  const key = buildSocialBladeAccountKey(platform, canonicalHandle);
+  const candidates = candidatesByKey.get(key) ?? [];
+  candidates.push(nameCasedHandle);
+  candidatesByKey.set(key, candidates);
+};
+
 const extractShowHandles = (
   externalIdsValue: Record<string, unknown> | null | undefined,
 ): SocialHandleSummary[] => {
@@ -994,10 +1036,6 @@ const buildPeopleProfiles = async (
         fallbackHandles.youtube_handle,
       );
     }
-    socialBladeRawHandleCandidatesByPersonId.set(
-      person.person_id,
-      rawSocialBladeHandleCandidates,
-    );
     const handles = dedupeHandles(
       [
         ...records
@@ -1005,6 +1043,20 @@ const buildPeopleProfiles = async (
           .filter((handle): handle is SocialHandleSummary => handle !== null),
         ...buildFallbackPersonHandleSummaries(fallbackHandles),
       ],
+    );
+    for (const handle of handles) {
+      const platform = normalizeCastSocialBladePlatform(handle.platform);
+      if (!platform) continue;
+      addNameCasedSocialBladeHandleCandidate(
+        rawSocialBladeHandleCandidates,
+        platform,
+        handle.handle,
+        person.full_name,
+      );
+    }
+    socialBladeRawHandleCandidatesByPersonId.set(
+      person.person_id,
+      rawSocialBladeHandleCandidates,
     );
     personHandlesByPersonId.set(person.person_id, handles);
     if (handles.length === 0) return null;

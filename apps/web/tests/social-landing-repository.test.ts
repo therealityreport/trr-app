@@ -876,6 +876,73 @@ describe("social landing repository", () => {
     ]);
   });
 
+  it("fetches name-cased SocialBlade account handles while keeping plain-column SQL", async () => {
+    const storedRows = [
+      {
+        person_id: null,
+        platform: "instagram",
+        account_handle: "@AndyCohen",
+        scraped_at: "2026-04-21T12:00:00.000Z",
+        updated_at: "2026-04-21T12:05:00.000Z",
+        stats_refreshed: true,
+        socialblade_url: "https://socialblade.com/instagram/user/AndyCohen",
+      },
+      {
+        person_id: null,
+        platform: "youtube",
+        account_handle: "user/AndyCohen",
+        scraped_at: "2026-04-21T12:10:00.000Z",
+        updated_at: "2026-04-21T12:15:00.000Z",
+        stats_refreshed: true,
+        socialblade_url: "https://socialblade.com/youtube/user/AndyCohen",
+      },
+    ];
+    queryMock.mockImplementation(async (_sql: string, params: unknown[]) => {
+      const accountHandleCandidates = params[2] as string[];
+      return {
+        rows: storedRows.filter((row) =>
+          accountHandleCandidates.includes(row.account_handle),
+        ),
+      };
+    });
+
+    const payload = await getSocialLandingPayload();
+    const [sql, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+    expect(sql).toMatch(/\baccount_handle\s*=\s*ANY\(\$3::text\[\]\)/);
+    expect(sql).not.toContain("lower(account_handle");
+    expect(params[2]).toEqual(
+      expect.arrayContaining(["@AndyCohen", "user/AndyCohen"]),
+    );
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-wwhl",
+        platform_counts: { instagram: 1, youtube: 1 },
+        members: [
+          expect.objectContaining({
+            person_id: "person-andy",
+            full_name: "Andy Cohen",
+            accounts: expect.arrayContaining([
+              expect.objectContaining({
+                platform: "instagram",
+                handle: "andycohen",
+                account_href: "/social/instagram/andycohen/socialblade",
+                socialblade_url:
+                  "https://socialblade.com/instagram/user/AndyCohen",
+              }),
+              expect.objectContaining({
+                platform: "youtube",
+                handle: "andycohen",
+                account_href: "/social/youtube/andycohen/socialblade",
+                socialblade_url: "https://socialblade.com/youtube/user/AndyCohen",
+              }),
+            ]),
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("omits account-only SocialBlade rows for ambiguous current handles", async () => {
     listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
       async (personIds: readonly string[]) =>
