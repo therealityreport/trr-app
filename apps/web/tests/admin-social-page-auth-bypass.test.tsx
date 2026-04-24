@@ -374,22 +374,59 @@ describe("admin social page auth bypass", () => {
   });
 
   it("renders cast SocialBlade shows and reveals grouped platform accounts", async () => {
+    const landingPayload = buildInitialLandingPayload();
+    mocks.fetchAdminWithAuth.mockImplementationOnce(async () =>
+      jsonResponse({
+        ...landingPayload,
+        cast_socialblade_shows: [
+          ...landingPayload.cast_socialblade_shows,
+          {
+            show_id: "show-rhony",
+            show_name: "RHONY",
+            canonical_slug: "real-housewives-of-new-york-city",
+            platform_counts: {
+              instagram: 1,
+            },
+            cast_member_count: 1,
+            latest_scraped_at: "2026-04-24T13:30:00.000Z",
+            members: [
+              {
+                person_id: "person-meredith-marks",
+                full_name: "Meredith Marks",
+                photo_url: null,
+                accounts: [
+                  {
+                    platform: "instagram",
+                    handle: "meredithmarks",
+                    display_label: "@meredithmarks",
+                    account_href: "/social/instagram/meredithmarks",
+                    socialblade_url:
+                      "https://socialblade.com/instagram/user/meredithmarks",
+                    scraped_at: "2026-04-24T13:30:00.000Z",
+                    updated_at: "2026-04-24T13:45:00.000Z",
+                    stats_refreshed: true,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
     render(<AdminSocialPage />);
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "CAST SOCIALBLADE" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /RHOSLC/ })).toBeInTheDocument();
+      const rhoslcButton = screen.getByRole("button", { name: /RHOSLC/ });
+      const rhonyButton = screen.getByRole("button", { name: /RHONY/ });
+      expect(rhoslcButton).toHaveAttribute("aria-pressed", "true");
+      expect(rhonyButton).toHaveAttribute("aria-pressed", "false");
     });
 
-    expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /RHOSLC/ }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Heather Gay")).toBeInTheDocument();
-      expect(screen.getAllByText("Instagram").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("YouTube").length).toBeGreaterThan(0);
-    });
+    expect(screen.getByText("Heather Gay")).toBeInTheDocument();
+    expect(screen.getAllByText("Instagram").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("YouTube").length).toBeGreaterThan(0);
 
     expect(screen.getByRole("img", { name: "Heather Gay profile" })).toHaveAttribute(
       "src",
@@ -399,6 +436,21 @@ describe("admin social page auth bypass", () => {
       "href",
       "/social/instagram/heathergay",
     );
+
+    fireEvent.click(screen.getByRole("button", { name: /RHONY/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByText("Meredith Marks")).toBeInTheDocument();
+      expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
+    });
   });
 
   it("keeps a quiet cast SocialBlade empty state when the landing payload has no cast rows", async () => {

@@ -273,7 +273,7 @@ const CastSocialBladeSection = ({
 }) => {
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
   const selectedShow =
-    shows.find((show) => show.show_id === selectedShowId) ?? null;
+    shows.find((show) => show.show_id === selectedShowId) ?? shows[0] ?? null;
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -306,6 +306,7 @@ const CastSocialBladeSection = ({
                 <button
                   key={show.show_id}
                   type="button"
+                  aria-pressed={isSelected}
                   onClick={() => setSelectedShowId(show.show_id)}
                   className={`w-full rounded-2xl border p-4 text-left transition ${
                     isSelected
