@@ -72,10 +72,13 @@ vi.mock("@/lib/admin/show-route-slug", () => ({
 
 import AdminSocialPage from "@/app/admin/social/page";
 
-const jsonResponse = (body: unknown): Response =>
+const jsonResponse = (
+  body: unknown,
+  init: { status?: number; headers?: Record<string, string> } = {},
+): Response =>
   new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
+    status: init.status ?? 200,
+    headers: { "Content-Type": "application/json", ...init.headers },
   });
 
 const buildInitialLandingPayload = () => ({
@@ -307,7 +310,7 @@ describe("admin social page auth bypass", () => {
           return jsonResponse(buildUpdatedLandingPayload());
         }
 
-        if (url === "/api/admin/social/landing") {
+        if (url.startsWith("/api/admin/social/landing")) {
           return jsonResponse(buildInitialLandingPayload());
         }
 
@@ -334,8 +337,11 @@ describe("admin social page auth bypass", () => {
       }
 
       const url = String(input);
-      if (url === "/api/admin/social/landing") {
+      if (url.startsWith("/api/admin/social/landing")) {
         landingLoadCount += 1;
+        if (landingLoadCount === 2) {
+          expect(url).toBe("/api/admin/social/landing?refresh=1");
+        }
         return jsonResponse(
           landingLoadCount === 1 ? buildInitialLandingPayload() : refreshedPayload,
         );
@@ -381,6 +387,59 @@ describe("admin social page auth bypass", () => {
         ]),
       });
     });
+  });
+
+  it("does not overwrite last-known-good landing cache with a not-cacheable response", async () => {
+    const cachedPayload = buildInitialLandingPayload();
+    const fallbackPayload = {
+      ...cachedPayload,
+      people_profiles: [],
+      person_targets: [],
+      cast_socialblade_shows: [],
+    };
+    window.localStorage.setItem(
+      landingCacheKey,
+      JSON.stringify({
+        cached_at: "2026-04-24T12:00:00.000Z",
+        payload: cachedPayload,
+      }),
+    );
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input, init, options) => {
+      void init;
+      if (!options?.allowDevAdminBypass) {
+        throw new Error("Not authenticated");
+      }
+
+      const url = String(input);
+      if (url.startsWith("/api/admin/social/landing")) {
+        return jsonResponse(fallbackPayload, {
+          headers: { "x-trr-cacheable": "0" },
+        });
+      }
+
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      expect(mocks.fetchAdminWithAuth).toHaveBeenCalledWith(
+        "/api/admin/social/landing",
+        undefined,
+        expect.objectContaining({
+          allowDevAdminBypass: true,
+          preferredUser: mocks.guardState.user,
+        }),
+      );
+    });
+
+    const stored = JSON.parse(
+      window.localStorage.getItem(landingCacheKey) || "null",
+    ) as { payload?: ReturnType<typeof buildInitialLandingPayload> } | null;
+
+    expect(stored?.payload?.people_profiles).toHaveLength(1);
+    expect(stored?.payload?.cast_socialblade_shows).toHaveLength(1);
   });
 
   it("uses the dev-admin bypass for landing loads and shared ingest actions", async () => {
@@ -554,7 +613,7 @@ describe("admin social page auth bypass", () => {
       }
 
       const url = String(input);
-      if (url === "/api/admin/social/landing") {
+      if (url.startsWith("/api/admin/social/landing")) {
         landingLoadCount += 1;
         return jsonResponse({
           ...landingPayload,
@@ -674,7 +733,7 @@ describe("admin social page auth bypass", () => {
       }
 
       const url = String(input);
-      if (url === "/api/admin/social/landing") {
+      if (url.startsWith("/api/admin/social/landing")) {
         landingLoadCount += 1;
         return jsonResponse({
           ...landingPayload,

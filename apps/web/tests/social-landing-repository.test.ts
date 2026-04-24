@@ -48,7 +48,10 @@ vi.mock("@/lib/server/postgres", () => ({
   query: queryMock,
 }));
 
-import { getSocialLandingPayload } from "@/lib/server/admin/social-landing-repository";
+import {
+  getSocialLandingPayload,
+  getSocialLandingPayloadResult,
+} from "@/lib/server/admin/social-landing-repository";
 
 const delay = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -1475,5 +1478,26 @@ describe("social landing repository", () => {
     );
 
     warnSpy.mockRestore();
+  });
+
+  it("marks the landing payload as not cacheable when cast summary loading fails closed", async () => {
+    fetchAdminBackendJsonMock.mockRejectedValue(new Error("cast summary timeout"));
+
+    const result = await getSocialLandingPayloadResult();
+
+    expect(result.cacheable).toBe(false);
+    expect(result.payload.cast_socialblade_shows).toEqual([]);
+    expect(result.payload.people_profiles).toEqual([]);
+  });
+
+  it("marks the landing payload as not cacheable when SocialBlade storage loading fails closed", async () => {
+    queryMock.mockRejectedValue(new Error("relation does not exist"));
+
+    const result = await getSocialLandingPayloadResult();
+
+    expect(result.cacheable).toBe(false);
+    expect(result.payload.cast_socialblade_shows).toEqual([]);
+    expect(result.payload.network_sets).toHaveLength(1);
+    expect(result.payload.show_sets).toHaveLength(2);
   });
 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/auth";
+import { invalidateSocialLandingRouteCacheForUser } from "@/lib/server/admin/social-landing-route-cache";
 import {
   fetchSocialBackendJson,
   socialProxyErrorResponse,
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin(request);
+    const user = await requireAdmin(request);
     const body = await request.text();
     const data = await fetchSocialBackendJson("/shared/ingest", {
       method: "POST",
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest) {
       retries: 0,
       timeoutMs: 210_000,
     });
+    invalidateSocialLandingRouteCacheForUser(user.uid);
     return NextResponse.json(data);
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to run shared social ingest");

@@ -89,6 +89,26 @@ type SocialBladeSummaryRow = Record<string, unknown> & {
   socialblade_url: string | null;
 };
 
+export type SocialLandingPayloadResult = {
+  payload: SocialLandingPayload;
+  cacheable: boolean;
+};
+
+type CacheableValue<T> = {
+  value: T;
+  cacheable: boolean;
+};
+
+const cacheableValue = <T>(value: T): CacheableValue<T> => ({
+  value,
+  cacheable: true,
+});
+
+const uncacheableValue = <T>(value: T): CacheableValue<T> => ({
+  value,
+  cacheable: false,
+});
+
 const PERSON_SOCIAL_SOURCES: readonly SupportedPersonSocialSource[] = [
   "facebook",
   "instagram",
@@ -439,8 +459,8 @@ const safeLoadShowExternalIdsMap = async (
 const safeLoadShowCastSummaryMap = async (
   showIds: readonly string[],
   adminContext?: VerifiedAdminContext,
-): Promise<ReadonlyMap<string, CastSummaryMember[]>> => {
-  if (showIds.length === 0) return new Map();
+): Promise<CacheableValue<ReadonlyMap<string, CastSummaryMember[]>>> => {
+  if (showIds.length === 0) return cacheableValue(new Map());
 
   try {
     const upstream = await fetchAdminBackendJson(
@@ -454,11 +474,11 @@ const safeLoadShowCastSummaryMap = async (
         routeName: "show-cast-summary",
       },
     );
-    if (upstream.status !== 200) return new Map();
+    if (upstream.status !== 200) return uncacheableValue(new Map());
 
     const payload = upstream.data as CastSummaryBatchPayload;
     const shows = Array.isArray(payload.shows) ? payload.shows : [];
-    return new Map(
+    return cacheableValue(new Map(
       shows
         .map((show) => {
           const showId = typeof show.show_id === "string" ? show.show_id.trim() : "";
@@ -473,13 +493,13 @@ const safeLoadShowCastSummaryMap = async (
             entry,
           ): entry is readonly [string, CastSummaryMember[]] => entry !== null,
         ),
-    );
+    ));
   } catch (error) {
     console.warn("[social-landing] Failed to load show cast summary", {
       showIds,
       error,
     });
-    return new Map();
+    return uncacheableValue(new Map());
   }
 };
 
@@ -749,8 +769,10 @@ const buildSocialBladeRowAccountKey = (
 const safeLoadCastSocialBladeRows = async (
   personIds: readonly string[],
   accountHandleCandidates: readonly string[],
-): Promise<SocialBladeSummaryRow[]> => {
-  if (personIds.length === 0 && accountHandleCandidates.length === 0) return [];
+): Promise<CacheableValue<SocialBladeSummaryRow[]>> => {
+  if (personIds.length === 0 && accountHandleCandidates.length === 0) {
+    return cacheableValue([]);
+  }
 
   const socialBladePlatforms = CAST_SOCIALBLADE_PLATFORMS.map((platform) =>
     platform.toLowerCase(),
@@ -790,10 +812,10 @@ const safeLoadCastSocialBladeRows = async (
       `,
       [socialBladePlatforms, socialBladePersonIds, socialBladeAccountHandles],
     );
-    return result.rows;
+    return cacheableValue(result.rows);
   } catch (error) {
     console.warn("[social-landing] Failed to load cast SocialBlade rows", error);
-    return [];
+    return uncacheableValue([]);
   }
 };
 
@@ -1188,19 +1210,19 @@ const buildCastSocialBladeShows = async (
     string,
     ReadonlyMap<string, readonly string[]>
   >,
-): Promise<CastSocialBladeShowSummary[]> => {
+): Promise<CacheableValue<CastSocialBladeShowSummary[]>> => {
   const personIds = [...personHandlesByPersonId.keys()];
   const currentLookup = buildCurrentSocialBladeLookup(
     personHandlesByPersonId,
     socialBladeRawHandleCandidatesByPersonId,
   );
-  const socialBladeRows = await safeLoadCastSocialBladeRows(
+  const socialBladeRowsResult = await safeLoadCastSocialBladeRows(
     personIds,
     currentLookup.accountHandleCandidates,
   );
 
   const rowsByAccountKey = new Map<string, SocialBladeSummaryRow[]>();
-  for (const row of socialBladeRows) {
+  for (const row of socialBladeRowsResult.value) {
     const rowAccountKey = buildSocialBladeRowAccountKey(row);
     if (!rowAccountKey) continue;
     const rows = rowsByAccountKey.get(rowAccountKey) ?? [];
@@ -1208,7 +1230,7 @@ const buildCastSocialBladeShows = async (
     rowsByAccountKey.set(rowAccountKey, rows);
   }
 
-  return [...coveredShows]
+  const shows = [...coveredShows]
     .sort((left, right) => left.show_name.localeCompare(right.show_name))
     .map((show) => {
       const members = (castByShowId.get(show.trr_show_id) ?? [])
@@ -1304,11 +1326,16 @@ const buildCastSocialBladeShows = async (
       } satisfies CastSocialBladeShowSummary;
     })
     .filter((show): show is CastSocialBladeShowSummary => show !== null);
+
+  return {
+    value: shows,
+    cacheable: socialBladeRowsResult.cacheable,
+  };
 };
 
-export async function getSocialLandingPayload(
+export async function getSocialLandingPayloadResult(
   adminContext?: VerifiedAdminContext,
-): Promise<SocialLandingPayload> {
+): Promise<SocialLandingPayloadResult> {
   const [coveredShows, redditDashboard] = await Promise.all([
     getCoveredShows(),
     safeLoadRedditDashboardSummary(),
@@ -1320,17 +1347,18 @@ export async function getSocialLandingPayload(
   const showExternalIdsById = await safeLoadShowExternalIdsMap(
     coveredShows.map((show) => show.trr_show_id),
   );
-  const castByShowId = await safeLoadShowCastSummaryMap(
+  const castByShowIdResult = await safeLoadShowCastSummaryMap(
     coveredShows.map((show) => show.trr_show_id),
     adminContext,
   );
+  const castByShowId = castByShowIdResult.value;
   const {
     peopleProfiles,
     personTargets,
     personHandlesByPersonId,
     socialBladeRawHandleCandidatesByPersonId,
   } = await buildPeopleProfiles(coveredShows, castByShowId);
-  const castSocialBladeShows = await buildCastSocialBladeShows(
+  const castSocialBladeShowsResult = await buildCastSocialBladeShows(
     coveredShows,
     castByShowId,
     personHandlesByPersonId,
@@ -1338,16 +1366,26 @@ export async function getSocialLandingPayload(
   );
 
   return {
-    network_sets: buildNetworkSets(sharedSources),
-    show_sets: buildShowSets(coveredShows, showExternalIdsById, sharedSources),
-    people_profiles: peopleProfiles,
-    person_targets: personTargets,
-    cast_socialblade_shows: castSocialBladeShows,
-    shared_pipeline: {
-      sources: sharedSources,
-      runs: sharedRuns,
-      review_items: sharedReviewItems,
-    } satisfies SharedPipelineSummary,
-    reddit_dashboard: redditDashboard,
+    payload: {
+      network_sets: buildNetworkSets(sharedSources),
+      show_sets: buildShowSets(coveredShows, showExternalIdsById, sharedSources),
+      people_profiles: peopleProfiles,
+      person_targets: personTargets,
+      cast_socialblade_shows: castSocialBladeShowsResult.value,
+      shared_pipeline: {
+        sources: sharedSources,
+        runs: sharedRuns,
+        review_items: sharedReviewItems,
+      } satisfies SharedPipelineSummary,
+      reddit_dashboard: redditDashboard,
+    },
+    cacheable: castByShowIdResult.cacheable && castSocialBladeShowsResult.cacheable,
   };
+}
+
+export async function getSocialLandingPayload(
+  adminContext?: VerifiedAdminContext,
+): Promise<SocialLandingPayload> {
+  const result = await getSocialLandingPayloadResult(adminContext);
+  return result.payload;
 }

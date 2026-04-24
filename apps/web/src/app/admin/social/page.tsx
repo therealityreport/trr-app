@@ -459,8 +459,12 @@ const CastSocialBladeSection = ({
 
 const loadLandingData = async (
   currentUser: User,
-): Promise<SocialLandingPayload> => {
-  const response = await fetchAdminWithAuth("/api/admin/social/landing", undefined, {
+  options: { refresh?: boolean } = {},
+): Promise<{ payload: SocialLandingPayload; cacheable: boolean }> => {
+  const url = options.refresh
+    ? "/api/admin/social/landing?refresh=1"
+    : "/api/admin/social/landing";
+  const response = await fetchAdminWithAuth(url, undefined, {
     allowDevAdminBypass: true,
     preferredUser: currentUser,
   });
@@ -470,7 +474,10 @@ const loadLandingData = async (
   if (!response.ok) {
     throw new Error(data?.error || "Failed to load social landing data");
   }
-  return coerceLandingPayload(data);
+  return {
+    payload: coerceLandingPayload(data),
+    cacheable: response.headers.get("x-trr-cacheable") !== "0",
+  };
 };
 
 const readCachedLandingData = (): SocialLandingPayload | null => {
@@ -784,10 +791,12 @@ export default function AdminSocialMediaPage() {
         setLoadError(null);
       }
       try {
-        const payload = await loadLandingData(user);
+        const { payload, cacheable } = await loadLandingData(user);
         if (cancelled) return;
         setLanding(payload);
-        writeCachedLandingData(payload);
+        if (cacheable) {
+          writeCachedLandingData(payload);
+        }
         setLoadError(null);
       } catch (error) {
         if (cancelled) return;
@@ -838,9 +847,13 @@ export default function AdminSocialMediaPage() {
           (data.run_id ? `Queued run ${data.run_id}` : "Shared ingest queued"),
       );
 
-      const payload = await loadLandingData(user);
+      const { payload, cacheable } = await loadLandingData(user, {
+        refresh: true,
+      });
       setLanding(payload);
-      writeCachedLandingData(payload);
+      if (cacheable) {
+        writeCachedLandingData(payload);
+      }
     } catch (error) {
       setSharedActionState(
         error instanceof Error
@@ -890,9 +903,11 @@ export default function AdminSocialMediaPage() {
     });
 
     void loadLandingData(user)
-      .then((payload) => {
+      .then(({ payload, cacheable }) => {
         setLanding(payload);
-        writeCachedLandingData(payload);
+        if (cacheable) {
+          writeCachedLandingData(payload);
+        }
       })
       .catch(() => {
         // Keep the optimistic card state if the background refresh fails.
