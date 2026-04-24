@@ -511,12 +511,27 @@ const buildSocialBladeAccountKey = (
   handle: string,
 ): string => `${platform}:${handle}`.toLowerCase();
 
+const normalizeSocialBladeRowHandle = (
+  platform: CastSocialBladePlatform,
+  value: string,
+): string | null => {
+  if (platform !== "youtube") {
+    return toCanonicalInternalHandle(platform, value);
+  }
+
+  const normalizedValue = normalizePersonExternalIdValue("youtube", value);
+  if (!normalizedValue) return null;
+  const routeMatch = normalizedValue.match(/^(?:user|c|channel)\/(.+)$/i);
+  const handleCandidate = routeMatch?.[1] ?? normalizedValue;
+  return normalizeSocialAccountProfileHandle(handleCandidate);
+};
+
 const buildSocialBladeRowAccountKey = (
   row: Pick<SocialBladeSummaryRow, "platform" | "account_handle">,
 ): string | null => {
   const platform = normalizeCastSocialBladePlatform(row.platform);
   if (!platform || typeof row.account_handle !== "string") return null;
-  const handle = toCanonicalInternalHandle(platform, row.account_handle);
+  const handle = normalizeSocialBladeRowHandle(platform, row.account_handle);
   return handle ? buildSocialBladeAccountKey(platform, handle) : null;
 };
 
@@ -561,7 +576,14 @@ const safeLoadCastSocialBladeRows = async (
               AND concat(
                 platform,
                 ':',
-                lower(regexp_replace(ltrim(account_handle, '@'), '[^a-zA-Z0-9._-]', '', 'g'))
+                lower(
+                  regexp_replace(
+                    regexp_replace(ltrim(account_handle, '@'), '^(user|c|channel)/', '', 'i'),
+                    '[^a-zA-Z0-9._-]',
+                    '',
+                    'g'
+                  )
+                )
               ) = ANY($3::text[])
             )
           )
@@ -768,10 +790,13 @@ const buildPeopleProfiles = async (
 
 const buildCastSocialBladeAccountSummary = (
   row: SocialBladeSummaryRow,
+  matchedHandle?: string,
 ): CastSocialBladeAccountSummary | null => {
   const platform = normalizeCastSocialBladePlatform(row.platform);
   if (!platform || typeof row.account_handle !== "string") return null;
-  const handle = toCanonicalInternalHandle(platform, row.account_handle);
+  const handle =
+    (matchedHandle ? normalizeSocialAccountProfileHandle(matchedHandle) : null) ??
+    normalizeSocialBladeRowHandle(platform, row.account_handle);
   if (!handle) return null;
 
   return {
@@ -791,6 +816,11 @@ const buildCastSocialBladeAccountSummary = (
     updated_at: toIsoStringOrNull(row.updated_at),
     stats_refreshed: row.stats_refreshed === true,
   };
+};
+
+type CastSocialBladeRowCandidate = {
+  row: SocialBladeSummaryRow;
+  matchedHandle: string;
 };
 
 const latestTimestamp = (values: readonly (string | null)[]): string | null => {
@@ -847,26 +877,46 @@ const buildCastSocialBladeShows = async (
             typeof member.full_name === "string" ? member.full_name.trim() : "";
           if (!personId || !fullName) return null;
 
-          const currentAccountKeys = new Set<string>();
+          const currentAccountsByKey = new Map<
+            string,
+            { platform: CastSocialBladePlatform; handle: string }
+          >();
           for (const handle of personHandlesByPersonId.get(personId) ?? []) {
             const platform = normalizeCastSocialBladePlatform(handle.platform);
             if (!platform) continue;
-            currentAccountKeys.add(buildSocialBladeAccountKey(platform, handle.handle));
+            currentAccountsByKey.set(buildSocialBladeAccountKey(platform, handle.handle), {
+              platform,
+              handle: handle.handle,
+            });
           }
 
-          const rowCandidates = (rowsByPersonId.get(personId) ?? []).filter((row) => {
+          const rowCandidates: CastSocialBladeRowCandidate[] = [];
+          for (const row of rowsByPersonId.get(personId) ?? []) {
             const rowAccountKey = buildSocialBladeRowAccountKey(row);
-            return rowAccountKey ? currentAccountKeys.has(rowAccountKey) : false;
-          });
-          for (const accountKey of currentAccountKeys) {
+            const currentAccount = rowAccountKey
+              ? currentAccountsByKey.get(rowAccountKey)
+              : null;
+            if (currentAccount) {
+              rowCandidates.push({ row, matchedHandle: currentAccount.handle });
+            }
+          }
+          for (const [accountKey, currentAccount] of currentAccountsByKey) {
             rowCandidates.push(
-              ...(accountOnlyRowsByKey.get(accountKey) ?? []),
+              ...(accountOnlyRowsByKey.get(accountKey) ?? []).map((row) => ({
+                row,
+                matchedHandle: currentAccount.handle,
+              })),
             );
           }
 
           const seenAccounts = new Set<string>();
           const accounts = rowCandidates
-            .map((row) => buildCastSocialBladeAccountSummary(row))
+            .map((candidate) =>
+              buildCastSocialBladeAccountSummary(
+                candidate.row,
+                candidate.matchedHandle,
+              ),
+            )
             .filter((account): account is CastSocialBladeAccountSummary => {
               if (!account) return false;
               const key = buildSocialBladeAccountKey(account.platform, account.handle);
