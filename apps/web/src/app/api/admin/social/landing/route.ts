@@ -16,7 +16,9 @@ import {
 } from "@/lib/server/admin/route-response-cache";
 import {
   SOCIAL_LANDING_CACHE_NAMESPACE,
+  getSocialLandingRouteCacheVersion,
   invalidateSocialLandingRouteCacheForUser,
+  isSocialLandingRouteCacheVersionCurrent,
 } from "@/lib/server/admin/social-landing-route-cache";
 import { getSocialLandingPayloadResult } from "@/lib/server/admin/social-landing-repository";
 import { normalizePersonExternalIdValue, type PersonExternalIdInput } from "@/lib/admin/person-external-ids";
@@ -105,8 +107,12 @@ export async function GET(request: NextRequest) {
       SOCIAL_LANDING_CACHE_NAMESPACE,
       cacheKey,
       async () => {
+        const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
         const nextResult = await getSocialLandingPayloadResult(adminContext);
-        if (nextResult.cacheable) {
+        if (
+          nextResult.cacheable &&
+          isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
+        ) {
           setRouteResponseCache(
             SOCIAL_LANDING_CACHE_NAMESPACE,
             cacheKey,
@@ -263,9 +269,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    invalidateRouteResponseCache(SOCIAL_LANDING_CACHE_NAMESPACE, `${user.uid}:`);
+    invalidateSocialLandingRouteCacheForUser(user.uid);
+    const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
     const result = await getSocialLandingPayloadResult(adminContext);
-    if (result.cacheable) {
+    if (
+      result.cacheable &&
+      isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
+    ) {
       setRouteResponseCache(
         SOCIAL_LANDING_CACHE_NAMESPACE,
         buildUserScopedRouteCacheKey(user.uid, "landing"),

@@ -125,6 +125,47 @@ describe("social landing route cache", () => {
     expect(getSocialLandingPayloadResultMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not let a stale in-flight landing load repopulate cache after shared ingest invalidates it", async () => {
+    let resolveStalePayload!: (value: { payload: ReturnType<typeof buildPayload>; cacheable: true }) => void;
+    const stalePayloadPromise = new Promise<{ payload: ReturnType<typeof buildPayload>; cacheable: true }>(
+      (resolve) => {
+        resolveStalePayload = resolve;
+      },
+    );
+    const staleLoadStarted = new Promise<void>((resolve) => {
+      getSocialLandingPayloadResultMock
+        .mockImplementationOnce(() => {
+          resolve();
+          return stalePayloadPromise;
+        })
+        .mockResolvedValueOnce({ payload: buildPayload("after"), cacheable: true });
+    });
+
+    const landingRequest = new NextRequest("http://localhost/api/admin/social/landing");
+    const staleResponsePromise = getLanding(landingRequest);
+    await staleLoadStarted;
+
+    const ingestResponse = await postSharedIngest(
+      new NextRequest("http://localhost/api/admin/trr-api/social/shared/ingest", {
+        method: "POST",
+        body: JSON.stringify({ source_scope: "bravo" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(ingestResponse.status).toBe(200);
+
+    resolveStalePayload({ payload: buildPayload("before"), cacheable: true });
+    const staleResponse = await staleResponsePromise;
+    expect((await staleResponse.json()).show_sets[0].show_id).toBe("before");
+
+    const refreshed = await getLanding(landingRequest);
+    const refreshedPayload = await refreshed.json();
+
+    expect(refreshed.headers.get("x-trr-cache")).not.toBe("hit");
+    expect(refreshedPayload.show_sets[0].show_id).toBe("after");
+    expect(getSocialLandingPayloadResultMock).toHaveBeenCalledTimes(2);
+  });
+
   it("bypasses warmed cache with refresh=1 and avoids route caching not-cacheable payloads", async () => {
     getSocialLandingPayloadResultMock
       .mockResolvedValueOnce({ payload: buildPayload("good"), cacheable: true })
