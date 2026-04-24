@@ -1097,7 +1097,6 @@ const buildCastSocialBladeAccountSummary = (
     account_href: buildSocialAccountProfileUrl({
       platform,
       handle,
-      tab: "socialblade",
     }),
     socialblade_url:
       typeof row.socialblade_url === "string" && row.socialblade_url.trim()
