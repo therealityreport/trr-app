@@ -981,8 +981,11 @@ export default function AdminSocialMediaPage() {
       }
 
       const nextPayload = coerceLandingPayload(data);
+      const cacheable = response.headers.get("x-trr-cacheable") !== "0";
       setLanding(nextPayload);
-      writeCachedLandingData(nextPayload);
+      if (cacheable) {
+        writeCachedLandingData(nextPayload);
+      }
       setAddHandleValue("");
       setAddHandleMessage(
         `Saved ${formatPlatformLabel(addHandlePlatform)} for ${selectedAddHandleTarget.label}.`,

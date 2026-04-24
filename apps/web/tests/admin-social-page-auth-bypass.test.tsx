@@ -872,4 +872,89 @@ describe("admin social page auth bypass", () => {
       preferredUser: mocks.guardState.user,
     });
   });
+
+  it("does not overwrite last-known-good landing cache after a not-cacheable add-handle save", async () => {
+    const cachedPayload = buildInitialLandingPayload();
+    const degradedPostPayload = {
+      ...buildUpdatedLandingPayload(),
+      cast_socialblade_shows: [],
+    };
+    window.localStorage.setItem(
+      landingCacheKey,
+      JSON.stringify({
+        cached_at: "2026-04-24T12:00:00.000Z",
+        payload: cachedPayload,
+      }),
+    );
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input, init, options) => {
+      if (!options?.allowDevAdminBypass) {
+        throw new Error("Not authenticated");
+      }
+
+      const url = String(input);
+      if (url === "/api/admin/social/landing" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          target_type: "person",
+          target_id: "person-2",
+          platform: "threads",
+          value: "https://www.threads.net/@producerhandles",
+        });
+        return jsonResponse(degradedPostPayload, {
+          headers: { "x-trr-cacheable": "0" },
+        });
+      }
+
+      if (url.startsWith("/api/admin/social/landing")) {
+        return jsonResponse(cachedPayload);
+      }
+
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ADD SOCIAL HANDLE")).toBeInTheDocument();
+      expect(screen.queryByText("@producerhandles")).not.toBeInTheDocument();
+    });
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: /NETWORK SHOW or CAST MEMBER/i }),
+      {
+        target: { value: "person:person-2" },
+      },
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "THE PLATFORM" }), {
+      target: { value: "threads" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "USERNAME/HANDLE (or URL)" }), {
+      target: { value: "https://www.threads.net/@producerhandles" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Saved Threads for Producer Without Handles."),
+      ).toBeInTheDocument();
+      expect(screen.getByText("@producerhandles")).toBeInTheDocument();
+      expect(
+        screen.getByText("No cast SocialBlade rows are available yet."),
+      ).toBeInTheDocument();
+    });
+
+    const stored = JSON.parse(
+      window.localStorage.getItem(landingCacheKey) || "null",
+    ) as { payload?: ReturnType<typeof buildInitialLandingPayload> } | null;
+
+    expect(stored?.payload?.people_profiles).toHaveLength(1);
+    expect(stored?.payload?.people_profiles).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          person_id: "person-2",
+        }),
+      ]),
+    );
+    expect(stored?.payload?.cast_socialblade_shows).toHaveLength(1);
+  });
 });
