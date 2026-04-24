@@ -511,6 +511,15 @@ const buildSocialBladeAccountKey = (
   handle: string,
 ): string => `${platform}:${handle}`.toLowerCase();
 
+const buildSocialBladeRowAccountKey = (
+  row: Pick<SocialBladeSummaryRow, "platform" | "account_handle">,
+): string | null => {
+  const platform = normalizeCastSocialBladePlatform(row.platform);
+  if (!platform || typeof row.account_handle !== "string") return null;
+  const handle = toCanonicalInternalHandle(platform, row.account_handle);
+  return handle ? buildSocialBladeAccountKey(platform, handle) : null;
+};
+
 const safeLoadCastSocialBladeRows = async (
   personIds: readonly string[],
   handles: readonly SocialHandleSummary[],
@@ -807,10 +816,8 @@ const buildCastSocialBladeShows = async (
   const rowsByPersonId = new Map<string, SocialBladeSummaryRow[]>();
   const accountOnlyRowsByKey = new Map<string, SocialBladeSummaryRow[]>();
   for (const row of socialBladeRows) {
-    const platform = normalizeCastSocialBladePlatform(row.platform);
-    if (!platform || typeof row.account_handle !== "string") continue;
-    const handle = toCanonicalInternalHandle(platform, row.account_handle);
-    if (!handle) continue;
+    const rowAccountKey = buildSocialBladeRowAccountKey(row);
+    if (!rowAccountKey) continue;
 
     const personId = typeof row.person_id === "string" ? row.person_id.trim() : "";
     if (personId) {
@@ -820,10 +827,9 @@ const buildCastSocialBladeShows = async (
       continue;
     }
 
-    const key = buildSocialBladeAccountKey(platform, handle);
-    const rows = accountOnlyRowsByKey.get(key) ?? [];
+    const rows = accountOnlyRowsByKey.get(rowAccountKey) ?? [];
     rows.push(row);
-    accountOnlyRowsByKey.set(key, rows);
+    accountOnlyRowsByKey.set(rowAccountKey, rows);
   }
 
   return [...coveredShows]
@@ -837,16 +843,20 @@ const buildCastSocialBladeShows = async (
             typeof member.full_name === "string" ? member.full_name.trim() : "";
           if (!personId || !fullName) return null;
 
-          const rowCandidates: SocialBladeSummaryRow[] = [
-            ...(rowsByPersonId.get(personId) ?? []),
-          ];
+          const currentAccountKeys = new Set<string>();
           for (const handle of personHandlesByPersonId.get(personId) ?? []) {
             const platform = normalizeCastSocialBladePlatform(handle.platform);
             if (!platform) continue;
+            currentAccountKeys.add(buildSocialBladeAccountKey(platform, handle.handle));
+          }
+
+          const rowCandidates = (rowsByPersonId.get(personId) ?? []).filter((row) => {
+            const rowAccountKey = buildSocialBladeRowAccountKey(row);
+            return rowAccountKey ? currentAccountKeys.has(rowAccountKey) : false;
+          });
+          for (const accountKey of currentAccountKeys) {
             rowCandidates.push(
-              ...(accountOnlyRowsByKey.get(
-                buildSocialBladeAccountKey(platform, handle.handle),
-              ) ?? []),
+              ...(accountOnlyRowsByKey.get(accountKey) ?? []),
             );
           }
 

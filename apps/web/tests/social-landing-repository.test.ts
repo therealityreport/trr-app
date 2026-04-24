@@ -777,6 +777,50 @@ describe("social landing repository", () => {
     ]);
   });
 
+  it("does not emit stale person-linked SocialBlade rows for old handles", async () => {
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) =>
+        new Map(
+          personIds.map((personId) => {
+            if (personId === "person-heather") {
+              return [
+                personId,
+                [
+                  {
+                    id: 7,
+                    source_id: "instagram",
+                    external_id: "heathergaynew",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
+            return [personId, []] as const;
+          }),
+        ),
+    );
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: "person-heather",
+          platform: "instagram",
+          account_handle: "heathergay",
+          scraped_at: "2026-04-20T12:00:00.000Z",
+          updated_at: "2026-04-20T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/instagram/user/heathergay",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([]);
+  });
+
   it("matches account-only SocialBlade rows by normalized platform and handle", async () => {
     queryMock.mockResolvedValue({
       rows: [
