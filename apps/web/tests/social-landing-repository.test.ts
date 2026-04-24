@@ -747,6 +747,9 @@ describe("social landing repository", () => {
     expect(sql).toContain("concat(");
     expect(sql).toContain("WHERE platform = ANY($1::text[])");
     expect(sql).toContain("person_id = ANY($2::uuid[])");
+    expect(sql).toContain("id::text AS id");
+    expect(sql).toContain("ORDER BY");
+    expect(sql).toContain("id ASC");
     expect(sql).not.toContain("WHERE lower(platform) = ANY");
     expect(sql).not.toContain("person_id::text = ANY");
     expect(sql).not.toContain("person_id IS NULL");
@@ -1139,6 +1142,45 @@ describe("social landing repository", () => {
       handle: "andycohen",
       socialblade_url: "https://socialblade.com/youtube/user/andycohen-specific",
       scraped_at: "2026-04-21T12:00:00.000Z",
+      stats_refreshed: true,
+    });
+  });
+
+  it("uses stable id order when duplicate SocialBlade rows have equal metadata", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          person_id: null,
+          platform: "youtube",
+          account_handle: "andycohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          created_at: "2026-04-21T12:01:00.000Z",
+          stats_refreshed: false,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen-b",
+        },
+        {
+          id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          person_id: null,
+          platform: "youtube",
+          account_handle: "andycohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          created_at: "2026-04-21T12:01:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen-a",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(
+      payload.cast_socialblade_shows[0]?.members[0]?.accounts[0],
+    ).toMatchObject({
+      handle: "andycohen",
+      socialblade_url: "https://socialblade.com/youtube/user/andycohen-a",
       stats_refreshed: true,
     });
   });

@@ -78,6 +78,7 @@ type SupportedPersonSocialSource = Extract<
 >;
 
 type SocialBladeSummaryRow = Record<string, unknown> & {
+  id: string | null;
   person_id: string | null;
   platform: string | null;
   account_handle: string | null;
@@ -623,6 +624,7 @@ const safeLoadCastSocialBladeRows = async (
     const result = await query<SocialBladeSummaryRow>(
       `
         SELECT
+          id::text AS id,
           person_id::text AS person_id,
           platform,
           account_handle,
@@ -650,6 +652,14 @@ const safeLoadCastSocialBladeRows = async (
               ) = ANY($3::text[])
             )
           )
+        ORDER BY
+          platform ASC,
+          account_handle ASC,
+          person_id ASC NULLS LAST,
+          updated_at DESC NULLS LAST,
+          scraped_at DESC NULLS LAST,
+          created_at DESC NULLS LAST,
+          id ASC
       `,
       [socialBladePlatforms, socialBladePersonIds, accountKeys],
     );
@@ -914,6 +924,26 @@ const compareCastSocialBladeRowCandidates = (
     const rightTimestamp = toTimestampMs(right.row[field]);
     if (leftTimestamp !== rightTimestamp) {
       return rightTimestamp - leftTimestamp;
+    }
+  }
+
+  const leftId = String(left.row.id ?? "");
+  const rightId = String(right.row.id ?? "");
+  if (leftId !== rightId) {
+    return leftId.localeCompare(rightId);
+  }
+
+  const stableFields = [
+    "platform",
+    "account_handle",
+    "person_id",
+    "socialblade_url",
+  ] as const;
+  for (const field of stableFields) {
+    const leftValue = String(left.row[field] ?? "");
+    const rightValue = String(right.row[field] ?? "");
+    if (leftValue !== rightValue) {
+      return leftValue.localeCompare(rightValue);
     }
   }
 
