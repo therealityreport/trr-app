@@ -453,6 +453,126 @@ describe("admin social page auth bypass", () => {
     });
   });
 
+  it("preserves the selected cast SocialBlade show across landing payload refreshes", async () => {
+    const landingPayload = buildInitialLandingPayload();
+    const rhonyShow = {
+      show_id: "show-rhony",
+      show_name: "RHONY",
+      canonical_slug: "real-housewives-of-new-york-city",
+      platform_counts: {
+        instagram: 1,
+      },
+      cast_member_count: 1,
+      latest_scraped_at: "2026-04-24T13:30:00.000Z",
+      members: [
+        {
+          person_id: "person-meredith-marks",
+          full_name: "Meredith Marks",
+          photo_url: null,
+          accounts: [
+            {
+              platform: "instagram",
+              handle: "meredithmarks",
+              display_label: "@meredithmarks",
+              account_href: "/social/instagram/meredithmarks",
+              socialblade_url:
+                "https://socialblade.com/instagram/user/meredithmarks",
+              scraped_at: "2026-04-24T13:30:00.000Z",
+              updated_at: "2026-04-24T13:45:00.000Z",
+              stats_refreshed: true,
+            },
+          ],
+        },
+      ],
+    };
+    let landingLoadCount = 0;
+
+    mocks.fetchAdminWithAuth.mockImplementation(async (input, init, options) => {
+      if (!options?.allowDevAdminBypass) {
+        throw new Error("Not authenticated");
+      }
+
+      const url = String(input);
+      if (url === "/api/admin/social/landing") {
+        landingLoadCount += 1;
+        return jsonResponse({
+          ...landingPayload,
+          cast_socialblade_shows: [
+            ...landingPayload.cast_socialblade_shows,
+            {
+              ...rhonyShow,
+              members:
+                landingLoadCount === 1
+                  ? rhonyShow.members
+                  : [
+                      {
+                        ...rhonyShow.members[0],
+                        full_name: "Meredith Marks Refreshed",
+                      },
+                    ],
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/social/shared/ingest")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({
+          message: "Shared ingest queued",
+          run_id: "run-queued-1",
+        });
+      }
+
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<AdminSocialPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "CAST SOCIALBLADE" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      expect(screen.getByText("Heather Gay")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /RHONY/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByText("Meredith Marks")).toBeInTheDocument();
+      expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Shared Ingest" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Shared ingest queued")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      expect(screen.getByRole("button", { name: /RHONY/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByText("Meredith Marks Refreshed")).toBeInTheDocument();
+      expect(screen.queryByText("Heather Gay")).not.toBeInTheDocument();
+    });
+  });
+
   it("keeps a quiet cast SocialBlade empty state when the landing payload has no cast rows", async () => {
     mocks.fetchAdminWithAuth.mockImplementationOnce(async () =>
       jsonResponse({
