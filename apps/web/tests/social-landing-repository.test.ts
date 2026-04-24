@@ -1062,6 +1062,70 @@ describe("social landing repository", () => {
     ]);
   });
 
+  it("fetches mixed-case raw YouTube route candidates before payload matching", async () => {
+    listEffectivePersonSocialHandlesByPersonIdsMock.mockResolvedValue(
+      new Map([
+        [
+          "person-andy",
+          {
+            person_id: "person-andy",
+            facebook_handle: null,
+            instagram_handle: null,
+            tiktok_handle: null,
+            twitter_handle: null,
+            youtube_handle: "user/AndyCohen",
+          },
+        ],
+      ]),
+    );
+    const storedRows = [
+      {
+        person_id: null,
+        platform: "youtube",
+        account_handle: "user/AndyCohen",
+        scraped_at: "2026-04-21T12:00:00.000Z",
+        updated_at: "2026-04-21T12:05:00.000Z",
+        stats_refreshed: true,
+        socialblade_url: "https://socialblade.com/youtube/user/AndyCohen",
+      },
+    ];
+    queryMock.mockImplementation(async (_sql: string, params: unknown[]) => {
+      const accountHandleCandidates = params[2] as string[];
+      return {
+        rows: storedRows.filter((row) =>
+          accountHandleCandidates.includes(row.account_handle),
+        ),
+      };
+    });
+
+    const payload = await getSocialLandingPayload();
+    const [, params] = queryMock.mock.calls[0] as [string, unknown[]];
+
+    expect(params[2]).toContain("user/AndyCohen");
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-wwhl",
+        platform_counts: { youtube: 1 },
+        members: [
+          expect.objectContaining({
+            person_id: "person-andy",
+            full_name: "Andy Cohen",
+            accounts: [
+              expect.objectContaining({
+                platform: "youtube",
+                handle: "andycohen",
+                display_label: "andycohen",
+                account_href: "/social/youtube/andycohen/socialblade",
+                socialblade_url: "https://socialblade.com/youtube/user/AndyCohen",
+                stats_refreshed: true,
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("matches persisted stripped legacy YouTube SocialBlade handles to current cast handles", async () => {
     queryMock.mockResolvedValue({
       rows: [

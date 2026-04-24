@@ -182,6 +182,26 @@ const toCanonicalInternalHandle = (
   return normalizeSocialAccountProfileHandle(trimmed);
 };
 
+const toCanonicalPersonSocialHandle = (
+  platform: SupportedPersonSocialSource,
+  value: string,
+): string | null => {
+  const normalizedValue = normalizePersonExternalIdValue(platform, value);
+  if (!normalizedValue) return null;
+
+  if (platform === "youtube") {
+    const routeMatch = normalizedValue.match(/^(?:user|c|channel)\/(.+)$/i);
+    return normalizeSocialAccountProfileHandle(
+      routeMatch?.[1] ?? normalizedValue,
+    );
+  }
+
+  return (
+    normalizeSocialAccountProfileHandle(normalizedValue) ??
+    normalizedValue.replace(/^@+/, "")
+  );
+};
+
 const buildInternalHandleSummary = (
   platform: SocialLandingPlatform,
   value: string,
@@ -208,9 +228,7 @@ const buildPersonHandleSummary = (
   const normalizedValue = normalizePersonExternalIdValue(platform, record.external_id);
   if (!normalizedValue) return null;
 
-  const canonicalHandle =
-    normalizeSocialAccountProfileHandle(normalizedValue) ??
-    normalizedValue.replace(/^@+/, "");
+  const canonicalHandle = toCanonicalPersonSocialHandle(platform, record.external_id);
   if (!canonicalHandle) return null;
 
   const displayValue =
@@ -235,9 +253,7 @@ const buildPersonHandleSummaryFromSource = (
   const normalizedValue = normalizePersonExternalIdValue(source, value);
   if (!normalizedValue) return null;
 
-  const canonicalHandle =
-    normalizeSocialAccountProfileHandle(normalizedValue) ??
-    normalizedValue.replace(/^@+/, "");
+  const canonicalHandle = toCanonicalPersonSocialHandle(source, value);
   if (!canonicalHandle) return null;
 
   const displayValue =
@@ -523,17 +539,27 @@ type SocialBladeCurrentLookupEntry = {
 type NormalizedSocialBladeHandle = {
   platform: CastSocialBladePlatform;
   handle: string;
+  rawValues: string[];
 };
 
 const normalizeSocialBladeCurrentHandles = (
   handles: readonly SocialHandleSummary[],
+  rawHandleCandidatesByKey: ReadonlyMap<string, readonly string[]> | null,
 ): NormalizedSocialBladeHandle[] =>
   handles
     .map((handle) => {
       const platform = normalizeCastSocialBladePlatform(handle.platform);
       const normalizedHandle = normalizeSocialAccountProfileHandle(handle.handle);
       return platform && normalizedHandle
-        ? { platform, handle: normalizedHandle }
+        ? {
+            platform,
+            handle: normalizedHandle,
+            rawValues: [
+              ...(rawHandleCandidatesByKey?.get(
+                buildSocialBladeAccountKey(platform, normalizedHandle),
+              ) ?? []),
+            ],
+          }
         : null;
     })
     .filter(
@@ -554,13 +580,49 @@ const buildSocialBladeAccountHandleCandidates = (
   handles: readonly NormalizedSocialBladeHandle[],
 ): string[] => {
   const candidates = new Set<string>();
+  const addCandidate = (value: string | null | undefined) => {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed) candidates.add(trimmed);
+  };
+  const addAtVariant = (value: string) => {
+    const stripped = value.trim().replace(/^@+/, "");
+    if (stripped) addCandidate(`@${stripped}`);
+  };
+  const addYoutubeRouteVariants = (value: string) => {
+    const stripped = value.trim().replace(/^@+/, "");
+    if (!stripped || /^(?:user|c|channel)\//i.test(stripped)) return;
+    for (const prefix of ["user", "c", "channel"]) {
+      addCandidate(`${prefix}/${stripped}`);
+      addCandidate(`${prefix}${stripped}`);
+    }
+  };
+
   for (const handle of handles) {
-    candidates.add(handle.handle);
-    candidates.add(`@${handle.handle}`);
+    addCandidate(handle.handle);
+    if (
+      handle.platform === "youtube" ||
+      handle.platform === "instagram" ||
+      handle.platform === "facebook"
+    ) {
+      addAtVariant(handle.handle);
+    }
     if (handle.platform === "youtube") {
-      for (const prefix of ["user", "c", "channel"]) {
-        candidates.add(`${prefix}/${handle.handle}`);
-        candidates.add(`${prefix}${handle.handle}`);
+      addYoutubeRouteVariants(handle.handle);
+    }
+    for (const rawValue of handle.rawValues) {
+      addCandidate(rawValue);
+      if (
+        handle.platform === "youtube" ||
+        handle.platform === "instagram" ||
+        handle.platform === "facebook"
+      ) {
+        addAtVariant(rawValue);
+      }
+      if (handle.platform === "youtube") {
+        const normalizedRaw = normalizePersonExternalIdValue("youtube", rawValue);
+        const routeMatch = normalizedRaw.match(/^(?:user|c|channel)\/(.+)$/i);
+        const rawHandle = routeMatch?.[1] ?? normalizedRaw;
+        addYoutubeRouteVariants(rawHandle);
       }
     }
   }
@@ -575,6 +637,10 @@ type SocialBladeCurrentLookup = {
 
 const buildCurrentSocialBladeLookup = (
   handlesByPersonId: ReadonlyMap<string, readonly SocialHandleSummary[]>,
+  rawHandleCandidatesByPersonId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, readonly string[]>
+  >,
 ): SocialBladeCurrentLookup => {
   const normalizedHandlesByPersonId = new Map<
     string,
@@ -583,7 +649,10 @@ const buildCurrentSocialBladeLookup = (
   const allCurrentHandles: NormalizedSocialBladeHandle[] = [];
 
   for (const [personId, handles] of handlesByPersonId) {
-    const normalizedHandles = normalizeSocialBladeCurrentHandles(handles);
+    const normalizedHandles = normalizeSocialBladeCurrentHandles(
+      handles,
+      rawHandleCandidatesByPersonId.get(personId) ?? null,
+    );
     normalizedHandlesByPersonId.set(personId, normalizedHandles);
     allCurrentHandles.push(...normalizedHandles);
   }
@@ -638,14 +707,10 @@ const normalizeSocialBladeRowHandle = (
   value: string,
 ): string | null => {
   if (platform !== "youtube") {
-    return toCanonicalInternalHandle(platform, value);
+    return toCanonicalPersonSocialHandle(platform, value);
   }
 
-  const normalizedValue = normalizePersonExternalIdValue("youtube", value);
-  if (!normalizedValue) return null;
-  const routeMatch = normalizedValue.match(/^(?:user|c|channel)\/(.+)$/i);
-  const handleCandidate = routeMatch?.[1] ?? normalizedValue;
-  return normalizeSocialAccountProfileHandle(handleCandidate);
+  return toCanonicalPersonSocialHandle("youtube", value);
 };
 
 const buildSocialBladeRowAccountKey = (
@@ -706,6 +771,26 @@ const safeLoadCastSocialBladeRows = async (
     console.warn("[social-landing] Failed to load cast SocialBlade rows", error);
     return [];
   }
+};
+
+const addRawSocialBladeHandleCandidate = (
+  candidatesByKey: Map<string, string[]>,
+  source: SupportedPersonSocialSource,
+  value: string | null | undefined,
+): void => {
+  if (typeof value !== "string") return;
+  const platform = normalizeCastSocialBladePlatform(source);
+  if (!platform) return;
+  const canonicalHandle = toCanonicalPersonSocialHandle(source, value);
+  if (!canonicalHandle) return;
+
+  const trimmed = value.trim();
+  if (!trimmed) return;
+
+  const key = buildSocialBladeAccountKey(platform, canonicalHandle);
+  const candidates = candidatesByKey.get(key) ?? [];
+  candidates.push(trimmed);
+  candidatesByKey.set(key, candidates);
 };
 
 const extractShowHandles = (
@@ -811,6 +896,10 @@ const buildPeopleProfiles = async (
   peopleProfiles: PersonProfileSummary[];
   personTargets: PersonTargetSummary[];
   personHandlesByPersonId: ReadonlyMap<string, SocialHandleSummary[]>;
+  socialBladeRawHandleCandidatesByPersonId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, readonly string[]>
+  >;
 }> => {
   const people = new Map<
     string,
@@ -867,16 +956,54 @@ const buildPeopleProfiles = async (
     .sort((left, right) => left.full_name.localeCompare(right.full_name));
 
   const personHandlesByPersonId = new Map<string, SocialHandleSummary[]>();
+  const socialBladeRawHandleCandidatesByPersonId = new Map<
+    string,
+    ReadonlyMap<string, readonly string[]>
+  >();
   const hydrated = personTargets.map((person) => {
     const records = externalIdsByPersonId.get(person.person_id) ?? [];
+    const fallbackHandles = fallbackHandlesByPersonId.get(person.person_id);
+    const rawSocialBladeHandleCandidates = new Map<string, string[]>();
+    for (const record of records) {
+      if (
+        PERSON_SOCIAL_SOURCES.includes(
+          record.source_id as SupportedPersonSocialSource,
+        )
+      ) {
+        addRawSocialBladeHandleCandidate(
+          rawSocialBladeHandleCandidates,
+          record.source_id as SupportedPersonSocialSource,
+          record.external_id,
+        );
+      }
+    }
+    if (fallbackHandles) {
+      addRawSocialBladeHandleCandidate(
+        rawSocialBladeHandleCandidates,
+        "facebook",
+        fallbackHandles.facebook_handle,
+      );
+      addRawSocialBladeHandleCandidate(
+        rawSocialBladeHandleCandidates,
+        "instagram",
+        fallbackHandles.instagram_handle,
+      );
+      addRawSocialBladeHandleCandidate(
+        rawSocialBladeHandleCandidates,
+        "youtube",
+        fallbackHandles.youtube_handle,
+      );
+    }
+    socialBladeRawHandleCandidatesByPersonId.set(
+      person.person_id,
+      rawSocialBladeHandleCandidates,
+    );
     const handles = dedupeHandles(
       [
         ...records
           .map((record) => buildPersonHandleSummary(record))
           .filter((handle): handle is SocialHandleSummary => handle !== null),
-        ...buildFallbackPersonHandleSummaries(
-          fallbackHandlesByPersonId.get(person.person_id),
-        ),
+        ...buildFallbackPersonHandleSummaries(fallbackHandles),
       ],
     );
     personHandlesByPersonId.set(person.person_id, handles);
@@ -896,6 +1023,7 @@ const buildPeopleProfiles = async (
       .sort((left, right) => left.full_name.localeCompare(right.full_name)),
     personTargets,
     personHandlesByPersonId,
+    socialBladeRawHandleCandidatesByPersonId,
   };
 };
 
@@ -1005,9 +1133,16 @@ const buildCastSocialBladeShows = async (
   coveredShows: readonly CoveredShow[],
   castByShowId: ReadonlyMap<string, CastSummaryMember[]>,
   personHandlesByPersonId: ReadonlyMap<string, SocialHandleSummary[]>,
+  socialBladeRawHandleCandidatesByPersonId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, readonly string[]>
+  >,
 ): Promise<CastSocialBladeShowSummary[]> => {
   const personIds = [...personHandlesByPersonId.keys()];
-  const currentLookup = buildCurrentSocialBladeLookup(personHandlesByPersonId);
+  const currentLookup = buildCurrentSocialBladeLookup(
+    personHandlesByPersonId,
+    socialBladeRawHandleCandidatesByPersonId,
+  );
   const socialBladeRows = await safeLoadCastSocialBladeRows(
     personIds,
     currentLookup.accountHandleCandidates,
@@ -1138,14 +1273,17 @@ export async function getSocialLandingPayload(
     coveredShows.map((show) => show.trr_show_id),
     adminContext,
   );
-  const { peopleProfiles, personTargets, personHandlesByPersonId } = await buildPeopleProfiles(
-    coveredShows,
-    castByShowId,
-  );
+  const {
+    peopleProfiles,
+    personTargets,
+    personHandlesByPersonId,
+    socialBladeRawHandleCandidatesByPersonId,
+  } = await buildPeopleProfiles(coveredShows, castByShowId);
   const castSocialBladeShows = await buildCastSocialBladeShows(
     coveredShows,
     castByShowId,
     personHandlesByPersonId,
+    socialBladeRawHandleCandidatesByPersonId,
   );
 
   return {
