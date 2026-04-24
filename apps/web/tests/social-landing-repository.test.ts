@@ -989,6 +989,160 @@ describe("social landing repository", () => {
     ]);
   });
 
+  it("prefers exact YouTube handles over colliding stripped legacy aliases", async () => {
+    listPrimaryPersonExternalIdsByPersonIdsMock.mockImplementation(
+      async (personIds: readonly string[]) =>
+        new Map(
+          personIds.map((personId) => {
+            if (personId === "person-andy") {
+              return [
+                personId,
+                [
+                  {
+                    id: 8,
+                    source_id: "youtube",
+                    external_id: "@andycohen",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
+            if (personId === "person-producer") {
+              return [
+                personId,
+                [
+                  {
+                    id: 9,
+                    source_id: "youtube",
+                    external_id: "@userandycohen",
+                    is_primary: true,
+                    valid_from: null,
+                    valid_to: null,
+                    observed_at: null,
+                  },
+                ],
+              ] as const;
+            }
+            return [personId, []] as const;
+          }),
+        ),
+    );
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: null,
+          platform: "youtube",
+          account_handle: "userandycohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/userandycohen",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(payload.cast_socialblade_shows).toEqual([
+      expect.objectContaining({
+        show_id: "show-wwhl",
+        platform_counts: { youtube: 1 },
+        members: [
+          expect.objectContaining({
+            person_id: "person-producer",
+            full_name: "Producer Without Handles",
+            accounts: [
+              expect.objectContaining({
+                platform: "youtube",
+                handle: "userandycohen",
+                account_href: "/social/youtube/userandycohen/socialblade",
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("chooses the newest SocialBlade row when duplicate handle rows match", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: null,
+          platform: "youtube",
+          account_handle: "andycohen",
+          scraped_at: "2026-04-20T12:00:00.000Z",
+          updated_at: "2026-04-20T12:05:00.000Z",
+          created_at: "2026-04-20T12:01:00.000Z",
+          stats_refreshed: false,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen-old",
+        },
+        {
+          person_id: null,
+          platform: "youtube",
+          account_handle: "andycohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          created_at: "2026-04-21T12:01:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen-new",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(
+      payload.cast_socialblade_shows[0]?.members[0]?.accounts[0],
+    ).toMatchObject({
+      handle: "andycohen",
+      socialblade_url: "https://socialblade.com/youtube/user/andycohen-new",
+      scraped_at: "2026-04-21T12:00:00.000Z",
+      stats_refreshed: true,
+    });
+  });
+
+  it("prefers a person-specific SocialBlade row over a newer generic duplicate", async () => {
+    queryMock.mockResolvedValue({
+      rows: [
+        {
+          person_id: null,
+          platform: "youtube",
+          account_handle: "andycohen",
+          scraped_at: "2026-04-23T12:00:00.000Z",
+          updated_at: "2026-04-23T12:05:00.000Z",
+          created_at: "2026-04-23T12:01:00.000Z",
+          stats_refreshed: false,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen-generic",
+        },
+        {
+          person_id: "person-andy",
+          platform: "youtube",
+          account_handle: "andycohen",
+          scraped_at: "2026-04-21T12:00:00.000Z",
+          updated_at: "2026-04-21T12:05:00.000Z",
+          created_at: "2026-04-21T12:01:00.000Z",
+          stats_refreshed: true,
+          socialblade_url: "https://socialblade.com/youtube/user/andycohen-specific",
+        },
+      ],
+    });
+
+    const payload = await getSocialLandingPayload();
+
+    expect(
+      payload.cast_socialblade_shows[0]?.members[0]?.accounts[0],
+    ).toMatchObject({
+      handle: "andycohen",
+      socialblade_url: "https://socialblade.com/youtube/user/andycohen-specific",
+      scraped_at: "2026-04-21T12:00:00.000Z",
+      stats_refreshed: true,
+    });
+  });
+
   it("omits unsupported platforms and shows with no SocialBlade rows", async () => {
     queryMock.mockResolvedValue({
       rows: [

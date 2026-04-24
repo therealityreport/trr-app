@@ -83,6 +83,7 @@ type SocialBladeSummaryRow = Record<string, unknown> & {
   account_handle: string | null;
   scraped_at: string | Date | null;
   updated_at: string | Date | null;
+  created_at: string | Date | null;
   stats_refreshed: boolean | null;
   socialblade_url: string | null;
 };
@@ -511,18 +512,73 @@ const buildSocialBladeAccountKey = (
   handle: string,
 ): string => `${platform}:${handle}`.toLowerCase();
 
-const buildSocialBladeLookupKeys = (
+type SocialBladeCurrentLookupEntry = {
+  key: string;
+  platform: CastSocialBladePlatform;
+  handle: string;
+  matchRank: number;
+};
+
+const buildSocialBladeLegacyAliasKeys = (
   platform: CastSocialBladePlatform,
   handle: string,
 ): string[] => {
-  const baseKey = buildSocialBladeAccountKey(platform, handle);
-  if (platform !== "youtube") return [baseKey];
-  return [
-    baseKey,
-    buildSocialBladeAccountKey(platform, `user${handle}`),
-    buildSocialBladeAccountKey(platform, `c${handle}`),
-    buildSocialBladeAccountKey(platform, `channel${handle}`),
-  ];
+  if (platform !== "youtube") return [];
+  return ["user", "c", "channel"].map((prefix) =>
+    buildSocialBladeAccountKey(platform, `${prefix}${handle}`),
+  );
+};
+
+const buildCurrentSocialBladeLookupEntries = (
+  targetHandles: readonly SocialHandleSummary[],
+  allHandles: readonly SocialHandleSummary[] = targetHandles,
+): SocialBladeCurrentLookupEntry[] => {
+  const normalizeHandles = (handles: readonly SocialHandleSummary[]) =>
+    handles
+      .map((handle) => {
+        const platform = normalizeCastSocialBladePlatform(handle.platform);
+        const normalizedHandle = normalizeSocialAccountProfileHandle(handle.handle);
+        return platform && normalizedHandle
+          ? { platform, handle: normalizedHandle }
+          : null;
+      })
+      .filter(
+        (
+          handle,
+        ): handle is { platform: CastSocialBladePlatform; handle: string } =>
+          handle !== null,
+      );
+
+  const allCurrentHandles = normalizeHandles(allHandles);
+  const exactKeys = new Set(
+    allCurrentHandles.map((handle) =>
+      buildSocialBladeAccountKey(handle.platform, handle.handle),
+    ),
+  );
+  const aliasCounts = new Map<string, number>();
+  for (const handle of allCurrentHandles) {
+    for (const aliasKey of buildSocialBladeLegacyAliasKeys(
+      handle.platform,
+      handle.handle,
+    )) {
+      aliasCounts.set(aliasKey, (aliasCounts.get(aliasKey) ?? 0) + 1);
+    }
+  }
+
+  const entries = new Map<string, SocialBladeCurrentLookupEntry>();
+  for (const handle of normalizeHandles(targetHandles)) {
+    const exactKey = buildSocialBladeAccountKey(handle.platform, handle.handle);
+    entries.set(exactKey, { key: exactKey, ...handle, matchRank: 0 });
+    for (const aliasKey of buildSocialBladeLegacyAliasKeys(
+      handle.platform,
+      handle.handle,
+    )) {
+      if (exactKeys.has(aliasKey)) continue;
+      if ((aliasCounts.get(aliasKey) ?? 0) !== 1) continue;
+      entries.set(aliasKey, { key: aliasKey, ...handle, matchRank: 1 });
+    }
+  }
+  return [...entries.values()];
 };
 
 const normalizeSocialBladeRowHandle = (
@@ -555,14 +611,9 @@ const safeLoadCastSocialBladeRows = async (
 ): Promise<SocialBladeSummaryRow[]> => {
   if (personIds.length === 0 && handles.length === 0) return [];
 
-  const accountKeys = [
-    ...new Set(
-      handles.flatMap((handle) => {
-          const platform = normalizeCastSocialBladePlatform(handle.platform);
-          return platform ? buildSocialBladeLookupKeys(platform, handle.handle) : [];
-        }),
-    ),
-  ];
+  const accountKeys = buildCurrentSocialBladeLookupEntries(handles).map(
+    (entry) => entry.key,
+  );
   const socialBladePlatforms = CAST_SOCIALBLADE_PLATFORMS.map((platform) =>
     platform.toLowerCase(),
   );
@@ -577,6 +628,7 @@ const safeLoadCastSocialBladeRows = async (
           account_handle,
           scraped_at,
           updated_at,
+          created_at,
           stats_refreshed,
           raw_response->>'socialblade_url' AS socialblade_url
         FROM pipeline.socialblade_growth_data
@@ -832,6 +884,40 @@ const buildCastSocialBladeAccountSummary = (
 type CastSocialBladeRowCandidate = {
   row: SocialBladeSummaryRow;
   matchedHandle: string;
+  matchRank: number;
+};
+
+const toTimestampMs = (value: string | Date | null | undefined): number => {
+  const isoValue = toIsoStringOrNull(value);
+  if (!isoValue) return Number.NEGATIVE_INFINITY;
+  const timestamp = Date.parse(isoValue);
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+};
+
+const compareCastSocialBladeRowCandidates = (
+  personId: string,
+  left: CastSocialBladeRowCandidate,
+  right: CastSocialBladeRowCandidate,
+): number => {
+  if (left.matchRank !== right.matchRank) {
+    return left.matchRank - right.matchRank;
+  }
+
+  const leftPersonRank = left.row.person_id === personId ? 0 : 1;
+  const rightPersonRank = right.row.person_id === personId ? 0 : 1;
+  if (leftPersonRank !== rightPersonRank) {
+    return leftPersonRank - rightPersonRank;
+  }
+
+  for (const field of ["updated_at", "scraped_at", "created_at"] as const) {
+    const leftTimestamp = toTimestampMs(left.row[field]);
+    const rightTimestamp = toTimestampMs(right.row[field]);
+    if (leftTimestamp !== rightTimestamp) {
+      return rightTimestamp - leftTimestamp;
+    }
+  }
+
+  return 0;
 };
 
 const latestTimestamp = (values: readonly (string | null)[]): string | null => {
@@ -878,18 +964,13 @@ const buildCastSocialBladeShows = async (
             typeof member.full_name === "string" ? member.full_name.trim() : "";
           if (!personId || !fullName) return null;
 
-          const currentAccountsByKey = new Map<
-            string,
-            { platform: CastSocialBladePlatform; handle: string }
-          >();
+          const currentAccountsByKey = new Map<string, SocialBladeCurrentLookupEntry>();
           for (const handle of personHandlesByPersonId.get(personId) ?? []) {
-            const platform = normalizeCastSocialBladePlatform(handle.platform);
-            if (!platform) continue;
-            for (const accountKey of buildSocialBladeLookupKeys(platform, handle.handle)) {
-              currentAccountsByKey.set(accountKey, {
-                platform,
-                handle: handle.handle,
-              });
+            for (const entry of buildCurrentSocialBladeLookupEntries(
+              [handle],
+              [...personHandlesByPersonId.values()].flat(),
+            )) {
+              currentAccountsByKey.set(entry.key, entry);
             }
           }
 
@@ -899,12 +980,16 @@ const buildCastSocialBladeShows = async (
               ...(rowsByAccountKey.get(accountKey) ?? []).map((row) => ({
                 row,
                 matchedHandle: currentAccount.handle,
+                matchRank: currentAccount.matchRank,
               })),
             );
           }
 
           const seenAccounts = new Set<string>();
           const accounts = rowCandidates
+            .sort((left, right) =>
+              compareCastSocialBladeRowCandidates(personId, left, right),
+            )
             .map((candidate) =>
               buildCastSocialBladeAccountSummary(
                 candidate.row,
