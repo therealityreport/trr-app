@@ -3337,7 +3337,7 @@ describe("SocialAccountProfilePage", () => {
   });
 
   it("renders Twitter catalog actions with the shared profile UI", async () => {
-    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL) => {
+    mocks.fetchAdminWithAuth.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/summary")) {
         return jsonResponse({
@@ -3352,8 +3352,21 @@ describe("SocialAccountProfilePage", () => {
           live_catalog_total_posts: 1200,
         });
       }
+      if (url.includes("/cookies/health")) {
+        return jsonResponse(healthyCookieHealth("twitter"));
+      }
       if (url.endsWith("/catalog/review-queue")) {
         return jsonResponse({ items: [] });
+      }
+      if (url.includes("/catalog/backfill")) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo", backfill_scope: "full_history" }));
+        return jsonResponse({
+          run_id: "catalog-run-twitter-12345678",
+          status: "queued",
+          catalog_run_id: "catalog-run-twitter-12345678",
+          effective_selected_tasks: ["post_details", "comments", "media"],
+        });
       }
       throw new Error(`Unhandled request: ${url}`);
     });
@@ -3369,6 +3382,16 @@ describe("SocialAccountProfilePage", () => {
       "href",
       "https://x.com/bravotv",
     );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Backfill Posts" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Twitter / X backfill queued for Post Details, Comments, Media. Catalog catalog-.")).toBeInTheDocument();
+    });
   });
 
   it("expands caption search without switching tabs and shows backend search results", async () => {
@@ -7353,9 +7376,9 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     await waitFor(() => {
       expect(within(progressSection as HTMLElement).getAllByText("Completed").length).toBeGreaterThan(0);
-      expect(within(progressSection as HTMLElement).getByText("0%")).toBeInTheDocument();
-      expect(within(progressSection as HTMLElement).getByText("0 / 431 posts checked")).toBeInTheDocument();
-      expect(within(progressSection as HTMLElement).getByText("0 persisted")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getByText("100%")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getByText("431 / 431 posts checked")).toBeInTheDocument();
+      expect(within(progressSection as HTMLElement).getByText("431 persisted")).toBeInTheDocument();
       expect(
         within(progressSection as HTMLElement).getByText(
           "This completed run did not report stage-level progress telemetry.",
@@ -7367,7 +7390,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
 
     const progressBar = progressSection?.querySelector("div.mt-4.h-2.overflow-hidden.rounded-full.bg-zinc-100 > div");
     expect(progressBar).not.toBeNull();
-    expect(progressBar).toHaveStyle({ width: "0%" });
+    expect(progressBar).toHaveStyle({ width: "100%" });
   });
 
   it("treats completed sync-newer runs as bounded progress instead of full-history coverage", async () => {

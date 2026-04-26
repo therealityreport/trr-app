@@ -3359,6 +3359,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const catalogPostProgress = useMemo(() => {
     const payload = catalogRunProgress?.post_progress ?? {};
     const rawCompleted = Number(payload.completed_posts ?? 0);
+    const terminalRunHasNoStageTelemetry =
+      TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus) && catalogStageEntries.length === 0;
+    const summarySavedTotal = Number(summary?.catalog_total_posts ?? summary?.total_posts ?? 0);
+    const summaryAccountTotal = Number(summary?.live_total_posts ?? summary?.total_posts ?? 0);
+    const payloadTotal = Number(payload.total_posts ?? 0);
+    const terminalSummaryCompletedFallback =
+      terminalRunHasNoStageTelemetry && displayedCatalogRunStatus === "completed" && summarySavedTotal > 0
+        ? Math.max(summarySavedTotal, payloadTotal)
+        : 0;
     const discoveryScraped = Number(catalogRunProgress?.stages?.shared_account_discovery?.scraped_count ?? 0);
     const fetchScraped = Number(catalogRunProgress?.stages?.shared_account_posts?.scraped_count ?? 0);
     const hasFetchStageTelemetry =
@@ -3370,12 +3379,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         : Math.max(
             discoveryScraped,
             fetchScraped,
+            terminalSummaryCompletedFallback,
             hasFetchStageTelemetry ? 0 : Number(catalogProgressSummary.items ?? 0),
           );
-    const persisted =
-      payload.saved_posts != null ? Number(payload.saved_posts ?? 0) : Number(payload.matched_posts ?? 0);
-    const fallbackTotal = Number(summary?.live_total_posts ?? summary?.total_posts ?? 0);
-    const total = Number(payload.total_posts ?? 0) || fallbackTotal;
+    const rawPersisted =
+      payload.saved_posts != null ? Number(payload.saved_posts ?? 0)
+      : payload.matched_posts != null ? Number(payload.matched_posts ?? 0)
+      : terminalSummaryCompletedFallback;
+    const persisted = Math.max(rawPersisted, terminalSummaryCompletedFallback);
+    const fallbackTotal = summaryAccountTotal;
+    const total = payloadTotal || fallbackTotal;
     const roundedCoveragePct = total > 0 ? Math.round((completed / total) * 100) : catalogProgressSummary.pct;
     const pct =
       catalogProgressMode === "bounded"
@@ -3401,7 +3414,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogRunProgress?.stages?.shared_account_discovery,
     catalogRunProgress?.stages?.shared_account_posts,
     catalogProgressMode,
+    catalogStageEntries.length,
     displayedCatalogRunStatus,
+    summary?.catalog_total_posts,
     summary?.live_total_posts,
     summary?.total_posts,
   ]);
@@ -4031,7 +4046,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             ("selected_tasks" in requestBody ? requestBody.selected_tasks ?? [] : []);
           const selectedTaskLabels = selectedTaskSet.map((task) => formatBackfillTaskLabel(task)).join(", ");
           const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform];
-          if (platform === "tiktok" && selectedTaskLabels) {
+          if ((platform === "tiktok" || platform === "twitter" || platform === "youtube") && selectedTaskLabels) {
             setCatalogActionMessage(
               `${platformLabel} backfill queued for ${selectedTaskLabels}.${
                 catalogRunId ? ` Catalog ${catalogRunId.slice(0, 8)}.` : queuedRunId ? ` (${queuedRunId.slice(0, 8)}).` : ""
@@ -4047,6 +4062,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               : `Recent sync queued${queuedRunId ? ` (${queuedRunId.slice(0, 8)})` : ""}.`,
           );
         }
+        setRunningCatalogAction(null);
         await refreshProfileSnapshotNow({ runId: catalogRunId || queuedRunId }).catch(() => {});
       } catch (error) {
         const requestError = toSocialAccountRequestError(
