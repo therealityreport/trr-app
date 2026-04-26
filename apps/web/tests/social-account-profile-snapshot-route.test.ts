@@ -1,237 +1,183 @@
-import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({
-  requireAdmin: vi.fn(),
-  toVerifiedAdminContext: vi.fn(),
-  buildAdminAuthPartition: vi.fn(),
-  buildAdminSnapshotCacheKey: vi.fn(),
-  getOrCreateAdminSnapshot: vi.fn(),
-  buildSnapshotResponse: vi.fn(),
-  buildSnapshotSubrequest: vi.fn(),
-  readRouteJsonOrThrow: vi.fn(),
-  socialProxyErrorResponse: vi.fn(),
-  getCatalogRunProgress: vi.fn(),
-  getSummary: vi.fn(),
+import { makeSocialAccountDashboardPayload, makeSocialAccountSummary } from "./fixtures/social-account-dashboard";
+
+const {
+  requireAdminMock,
+  toVerifiedAdminContextMock,
+  buildAdminAuthPartitionMock,
+  buildAdminSnapshotCacheKeyMock,
+  getOrCreateAdminSnapshotMock,
+  fetchSocialBackendJsonMock,
+  socialProxyErrorResponseMock,
+} = vi.hoisted(() => ({
+  requireAdminMock: vi.fn(),
+  toVerifiedAdminContextMock: vi.fn(),
+  buildAdminAuthPartitionMock: vi.fn(),
+  buildAdminSnapshotCacheKeyMock: vi.fn(),
+  getOrCreateAdminSnapshotMock: vi.fn(),
+  fetchSocialBackendJsonMock: vi.fn(),
+  socialProxyErrorResponseMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
-  requireAdmin: (...args: unknown[]) => mocks.requireAdmin(...args),
-  toVerifiedAdminContext: (...args: unknown[]) => mocks.toVerifiedAdminContext(...args),
+  requireAdmin: requireAdminMock,
+  toVerifiedAdminContext: toVerifiedAdminContextMock,
 }));
 
 vi.mock("@/lib/server/admin/admin-snapshot-cache", () => ({
-  buildAdminAuthPartition: (...args: unknown[]) => mocks.buildAdminAuthPartition(...args),
-  buildAdminSnapshotCacheKey: (...args: unknown[]) => mocks.buildAdminSnapshotCacheKey(...args),
-  getOrCreateAdminSnapshot: (...args: unknown[]) => mocks.getOrCreateAdminSnapshot(...args),
+  buildAdminAuthPartition: buildAdminAuthPartitionMock,
+  buildAdminSnapshotCacheKey: buildAdminSnapshotCacheKeyMock,
+  getOrCreateAdminSnapshot: getOrCreateAdminSnapshotMock,
 }));
 
 vi.mock("@/lib/server/admin/admin-snapshot-route", () => ({
-  buildSnapshotResponse: (...args: unknown[]) => mocks.buildSnapshotResponse(...args),
-  buildSnapshotSubrequest: (...args: unknown[]) => mocks.buildSnapshotSubrequest(...args),
-  readRouteJsonOrThrow: (...args: unknown[]) => mocks.readRouteJsonOrThrow(...args),
+  buildSnapshotResponse: vi.fn(
+    (input: {
+      data: Record<string, unknown>;
+      cacheStatus: string;
+      generatedAt: string;
+      cacheAgeMs: number;
+      stale: boolean;
+    }) =>
+      Response.json(
+        {
+          data: input.data,
+          generated_at: input.generatedAt,
+          cache_age_ms: input.cacheAgeMs,
+          stale: input.stale,
+        },
+        { headers: { "x-trr-cache": input.cacheStatus } },
+      ),
+  ),
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
-  socialProxyErrorResponse: (...args: unknown[]) => mocks.socialProxyErrorResponse(...args),
-}));
-
-vi.mock(
-  "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/progress/route",
-  () => ({
-    GET: (...args: unknown[]) => mocks.getCatalogRunProgress(...args),
-  }),
-);
-
-vi.mock("@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/summary/route", () => ({
-  GET: (...args: unknown[]) => mocks.getSummary(...args),
+  fetchSocialBackendJson: fetchSocialBackendJsonMock,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 25_000,
+  socialProxyErrorResponse: socialProxyErrorResponseMock,
 }));
 
 import { GET } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot/route";
 
 describe("social account profile snapshot route", () => {
   beforeEach(() => {
-    mocks.requireAdmin.mockReset();
-    mocks.toVerifiedAdminContext.mockReset();
-    mocks.buildAdminAuthPartition.mockReset();
-    mocks.buildAdminSnapshotCacheKey.mockReset();
-    mocks.getOrCreateAdminSnapshot.mockReset();
-    mocks.buildSnapshotResponse.mockReset();
-    mocks.buildSnapshotSubrequest.mockReset();
-    mocks.readRouteJsonOrThrow.mockReset();
-    mocks.socialProxyErrorResponse.mockReset();
-    mocks.getCatalogRunProgress.mockReset();
-    mocks.getSummary.mockReset();
+    requireAdminMock.mockReset();
+    toVerifiedAdminContextMock.mockReset();
+    buildAdminAuthPartitionMock.mockReset();
+    buildAdminSnapshotCacheKeyMock.mockReset();
+    getOrCreateAdminSnapshotMock.mockReset();
+    fetchSocialBackendJsonMock.mockReset();
+    socialProxyErrorResponseMock.mockReset();
+    vi.restoreAllMocks();
 
-    mocks.requireAdmin.mockResolvedValue({ uid: "admin-1", email: "admin@example.com" });
-    mocks.toVerifiedAdminContext.mockReturnValue({
-      uid: "admin-1",
-      email: "admin@example.com",
-      verifiedAt: 1_700_000_000_000,
-    });
-    mocks.buildAdminAuthPartition.mockReturnValue("partition:admin-1");
-    mocks.buildAdminSnapshotCacheKey.mockReturnValue("snapshot-key");
-    mocks.buildSnapshotSubrequest.mockImplementation(
-      (_request: NextRequest, pathname: string, searchParams?: URLSearchParams) =>
-        new NextRequest(
-          `http://localhost${pathname}${searchParams && searchParams.toString() ? `?${searchParams.toString()}` : ""}`,
-        ),
+    requireAdminMock.mockResolvedValue({ uid: "admin-1", provider: "firebase" });
+    toVerifiedAdminContextMock.mockReturnValue({ uid: "admin-1" });
+    buildAdminAuthPartitionMock.mockReturnValue("firebase:admin-1");
+    buildAdminSnapshotCacheKeyMock.mockReturnValue("social-profile-cache-key");
+    fetchSocialBackendJsonMock.mockResolvedValue(makeSocialAccountDashboardPayload());
+    socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
+      Response.json({ error: String(error), code: "BACKEND_UNREACHABLE" }, { status: 502 }),
     );
-    mocks.readRouteJsonOrThrow.mockImplementation(async (response: Response) => response.json());
-    mocks.buildSnapshotResponse.mockImplementation(
-      ({ data, cacheStatus, generatedAt, cacheAgeMs, stale }: Record<string, unknown>) =>
-        NextResponse.json({
-          ...((data as Record<string, unknown> | undefined) ?? {}),
-          cache_status: cacheStatus,
-          generated_at: generatedAt,
-          cache_age_ms: cacheAgeMs,
-          stale,
-        }),
-    );
-    mocks.getOrCreateAdminSnapshot.mockImplementation(
-      async ({ fetcher }: { fetcher: () => Promise<Record<string, unknown>> }) => ({
-        data: await fetcher(),
+    getOrCreateAdminSnapshotMock.mockImplementation(
+      async (options: { fetcher: () => Promise<Record<string, unknown>> }) => ({
+        data: await options.fetcher(),
         meta: {
-          cacheStatus: "live",
-          generatedAt: "2026-04-21T12:00:00.000Z",
+          cacheStatus: "miss",
+          generatedAt: "2026-04-26T12:03:00.000Z",
           cacheAgeMs: 0,
           stale: false,
         },
       }),
     );
-    mocks.socialProxyErrorResponse.mockImplementation((error: unknown) =>
-      NextResponse.json(
-        { error: error instanceof Error ? error.message : "unknown error" },
-        { status: 500 },
-      ),
-    );
   });
 
-  it("loads catalog progress for cancelling runs inferred from the summary snapshot", async () => {
-    mocks.getSummary.mockResolvedValue(
-      NextResponse.json({
-        catalog_recent_runs: [
-          {
-            run_id: "run-cancelling-1",
-            status: "cancelling",
-          },
-        ],
-      }),
-    );
-    mocks.getCatalogRunProgress.mockResolvedValue(
-      NextResponse.json({
-        run_id: "run-cancelling-1",
-        run_status: "cancelling",
-      }),
-    );
+  it("proxies one backend dashboard request and does not forward refresh", async () => {
+    const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     const response = await GET(
       new NextRequest(
-        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/snapshot?recent_log_limit=10",
+        "http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/snapshot?detail=lite&run_id=run-1&recent_log_limit=12&refresh=1",
       ),
-      {
-        params: Promise.resolve({
-          platform: "instagram",
-          handle: "bravotv",
-        }),
-      },
+      { params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }) },
     );
+    const body = (await response.json()) as { data: { summary?: { account_handle?: string } } };
 
-    expect(mocks.getCatalogRunProgress).toHaveBeenCalledTimes(1);
-    const progressContext = mocks.getCatalogRunProgress.mock.calls[0]?.[1] as
-      | { params?: Promise<{ platform: string; handle: string; runId: string }> }
-      | undefined;
-    await expect(progressContext?.params).resolves.toEqual({
-      platform: "instagram",
-      handle: "bravotv",
-      runId: "run-cancelling-1",
-    });
-
-    const payload = (await response.json()) as {
-      catalog_run_progress?: { run_id?: string; run_status?: string };
-    };
-    expect(payload.catalog_run_progress).toEqual({
-      run_id: "run-cancelling-1",
-      run_status: "cancelling",
-    });
-  });
-
-  it("does not nest catalog progress for explicit runs missing from the summary snapshot", async () => {
-    mocks.getSummary.mockResolvedValue(
-      NextResponse.json({
-        catalog_recent_runs: [],
+    expect(response.status).toBe(200);
+    expect(body.data.summary?.account_handle).toBe("thetraitorsus");
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledTimes(1);
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/thetraitorsus/dashboard",
+      expect.objectContaining({
+        fallbackError: "Failed to fetch social account profile dashboard",
+        queryString: "detail=lite&run_id=run-1&recent_log_limit=12",
+        retries: 0,
+        timeoutMs: 25_000,
       }),
     );
+    expect(response.headers.get("x-trr-dashboard-freshness")).toBe("fresh");
+    expect(response.headers.get("x-trr-dashboard-source")).toBe("live");
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "social_profile_dashboard_budget",
+      expect.objectContaining({
+        platform: "instagram",
+        handle: "thetraitorsus",
+        cacheStatus: "miss",
+        freshnessStatus: "fresh",
+        initialRequestCount: 1,
+        stale: false,
+        staleCacheHit: false,
+      }),
+    );
+  });
+
+  it("maps stale snapshot fallback to dashboard freshness headers and telemetry", async () => {
+    const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    getOrCreateAdminSnapshotMock.mockResolvedValueOnce({
+      data: {
+        summary: makeSocialAccountSummary(),
+        catalog_run_progress: null,
+        dashboard_freshness: {
+          status: "fresh",
+          source: "live",
+          generated_at: "2026-04-26T12:00:00.000Z",
+          age_seconds: 0,
+        },
+        operational_alerts: [],
+      },
+      meta: {
+        cacheStatus: "hit",
+        generatedAt: "2026-04-26T12:00:00.000Z",
+        cacheAgeMs: 180_000,
+        stale: true,
+      },
+    });
 
     const response = await GET(
-      new NextRequest(
-        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/snapshot?run_id=run-completed-1&recent_log_limit=10",
-      ),
-      {
-        params: Promise.resolve({
-          platform: "instagram",
-          handle: "bravotv",
-        }),
-      },
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/thetraitorsus/snapshot"),
+      { params: Promise.resolve({ platform: "instagram", handle: "thetraitorsus" }) },
     );
-
-    expect(mocks.getCatalogRunProgress).not.toHaveBeenCalled();
-    const payload = (await response.json()) as {
-      catalog_run_progress?: unknown;
+    const body = (await response.json()) as {
+      data: { dashboard_freshness?: { status?: string; source?: string; age_seconds?: number } };
     };
-    expect(payload.catalog_run_progress).toBeNull();
-  });
 
-  it("forwards the requested summary detail to the nested summary subrequest", async () => {
-    mocks.getSummary.mockResolvedValue(NextResponse.json({ catalog_recent_runs: [] }));
-
-    await GET(
-      new NextRequest(
-        "http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/snapshot?detail=lite&recent_log_limit=10",
-      ),
-      {
-        params: Promise.resolve({
-          platform: "instagram",
-          handle: "bravotv",
-        }),
-      },
-    );
-
-    expect(mocks.buildSnapshotSubrequest).toHaveBeenCalledWith(
-      expect.any(NextRequest),
-      "/api/admin/trr-api/social/profiles/instagram/bravotv/summary",
+    expect(response.status).toBe(200);
+    expect(fetchSocialBackendJsonMock).not.toHaveBeenCalled();
+    expect(body.data.dashboard_freshness?.status).toBe("stale");
+    expect(body.data.dashboard_freshness?.source).toBe("cache");
+    expect(body.data.dashboard_freshness?.age_seconds).toBe(180);
+    expect(response.headers.get("x-trr-dashboard-freshness")).toBe("stale");
+    expect(response.headers.get("x-trr-dashboard-source")).toBe("cache");
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "social_profile_dashboard_budget",
       expect.objectContaining({
-        toString: expect.any(Function),
-      }),
-      expect.objectContaining({
-        uid: "admin-1",
-        email: "admin@example.com",
-        verifiedAt: 1_700_000_000_000,
+        cacheStatus: "hit",
+        freshnessStatus: "stale",
+        stale: true,
+        cacheAgeMs: 180_000,
+        staleCacheHit: true,
       }),
     );
-    const summarySearchParams = mocks.buildSnapshotSubrequest.mock.calls[0]?.[2] as URLSearchParams | undefined;
-    expect(summarySearchParams?.toString()).toBe("detail=lite");
-  });
-
-  it("passes structured upstream errors through to the social proxy error response", async () => {
-    const upstreamError = Object.assign(new Error("Social account profile not found."), {
-      status: 404,
-      code: "UPSTREAM_ERROR",
-      upstreamStatus: 404,
-    });
-    mocks.readRouteJsonOrThrow.mockRejectedValueOnce(upstreamError);
-
-    await GET(
-      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/missing/snapshot?detail=lite"),
-      {
-        params: Promise.resolve({
-          platform: "instagram",
-          handle: "missing",
-        }),
-      },
-    );
-
-    expect(mocks.socialProxyErrorResponse).toHaveBeenCalledTimes(1);
-    expect(mocks.socialProxyErrorResponse.mock.calls[0]?.[0]).toBe(upstreamError);
   });
 });
