@@ -4,8 +4,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-26T03:03:22.105Z",
-  "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
+  "generatedAt": "2026-04-26T11:24:51.931Z",
+  "sourceCommitSha": "2591c2341209d0f741bb6632000838fa887c94d8",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
     {
@@ -12467,7 +12467,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot/route.ts",
       "sourceLocator": {
-        "line": 29,
+        "line": 62,
         "symbol": "GET"
       },
       "provenance": "static_scan",

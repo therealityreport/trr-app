@@ -7,13 +7,12 @@ import {
 } from "@/lib/server/admin/admin-snapshot-cache";
 import {
   buildSnapshotResponse,
-  buildSnapshotSubrequest,
-  readRouteJsonOrThrow,
 } from "@/lib/server/admin/admin-snapshot-route";
-import { socialProxyErrorResponse } from "@/lib/server/trr-api/social-admin-proxy";
-
-import { GET as getCatalogRunProgress } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/progress/route";
-import { GET as getSummary } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/summary/route";
+import {
+  fetchSocialBackendJson,
+  SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+  socialProxyErrorResponse,
+} from "@/lib/server/trr-api/social-admin-proxy";
 
 type RouteContext = {
   params: Promise<{ platform: string; handle: string }>;
@@ -24,7 +23,41 @@ const LIVE_STALE_MS = 2_500;
 
 export const dynamic = "force-dynamic";
 
-const ACTIVE_CATALOG_RUN_STATUSES = new Set(["queued", "pending", "running", "retrying", "cancelling", "attached"]);
+type BackendDashboardPayload = {
+  data?: {
+    summary?: Record<string, unknown> | null;
+    catalog_run_progress?: Record<string, unknown> | null;
+  } | null;
+  freshness?: Record<string, unknown> | null;
+  operational_alerts?: unknown[];
+};
+
+type SocialProfileSnapshotPayload = {
+  summary: Record<string, unknown> | null;
+  catalog_run_progress: Record<string, unknown> | null;
+  dashboard_freshness: Record<string, unknown> | null;
+  operational_alerts: unknown[];
+};
+
+const normalizeDashboardSnapshot = (dashboard: BackendDashboardPayload): SocialProfileSnapshotPayload => ({
+  summary: dashboard.data?.summary ?? null,
+  catalog_run_progress: dashboard.data?.catalog_run_progress ?? null,
+  dashboard_freshness: dashboard.freshness ?? null,
+  operational_alerts: Array.isArray(dashboard.operational_alerts) ? dashboard.operational_alerts : [],
+});
+
+const logSocialProfileDashboardBudget = (input: {
+  platform: string;
+  handle: string;
+  cacheStatus: string;
+  freshnessStatus: string;
+  initialRequestCount: number;
+  stale: boolean;
+  cacheAgeMs: number;
+  staleCacheHit: boolean;
+}) => {
+  console.info("social_profile_dashboard_budget", input);
+};
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -33,10 +66,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { platform, handle } = await context.params;
     const searchParams = new URLSearchParams(request.nextUrl.searchParams);
     const forceRefresh = (searchParams.get("refresh") ?? "").trim().length > 0;
-    const summarySearchParams = new URLSearchParams();
+    const backendParams = new URLSearchParams();
     const requestedDetail = (searchParams.get("detail") ?? "").trim();
-    if (requestedDetail) {
-      summarySearchParams.set("detail", requestedDetail);
+    backendParams.set("detail", requestedDetail === "full" ? "full" : "lite");
+    const runId = (searchParams.get("run_id") ?? "").trim();
+    if (runId) {
+      backendParams.set("run_id", runId);
+    }
+    const recentLogLimit = (searchParams.get("recent_log_limit") ?? "").trim();
+    if (recentLogLimit) {
+      backendParams.set("recent_log_limit", recentLogLimit);
     }
     searchParams.delete("refresh");
 
@@ -51,73 +90,58 @@ export async function GET(request: NextRequest, context: RouteContext) {
       staleIfErrorTtlMs: LIVE_STALE_MS,
       forceRefresh,
       fetcher: async () => {
-        const summary = await readRouteJsonOrThrow<Record<string, unknown>>(
-          await getSummary(
-              buildSnapshotSubrequest(
-                request,
-                `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/summary`,
-                summarySearchParams,
-                adminContext,
-              ),
-              context,
-            ),
-          "Failed to load social account profile snapshot",
+        const dashboard = await fetchSocialBackendJson(
+          `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/dashboard`,
+          {
+            adminContext,
+            fallbackError: "Failed to fetch social account profile dashboard",
+            queryString: backendParams.toString(),
+            retries: 0,
+            timeoutMs: SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
+          },
         );
-
-        const explicitRunId = searchParams.get("run_id")?.trim() ?? "";
-        const recentRuns = Array.isArray(summary.catalog_recent_runs)
-          ? (summary.catalog_recent_runs as Array<Record<string, unknown>>)
-          : [];
-        const inferredRunId =
-          recentRuns.find((run) =>
-            ACTIVE_CATALOG_RUN_STATUSES.has(String(run.status ?? "").trim().toLowerCase()),
-          )?.run_id ?? null;
-        const explicitRunStatus =
-          recentRuns.find((run) => String(run.run_id ?? "").trim() === explicitRunId)?.status ?? null;
-        const shouldLoadExplicitRunProgress =
-          explicitRunId.length > 0 &&
-          Boolean(explicitRunStatus) &&
-          ACTIVE_CATALOG_RUN_STATUSES.has(String(explicitRunStatus).trim().toLowerCase());
-        const progressRunId =
-          explicitRunId.length > 0
-            ? shouldLoadExplicitRunProgress
-              ? explicitRunId
-              : ""
-            : typeof inferredRunId === "string" && inferredRunId.trim().length > 0
-            ? inferredRunId.trim()
-            : "";
-
-        const catalogRunProgress = progressRunId
-          ? await readRouteJsonOrThrow<Record<string, unknown>>(
-              await getCatalogRunProgress(
-                  buildSnapshotSubrequest(
-                    request,
-                    `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(progressRunId)}/progress`,
-                    new URLSearchParams({
-                      recent_log_limit: searchParams.get("recent_log_limit") ?? "25",
-                    }),
-                    adminContext,
-                  ),
-                { params: Promise.resolve({ platform, handle, runId: progressRunId }) },
-              ),
-              "Failed to load social account catalog progress snapshot",
-            )
-          : null;
-
-        return {
-          summary,
-          catalog_run_progress: catalogRunProgress,
-        };
+        return normalizeDashboardSnapshot(dashboard as BackendDashboardPayload);
       },
     });
 
-    return buildSnapshotResponse({
-      data: snapshot.data,
+    const dashboardFreshness =
+      snapshot.data.dashboard_freshness && typeof snapshot.data.dashboard_freshness === "object"
+        ? snapshot.data.dashboard_freshness
+        : {};
+    const responseData = {
+      ...snapshot.data,
+      dashboard_freshness: {
+        ...dashboardFreshness,
+        status: snapshot.meta.stale ? "stale" : String(dashboardFreshness.status ?? "fresh"),
+        source: snapshot.meta.stale ? "cache" : String(dashboardFreshness.source ?? "live"),
+        generated_at: snapshot.meta.generatedAt,
+        age_seconds: Math.round(snapshot.meta.cacheAgeMs / 1000),
+      },
+    };
+    const freshnessStatus = String(responseData.dashboard_freshness.status);
+    const freshnessSource = String(responseData.dashboard_freshness.source);
+
+    logSocialProfileDashboardBudget({
+      platform,
+      handle,
+      cacheStatus: snapshot.meta.cacheStatus,
+      freshnessStatus,
+      initialRequestCount: 1,
+      stale: snapshot.meta.stale,
+      cacheAgeMs: snapshot.meta.cacheAgeMs,
+      staleCacheHit: snapshot.meta.stale && snapshot.meta.cacheStatus === "hit",
+    });
+
+    const response = buildSnapshotResponse({
+      data: responseData,
       cacheStatus: snapshot.meta.cacheStatus,
       generatedAt: snapshot.meta.generatedAt,
       cacheAgeMs: snapshot.meta.cacheAgeMs,
       stale: snapshot.meta.stale,
     });
+    response.headers.set("x-trr-dashboard-freshness", freshnessStatus);
+    response.headers.set("x-trr-dashboard-source", freshnessSource);
+    return response;
   } catch (error) {
     return socialProxyErrorResponse(error, "[api] Failed to fetch social account profile snapshot");
   }
