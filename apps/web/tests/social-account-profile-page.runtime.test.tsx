@@ -6302,7 +6302,9 @@ it("prefers terminal cancelled status labels over stale recovering state", async
       expect(screen.getByRole("button", { name: "Backfill Posts" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Restart Backfill" })).not.toBeInTheDocument();
-    expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("No active catalog run. Ready to start the next backfill.")).toBeInTheDocument();
+    });
   });
 
   it("prefers live catalog-backed summary cards while a frontier run is active", async () => {
