@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Route } from "next";
+import Image from "next/image";
 import type { User } from "firebase/auth";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
@@ -258,9 +259,11 @@ const CastMemberAvatar = ({
   if (!member.photo_url) return fallback;
 
   return (
-    <img
+    <Image
       src={member.photo_url}
       alt={`${member.full_name} profile`}
+      width={48}
+      height={48}
       className="h-12 w-12 shrink-0 rounded-full border border-zinc-200 bg-white object-cover"
     />
   );
