@@ -4,7 +4,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-23T20:11:24.843Z",
+  "generatedAt": "2026-04-26T03:03:22.105Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
@@ -4874,7 +4874,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "polls": false,
       "pollCadenceMs": null,
       "automatic": false,
-      "loadsLargeDatasets": false,
+      "loadsLargeDatasets": true,
       "usesPagination": true,
       "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
@@ -4884,7 +4884,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": true,
-      "payloadRisk": "low",
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {
@@ -8646,7 +8646,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 81,
+        "line": 86,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14051,7 +14051,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 118,
+        "line": 143,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17480,7 +17480,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/shared/ingest/route.ts",
       "sourceLocator": {
-        "line": 10,
+        "line": 11,
         "symbol": "POST"
       },
       "provenance": "static_scan",
