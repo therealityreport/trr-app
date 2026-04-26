@@ -14,7 +14,13 @@ import {
   parseCacheTtlMs,
   setRouteResponseCache,
 } from "@/lib/server/admin/route-response-cache";
-import { getSocialLandingPayload } from "@/lib/server/admin/social-landing-repository";
+import {
+  SOCIAL_LANDING_CACHE_NAMESPACE,
+  getSocialLandingRouteCacheVersion,
+  invalidateSocialLandingRouteCacheForUser,
+  isSocialLandingRouteCacheVersionCurrent,
+} from "@/lib/server/admin/social-landing-route-cache";
+import { getSocialLandingPayloadResult } from "@/lib/server/admin/social-landing-repository";
 import { normalizePersonExternalIdValue, type PersonExternalIdInput } from "@/lib/admin/person-external-ids";
 import { normalizeSocialAccountProfileHandle } from "@/lib/admin/show-admin-routes";
 import { fetchSocialBackendJson } from "@/lib/server/trr-api/social-admin-proxy";
@@ -23,7 +29,6 @@ import { invalidateTrrShowReadCaches } from "@/lib/server/trr-api/trr-show-read-
 
 export const dynamic = "force-dynamic";
 
-const SOCIAL_LANDING_CACHE_NAMESPACE = "admin-social-landing";
 const SOCIAL_LANDING_CACHE_TTL_MS = parseCacheTtlMs(
   process.env.TRR_ADMIN_SOCIAL_LANDING_CACHE_TTL_MS,
   60_000,
@@ -83,29 +88,49 @@ export async function GET(request: NextRequest) {
     const user = await requireAdmin(request);
     const adminContext = toVerifiedAdminContext(user);
     const cacheKey = buildUserScopedRouteCacheKey(user.uid, "landing");
+    const shouldRefresh =
+      request.nextUrl.searchParams.get("refresh") === "1" ||
+      request.nextUrl.searchParams.get("refresh") === "true";
+    if (shouldRefresh) {
+      invalidateSocialLandingRouteCacheForUser(user.uid);
+    }
+
     const cached = getRouteResponseCache<Record<string, unknown>>(
       SOCIAL_LANDING_CACHE_NAMESPACE,
       cacheKey,
     );
-    if (cached) {
+    if (cached && !shouldRefresh) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
     }
 
-    const payload = await getOrCreateRouteResponsePromise(
+    const result = await getOrCreateRouteResponsePromise(
       SOCIAL_LANDING_CACHE_NAMESPACE,
       cacheKey,
       async () => {
-        const nextPayload = await getSocialLandingPayload(adminContext);
-        setRouteResponseCache(
-          SOCIAL_LANDING_CACHE_NAMESPACE,
-          cacheKey,
-          nextPayload,
-          SOCIAL_LANDING_CACHE_TTL_MS,
-        );
-        return nextPayload;
+        const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
+        const nextResult = await getSocialLandingPayloadResult(adminContext);
+        if (
+          nextResult.cacheable &&
+          isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
+        ) {
+          setRouteResponseCache(
+            SOCIAL_LANDING_CACHE_NAMESPACE,
+            cacheKey,
+            nextResult.payload,
+            SOCIAL_LANDING_CACHE_TTL_MS,
+          );
+        }
+        return nextResult;
       },
     );
-    return NextResponse.json(payload);
+    const headers: Record<string, string> = {};
+    if (shouldRefresh) {
+      headers["x-trr-cache"] = "refresh";
+    }
+    if (!result.cacheable) {
+      headers["x-trr-cacheable"] = "0";
+    }
+    return NextResponse.json(result.payload, { headers });
   } catch (error) {
     console.error("[api] Failed to load social landing payload", error);
     const message = error instanceof Error ? error.message : "Failed to load social landing payload";
@@ -244,15 +269,23 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    invalidateRouteResponseCache(SOCIAL_LANDING_CACHE_NAMESPACE, `${user.uid}:`);
-    const payload = await getSocialLandingPayload();
-    setRouteResponseCache(
-      SOCIAL_LANDING_CACHE_NAMESPACE,
-      buildUserScopedRouteCacheKey(user.uid, "landing"),
-      payload,
-      SOCIAL_LANDING_CACHE_TTL_MS,
-    );
-    return NextResponse.json(payload);
+    invalidateSocialLandingRouteCacheForUser(user.uid);
+    const cacheVersion = getSocialLandingRouteCacheVersion(user.uid);
+    const result = await getSocialLandingPayloadResult(adminContext);
+    if (
+      result.cacheable &&
+      isSocialLandingRouteCacheVersionCurrent(user.uid, cacheVersion)
+    ) {
+      setRouteResponseCache(
+        SOCIAL_LANDING_CACHE_NAMESPACE,
+        buildUserScopedRouteCacheKey(user.uid, "landing"),
+        result.payload,
+        SOCIAL_LANDING_CACHE_TTL_MS,
+      );
+    }
+    return NextResponse.json(result.payload, {
+      headers: result.cacheable ? undefined : { "x-trr-cacheable": "0" },
+    });
   } catch (error) {
     console.error("[api] Failed to update social landing handle", error);
     const message = error instanceof Error ? error.message : "Failed to update social landing handle";

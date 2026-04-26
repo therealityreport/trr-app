@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Route } from "next";
+import Image from "next/image";
 import type { User } from "firebase/auth";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
@@ -10,6 +11,10 @@ import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import { buildAdminSectionBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { ADMIN_SOCIAL_PATH, buildSocialPath } from "@/lib/admin/admin-route-paths";
 import type {
+  CastSocialBladeAccountSummary,
+  CastSocialBladeMemberSummary,
+  CastSocialBladePlatform,
+  CastSocialBladeShowSummary,
   NetworkProfileSet,
   PersonTargetSummary,
   RedditDashboardSummary,
@@ -30,7 +35,12 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
-const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v1";
+const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v2";
+const CAST_SOCIALBLADE_PLATFORM_ORDER: CastSocialBladePlatform[] = [
+  "instagram",
+  "youtube",
+  "facebook",
+];
 const EDITABLE_SHOW_SOCIAL_PLATFORMS = [
   "instagram",
   "facebook",
@@ -61,7 +71,20 @@ type AddHandleTargetOption = {
 
 const formatPlatformLabel = (platform: SocialLandingPlatform): string => {
   if (platform === "twitter") return "X/Twitter";
+  if (platform === "youtube") return "YouTube";
   return platform.charAt(0).toUpperCase() + platform.slice(1);
+};
+
+const formatCompactTimestamp = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 };
 
 const buildEmptyShowHandleDraft = (): ShowHandleDraft => ({
@@ -80,6 +103,9 @@ const coerceLandingPayload = (
   show_sets: Array.isArray(data?.show_sets) ? data.show_sets : [],
   people_profiles: Array.isArray(data?.people_profiles) ? data.people_profiles : [],
   person_targets: Array.isArray(data?.person_targets) ? data.person_targets : [],
+  cast_socialblade_shows: Array.isArray(data?.cast_socialblade_shows)
+    ? data.cast_socialblade_shows
+    : [],
   shared_pipeline: {
     sources: Array.isArray(data?.shared_pipeline?.sources)
       ? data.shared_pipeline.sources
@@ -198,10 +224,250 @@ const applyShowHandleDraft = (
   };
 };
 
+const getMemberInitials = (fullName: string): string => {
+  const initials = fullName
+    .split(/\s+/)
+    .map((part) => part.trim()[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("");
+  return initials || "?";
+};
+
+const groupCastAccountsByPlatform = (
+  accounts: readonly CastSocialBladeAccountSummary[],
+): Partial<Record<CastSocialBladePlatform, CastSocialBladeAccountSummary[]>> =>
+  accounts.reduce<Partial<Record<CastSocialBladePlatform, CastSocialBladeAccountSummary[]>>>(
+    (grouped, account) => ({
+      ...grouped,
+      [account.platform]: [...(grouped[account.platform] ?? []), account],
+    }),
+    {},
+  );
+
+const CastMemberAvatar = ({
+  member,
+}: {
+  member: CastSocialBladeMemberSummary;
+}) => {
+  const fallback = (
+    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white text-sm font-semibold text-zinc-700">
+      {getMemberInitials(member.full_name)}
+    </div>
+  );
+
+  if (!member.photo_url) return fallback;
+
+  return (
+    <Image
+      src={member.photo_url}
+      alt={`${member.full_name} profile`}
+      width={48}
+      height={48}
+      className="h-12 w-12 shrink-0 rounded-full border border-zinc-200 bg-white object-cover"
+    />
+  );
+};
+
+const CastSocialBladeSection = ({
+  shows,
+}: {
+  shows: readonly CastSocialBladeShowSummary[];
+}) => {
+  const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const firstAvailableShowId = shows[0]?.show_id ?? null;
+    setSelectedShowId((currentShowId) => {
+      if (
+        currentShowId &&
+        shows.some((show) => show.show_id === currentShowId)
+      ) {
+        return currentShowId;
+      }
+      return currentShowId === firstAvailableShowId
+        ? currentShowId
+        : firstAvailableShowId;
+    });
+  }, [shows]);
+
+  const selectedShow =
+    shows.find((show) => show.show_id === selectedShowId) ?? shows[0] ?? null;
+
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className={sectionEyebrowClass}>Cast SocialBlade</p>
+          <h2 className="text-lg font-semibold text-zinc-900">
+            CAST SOCIALBLADE
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+            Pick a show to inspect cast SocialBlade coverage by platform.
+          </p>
+        </div>
+        <span className="w-fit rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
+          {shows.length} show{shows.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {shows.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5 text-sm text-zinc-500">
+          No cast SocialBlade rows are available yet.
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+          <div className="space-y-2">
+            {shows.map((show) => {
+              const isSelected = selectedShow?.show_id === show.show_id;
+              const latestScraped = formatCompactTimestamp(show.latest_scraped_at);
+              return (
+                <button
+                  key={show.show_id}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => setSelectedShowId(show.show_id)}
+                  className={`w-full rounded-2xl border p-4 text-left transition ${
+                    isSelected
+                      ? "border-zinc-900 bg-zinc-900 text-white"
+                      : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 hover:bg-white"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">{show.show_name}</span>
+                  <span
+                    className={`mt-2 block text-xs ${
+                      isSelected ? "text-zinc-200" : "text-zinc-500"
+                    }`}
+                  >
+                    {show.cast_member_count.toLocaleString()} cast members
+                    {latestScraped ? ` · latest ${latestScraped}` : ""}
+                  </span>
+                  <span className="mt-3 flex flex-wrap gap-1.5">
+                    {CAST_SOCIALBLADE_PLATFORM_ORDER.map((platform) => {
+                      const count = show.platform_counts[platform] ?? 0;
+                      if (count === 0) return null;
+                      return (
+                        <span
+                          key={`${show.show_id}:${platform}`}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                            isSelected
+                              ? "border-zinc-600 bg-zinc-800 text-zinc-100"
+                              : "border-zinc-200 bg-white text-zinc-600"
+                          }`}
+                        >
+                          {formatPlatformLabel(platform)} {count}
+                        </span>
+                      );
+                    })}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedShow ? (
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-zinc-900">
+                    {selectedShow.show_name}
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {selectedShow.members.length.toLocaleString()} cast members with
+                    linked SocialBlade account data.
+                  </p>
+                </div>
+                {formatCompactTimestamp(selectedShow.latest_scraped_at) ? (
+                  <span className="w-fit rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                    Latest scrape {formatCompactTimestamp(selectedShow.latest_scraped_at)}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {selectedShow.members.map((member) => {
+                  const accountsByPlatform = groupCastAccountsByPlatform(member.accounts);
+                  return (
+                    <div
+                      key={member.person_id}
+                      className="rounded-2xl border border-zinc-200 bg-white p-4"
+                    >
+                      <div className="flex items-center gap-3">
+                        <CastMemberAvatar member={member} />
+                        <div>
+                          <p className="font-semibold text-zinc-900">
+                            {member.full_name}
+                          </p>
+                          <p className="text-xs text-zinc-500">
+                            {member.accounts.length.toLocaleString()} account
+                            {member.accounts.length === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        {CAST_SOCIALBLADE_PLATFORM_ORDER.map((platform) => {
+                          const accounts = accountsByPlatform[platform] ?? [];
+                          if (accounts.length === 0) return null;
+                          return (
+                            <div
+                              key={`${member.person_id}:${platform}`}
+                              className="rounded-xl border border-zinc-200 bg-zinc-50 p-3"
+                            >
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                {formatPlatformLabel(platform)}
+                              </p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {accounts.map((account) => {
+                                  const scrapedAt = formatCompactTimestamp(account.scraped_at);
+                                  const updatedAt = formatCompactTimestamp(account.updated_at);
+                                  return (
+                                    <Link
+                                      key={`${member.person_id}:${account.platform}:${account.handle}`}
+                                      href={account.account_href as Route}
+                                      aria-label={`${formatPlatformLabel(account.platform)} ${account.display_label}`}
+                                      className="inline-flex flex-col rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:border-zinc-300 hover:bg-zinc-50"
+                                    >
+                                      <span className="font-semibold text-zinc-900">
+                                        {account.display_label}
+                                      </span>
+                                      <span className="mt-1 text-xs text-zinc-500">
+                                        {scrapedAt ? `Scraped ${scrapedAt}` : "No scrape timestamp"}
+                                        {updatedAt ? ` · updated ${updatedAt}` : ""}
+                                        {account.stats_refreshed ? " · refreshed" : ""}
+                                      </span>
+                                    </Link>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-500">
+              Select a show to view cast members and grouped platform accounts.
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+};
+
 const loadLandingData = async (
   currentUser: User,
-): Promise<SocialLandingPayload> => {
-  const response = await fetchAdminWithAuth("/api/admin/social/landing", undefined, {
+  options: { refresh?: boolean } = {},
+): Promise<{ payload: SocialLandingPayload; cacheable: boolean }> => {
+  const url = options.refresh
+    ? "/api/admin/social/landing?refresh=1"
+    : "/api/admin/social/landing";
+  const response = await fetchAdminWithAuth(url, undefined, {
     allowDevAdminBypass: true,
     preferredUser: currentUser,
   });
@@ -211,7 +477,10 @@ const loadLandingData = async (
   if (!response.ok) {
     throw new Error(data?.error || "Failed to load social landing data");
   }
-  return coerceLandingPayload(data);
+  return {
+    payload: coerceLandingPayload(data),
+    cacheable: response.headers.get("x-trr-cacheable") !== "0",
+  };
 };
 
 const readCachedLandingData = (): SocialLandingPayload | null => {
@@ -525,10 +794,12 @@ export default function AdminSocialMediaPage() {
         setLoadError(null);
       }
       try {
-        const payload = await loadLandingData(user);
+        const { payload, cacheable } = await loadLandingData(user);
         if (cancelled) return;
         setLanding(payload);
-        writeCachedLandingData(payload);
+        if (cacheable) {
+          writeCachedLandingData(payload);
+        }
         setLoadError(null);
       } catch (error) {
         if (cancelled) return;
@@ -579,8 +850,13 @@ export default function AdminSocialMediaPage() {
           (data.run_id ? `Queued run ${data.run_id}` : "Shared ingest queued"),
       );
 
-      const payload = await loadLandingData(user);
+      const { payload, cacheable } = await loadLandingData(user, {
+        refresh: true,
+      });
       setLanding(payload);
+      if (cacheable) {
+        writeCachedLandingData(payload);
+      }
     } catch (error) {
       setSharedActionState(
         error instanceof Error
@@ -630,9 +906,11 @@ export default function AdminSocialMediaPage() {
     });
 
     void loadLandingData(user)
-      .then((payload) => {
+      .then(({ payload, cacheable }) => {
         setLanding(payload);
-        writeCachedLandingData(payload);
+        if (cacheable) {
+          writeCachedLandingData(payload);
+        }
       })
       .catch(() => {
         // Keep the optimistic card state if the background refresh fails.
@@ -643,6 +921,7 @@ export default function AdminSocialMediaPage() {
   const showSets = landing?.show_sets ?? [];
   const peopleProfiles = landing?.people_profiles ?? [];
   const personTargets = landing?.person_targets ?? [];
+  const castSocialBladeShows = landing?.cast_socialblade_shows ?? [];
   const addHandleTargetOptions = buildAddHandleTargetOptions(
     networkSets,
     showSets,
@@ -705,8 +984,11 @@ export default function AdminSocialMediaPage() {
       }
 
       const nextPayload = coerceLandingPayload(data);
+      const cacheable = response.headers.get("x-trr-cacheable") !== "0";
       setLanding(nextPayload);
-      writeCachedLandingData(nextPayload);
+      if (cacheable) {
+        writeCachedLandingData(nextPayload);
+      }
       setAddHandleValue("");
       setAddHandleMessage(
         `Saved ${formatPlatformLabel(addHandlePlatform)} for ${selectedAddHandleTarget.label}.`,
@@ -1020,6 +1302,8 @@ export default function AdminSocialMediaPage() {
                   </div>
                 )}
               </section>
+
+              <CastSocialBladeSection shows={castSocialBladeShows} />
 
               <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center justify-between gap-3">
