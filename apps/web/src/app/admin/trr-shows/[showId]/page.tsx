@@ -119,7 +119,10 @@ import {
   inferHasTextOverlay,
 } from "@/lib/gallery-filter-utils";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
-import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
+import {
+  fetchAllPaginatedGalleryRowsWithMeta,
+  mapGalleryInputsWithConcurrency,
+} from "@/lib/admin/paginated-gallery-fetch";
 import { resolveBravoVideoThumbnailUrl } from "@/lib/admin/bravo-video-thumbnails";
 import {
   contentTypeToAssetKind,
@@ -1143,6 +1146,7 @@ const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
 const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
 const GALLERY_ASSET_PAGE_SIZE = 500;
+const GALLERY_ASSET_FETCH_CONCURRENCY = 1;
 const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
 const CAST_INCREMENTAL_INITIAL_LIMIT = 48;
@@ -2836,6 +2840,7 @@ export default function TrrShowDetailPage() {
   const [selectedGallerySeason, setSelectedGallerySeason] = useState<
     number | "all"
   >("all");
+  const [gallerySeasonInitialized, setGallerySeasonInitialized] = useState(false);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryTruncatedWarning, setGalleryTruncatedWarning] = useState<string | null>(null);
   const [galleryFallbackTelemetry, setGalleryFallbackTelemetry] = useState({
@@ -9460,6 +9465,13 @@ export default function TrrShowDetailPage() {
   }, [selectedGallerySeason, visibleSeasons]);
 
   useEffect(() => {
+    if (gallerySeasonInitialized || visibleSeasons.length === 0) return;
+    const newestVisibleSeason = visibleSeasons[0]?.season_number;
+    setSelectedGallerySeason(typeof newestVisibleSeason === "number" ? newestVisibleSeason : "all");
+    setGallerySeasonInitialized(true);
+  }, [gallerySeasonInitialized, visibleSeasons]);
+
+  useEffect(() => {
     setGalleryVisibleBySection(buildShowGalleryVisibleDefaults());
   }, [selectedGallerySeason, advancedFilters]);
 
@@ -9569,13 +9581,19 @@ export default function TrrShowDetailPage() {
             ? `/api/admin/trr-api/shows/${showId}/seasons/${targetSeasonNumber}/assets?sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
             : `/api/admin/trr-api/shows/${showId}/seasons/${targetSeasonNumber}/assets`;
 
+        const fetchAssetRowsForBaseUrls = (baseUrls: string[]) =>
+          mapGalleryInputsWithConcurrency({
+            inputs: baseUrls,
+            concurrency: GALLERY_ASSET_FETCH_CONCURRENCY,
+            fetchInput: (baseUrl) => fetchAssetRows(baseUrl),
+          });
+
         if (seasonNumber === "all") {
-          // Fetch show-level assets once + season assets for all seasons.
-          const [showAssets, ...seasonResults] = await Promise.all([
-            fetchAssetRows(fetchShowAssetsBaseUrl),
-            ...visibleSeasons.map(async (season) => {
-              return fetchAssetRows(fetchSeasonAssetsBaseUrl(season.season_number));
-            }),
+          // Fetch show-level assets once + season assets for all seasons without
+          // saturating backend DB pools with one request per season.
+          const [showAssets, ...seasonResults] = await fetchAssetRowsForBaseUrls([
+            fetchShowAssetsBaseUrl,
+            ...visibleSeasons.map((season) => fetchSeasonAssetsBaseUrl(season.season_number)),
           ]);
           const dedupedAssets = dedupe([
             ...(showAssets?.rows ?? []),
@@ -9585,9 +9603,9 @@ export default function TrrShowDetailPage() {
           setGalleryTruncatedWarning(null);
           setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
         } else {
-          const [showAssets, seasonAssets] = await Promise.all([
-            fetchAssetRows(fetchShowAssetsBaseUrl),
-            fetchAssetRows(fetchSeasonAssetsBaseUrl(seasonNumber)),
+          const [showAssets, seasonAssets] = await fetchAssetRowsForBaseUrls([
+            fetchShowAssetsBaseUrl,
+            fetchSeasonAssetsBaseUrl(seasonNumber),
           ]);
           const dedupedAssets = dedupe([...(showAssets?.rows ?? []), ...(seasonAssets?.rows ?? [])]);
           setGalleryAssets(dedupedAssets);
@@ -11357,13 +11375,21 @@ export default function TrrShowDetailPage() {
   useEffect(() => {
     if (activeTab !== "assets") return;
     if (assetsView === "images" && visibleSeasons.length > 0) {
+      if (!gallerySeasonInitialized) return;
       loadGalleryAssets(selectedGallerySeason);
       return;
     }
     if (assetsView === "branding") {
       loadGalleryAssets("all");
     }
-  }, [activeTab, assetsView, selectedGallerySeason, loadGalleryAssets, visibleSeasons.length]);
+  }, [
+    activeTab,
+    assetsView,
+    gallerySeasonInitialized,
+    selectedGallerySeason,
+    loadGalleryAssets,
+    visibleSeasons.length,
+  ]);
 
   // Open lightbox for gallery asset
   const openAssetLightbox = (

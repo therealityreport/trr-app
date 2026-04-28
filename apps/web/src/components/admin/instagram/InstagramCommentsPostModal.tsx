@@ -52,6 +52,52 @@ const getModalTitle = (platform: SocialPlatformSlug, post: SocialAccountProfileP
   return sourceId ? `${prefix} for ${sourceId}` : `Post ${prefix}`;
 };
 
+const readRecordString = (value: Record<string, unknown> | null | undefined, key: string): string | null => {
+  const field = value?.[key];
+  return typeof field === "string" && field.trim() ? field.trim() : null;
+};
+
+const getCommentDisplayName = (item: SocialAccountProfileComment): string => {
+  return (
+    item.display_name ||
+    item.author_full_name ||
+    readRecordString(item.owner, "display_name") ||
+    readRecordString(item.user, "display_name") ||
+    item.ownerUsername ||
+    item.username ||
+    "Unknown"
+  );
+};
+
+const getCommentUsername = (item: SocialAccountProfileComment): string | null => {
+  return (
+    item.ownerUsername ||
+    item.username ||
+    readRecordString(item.owner, "username") ||
+    readRecordString(item.user, "username")
+  );
+};
+
+const getCommentAvatarUrl = (item: SocialAccountProfileComment): string | null => {
+  return (
+    item.hosted_author_profile_pic_url ||
+    item.ownerProfilePicUrl ||
+    item.author_profile_pic_url ||
+    readRecordString(item.owner, "avatar_url") ||
+    readRecordString(item.user, "avatar_url") ||
+    null
+  );
+};
+
+const getCommentLikes = (item: SocialAccountProfileComment): number | null | undefined =>
+  item.likes_count ?? item.likesCount ?? item.likes;
+
+const getCommentReplies = (item: SocialAccountProfileComment): number =>
+  Number(item.replies_count ?? item.repliesCount ?? item.reply_count ?? item.replies?.length ?? 0) || 0;
+
+const getCommentCreatedAt = (item: SocialAccountProfileComment): string | null | undefined =>
+  item.timestamp ?? item.created_at;
+
 export default function InstagramCommentsPostModal({
   isOpen,
   onClose,
@@ -194,41 +240,56 @@ export default function InstagramCommentsPostModal({
                     </td>
                   </tr>
                 ) : (
-                  items.map((item: SocialAccountProfileComment) => (
-                    <tr key={item.id}>
-                      <td className="py-4 pr-4 align-top text-zinc-700">
-                        <div className="space-y-1">
-                          <p>{item.display_name || item.username || "Unknown"}</p>
-                          {item.display_name && item.username ? (
-                            <p className="text-xs text-zinc-500">@{item.username.replace(/^@/, "")}</p>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="py-4 pr-4 align-top text-zinc-700">
-                        <div className="max-w-2xl">
-                          <p className="whitespace-pre-wrap break-words leading-5 text-zinc-700">{item.text || "No text"}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                            {item.discussion_type ? (
-                              <p>{item.discussion_type.replace(/_/g, " ")}</p>
-                            ) : item.is_reply ? (
-                              <p>reply</p>
-                            ) : null}
-                            {([...(item.hosted_media_urls ?? []), ...(item.media_urls ?? [])].filter(Boolean) as string[]).length > 0 ? (
-                              <p>
-                                {formatInteger(
-                                  ([...(item.hosted_media_urls ?? []), ...(item.media_urls ?? [])].filter(Boolean) as string[])
-                                    .length,
-                                )}{" "}
-                                media
-                              </p>
-                            ) : null}
+                  items.map((item: SocialAccountProfileComment) => {
+                    const displayName = getCommentDisplayName(item);
+                    const username = getCommentUsername(item);
+                    const avatarUrl = getCommentAvatarUrl(item);
+                    const repliesCount = getCommentReplies(item);
+                    return (
+                      <tr key={item.id}>
+                        <td className="py-4 pr-4 align-top text-zinc-700">
+                          <div className="flex items-start gap-3">
+                            {avatarUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={avatarUrl} alt="" className="h-9 w-9 rounded-full border border-zinc-200 object-cover" />
+                            ) : (
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 text-xs font-semibold uppercase text-zinc-500">
+                                {displayName.slice(0, 1)}
+                              </div>
+                            )}
+                            <div className="space-y-1">
+                              <p>{displayName}</p>
+                              {username ? <p className="text-xs text-zinc-500">@{username.replace(/^@/, "")}</p> : null}
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="py-4 pr-4 align-top text-zinc-700">{formatInteger(item.likes)}</td>
-                      <td className="py-4 align-top text-xs text-zinc-500">{formatDateTime(item.created_at)}</td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="py-4 pr-4 align-top text-zinc-700">
+                          <div className="max-w-2xl">
+                            <p className="whitespace-pre-wrap break-words leading-5 text-zinc-700">{item.text || "No text"}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                              {item.discussion_type ? (
+                                <p>{item.discussion_type.replace(/_/g, " ")}</p>
+                              ) : item.is_reply ? (
+                                <p>reply</p>
+                              ) : null}
+                              {repliesCount > 0 ? <p>{formatInteger(repliesCount)} replies</p> : null}
+                              {([...(item.hosted_media_urls ?? []), ...(item.media_urls ?? [])].filter(Boolean) as string[]).length > 0 ? (
+                                <p>
+                                  {formatInteger(
+                                    ([...(item.hosted_media_urls ?? []), ...(item.media_urls ?? [])].filter(Boolean) as string[])
+                                      .length,
+                                  )}{" "}
+                                  media
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4 pr-4 align-top text-zinc-700">{formatInteger(getCommentLikes(item))}</td>
+                        <td className="py-4 align-top text-xs text-zinc-500">{formatDateTime(getCommentCreatedAt(item))}</td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

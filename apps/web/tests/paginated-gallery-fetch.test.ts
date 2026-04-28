@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { fetchAllPaginatedGalleryRowsWithMeta } from "@/lib/admin/paginated-gallery-fetch";
+import {
+  fetchAllPaginatedGalleryRowsWithMeta,
+  mapGalleryInputsWithConcurrency,
+} from "@/lib/admin/paginated-gallery-fetch";
 
 describe("fetchAllPaginatedGalleryRowsWithMeta", () => {
   it("uses the smaller default first-page slice for gallery backfills", async () => {
@@ -43,5 +46,34 @@ describe("fetchAllPaginatedGalleryRowsWithMeta", () => {
       { cursor: null, limit: 2 },
       { cursor: "cursor-2", limit: 2 },
     ]);
+  });
+
+  it("limits concurrent gallery input fetches while preserving result order", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const started: number[] = [];
+
+    const result = await mapGalleryInputsWithConcurrency({
+      inputs: [1, 2, 3, 4, 5],
+      concurrency: 2,
+      async fetchInput(input) {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        started.push(input);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        active -= 1;
+        return `asset-page-${input}`;
+      },
+    });
+
+    expect(result).toEqual([
+      "asset-page-1",
+      "asset-page-2",
+      "asset-page-3",
+      "asset-page-4",
+      "asset-page-5",
+    ]);
+    expect(maxActive).toBeLessThanOrEqual(2);
+    expect(started).toEqual([1, 2, 3, 4, 5]);
   });
 });

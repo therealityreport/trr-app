@@ -22,5 +22,7 @@ describe("bravotv image run panel wiring", () => {
     expect(contents).toContain("<BravotvImageRunPanel");
     expect(contents).toContain('mode="show"');
     expect(contents).toContain("loadGalleryAssets(selectedGallerySeason)");
+    expect(contents).toContain("gallerySeasonInitialized");
+    expect(contents).toContain("newestVisibleSeason");
   });
 });
