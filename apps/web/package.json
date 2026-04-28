@@ -48,6 +48,7 @@
     "@firebase/logger": "0.5.0",
     "@firebase/util": "1.14.0",
     "@supabase/supabase-js": "^2.98.0",
+    "@vercel/functions": "^3.4.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "firebase": "^12.10.0",

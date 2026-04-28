@@ -1,17 +1,32 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyConnectionClass,
+  isTransactionFlightTestEnabled,
   isDeployedRuntime,
   isSupavisorSessionPoolerConnectionString,
   resolveActiveCandidateIndex,
   resolvePostgresConnectionCandidates,
+  resolvePostgresApplicationName,
   resolvePostgresPoolSizing,
   resolvePostgresConnectionString,
   resolvePostgresSslConfig,
+  resolveRuntimeConnectionLane,
+  shouldAttachPostgresPoolToVercel,
   validateRuntimeLane,
 } from "@/lib/server/postgres";
 
 describe("resolvePostgresConnectionString", () => {
+  it("prefers the explicit direct lane over session and compatibility URLs", () => {
+    const value = resolvePostgresConnectionString({
+      TRR_DB_DIRECT_URL: "postgresql://postgres:secret@db.ref.supabase.co:5432/postgres",
+      TRR_DB_SESSION_URL: "postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      TRR_DB_URL: "postgresql://compat:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      TRR_DB_FALLBACK_URL: "postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+    });
+
+    expect(value).toBe("postgresql://postgres:secret@db.ref.supabase.co:5432/postgres");
+  });
+
   it("prefers TRR_DB_URL over the explicit runtime fallback", () => {
     const value = resolvePostgresConnectionString({
       TRR_DB_URL: "postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
@@ -21,12 +36,48 @@ describe("resolvePostgresConnectionString", () => {
     expect(value).toBe("postgresql://postgres.ref:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres");
   });
 
+  it("prefers the explicit session lane over the compatibility URL", () => {
+    const value = resolvePostgresConnectionString({
+      TRR_DB_SESSION_URL: "postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      TRR_DB_URL: "postgresql://compat:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+    });
+
+    expect(value).toBe("postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres");
+  });
+
   it("falls back to TRR_DB_FALLBACK_URL when the canonical runtime env is absent", () => {
     const value = resolvePostgresConnectionString({
       TRR_DB_FALLBACK_URL: "postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
     });
 
     expect(value).toBe("postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres");
+  });
+
+  it("does not select transaction mode without the explicit flight-test flag", () => {
+    const values = resolvePostgresConnectionCandidates({
+      TRR_DB_DIRECT_URL: "postgresql://postgres:secret@db.ref.supabase.co:5432/postgres",
+      TRR_DB_RUNTIME_LANE: "transaction",
+      TRR_DB_TRANSACTION_URL: "postgresql://tx:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
+      TRR_DB_SESSION_URL: "postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      TRR_DB_URL: "postgresql://compat:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+    });
+
+    expect(values).toEqual([
+      "postgresql://postgres:secret@db.ref.supabase.co:5432/postgres",
+      "postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      "postgresql://compat:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+    ]);
+  });
+
+  it("selects transaction mode only for an explicit flight test", () => {
+    const value = resolvePostgresConnectionString({
+      TRR_DB_RUNTIME_LANE: "transaction",
+      TRR_DB_TRANSACTION_FLIGHT_TEST: "1",
+      TRR_DB_TRANSACTION_URL: "postgresql://tx:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres",
+      TRR_DB_SESSION_URL: "postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+    });
+
+    expect(value).toBe("postgresql://tx:secret@aws-1-us-east-1.pooler.supabase.com:6543/postgres");
   });
 
   it("never derives direct-host fallback candidates", () => {
@@ -44,7 +95,7 @@ describe("resolvePostgresConnectionString", () => {
 
   it("throws when no DB URL env vars are configured", () => {
     expect(() => resolvePostgresConnectionString({})).toThrow(
-      "No database connection string is set. Configure TRR_DB_URL (recommended in TRR-APP/apps/web/.env.local for make dev) or TRR_DB_FALLBACK_URL. Runtime reads do not use SUPABASE_DB_URL or DATABASE_URL.",
+      "No database connection string is set. Configure TRR_DB_DIRECT_URL, TRR_DB_SESSION_URL, or TRR_DB_URL (recommended in TRR-APP/apps/web/.env.local for make dev), or TRR_DB_FALLBACK_URL. Transaction-mode tests require TRR_DB_TRANSACTION_URL plus TRR_DB_TRANSACTION_FLIGHT_TEST=1. Runtime reads do not use SUPABASE_DB_URL or DATABASE_URL.",
     );
   });
 });
@@ -59,6 +110,29 @@ describe("resolveActiveCandidateIndex", () => {
     expect(resolveActiveCandidateIndex({ TRR_DB_FORCE_FALLBACK: "true" })).toBe(1);
     expect(resolveActiveCandidateIndex({ TRR_DB_FORCE_FALLBACK: "yes" })).toBe(1);
     expect(resolveActiveCandidateIndex({ TRR_DB_FORCE_FALLBACK: "false" })).toBe(0);
+  });
+
+  it("selects the declared fallback source when session and compatibility URLs differ", () => {
+    expect(
+      resolveActiveCandidateIndex({
+        TRR_DB_FORCE_FALLBACK: "1",
+        TRR_DB_SESSION_URL: "postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+        TRR_DB_URL: "postgresql://compat:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+        TRR_DB_FALLBACK_URL: "postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      }),
+    ).toBe(2);
+  });
+
+  it("selects the declared fallback source when direct, session, and compatibility URLs differ", () => {
+    expect(
+      resolveActiveCandidateIndex({
+        TRR_DB_FORCE_FALLBACK: "1",
+        TRR_DB_DIRECT_URL: "postgresql://postgres:secret@db.ref.supabase.co:5432/postgres",
+        TRR_DB_SESSION_URL: "postgresql://session:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+        TRR_DB_URL: "postgresql://compat:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+        TRR_DB_FALLBACK_URL: "postgresql://fallback:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
+      }),
+    ).toBe(3);
   });
 });
 
@@ -113,6 +187,22 @@ describe("classifyConnectionClass", () => {
   });
 });
 
+describe("transaction flight-test controls", () => {
+  it("defaults to the session lane", () => {
+    expect(resolveRuntimeConnectionLane({})).toBe("session");
+    expect(isTransactionFlightTestEnabled({})).toBe(false);
+  });
+
+  it("recognizes explicit transaction flight-test controls", () => {
+    expect(
+      resolveRuntimeConnectionLane({
+        TRR_DB_RUNTIME_LANE: "transaction",
+      }),
+    ).toBe("transaction");
+    expect(isTransactionFlightTestEnabled({ TRR_DB_TRANSACTION_FLIGHT_TEST: "true" })).toBe(true);
+  });
+});
+
 describe("resolvePostgresPoolSizing", () => {
   it("keeps session defaults bounded in local development", () => {
     const sizing = resolvePostgresPoolSizing(
@@ -121,8 +211,8 @@ describe("resolvePostgresPoolSizing", () => {
     );
 
     expect(sizing).toEqual({
-      maxConcurrentOperations: 4,
-      poolMax: 4,
+      maxConcurrentOperations: 1,
+      poolMax: 1,
     });
   });
 
@@ -133,8 +223,8 @@ describe("resolvePostgresPoolSizing", () => {
     );
 
     expect(sizing).toEqual({
-      maxConcurrentOperations: 2,
-      poolMax: 4,
+      maxConcurrentOperations: 1,
+      poolMax: 2,
     });
   });
 
@@ -145,8 +235,8 @@ describe("resolvePostgresPoolSizing", () => {
     );
 
     expect(sizing).toEqual({
-      maxConcurrentOperations: 2,
-      poolMax: 4,
+      maxConcurrentOperations: 1,
+      poolMax: 1,
     });
   });
 
@@ -175,6 +265,41 @@ describe("resolvePostgresPoolSizing", () => {
       maxConcurrentOperations: 2,
       poolMax: 2,
     });
+  });
+});
+
+describe("resolvePostgresApplicationName", () => {
+  it("uses a pg_stat_activity-friendly default", () => {
+    expect(resolvePostgresApplicationName({})).toBe("trr-app:web");
+  });
+
+  it("uses a trimmed explicit app name", () => {
+    expect(resolvePostgresApplicationName({ POSTGRES_APPLICATION_NAME: " trr-app:preview " })).toBe(
+      "trr-app:preview",
+    );
+  });
+
+  it("falls back to the default when the env var is blank", () => {
+    expect(resolvePostgresApplicationName({ POSTGRES_APPLICATION_NAME: "   " })).toBe("trr-app:web");
+  });
+
+  it("does not use secret-like values as application_name", () => {
+    expect(
+      resolvePostgresApplicationName({
+        POSTGRES_APPLICATION_NAME: "postgresql://user:secret@db.example.com/postgres",
+      }),
+    ).toBe("trr-app:web");
+    expect(resolvePostgresApplicationName({ POSTGRES_APPLICATION_NAME: "token=abc123" })).toBe("trr-app:web");
+    expect(resolvePostgresApplicationName({ POSTGRES_APPLICATION_NAME: "service@role" })).toBe("trr-app:web");
+  });
+});
+
+describe("shouldAttachPostgresPoolToVercel", () => {
+  it("attaches only when Vercel runtime markers are present", () => {
+    expect(shouldAttachPostgresPoolToVercel({})).toBe(false);
+    expect(shouldAttachPostgresPoolToVercel({ VERCEL: "1" })).toBe(true);
+    expect(shouldAttachPostgresPoolToVercel({ VERCEL_ENV: "production" })).toBe(true);
+    expect(shouldAttachPostgresPoolToVercel({ VERCEL_ENV: "preview" })).toBe(true);
   });
 });
 
@@ -215,9 +340,23 @@ describe("validateRuntimeLane", () => {
     );
   });
 
+  it("allows transaction only during an explicit flight test", () => {
+    expect(() =>
+      validateRuntimeLane("transaction", true, {
+        TRR_DB_TRANSACTION_FLIGHT_TEST: "1",
+      }),
+    ).not.toThrow();
+  });
+
   it("rejects direct in deployed runtime", () => {
-    expect(() => validateRuntimeLane("direct", true)).toThrow(
-      /connection class "direct" is not allowed\b/,
+    expect(() => validateRuntimeLane("direct", true, {}, "TRR_DB_DIRECT_URL")).toThrow(
+      /connection source "TRR_DB_DIRECT_URL" is not allowed\b/,
+    );
+  });
+
+  it("rejects TRR_DB_DIRECT_URL in deployed runtime even when the URL shape is session", () => {
+    expect(() => validateRuntimeLane("session", true, {}, "TRR_DB_DIRECT_URL")).toThrow(
+      /connection source "TRR_DB_DIRECT_URL" is not allowed\b/,
     );
   });
 
@@ -227,8 +366,12 @@ describe("validateRuntimeLane", () => {
     );
   });
 
-  it("rejects direct in local dev", () => {
-    expect(() => validateRuntimeLane("direct", false)).toThrow(
+  it("allows direct in local dev only through TRR_DB_DIRECT_URL", () => {
+    expect(() => validateRuntimeLane("direct", false, {}, "TRR_DB_DIRECT_URL")).not.toThrow();
+  });
+
+  it("rejects direct in local dev from compatibility sources", () => {
+    expect(() => validateRuntimeLane("direct", false, {}, "TRR_DB_URL")).toThrow(
       /connection class "direct" is not allowed\b/,
     );
   });

@@ -4,8 +4,8 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-26T11:24:51.931Z",
-  "sourceCommitSha": "2591c2341209d0f741bb6632000838fa887c94d8",
+  "generatedAt": "2026-04-26T15:07:34.718Z",
+  "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
     {
@@ -7346,6 +7346,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
+      "id": "route:GET:/api/admin/health/app-db-pressure",
+      "kind": "api_route",
+      "title": "GET /api/admin/health/app-db-pressure",
+      "pathPattern": "/api/admin/health/app-db-pressure",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/health/app-db-pressure/route.ts",
+      "sourceLocator": {
+        "line": 7,
+        "symbol": "GET"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "high",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
       "id": "route:GET:/api/admin/images/[imageType]/[imageId]",
       "kind": "api_route",
       "title": "GET /api/admin/images/[imageType]/[imageId]",
@@ -12467,7 +12500,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot/route.ts",
       "sourceLocator": {
-        "line": 62,
+        "line": 60,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -21896,6 +21929,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:GET:/api/admin/games/problem-reports",
         "route:GET:/api/admin/getty-local/remote-readiness",
         "route:GET:/api/admin/getty-local/scrape",
+        "route:GET:/api/admin/health/app-db-pressure",
         "route:GET:/api/admin/images/[imageType]/[imageId]",
         "route:GET:/api/admin/nbcumv/talent-bios",
         "route:GET:/api/admin/networks-streaming/detail",
@@ -22548,11 +22582,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 545,
+      "totalNodes": 546,
       "totalEdges": 186,
       "nodesByKind": {
         "ui_surface": 58,
-        "api_route": 370,
+        "api_route": 371,
         "backend_endpoint": 111,
         "repository_surface": 2,
         "polling_loop": 4

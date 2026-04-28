@@ -14,7 +14,7 @@ import {
 
 export const dynamic = "force-dynamic";
 const LIVE_STATUS_SNAPSHOT_TTL_MS = 5_000;
-const LIVE_STATUS_SNAPSHOT_STALE_MS = 5_000;
+const LIVE_STATUS_SNAPSHOT_STALE_MS = 25_000;
 
 export async function GET(request: NextRequest) {
   try {

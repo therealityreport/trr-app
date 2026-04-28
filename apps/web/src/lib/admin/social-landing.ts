@@ -21,6 +21,7 @@ export interface SharedAccountSourceSummary {
   account_handle: string;
   is_active: boolean;
   scrape_priority: number;
+  metadata?: Record<string, unknown> | null;
   last_scrape_status?: string | null;
   last_scrape_at?: string | null;
   last_classified_at?: string | null;

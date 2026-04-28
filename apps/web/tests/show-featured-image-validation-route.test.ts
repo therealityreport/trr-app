@@ -7,12 +7,14 @@ const {
   getShowByExactSlugMock,
   updateShowByIdMock,
   validateShowImageForFieldMock,
+  fetchSocialBackendJsonMock,
 } = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   getShowByIdMock: vi.fn(),
   getShowByExactSlugMock: vi.fn(),
   updateShowByIdMock: vi.fn(),
   validateShowImageForFieldMock: vi.fn(),
+  fetchSocialBackendJsonMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
@@ -31,6 +33,10 @@ vi.mock("@/lib/server/trr-api/admin-read-proxy", () => ({
   invalidateAdminBackendCache: vi.fn(),
   ADMIN_READ_PROXY_SHORT_TIMEOUT_MS: 5_000,
   buildAdminProxyErrorResponse: vi.fn(),
+}));
+
+vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
+  fetchSocialBackendJson: fetchSocialBackendJsonMock,
 }));
 
 import { PUT } from "@/app/api/admin/trr-api/shows/[showId]/route";
@@ -53,14 +59,16 @@ describe("show route featured image validation", () => {
     getShowByExactSlugMock.mockReset();
     updateShowByIdMock.mockReset();
     validateShowImageForFieldMock.mockReset();
+    fetchSocialBackendJsonMock.mockReset();
 
-    requireAdminMock.mockResolvedValue({ uid: "admin-user" });
+    requireAdminMock.mockResolvedValue({ uid: "admin-user", email: "admin@example.test" });
     getShowByIdMock.mockResolvedValue({
       id: SHOW_ID,
       name: "Test Show",
       slug: "test-show",
       canonical_slug: "test-show",
       alternative_names: ["Legacy Alias"],
+      external_ids: {},
     });
     getShowByExactSlugMock.mockResolvedValue(null);
     updateShowByIdMock.mockResolvedValue({
@@ -174,6 +182,74 @@ describe("show route featured image validation", () => {
     expect(updateShowByIdMock).toHaveBeenCalledWith(
       SHOW_ID,
       expect.objectContaining({ name: "Updated Name" })
+    );
+  });
+
+  it("syncs saved show handles into show-assigned shared account sources", async () => {
+    fetchSocialBackendJsonMock
+      .mockResolvedValueOnce({
+        sources: [
+          {
+            platform: "instagram",
+            account_handle: "bravotv",
+            is_active: true,
+            scrape_priority: 10,
+            metadata: {},
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ sources: [] });
+
+    const response = await PUT(buildRequest({ instagram_handle: "@thetraitorsus" }), {
+      params: Promise.resolve({ showId: SHOW_ID }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(updateShowByIdMock).toHaveBeenCalledWith(
+      SHOW_ID,
+      expect.objectContaining({
+        externalIds: expect.objectContaining({
+          instagram_handle: "thetraitorsus",
+          instagram: "thetraitorsus",
+        }),
+      }),
+    );
+    expect(fetchSocialBackendJsonMock).toHaveBeenNthCalledWith(
+      1,
+      "/shared/sources",
+      expect.objectContaining({
+        queryString: "source_scope=bravo&include_inactive=true",
+      }),
+    );
+    expect(fetchSocialBackendJsonMock).toHaveBeenNthCalledWith(
+      2,
+      "/shared/sources",
+      expect.objectContaining({
+        method: "PUT",
+        body: expect.any(String),
+      }),
+    );
+    const putBody = JSON.parse(fetchSocialBackendJsonMock.mock.calls[1][1].body) as {
+      sources: Array<{
+        platform: string;
+        account_handle: string;
+        is_active: boolean;
+        metadata: Record<string, unknown>;
+      }>;
+    };
+    expect(putBody.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "instagram",
+          account_handle: "thetraitorsus",
+          is_active: true,
+          metadata: expect.objectContaining({
+            assigned_show_id: SHOW_ID,
+            profile_kind: "show_official",
+            network_name: "Test Show",
+          }),
+        }),
+      ]),
     );
   });
 

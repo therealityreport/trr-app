@@ -5,9 +5,7 @@ import {
   buildAdminSnapshotCacheKey,
   getOrCreateAdminSnapshot,
 } from "@/lib/server/admin/admin-snapshot-cache";
-import {
-  buildSnapshotResponse,
-} from "@/lib/server/admin/admin-snapshot-route";
+import { buildSnapshotResponse } from "@/lib/server/admin/admin-snapshot-route";
 import {
   fetchSocialBackendJson,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS,
@@ -18,8 +16,8 @@ type RouteContext = {
   params: Promise<{ platform: string; handle: string }>;
 };
 
-const LIVE_TTL_MS = 2_500;
-const LIVE_STALE_MS = 2_500;
+const LIVE_TTL_MS = 5 * 60_000;
+const LIVE_STALE_MS = 5 * 60_000;
 
 export const dynamic = "force-dynamic";
 
@@ -104,9 +102,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
       },
     });
 
-    const dashboardFreshness =
+    const dashboardFreshness: Record<string, unknown> =
       snapshot.data.dashboard_freshness && typeof snapshot.data.dashboard_freshness === "object"
-        ? snapshot.data.dashboard_freshness
+        ? (snapshot.data.dashboard_freshness as Record<string, unknown>)
         : {};
     const responseData = {
       ...snapshot.data,

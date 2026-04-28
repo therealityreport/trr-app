@@ -50,7 +50,17 @@ export type SocialBladeProfileStatsLabels = Partial<{
   chart_metric_label: string;
 }>;
 
-export type SocialAccountProfileSummaryDetail = "lite" | "full";
+export type SocialAccountProfileSummaryDetail = "lite" | "distribution" | "full";
+
+export type SocialAccountDashboardFreshnessStatus = "fresh" | "stale" | "missing" | "error";
+export type SocialAccountDashboardFreshnessSource = "live" | "cache" | "materialized";
+
+export type SocialAccountDashboardFreshness = {
+  status: SocialAccountDashboardFreshnessStatus;
+  generated_at: string | null;
+  age_seconds: number | null;
+  source: SocialAccountDashboardFreshnessSource;
+};
 
 export type SocialAccountProfileSummary = {
   summary_detail?: SocialAccountProfileSummaryDetail | null;
@@ -198,6 +208,13 @@ export type SocialAccountProfilePost = {
   mentions?: string[];
   collaborators?: string[];
   tags?: string[];
+  thumbnail_url?: string | null;
+  source_thumbnail_url?: string | null;
+  hosted_thumbnail_url?: string | null;
+  media_urls?: string[] | null;
+  source_media_urls?: string[] | null;
+  hosted_media_urls?: string[] | null;
+  post_format?: string | null;
   match_mode?: "owner" | "collaborator";
   source_surface?: "materialized" | "catalog";
   saved_comments?: number | null;

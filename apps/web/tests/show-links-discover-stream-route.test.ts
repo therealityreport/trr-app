@@ -140,7 +140,7 @@ describe("show links discover stream proxy route", () => {
               code: "DATABASE_SERVICE_UNAVAILABLE",
               reason: "database_configuration",
               message:
-                "Database service unavailable: runtime DB configuration is incomplete. Set TRR_DB_URL and optional TRR_DB_FALLBACK_URL.",
+                "Database service unavailable: runtime DB configuration is incomplete. Set TRR_DB_DIRECT_URL, TRR_DB_SESSION_URL, TRR_DB_URL, or optional TRR_DB_FALLBACK_URL.",
               retryable: true,
             },
           }),
@@ -162,6 +162,6 @@ describe("show links discover stream proxy route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(text).toContain("\"checkpoint\":\"backend_http_error\"");
     expect(text).toContain("\"error_code\":\"DATABASE_SERVICE_UNAVAILABLE\"");
-    expect(text).toContain("Set TRR_DB_URL and optional TRR_DB_FALLBACK_URL");
+    expect(text).toContain("Set TRR_DB_DIRECT_URL, TRR_DB_SESSION_URL, TRR_DB_URL, or optional TRR_DB_FALLBACK_URL");
   });
 });

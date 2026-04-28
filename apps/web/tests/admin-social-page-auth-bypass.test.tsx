@@ -284,7 +284,7 @@ const buildUpdatedLandingPayload = () => ({
 });
 
 describe("admin social page auth bypass", () => {
-  const landingCacheKey = "trr-admin-social-landing:v2";
+  const landingCacheKey = "trr-admin-social-landing:v3";
 
   beforeEach(() => {
     window.localStorage.clear();

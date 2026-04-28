@@ -168,115 +168,10 @@ export interface UpdateSeasonInput {
 }
 
 // ============================================================================
-// Schema Safety
-// ============================================================================
-
-let surveyShowsSchemaEnsured = false;
-let surveyShowsSchemaEnsuring: Promise<void> | null = null;
-let paletteLibrarySchemaEnsured = false;
-let paletteLibrarySchemaEnsuring: Promise<void> | null = null;
-
-async function ensureSurveyShowsSchema(): Promise<void> {
-  if (surveyShowsSchemaEnsured) return;
-  if (surveyShowsSchemaEnsuring) return surveyShowsSchemaEnsuring;
-
-  // Some environments may be missing later migrations (e.g. `trr_show_id`, `fonts`).
-  // These ALTERs are idempotent and keep admin Brand Assets screens functional.
-  surveyShowsSchemaEnsuring = (async () => {
-    await query(`ALTER TABLE survey_shows ADD COLUMN IF NOT EXISTS trr_show_id uuid;`);
-    await query(
-      `ALTER TABLE survey_shows ADD COLUMN IF NOT EXISTS fonts jsonb NOT NULL DEFAULT '{}'::jsonb;`
-    );
-    await query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_survey_shows_trr_show_id_unique
-       ON survey_shows (trr_show_id)
-       WHERE trr_show_id IS NOT NULL;`
-    );
-    await query(
-      `CREATE INDEX IF NOT EXISTS idx_survey_shows_trr_show_id
-       ON survey_shows (trr_show_id);`
-    );
-    surveyShowsSchemaEnsured = true;
-    surveyShowsSchemaEnsuring = null;
-  })();
-
-  return surveyShowsSchemaEnsuring;
-}
-
-async function ensurePaletteLibrarySchema(): Promise<void> {
-  if (paletteLibrarySchemaEnsured) return;
-  if (paletteLibrarySchemaEnsuring) return paletteLibrarySchemaEnsuring;
-
-  paletteLibrarySchemaEnsuring = (async () => {
-    await query(
-      `CREATE OR REPLACE FUNCTION set_updated_at_timestamp()
-       RETURNS TRIGGER AS $$
-       BEGIN
-         NEW.updated_at = now();
-         RETURN NEW;
-       END;
-       $$ LANGUAGE plpgsql;`,
-    );
-    await query(
-      `CREATE TABLE IF NOT EXISTS survey_show_palette_library (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        trr_show_id uuid NOT NULL,
-        season_number integer,
-        name text NOT NULL,
-        colors jsonb NOT NULL DEFAULT '[]'::jsonb,
-        source_type text NOT NULL,
-        source_image_url text,
-        seed integer NOT NULL,
-        marker_points jsonb NOT NULL DEFAULT '[]'::jsonb,
-        created_by_uid text,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        CONSTRAINT survey_show_palette_library_season_number_valid
-          CHECK (season_number IS NULL OR season_number > 0),
-        CONSTRAINT survey_show_palette_library_source_type_valid
-          CHECK (source_type IN ('upload', 'url', 'media_library'))
-      )`,
-    );
-    await query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS idx_survey_show_palette_library_name_scope
-       ON survey_show_palette_library (trr_show_id, COALESCE(season_number, -1), lower(name))`,
-    );
-    await query(
-      `CREATE INDEX IF NOT EXISTS idx_survey_show_palette_library_show
-       ON survey_show_palette_library (trr_show_id)`,
-    );
-    await query(
-      `CREATE INDEX IF NOT EXISTS idx_survey_show_palette_library_show_season
-       ON survey_show_palette_library (trr_show_id, season_number)`,
-    );
-    await query(
-      `DO $$
-       BEGIN
-         IF NOT EXISTS (
-           SELECT 1
-           FROM pg_trigger
-           WHERE tgname = 'trg_survey_show_palette_library_updated_at'
-         ) THEN
-           CREATE TRIGGER trg_survey_show_palette_library_updated_at
-           BEFORE UPDATE ON survey_show_palette_library
-           FOR EACH ROW EXECUTE FUNCTION set_updated_at_timestamp();
-         END IF;
-       END $$;`,
-    );
-
-    paletteLibrarySchemaEnsured = true;
-    paletteLibrarySchemaEnsuring = null;
-  })();
-
-  return paletteLibrarySchemaEnsuring;
-}
-
-// ============================================================================
 // Show Functions
 // ============================================================================
 
 export async function getAllShows(): Promise<ShowRecord[]> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -289,7 +184,6 @@ export async function getAllShows(): Promise<ShowRecord[]> {
 }
 
 export async function getActiveShows(): Promise<ShowRecord[]> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -303,7 +197,6 @@ export async function getActiveShows(): Promise<ShowRecord[]> {
 }
 
 export async function getShowByKey(key: string): Promise<ShowRecord | null> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -318,7 +211,6 @@ export async function getShowByKey(key: string): Promise<ShowRecord | null> {
 }
 
 export async function getShowById(id: string): Promise<ShowRecord | null> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -333,7 +225,6 @@ export async function getShowById(id: string): Promise<ShowRecord | null> {
 }
 
 export async function getShowByTrrShowId(trrShowId: string): Promise<ShowRecord | null> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `SELECT
       id, key, trr_show_id, title, short_title, network, status, logline,
@@ -348,7 +239,6 @@ export async function getShowByTrrShowId(trrShowId: string): Promise<ShowRecord 
 }
 
 export async function createShow(input: CreateShowInput): Promise<ShowRecord> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowRecord>(
     `INSERT INTO survey_shows (
       key, title, short_title, network, status, logline,
@@ -381,7 +271,6 @@ export async function updateShowByKey(
   key: string,
   input: UpdateShowInput
 ): Promise<ShowRecord | null> {
-  await ensureSurveyShowsSchema();
   const updates: string[] = [];
   const values: unknown[] = [];
   let paramIndex = 1;
@@ -459,7 +348,6 @@ export async function updateShowByKey(
 }
 
 export async function deleteShow(key: string): Promise<boolean> {
-  await ensureSurveyShowsSchema();
   const result = await query(`DELETE FROM survey_shows WHERE key = $1`, [key]);
   return (result.rowCount ?? 0) > 0;
 }
@@ -469,7 +357,6 @@ export async function deleteShow(key: string): Promise<boolean> {
 // ============================================================================
 
 export async function getSeasonsByShowKey(showKey: string): Promise<ShowSeasonRecord[]> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowSeasonRecord>(
     `SELECT
       ss.id, ss.show_id, ss.season_number, ss.label, ss.year, ss.description,
@@ -516,7 +403,6 @@ export async function getSeasonById(id: string): Promise<ShowSeasonRecord | null
 }
 
 export async function getCurrentSeason(showKey: string): Promise<ShowSeasonRecord | null> {
-  await ensureSurveyShowsSchema();
   const result = await query<ShowSeasonRecord>(
     `SELECT
       ss.id, ss.show_id, ss.season_number, ss.label, ss.year, ss.description,
@@ -657,8 +543,6 @@ export async function listPaletteLibraryEntriesByShow(
   trrShowId: string,
   options: ListPaletteLibraryEntriesOptions = {},
 ): Promise<PaletteLibraryEntryRecord[]> {
-  await ensurePaletteLibrarySchema();
-
   const includeAllSeasonEntries = options.includeAllSeasonEntries ?? true;
   const seasonNumber = options.seasonNumber;
 
@@ -707,7 +591,6 @@ export async function listPaletteLibraryEntriesByShow(
 export async function createPaletteLibraryEntry(
   input: CreatePaletteLibraryEntryInput,
 ): Promise<PaletteLibraryEntryRecord> {
-  await ensurePaletteLibrarySchema();
   const result = await query<PaletteLibraryEntryRecord>(
     `INSERT INTO survey_show_palette_library (
        trr_show_id, season_number, name, colors, source_type, source_image_url, seed, marker_points, created_by_uid
@@ -732,7 +615,6 @@ export async function createPaletteLibraryEntry(
 }
 
 export async function deletePaletteLibraryEntryById(id: string): Promise<boolean> {
-  await ensurePaletteLibrarySchema();
   const result = await query(`DELETE FROM survey_show_palette_library WHERE id = $1`, [id]);
   return (result.rowCount ?? 0) > 0;
 }

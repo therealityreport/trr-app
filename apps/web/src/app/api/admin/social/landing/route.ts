@@ -36,6 +36,7 @@ const SOCIAL_LANDING_CACHE_TTL_MS = parseCacheTtlMs(
 const NETWORK_SOURCE_SCOPE_BY_KEY = {
   "bravo-tv": "bravo",
 } as const;
+const SHOW_HANDLE_SHARED_SOURCE_SCOPE = "bravo";
 const SHOW_EXTERNAL_ID_KEYS_BY_PLATFORM = {
   instagram: ["instagram_handle", "instagram", "instagram_id"],
   facebook: ["facebook_handle", "facebook", "facebook_id"],
@@ -81,6 +82,126 @@ const normalizePersonExternalId = (platform: LandingPlatform, rawValue: string):
     throw new Error("A valid social handle or URL is required.");
   }
   return normalizedValue;
+};
+
+const toRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const normalizeSharedAccountHandle = (value: unknown): string =>
+  String(value ?? "").trim().replace(/^@+/, "");
+
+const buildShowSharedSourceMetadata = ({
+  showId,
+  showName,
+  platform,
+  accountHandle,
+  existingMetadata = {},
+}: {
+  showId: string;
+  showName: string;
+  platform: LandingPlatform;
+  accountHandle: string;
+  existingMetadata?: Record<string, unknown>;
+}): Record<string, unknown> => ({
+  ...existingMetadata,
+  seed_source: "admin-social-landing-show-add",
+  display_name: showName,
+  network_name: showName,
+  profile_kind: "show_official",
+  assigned_show_id: showId,
+  source_scope: SHOW_HANDLE_SHARED_SOURCE_SCOPE,
+  account_handle: accountHandle,
+  platform,
+  assignment_mode: "community_match",
+  assignment_rules: {
+    use_hashtags: true,
+    use_mentions: true,
+    use_collaborators: platform === "instagram",
+    use_configured_aliases: true,
+    allow_multi_show_candidates: false,
+  },
+});
+
+const syncShowSharedSource = async ({
+  adminContext,
+  showId,
+  showName,
+  platform,
+  accountHandle,
+}: {
+  adminContext: ReturnType<typeof toVerifiedAdminContext>;
+  showId: string;
+  showName: string;
+  platform: LandingPlatform;
+  accountHandle: string;
+}) => {
+  const current = (await fetchSocialBackendJson("/shared/sources", {
+    adminContext,
+    queryString: `source_scope=${SHOW_HANDLE_SHARED_SOURCE_SCOPE}&include_inactive=true`,
+    fallbackError: "Failed to load shared social account sources",
+    retries: 0,
+    timeoutMs: 30_000,
+  })) as { sources?: Array<Record<string, unknown>> };
+  const nextSources = (Array.isArray(current.sources) ? current.sources : [])
+    .map((source) => {
+      const sourcePlatform = String(source.platform ?? "").trim().toLowerCase();
+      const sourceHandle = normalizeSharedAccountHandle(source.account_handle);
+      if (!sourcePlatform || !sourceHandle) return null;
+      return {
+        platform: sourcePlatform,
+        account_handle: sourceHandle,
+        is_active: source.is_active !== false,
+        scrape_priority: Number(source.scrape_priority || 100),
+        metadata: toRecord(source.metadata),
+      };
+    })
+    .filter((source): source is {
+      platform: string;
+      account_handle: string;
+      is_active: boolean;
+      scrape_priority: number;
+      metadata: Record<string, unknown>;
+    } => source !== null);
+
+  const existingIndex = nextSources.findIndex(
+    (source) =>
+      source.platform === platform &&
+      source.account_handle.toLowerCase() === accountHandle.toLowerCase(),
+  );
+  const nextSource = {
+    platform,
+    account_handle: accountHandle,
+    is_active: true,
+    scrape_priority: existingIndex >= 0 ? nextSources[existingIndex].scrape_priority : 100,
+    metadata: buildShowSharedSourceMetadata({
+      showId,
+      showName,
+      platform,
+      accountHandle,
+      existingMetadata: existingIndex >= 0 ? nextSources[existingIndex].metadata : {},
+    }),
+  };
+
+  if (existingIndex >= 0) {
+    nextSources[existingIndex] = nextSource;
+  } else {
+    nextSources.push(nextSource);
+  }
+
+  await fetchSocialBackendJson("/shared/sources", {
+    adminContext,
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source_scope: SHOW_HANDLE_SHARED_SOURCE_SCOPE,
+      sources: nextSources,
+    }),
+    fallbackError: "Failed to update shared social account sources",
+    retries: 0,
+    timeoutMs: 45_000,
+  });
 };
 
 export async function GET(request: NextRequest) {
@@ -233,6 +354,13 @@ export async function POST(request: NextRequest) {
         existingExternalIds[key] = normalizedHandle;
       }
       await updateShowById(targetId, { externalIds: existingExternalIds });
+      await syncShowSharedSource({
+        adminContext,
+        showId: targetId,
+        showName: currentShow.name || "Show",
+        platform,
+        accountHandle: normalizedHandle,
+      });
       invalidateTrrShowReadCaches(`${user.uid}:`);
       await invalidateAdminBackendCache(`/admin/trr-api/shows/${targetId}/cache/invalidate`, {
         routeName: "show-detail",

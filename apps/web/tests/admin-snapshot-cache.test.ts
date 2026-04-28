@@ -73,6 +73,36 @@ describe("admin snapshot cache", () => {
     expect(second.meta.cacheStatus).toBe("miss");
   });
 
+  it("starts the ttl after slow fetches finish", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T12:00:00.000Z"));
+    const cacheKey = buildAdminSnapshotCacheKey({
+      authPartition: "firebase-admin-1",
+      pageFamily: "social-profile",
+      scope: "instagram:thetraitorsus",
+    });
+    const fetcher = vi.fn(async () => {
+      vi.setSystemTime(new Date("2026-04-08T12:00:07.000Z"));
+      return { ok: true };
+    });
+
+    const first = await getOrCreateAdminSnapshot({
+      cacheKey,
+      ttlMs: 2_500,
+      fetcher,
+    });
+    const second = await getOrCreateAdminSnapshot({
+      cacheKey,
+      ttlMs: 2_500,
+      fetcher,
+    });
+
+    expect(first.meta.cacheStatus).toBe("miss");
+    expect(second.meta.cacheStatus).toBe("hit");
+    expect(second.meta.cacheAgeMs).toBe(0);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("serves the last good snapshot when the refresh errors inside the stale window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:00:00.000Z"));

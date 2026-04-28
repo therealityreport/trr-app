@@ -312,6 +312,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   }, [fetchAdminWithAuth, handle, onSummaryRefresh, platform, refreshPosts, user]);
 
   const coverage = summary?.comments_coverage;
+  const savedSummary = summary?.comments_saved_summary;
   const coverageStatus = normalizeRunStatus(coverage?.effective_status ?? coverage?.last_comments_run_status);
   const coverageActiveRunId = useMemo(() => {
     if (!ACTIVE_RUN_STATUSES.has(coverageStatus)) return null;
@@ -322,9 +323,9 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   // derive from `coverage.available_posts`; that field conflates the commentable subset
   // with the saved-post inventory. `Commentable now` stays on `coverage.eligible_posts`.
   const availablePosts = Number(summary?.live_catalog_total_posts ?? summary?.catalog_total_posts ?? 0);
-  const commentablePosts = Number(coverage?.eligible_posts ?? 0);
+  const commentablePosts = Number(coverage?.eligible_posts ?? savedSummary?.retrieved_comment_posts ?? 0);
   const effectiveCoverageLabel = String(coverage?.effective_label || "").trim()
-    || formatStatusLabel(coverage?.effective_status ?? coverage?.last_comments_run_status);
+    || (savedSummary ? "Saved" : formatStatusLabel(coverage?.effective_status ?? coverage?.last_comments_run_status));
   const historicalFailure = Boolean(coverage?.historical_failure);
   const lastAttemptStatus = normalizeRunStatus(coverage?.last_attempt_status);
   const lastAttemptAt = coverage?.last_attempt_at ?? coverage?.last_comments_run_at;
