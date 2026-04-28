@@ -1464,10 +1464,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     const normalize = (s: string | undefined | null) => String(s || "").trim().toLowerCase();
     const nonTerminal = runs.find((r) => !TERMINAL_CATALOG_RUN_STATUSES.has(normalize(r.status)));
     if (nonTerminal) return nonTerminal;
-    if (runs.length === 1 && normalize(runs[0]?.status) === "cancelled") {
-      return runs[0] ?? null;
-    }
-    return null;
+    return runs[0] ?? null;
   }, [visibleCatalogRecentRuns]);
   const latestCatalogRunStatus = useMemo(() => normalizeCatalogRunStatus(latestCatalogRun?.status), [latestCatalogRun?.status]);
   const activeCatalogRunStatusNormalized = useMemo(
@@ -2928,9 +2925,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     displayedCatalogRunId,
   ]);
 
-  const displayedCatalogRunIsActive = useMemo(() => {
-    return Boolean(displayedCatalogRunId) && ACTIVE_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "");
-  }, [displayedCatalogRunId, displayedCatalogRunStatus]);
+  const shouldDisplayCatalogRunProgressCard = useMemo(() => {
+    const normalizedDisplayedRunId = String(displayedCatalogRunId || "").trim();
+    if (!normalizedDisplayedRunId) return false;
+    if (ACTIVE_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "")) return true;
+    if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "")) return false;
+    if (displayedCatalogRunStatus === "cancelled") return true;
+    if (selectedCatalogRunId === normalizedDisplayedRunId) return true;
+    return activeCatalogRunId === normalizedDisplayedRunId && catalogRunProgress?.run_id === normalizedDisplayedRunId;
+  }, [
+    activeCatalogRunId,
+    catalogRunProgress?.run_id,
+    displayedCatalogRunId,
+    displayedCatalogRunStatus,
+    selectedCatalogRunId,
+  ]);
 
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog) return;
@@ -2939,6 +2948,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (normalizedDisplayedRunId === String(backgroundCatalogRunId || "").trim()) return;
     if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus)) return;
     if (summaryUninitialized) return;
+    const shouldHydrateTerminalRun =
+      selectedCatalogRunId === normalizedDisplayedRunId ||
+      displayedCatalogRunStatus === "cancelled" ||
+      activeCatalogRunId === normalizedDisplayedRunId;
+    if (!shouldHydrateTerminalRun) return;
     if (catalogRunProgress?.run_id === normalizedDisplayedRunId) {
       catalogTerminalProgressHydrationAttemptedRunIdRef.current = null;
       return;
@@ -3003,6 +3017,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       cancelled = true;
     };
   }, [
+    activeCatalogRunId,
     backgroundCatalogRunId,
     catalogRunProgress?.run_id,
     checking,
@@ -3010,6 +3025,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     displayedCatalogRunStatus,
     fetchCatalogRunProgressSnapshot,
     hasAccess,
+    selectedCatalogRunId,
     summaryUninitialized,
     supportsCatalog,
     user,
@@ -5300,7 +5316,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             </section>
           ) : null}
 
-          {shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && displayedCatalogRunId && displayedCatalogRunIsActive ? (
+          {shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && shouldDisplayCatalogRunProgressCard ? (
             <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -5726,6 +5742,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   </div>
                 </div>
               ) : null}
+            </section>
+          ) : shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && !activeCatalogRun ? (
+            <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-zinc-500">No active catalog run. Ready to start the next backfill.</p>
             </section>
           ) : null}
 
