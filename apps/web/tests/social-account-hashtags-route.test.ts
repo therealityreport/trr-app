@@ -1,14 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, fetchSocialBackendJsonMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
+const {
+  requireAdminMock,
+  buildAdminAuthPartitionMock,
+  buildAdminSnapshotCacheKeyMock,
+  getOrCreateAdminSnapshotMock,
+  fetchSocialBackendJsonMock,
+  socialProxyErrorResponseMock,
+} = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
+  buildAdminAuthPartitionMock: vi.fn(),
+  buildAdminSnapshotCacheKeyMock: vi.fn(),
+  getOrCreateAdminSnapshotMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
   socialProxyErrorResponseMock: vi.fn(),
 }));
 
 vi.mock("@/lib/server/auth", () => ({
   requireAdmin: requireAdminMock,
+}));
+
+vi.mock("@/lib/server/admin/admin-snapshot-cache", () => ({
+  buildAdminAuthPartition: buildAdminAuthPartitionMock,
+  buildAdminSnapshotCacheKey: buildAdminSnapshotCacheKeyMock,
+  getOrCreateAdminSnapshot: getOrCreateAdminSnapshotMock,
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
@@ -21,15 +37,31 @@ import { GET, PUT } from "@/app/api/admin/trr-api/social/profiles/[platform]/[ha
 describe("social account hashtags proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
+    buildAdminAuthPartitionMock.mockReset();
+    buildAdminSnapshotCacheKeyMock.mockReset();
+    getOrCreateAdminSnapshotMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
     socialProxyErrorResponseMock.mockReset();
 
-    requireAdminMock.mockResolvedValue(undefined);
+    requireAdminMock.mockResolvedValue({ uid: "admin-1", provider: "firebase" });
+    buildAdminAuthPartitionMock.mockReturnValue("firebase:admin-1");
+    buildAdminSnapshotCacheKeyMock.mockReturnValue("hashtags-cache-key");
     fetchSocialBackendJsonMock.mockResolvedValue({ items: [] });
     socialProxyErrorResponseMock.mockImplementation((error: unknown) =>
       new Response(JSON.stringify({ error: String(error), code: "BACKEND_UNREACHABLE" }), {
         status: 502,
         headers: { "content-type": "application/json" },
+      }),
+    );
+    getOrCreateAdminSnapshotMock.mockImplementation(
+      async (options: { fetcher: () => Promise<Record<string, unknown>> }) => ({
+        data: await options.fetcher(),
+        meta: {
+          cacheStatus: "miss",
+          generatedAt: "2026-04-28T12:00:00.000Z",
+          cacheAgeMs: 0,
+          stale: false,
+        },
       }),
     );
   });
@@ -45,8 +77,9 @@ describe("social account hashtags proxy route", () => {
 
     expect(response.status).toBe(200);
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
-      "/profiles/instagram/bravotv/hashtags?window=30d&page=2",
+      "/profiles/instagram/bravotv/hashtags",
       expect.objectContaining({
+        queryString: "window=30d&page=2",
         fallbackError: "Failed to fetch social account profile hashtags",
         retries: 0,
         timeoutMs: 30_000,
@@ -83,7 +116,7 @@ describe("social account hashtags proxy route", () => {
   });
 
   it("returns standardized proxy errors", async () => {
-    fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("fetch failed"));
+    getOrCreateAdminSnapshotMock.mockRejectedValueOnce(new Error("fetch failed"));
 
     const response = await GET(
       new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/hashtags"),
