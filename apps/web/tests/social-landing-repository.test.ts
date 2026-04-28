@@ -159,6 +159,49 @@ describe("social landing repository", () => {
     ]);
 
     fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/landing-socialblade-rows") {
+        const options = fetchSocialBackendJsonMock.mock.calls.at(-1)?.[1] as
+          | { body?: string }
+          | undefined;
+        const body = JSON.parse(options?.body ?? "{}") as {
+          platforms?: string[];
+          person_ids?: string[];
+          account_handles?: string[];
+        };
+        const result = await queryMock(
+          `
+            SELECT
+              id::text AS id,
+              person_id::text AS person_id,
+              platform,
+              account_handle,
+              scraped_at,
+              updated_at,
+              created_at,
+              stats_refreshed,
+              raw_response->>'socialblade_url' AS socialblade_url
+            FROM pipeline.socialblade_growth_data
+            WHERE platform = ANY($1::text[])
+              AND (
+                person_id = ANY($2::uuid[])
+                OR (
+                  account_handle = ANY($3::text[])
+                )
+              )
+            ORDER BY
+              platform ASC,
+              account_handle ASC,
+              person_id ASC NULLS LAST,
+              updated_at DESC NULLS LAST,
+              scraped_at DESC NULLS LAST,
+              created_at DESC NULLS LAST,
+              id ASC
+          `,
+          [body.platforms ?? [], body.person_ids ?? [], body.account_handles ?? []],
+        );
+        return { rows: Array.isArray(result?.rows) ? result.rows : [] };
+      }
+
       if (path === "/shared/sources") {
         return {
           sources: [
@@ -576,6 +619,98 @@ describe("social landing repository", () => {
       archived_community_count: expect.any(Number),
       show_count: expect.any(Number),
     });
+  });
+
+  it("places show-assigned shared sources on the show instead of the Bravo network", async () => {
+    getCoveredShowsMock.mockResolvedValue([
+      {
+        id: "covered-traitors",
+        trr_show_id: "show-traitors",
+        show_name: "The Traitors",
+        canonical_slug: "the-traitors",
+        alternative_names: [],
+        show_total_episodes: 40,
+        poster_url: null,
+      },
+    ]);
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/shared/sources") {
+        return {
+          sources: [
+            {
+              id: "source-bravo",
+              platform: "instagram",
+              source_scope: "bravo",
+              account_handle: "bravotv",
+              is_active: true,
+              scrape_priority: 10,
+              metadata: {},
+            },
+            {
+              id: "source-traitors",
+              platform: "twitter",
+              source_scope: "bravo",
+              account_handle: "thetraitorsus",
+              is_active: true,
+              scrape_priority: 85,
+              metadata: {
+                assigned_show_id: "show-traitors",
+                profile_kind: "show_official",
+                network_name: "The Traitors",
+              },
+            },
+          ],
+        };
+      }
+      if (path === "/shared/ingest/runs") return [];
+      if (path === "/shared/review-queue") return { items: [] };
+      throw new Error(`Unhandled social path: ${path}`);
+    });
+    listShowExternalIdsByIdsMock.mockResolvedValue(
+      new Map([
+        [
+          "show-traitors",
+          {
+            instagram_handle: "thetraitorsus",
+            tiktok_handle: "thetraitorsus",
+          },
+        ],
+      ]),
+    );
+
+    const result = await getSocialLandingPayloadResult();
+    const bravoSet = result.payload.network_sets[0];
+    const traitors = result.payload.show_sets.find(
+      (show) => show.show_name === "The Traitors",
+    );
+
+    expect(result.cacheable).toBe(true);
+    expect(bravoSet.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "instagram", handle: "bravotv" }),
+      ]),
+    );
+    expect(bravoSet.handles).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "twitter", handle: "thetraitorsus" }),
+      ]),
+    );
+    expect(traitors?.fallback_note).toBeNull();
+    expect(traitors?.handles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "instagram", handle: "thetraitorsus" }),
+        expect.objectContaining({ platform: "tiktok", handle: "thetraitorsus" }),
+        expect.objectContaining({ platform: "twitter", handle: "thetraitorsus" }),
+      ]),
+    );
+  });
+
+  it("marks landing payloads not cacheable when show external-id handles fail to load", async () => {
+    listShowExternalIdsByIdsMock.mockRejectedValue(new Error("pool exhausted"));
+
+    const result = await getSocialLandingPayloadResult();
+
+    expect(result.cacheable).toBe(false);
   });
 
   it("caps social landing show and people fanout concurrency to avoid saturating local admin reads", async () => {
@@ -1499,5 +1634,37 @@ describe("social landing repository", () => {
     expect(result.payload.cast_socialblade_shows).toEqual([]);
     expect(result.payload.network_sets).toHaveLength(1);
     expect(result.payload.show_sets).toHaveLength(2);
+  });
+
+  it("falls back to local landing summary when the authenticated backend summary times out", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    fetchSocialBackendJsonMock.mockRejectedValueOnce(new Error("TRR-Backend request timed out."));
+
+    const result = await getSocialLandingPayloadResult({
+      uid: "admin-user",
+      email: "admin@example.test",
+      verifiedAt: 1_776_000_000,
+    });
+
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/landing-summary",
+      expect.objectContaining({
+        fallbackError: "Failed to fetch social landing summary",
+      }),
+    );
+    expect(getCoveredShowsMock).toHaveBeenCalled();
+    expect(result.cacheable).toBe(false);
+    expect(result.payload.show_sets).toHaveLength(2);
+    expect(result.payload.reddit_dashboard).toEqual({
+      active_community_count: 2,
+      archived_community_count: 1,
+      show_count: 2,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[social-landing] Failed to load backend landing summary; using local fallback",
+      expect.any(Error),
+    );
+
+    warnSpy.mockRestore();
   });
 });

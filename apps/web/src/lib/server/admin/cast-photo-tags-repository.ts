@@ -1,6 +1,9 @@
 import "server-only";
 
-import { query } from "@/lib/server/postgres";
+import {
+  ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+  fetchAdminBackendJson,
+} from "@/lib/server/trr-api/admin-read-proxy";
 
 export interface CastPhotoTags {
   cast_photo_id: string;
@@ -15,51 +18,74 @@ export interface CastPhotoTags {
   updated_by_firebase_uid: string | null;
 }
 
-const TAG_FIELDS =
-  "cast_photo_id, people_names, people_ids, people_count, people_count_source, detector, created_at, updated_at, created_by_firebase_uid, updated_by_firebase_uid";
+const CAST_PHOTO_TAGS_ROUTE = "cast-photo-tags";
 
-// In the Supabase/PostgREST world, schemas must be "exposed" to be queryable.
-// In TRR-APP we prefer direct Postgres for admin tooling (no PostgREST), but we
-// still treat missing schema/table as "unavailable" so callers can degrade.
-let adminSchemaAvailable: boolean | null = null;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-type PgErrorLike = { code?: string };
-
-const isMissingAdminSchemaOrTable = (error: unknown): boolean => {
-  const code = (error as PgErrorLike | null)?.code;
-  // 3F000 = invalid_schema_name, 42P01 = undefined_table
-  return code === "3F000" || code === "42P01";
+const normalizeStringArray = (value: unknown): string[] | null => {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) return null;
+  return value.filter((entry): entry is string => typeof entry === "string");
 };
 
-const markAdminSchemaUnavailable = (error: unknown) => {
-  if (adminSchemaAvailable === false) return;
-  adminSchemaAvailable = false;
-  console.warn("[cast-photo-tags] Admin tags table unavailable", error);
+const normalizeCountSource = (value: unknown): "auto" | "manual" | null =>
+  value === "auto" || value === "manual" ? value : null;
+
+const normalizeString = (value: unknown): string | null =>
+  typeof value === "string" ? value : null;
+
+const normalizeCount = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const normalizeTag = (value: unknown): CastPhotoTags | null => {
+  if (!isRecord(value) || typeof value.cast_photo_id !== "string") return null;
+
+  return {
+    cast_photo_id: value.cast_photo_id,
+    people_names: normalizeStringArray(value.people_names),
+    people_ids: normalizeStringArray(value.people_ids),
+    people_count: normalizeCount(value.people_count),
+    people_count_source: normalizeCountSource(value.people_count_source),
+    detector: normalizeString(value.detector),
+    created_at: normalizeString(value.created_at),
+    updated_at: normalizeString(value.updated_at),
+    created_by_firebase_uid: normalizeString(value.created_by_firebase_uid),
+    updated_by_firebase_uid: normalizeString(value.updated_by_firebase_uid),
+  };
+};
+
+const warnBackendFallback = (operation: string, error: unknown) => {
+  console.warn(`[cast-photo-tags] Backend ${operation} unavailable`, error);
 };
 
 export async function getTagsByPhotoIds(
-  photoIds: string[]
+  photoIds: string[],
 ): Promise<Map<string, CastPhotoTags>> {
   const tags = new Map<string, CastPhotoTags>();
   if (photoIds.length === 0) return tags;
-  if (adminSchemaAvailable === false) return tags;
+
+  const params = new URLSearchParams();
+  for (const photoId of photoIds) {
+    if (photoId) params.append("photo_ids", photoId);
+  }
+  if (!params.has("photo_ids")) return tags;
 
   try {
-    const result = await query<CastPhotoTags>(
-      `SELECT ${TAG_FIELDS}
-       FROM admin.cast_photo_people_tags
-       WHERE cast_photo_id = ANY($1::uuid[])`,
-      [photoIds]
-    );
-    for (const row of result.rows) {
-      tags.set(row.cast_photo_id, row);
+    const result = await fetchAdminBackendJson("/admin/cast-photos/tags", {
+      queryString: params.toString(),
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: `${CAST_PHOTO_TAGS_ROUTE}:list`,
+    });
+    if (result.status !== 200) return tags;
+
+    const rawTags = Array.isArray(result.data.tags) ? result.data.tags : [];
+    for (const rawTag of rawTags) {
+      const tag = normalizeTag(rawTag);
+      if (tag) tags.set(tag.cast_photo_id, tag);
     }
   } catch (error) {
-    if (isMissingAdminSchemaOrTable(error)) {
-      markAdminSchemaUnavailable(error);
-      return tags;
-    }
-    console.warn("[cast-photo-tags] Failed to fetch tags", error);
+    warnBackendFallback("tag read", error);
   }
 
   return tags;
@@ -67,22 +93,21 @@ export async function getTagsByPhotoIds(
 
 export async function getPhotoIdsByPersonId(personId: string): Promise<string[]> {
   if (!personId) return [];
-  if (adminSchemaAvailable === false) return [];
 
   try {
-    const result = await query<{ cast_photo_id: string }>(
-      `SELECT cast_photo_id
-       FROM admin.cast_photo_people_tags
-       WHERE people_ids @> ARRAY[$1]::text[]`,
-      [personId]
-    );
-    return result.rows.map((row) => row.cast_photo_id);
-  } catch (error) {
-    if (isMissingAdminSchemaOrTable(error)) {
-      markAdminSchemaUnavailable(error);
+    const result = await fetchAdminBackendJson("/admin/cast-photos/tags/photo-ids", {
+      queryString: new URLSearchParams({ person_id: personId }).toString(),
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: `${CAST_PHOTO_TAGS_ROUTE}:photo-ids`,
+    });
+    if (result.status !== 200 || !Array.isArray(result.data.photo_ids)) {
       return [];
     }
-    console.warn("[cast-photo-tags] Failed to fetch tag photo IDs", error);
+    return result.data.photo_ids.filter(
+      (photoId): photoId is string => typeof photoId === "string",
+    );
+  } catch (error) {
+    warnBackendFallback("photo ID read", error);
     return [];
   }
 }
@@ -97,86 +122,51 @@ export async function upsertCastPhotoTags(
     detector?: string | null;
     created_by_firebase_uid?: string | null;
     updated_by_firebase_uid?: string | null;
-  }
+  },
 ): Promise<CastPhotoTags | null> {
-  if (adminSchemaAvailable === false) return null;
   try {
-    const now = new Date().toISOString();
-    const result = await query<CastPhotoTags>(
-      `INSERT INTO admin.cast_photo_people_tags (
-        cast_photo_id,
-        people_names,
-        people_ids,
-        people_count,
-        people_count_source,
-        detector,
-        created_by_firebase_uid,
-        updated_by_firebase_uid,
-        updated_at
-      ) VALUES (
-        $1::uuid,
-        $2::text[],
-        $3::text[],
-        $4::int,
-        $5::text,
-        $6::text,
-        $7::text,
-        $8::text,
-        $9::timestamptz
-      )
-      ON CONFLICT (cast_photo_id) DO UPDATE SET
-        people_names = EXCLUDED.people_names,
-        people_ids = EXCLUDED.people_ids,
-        people_count = EXCLUDED.people_count,
-        people_count_source = EXCLUDED.people_count_source,
-        detector = EXCLUDED.detector,
-        updated_by_firebase_uid = EXCLUDED.updated_by_firebase_uid,
-        updated_at = EXCLUDED.updated_at,
-        created_by_firebase_uid = COALESCE(admin.cast_photo_people_tags.created_by_firebase_uid, EXCLUDED.created_by_firebase_uid)
-      RETURNING ${TAG_FIELDS}`,
-      [
-        payload.cast_photo_id,
-        payload.people_names,
-        payload.people_ids,
-        payload.people_count,
-        payload.people_count_source,
-        payload.detector ?? null,
-        payload.created_by_firebase_uid ?? null,
-        payload.updated_by_firebase_uid ?? null,
-        now,
-      ]
-    );
-
-    return result.rows[0] ?? null;
+    const result = await fetchAdminBackendJson("/admin/cast-photos/tags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cast_photo_id: payload.cast_photo_id,
+        people_names: payload.people_names,
+        people_ids: payload.people_ids,
+        people_count: payload.people_count,
+        people_count_source: payload.people_count_source,
+        detector: payload.detector ?? null,
+        created_by_firebase_uid: payload.created_by_firebase_uid ?? null,
+        updated_by_firebase_uid: payload.updated_by_firebase_uid ?? null,
+      }),
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+      routeName: `${CAST_PHOTO_TAGS_ROUTE}:upsert`,
+    });
+    if (result.status !== 200) return null;
+    return normalizeTag(result.data.tag);
   } catch (error) {
-    if (isMissingAdminSchemaOrTable(error)) {
-      markAdminSchemaUnavailable(error);
-      return null;
-    }
-    console.warn("[cast-photo-tags] Failed to upsert tags", error);
+    warnBackendFallback("tag upsert", error);
     return null;
   }
 }
 
 export async function setCastPhotoFaceBoxes(
   castPhotoId: string,
-  faceBoxes: unknown[] | null
+  faceBoxes: unknown[] | null,
 ): Promise<boolean> {
   try {
-    await query(
-      `UPDATE core.cast_photos
-       SET metadata = CASE
-         WHEN $2::jsonb IS NULL
-           THEN (COALESCE(metadata, '{}'::jsonb) - 'face_boxes')
-         ELSE jsonb_set(COALESCE(metadata, '{}'::jsonb), '{face_boxes}', $2::jsonb, true)
-       END,
-       updated_at = NOW()
-       WHERE id = $1::uuid`,
-      [castPhotoId, faceBoxes ? JSON.stringify(faceBoxes) : null]
+    const result = await fetchAdminBackendJson(
+      `/admin/cast-photos/${castPhotoId}/face-boxes`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ face_boxes: faceBoxes ?? null }),
+        timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
+        routeName: `${CAST_PHOTO_TAGS_ROUTE}:face-boxes`,
+      },
     );
-    return true;
+    return result.status === 200 && result.data.updated === true;
   } catch (error) {
-    console.warn("[cast-photo-tags] Failed to update face boxes", error);
+    warnBackendFallback("face box update", error);
     return false;
   }
 }

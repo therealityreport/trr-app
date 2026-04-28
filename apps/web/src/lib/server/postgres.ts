@@ -1,6 +1,7 @@
 import "server-only";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { attachDatabasePool } from "@vercel/functions";
 import { Pool, types, type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 
 type SslConfig = {
@@ -61,9 +62,16 @@ const resolveCaBundle = (): string | undefined => {
 
 type EnvLike = Record<string, string | undefined>;
 type ConnectionClass = "local" | "session" | "transaction" | "direct" | "other" | "unknown";
+type RuntimeConnectionLane = "session" | "transaction";
+type CandidateSource =
+  | "TRR_DB_DIRECT_URL"
+  | "TRR_DB_SESSION_URL"
+  | "TRR_DB_TRANSACTION_URL"
+  | "TRR_DB_URL"
+  | "TRR_DB_FALLBACK_URL";
 type CandidateDetail = {
   value: string;
-  source: "TRR_DB_URL" | "TRR_DB_FALLBACK_URL";
+  source: CandidateSource;
   hostClass: "local" | "pooler" | "direct" | "other" | "unknown";
   connectionClass: ConnectionClass;
 };
@@ -73,16 +81,17 @@ type PostgresPoolSizing = {
   maxConcurrentOperations: number;
 };
 
-const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app-server";
+const DEFAULT_POSTGRES_APPLICATION_NAME = "trr-app:web";
 // Transaction-local search_path applied to every explicit transaction. Pinning
 // prevents a prior caller's `SET search_path` from leaking through the pooled
 // connection. Single-statement `query()` calls run under pg's default behavior
 // (autocommit per statement) and remain schema-qualified in the codebase, so
 // the server default is acceptable there.
 const DEFAULT_TRANSACTION_SEARCH_PATH = "public, core, firebase_surveys";
-const DEFAULT_SESSION_POOL_MAX = 4;
-const DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_LOCAL = 4;
-const DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_DEPLOYED = 2;
+const DEFAULT_SESSION_POOL_MAX_LOCAL = 1;
+const DEFAULT_SESSION_POOL_MAX_PREVIEW = 1;
+const DEFAULT_SESSION_POOL_MAX_PRODUCTION = 2;
+const DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS = 1;
 
 const classifyHostClass = (connectionString: string): CandidateDetail["hostClass"] => {
   const host = parseConnectionHostname(connectionString);
@@ -113,6 +122,15 @@ export const isSupavisorSessionPoolerConnectionString = (connectionString: strin
   return Boolean(host?.endsWith("pooler.supabase.com") && port === "5432");
 };
 
+const envTruthy = (value: string | undefined): boolean =>
+  ["1", "true", "yes", "on"].includes((value ?? "").trim().toLowerCase());
+
+export const isTransactionFlightTestEnabled = (env: EnvLike = process.env): boolean =>
+  envTruthy(env.TRR_DB_TRANSACTION_FLIGHT_TEST);
+
+export const resolveRuntimeConnectionLane = (env: EnvLike = process.env): RuntimeConnectionLane =>
+  (env.TRR_DB_RUNTIME_LANE ?? "").trim().toLowerCase() === "transaction" ? "transaction" : "session";
+
 export const isDeployedRuntime = (env: EnvLike = process.env): boolean => {
   if (env.NODE_ENV === "development") return false;
   const vercelEnv = env.VERCEL_ENV?.toLowerCase();
@@ -120,21 +138,47 @@ export const isDeployedRuntime = (env: EnvLike = process.env): boolean => {
   return true;
 };
 
-export function validateRuntimeLane(connectionClass: ConnectionClass, isDeployed: boolean): void {
+export function validateRuntimeLane(
+  connectionClass: ConnectionClass,
+  isDeployed: boolean,
+  env: EnvLike = process.env,
+  source?: CandidateSource,
+): void {
+  if (source === "TRR_DB_DIRECT_URL" && isDeployed) {
+    throw new Error(
+      `[postgres] connection source "${source}" is not allowed in deployed runtime. ` +
+        `TRR_DB_DIRECT_URL is local-only; use TRR_DB_SESSION_URL or TRR_DB_URL for deployed session-pooler traffic.`,
+    );
+  }
   if (connectionClass === "session" || connectionClass === "local") {
+    return;
+  }
+  if (connectionClass === "direct" && !isDeployed && source === "TRR_DB_DIRECT_URL") {
+    return;
+  }
+  if (connectionClass === "transaction" && isTransactionFlightTestEnabled(env)) {
     return;
   }
   throw new Error(
     `[postgres] connection class "${connectionClass}" is not allowed. ` +
-      `Only "session" (Supavisor pooler :5432) and "local" lanes are permitted.`,
+      `Only "session" (Supavisor pooler :5432) and "local" lanes are permitted by default. ` +
+      `Local direct database runs must use TRR_DB_DIRECT_URL. ` +
+      `Set TRR_DB_TRANSACTION_FLIGHT_TEST=1 with TRR_DB_RUNTIME_LANE=transaction for a scoped transaction-mode test.`,
   );
 }
 
 function resolvePostgresConnectionCandidateDetails(env: EnvLike = process.env): CandidateDetail[] {
-  const ordered: Array<Pick<CandidateDetail, "source"> & { value: string | undefined }> = [
+  const ordered: Array<Pick<CandidateDetail, "source"> & { value: string | undefined }> = [];
+  const runtimeLane = resolveRuntimeConnectionLane(env);
+  ordered.push({ source: "TRR_DB_DIRECT_URL", value: env.TRR_DB_DIRECT_URL });
+  if (runtimeLane === "transaction" && isTransactionFlightTestEnabled(env)) {
+    ordered.push({ source: "TRR_DB_TRANSACTION_URL", value: env.TRR_DB_TRANSACTION_URL });
+  }
+  ordered.push(
+    { source: "TRR_DB_SESSION_URL", value: env.TRR_DB_SESSION_URL },
     { source: "TRR_DB_URL", value: env.TRR_DB_URL },
     { source: "TRR_DB_FALLBACK_URL", value: env.TRR_DB_FALLBACK_URL },
-  ];
+  );
   const candidates: CandidateDetail[] = [];
   const seen = new Set<string>();
   for (const entry of ordered) {
@@ -157,7 +201,13 @@ export function resolvePostgresConnectionCandidates(env: EnvLike = process.env):
 
 export function resolveActiveCandidateIndex(env: EnvLike = process.env): number {
   const force = (env.TRR_DB_FORCE_FALLBACK ?? "").toLowerCase().trim();
-  return force === "1" || force === "true" || force === "yes" ? 1 : 0;
+  const forceFallback = force === "1" || force === "true" || force === "yes";
+  if (!forceFallback) return 0;
+  const candidates = resolvePostgresConnectionCandidateDetails(env);
+  const fallbackIndex = candidates.findIndex(
+    (candidate) => candidate.source === "TRR_DB_FALLBACK_URL",
+  );
+  return fallbackIndex >= 0 ? fallbackIndex : Math.max(candidates.length, 1);
 }
 
 export const resolvePostgresConnectionString = (env: EnvLike = process.env): string => {
@@ -165,7 +215,7 @@ export const resolvePostgresConnectionString = (env: EnvLike = process.env): str
   const connectionString = candidates[0];
   if (!connectionString) {
     throw new Error(
-      "No database connection string is set. Configure TRR_DB_URL (recommended in TRR-APP/apps/web/.env.local for make dev) or TRR_DB_FALLBACK_URL. Runtime reads do not use SUPABASE_DB_URL or DATABASE_URL.",
+      "No database connection string is set. Configure TRR_DB_DIRECT_URL, TRR_DB_SESSION_URL, or TRR_DB_URL (recommended in TRR-APP/apps/web/.env.local for make dev), or TRR_DB_FALLBACK_URL. Transaction-mode tests require TRR_DB_TRANSACTION_URL plus TRR_DB_TRANSACTION_FLIGHT_TEST=1. Runtime reads do not use SUPABASE_DB_URL or DATABASE_URL.",
     );
   }
   return connectionString;
@@ -208,6 +258,7 @@ export const resolvePostgresSslConfig = (
 type PoolState = {
   candidateIndex: number;
   pool: Pool;
+  attachedToVercel: boolean;
 };
 
 let poolState: PoolState | null = null;
@@ -219,6 +270,21 @@ const parsePositiveInt = (value: string | undefined): number | undefined => {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+export const resolvePostgresApplicationName = (env: EnvLike = process.env): string => {
+  const configured = env.POSTGRES_APPLICATION_NAME?.trim();
+  if (!configured) return DEFAULT_POSTGRES_APPLICATION_NAME;
+  const lower = configured.toLowerCase();
+  if (configured.includes("://") || configured.includes("@")) return DEFAULT_POSTGRES_APPLICATION_NAME;
+  if (["password", "secret", "token", "key="].some((marker) => lower.includes(marker))) {
+    return DEFAULT_POSTGRES_APPLICATION_NAME;
+  }
+  return configured;
+};
+
+export const shouldAttachPostgresPoolToVercel = (env: EnvLike = process.env): boolean => {
+  return Boolean(env.VERCEL || env.VERCEL_ENV);
 };
 
 const closePoolState = async (): Promise<void> => {
@@ -237,17 +303,21 @@ export const resolvePostgresPoolSizing = (
   env: EnvLike = process.env,
 ): PostgresPoolSizing => {
   const isDevelopment = env.NODE_ENV === "development";
+  const vercelEnv = env.VERCEL_ENV?.toLowerCase();
+  const isPreview = vercelEnv === "preview";
   const isSessionPooler = isSupavisorSessionPoolerConnectionString(connectionString);
-  const defaultSessionMaxConcurrentOperations = isDevelopment
-    ? DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_LOCAL
-    : DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS_DEPLOYED;
+  const defaultSessionPoolMax = isDevelopment
+    ? DEFAULT_SESSION_POOL_MAX_LOCAL
+    : isPreview
+      ? DEFAULT_SESSION_POOL_MAX_PREVIEW
+      : DEFAULT_SESSION_POOL_MAX_PRODUCTION;
   return {
     maxConcurrentOperations:
       parsePositiveInt(env.POSTGRES_MAX_CONCURRENT_OPERATIONS) ??
-      (isSessionPooler ? defaultSessionMaxConcurrentOperations : isDevelopment ? 8 : 12),
+      (isSessionPooler ? DEFAULT_SESSION_POOL_MAX_CONCURRENT_OPERATIONS : isDevelopment ? 8 : 12),
     poolMax:
       parsePositiveInt(env.POSTGRES_POOL_MAX) ??
-      (isSessionPooler ? DEFAULT_SESSION_POOL_MAX : isDevelopment ? 8 : 10),
+      (isSessionPooler ? defaultSessionPoolMax : isDevelopment ? 8 : 10),
   };
 };
 
@@ -270,6 +340,37 @@ const emitStructured = (event: string, fields: Record<string, unknown>): void =>
   }
 };
 
+const readPoolCounts = (pool: Pool | null | undefined) => ({
+  pool_total_count: pool?.totalCount ?? 0,
+  pool_idle_count: pool?.idleCount ?? 0,
+  pool_waiting_count: pool?.waitingCount ?? 0,
+});
+
+export const readPostgresPoolPressureSnapshot = (): Record<string, boolean | number | string> => {
+  const candidates = resolvePostgresConnectionCandidates(process.env);
+  const candidateIndex = poolState?.candidateIndex ?? activeCandidateIndex;
+  const connectionString = candidates[candidateIndex];
+  const sizing = connectionString
+    ? resolvePostgresPoolSizing(connectionString, process.env)
+    : { poolMax: 0, maxConcurrentOperations: 0 };
+  return {
+    application_name: resolvePostgresApplicationName(process.env),
+    db_configured: Boolean(connectionString),
+    vercel_pool_attached: Boolean(poolState?.attachedToVercel),
+    pool_max: sizing.poolMax,
+    max_concurrent_operations: sizing.maxConcurrentOperations,
+    active_permit_count: activeOperationCount,
+    queued_operation_count: waitingOperationResolvers.length,
+    ...readPoolCounts(poolState?.pool),
+    connection_class: connectionString ? classifyConnectionClass(connectionString) : "unknown",
+    connection_source:
+      candidateIndex === 0
+        ? resolvePostgresConnectionCandidateDetails(process.env)[0]?.source ?? ""
+        : resolvePostgresConnectionCandidateDetails(process.env)[candidateIndex]?.source ?? "",
+    transaction_flight_test_enabled: isTransactionFlightTestEnabled(process.env),
+  };
+};
+
 const acquireOperationSlot = async (): Promise<void> => {
   const maxConcurrentOperations = getMaxConcurrentOperations();
   if (activeOperationCount < maxConcurrentOperations) {
@@ -281,6 +382,8 @@ const acquireOperationSlot = async (): Promise<void> => {
     waiting: waitingOperationResolvers.length + 1,
     active: activeOperationCount,
     max_concurrent_operations: maxConcurrentOperations,
+    application_name: resolvePostgresApplicationName(process.env),
+    ...readPoolCounts(poolState?.pool),
   });
   await new Promise<void>((resolve) => {
     waitingOperationResolvers.push(resolve);
@@ -320,7 +423,12 @@ const getPool = (): Pool => {
   const connectionString = selectedCandidate?.value ?? getConnectionString();
 
   if (selectedCandidate) {
-    validateRuntimeLane(selectedCandidate.connectionClass, isDeployedRuntime(process.env));
+    validateRuntimeLane(
+      selectedCandidate.connectionClass,
+      isDeployedRuntime(process.env),
+      process.env,
+      selectedCandidate.source,
+    );
   }
 
   const isDevelopment = process.env.NODE_ENV === "development";
@@ -336,7 +444,7 @@ const getPool = (): Pool => {
   // a full TCP+TLS handshake per query locally, which hurt dev velocity without a
   // documented reason. Keep the env var as an explicit escape hatch.
   const maxUses = parsePositiveInt(process.env.POSTGRES_POOL_MAX_USES);
-  const applicationName = (process.env.POSTGRES_APPLICATION_NAME ?? DEFAULT_POSTGRES_APPLICATION_NAME).trim();
+  const applicationName = resolvePostgresApplicationName(process.env);
 
   const pool = new Pool({
     connectionString,
@@ -347,6 +455,15 @@ const getPool = (): Pool => {
     idleTimeoutMillis,
     ...(maxUses ? { maxUses } : {}),
   });
+  let attachedToVercel = false;
+  if (shouldAttachPostgresPoolToVercel(process.env)) {
+    try {
+      attachDatabasePool(pool);
+      attachedToVercel = true;
+    } catch (error) {
+      console.warn("[postgres] Failed to attach database pool to Vercel runtime", error);
+    }
+  }
   pool.on("error", (error) => {
     console.warn("[postgres] Idle client error", error);
   });
@@ -354,20 +471,24 @@ const getPool = (): Pool => {
   poolState = {
     candidateIndex: activeCandidateIndex,
     pool,
+    attachedToVercel,
   };
   if (selectedCandidate) {
     emitStructured("postgres_pool_init", {
+      vercel_env: process.env.VERCEL_ENV ?? "",
+      vercel_pool_attached: attachedToVercel,
       winner_source: selectedCandidate.source,
       host_class: selectedCandidate.hostClass,
       connection_class: selectedCandidate.connectionClass,
       pool_max: max,
       pool_max_source: process.env.POSTGRES_POOL_MAX ? "env:POSTGRES_POOL_MAX" : "default",
+      ...readPoolCounts(pool),
       max_concurrent_operations: getMaxConcurrentOperations(),
       max_concurrent_operations_source: process.env.POSTGRES_MAX_CONCURRENT_OPERATIONS
         ? "env:POSTGRES_MAX_CONCURRENT_OPERATIONS"
         : "default",
       application_name: applicationName,
-      application_name_source: process.env.POSTGRES_APPLICATION_NAME
+      application_name_source: process.env.POSTGRES_APPLICATION_NAME?.trim()
         ? "env:POSTGRES_APPLICATION_NAME"
         : "default",
     });
@@ -425,6 +546,8 @@ async function withPoolRetry<T>(operation: (pool: Pool) => Promise<T>): Promise<
         attempt,
         candidate_index: poolState?.candidateIndex ?? activeCandidateIndex,
         error_message: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+        application_name: resolvePostgresApplicationName(process.env),
+        ...readPoolCounts(poolState?.pool),
       });
       await closePoolState();
       await sleep(150 * 2 ** attempt);

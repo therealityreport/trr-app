@@ -96,7 +96,7 @@ export async function fetchAdminBackendJson(
   path: string,
   options?: {
     timeoutMs?: number;
-    method?: "GET" | "POST";
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
     body?: string;
     headers?: Record<string, string>;
     adminContext?: VerifiedAdminContext;

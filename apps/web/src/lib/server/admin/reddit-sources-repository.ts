@@ -5,15 +5,13 @@ import {
   normalizeRedditFlairAssignments,
   type RedditFlairAssignment,
 } from "@/lib/admin/reddit-flair-targeting";
-import { query, withAuthTransaction, type AuthContext } from "@/lib/server/postgres";
+import { query, type AuthContext } from "@/lib/server/postgres";
 import { sanitizeRedditFlairList } from "@/lib/server/admin/reddit-flair-normalization";
-import {
-  resolveCommunityFocusState,
-  sanitizeFocusTargets,
-} from "@/lib/server/admin/reddit-community-focus";
+import { sanitizeFocusTargets } from "@/lib/server/admin/reddit-community-focus";
 import {
   sanitizeEpisodeTitlePatterns,
 } from "@/lib/server/admin/reddit-episode-rules";
+import { fetchAdminBackendJson } from "@/lib/server/trr-api/admin-read-proxy";
 
 export interface RedditCommunityRow {
   id: string;
@@ -144,8 +142,9 @@ export interface UpdateRedditThreadInput {
   notes?: string | null;
 }
 
-const COMMUNITIES_TABLE = "admin.reddit_communities";
 const THREADS_TABLE = "admin.reddit_threads";
+const REDDIT_COMMUNITIES_BACKEND_PATH = "/admin/reddit/communities";
+const REDDIT_THREADS_BACKEND_PATH = "/admin/reddit/threads";
 
 const SUBREDDIT_RE = /^[A-Za-z0-9_]{2,21}$/;
 
@@ -340,32 +339,69 @@ const toCommunityRow = (row: RedditCommunityRowRaw): RedditCommunityRow => {
   };
 };
 
-interface SanitizedAnalysisModes {
-  analysisFlairs: string[];
-  analysisAllFlairs: string[];
-}
+const toCommunityRows = (value: unknown): RedditCommunityRow[] => {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => toCommunityRow(row as RedditCommunityRowRaw));
+};
 
-const sanitizeAnalysisFlairModes = (
-  subreddit: string,
-  values: {
-    existingAnalysisFlairs: string[];
-    existingAnalysisAllFlairs: string[];
-    analysisFlairs?: string[];
-    analysisAllFlairs?: string[];
-  },
-): SanitizedAnalysisModes => {
-  const nextAll = values.analysisAllFlairs
-    ? sanitizeRedditFlairList(subreddit, values.analysisAllFlairs)
-    : values.existingAnalysisAllFlairs;
-  const scanBeforeOverlap = values.analysisFlairs
-    ? sanitizeRedditFlairList(subreddit, values.analysisFlairs)
-    : values.existingAnalysisFlairs;
-  const allKeys = new Set(nextAll.map((value) => value.toLowerCase()));
-  const nextScan = scanBeforeOverlap.filter((value) => !allKeys.has(value.toLowerCase()));
-  return {
-    analysisFlairs: nextScan,
-    analysisAllFlairs: nextAll,
+const toCommunityWithThreadsRows = (value: unknown): RedditCommunityWithThreads[] => {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => {
+    const record = row as CommunitiesWithThreadsRow;
+    return {
+      ...toCommunityRow(record),
+      assigned_threads: toThreadsArray(record.assigned_threads),
+      assigned_thread_count: toNumberOrZero(record.assigned_thread_count),
+    };
+  });
+};
+
+const toThreadRows = (value: unknown): RedditThreadRow[] => {
+  if (!Array.isArray(value)) return [];
+  return value as RedditThreadRow[];
+};
+
+const toThreadRow = (value: unknown): RedditThreadRow | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as RedditThreadRow;
+};
+
+const compactPayload = (payload: Record<string, unknown>): Record<string, unknown> => {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+};
+
+const authHeaders = (
+  authContext: AuthContext,
+  includeJson = false,
+): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "X-TRR-Admin-User-Uid": authContext.firebaseUid,
   };
+  if (includeJson) {
+    headers["Content-Type"] = "application/json";
+  }
+  return headers;
+};
+
+const backendErrorMessage = (
+  data: Record<string, unknown>,
+  fallback: string,
+): string => {
+  if (typeof data.error === "string") return data.error;
+  if (typeof data.detail === "string") return data.detail;
+  return fallback;
+};
+
+const backendError = (
+  status: number,
+  data: Record<string, unknown>,
+  fallback: string,
+): Error => {
+  const error = new Error(backendErrorMessage(data, fallback));
+  if (status === 409) {
+    (error as Error & { code?: string }).code = "23505";
+  }
+  return error;
 };
 
 export const normalizeSubreddit = (value: string): string => {
@@ -383,15 +419,19 @@ export async function listRedditCommunities(
   options: ListRedditCommunitiesOptions = {},
 ): Promise<RedditCommunityRow[]> {
   const includeInactive = options.includeInactive ?? false;
-  const result = await query<RedditCommunityRowRaw>(
-    `SELECT *
-       FROM ${COMMUNITIES_TABLE}
-      WHERE ($1::uuid IS NULL OR trr_show_id = $1::uuid)
-        AND ($2::boolean OR is_active = true)
-      ORDER BY trr_show_name ASC, lower(subreddit) ASC`,
-    [options.trrShowId ?? null, includeInactive],
-  );
-  return result.rows.map(toCommunityRow);
+  const queryString = new URLSearchParams();
+  if (options.trrShowId) queryString.set("trr_show_id", options.trrShowId);
+  queryString.set("include_inactive", includeInactive ? "true" : "false");
+  queryString.set("include_assigned_threads", "false");
+
+  const result = await fetchAdminBackendJson(REDDIT_COMMUNITIES_BACKEND_PATH, {
+    queryString: queryString.toString(),
+    routeName: "reddit-sources:list-communities",
+  });
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to list reddit communities");
+  }
+  return toCommunityRows(result.data.communities);
 }
 
 interface CommunitiesWithThreadsRow extends RedditCommunityRowRaw {
@@ -404,88 +444,67 @@ export async function listRedditCommunitiesWithThreads(
 ): Promise<RedditCommunityWithThreads[]> {
   const includeInactive = options.includeInactive ?? false;
   const includeGlobalThreadsForSeason = options.includeGlobalThreadsForSeason ?? true;
-  const result = await query<CommunitiesWithThreadsRow>(
-    `SELECT
-        c.*,
-        COALESCE(
-          json_agg(t ORDER BY t.posted_at DESC NULLS LAST, t.created_at DESC)
-          FILTER (WHERE t.id IS NOT NULL),
-          '[]'::json
-        ) AS assigned_threads,
-        COUNT(t.id)::int AS assigned_thread_count
-      FROM ${COMMUNITIES_TABLE} c
-      LEFT JOIN ${THREADS_TABLE} t
-        ON t.community_id = c.id
-       AND (
-          $3::uuid IS NULL
-          OR t.trr_season_id = $3::uuid
-          OR ($4::boolean AND t.trr_season_id IS NULL)
-       )
-      WHERE ($1::uuid IS NULL OR c.trr_show_id = $1::uuid)
-        AND ($2::boolean OR c.is_active = true)
-      GROUP BY c.id
-      ORDER BY c.trr_show_name ASC, lower(c.subreddit) ASC`,
-    [options.trrShowId ?? null, includeInactive, options.trrSeasonId ?? null, includeGlobalThreadsForSeason],
+  const queryString = new URLSearchParams();
+  if (options.trrShowId) queryString.set("trr_show_id", options.trrShowId);
+  if (options.trrSeasonId) queryString.set("trr_season_id", options.trrSeasonId);
+  queryString.set("include_inactive", includeInactive ? "true" : "false");
+  queryString.set(
+    "include_global_threads_for_season",
+    includeGlobalThreadsForSeason ? "true" : "false",
   );
+  queryString.set("include_assigned_threads", "true");
 
-  return result.rows.map((row) => ({
-    ...toCommunityRow(row),
-    assigned_threads: toThreadsArray(row.assigned_threads),
-    assigned_thread_count: toNumberOrZero(row.assigned_thread_count),
-  }));
+  const result = await fetchAdminBackendJson(REDDIT_COMMUNITIES_BACKEND_PATH, {
+    queryString: queryString.toString(),
+    routeName: "reddit-sources:list-communities-with-threads",
+  });
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to list reddit communities");
+  }
+  return toCommunityWithThreadsRows(result.data.communities);
 }
 
 export async function getRedditCommunityById(id: string): Promise<RedditCommunityRow | null> {
-  const result = await query<RedditCommunityRowRaw>(
-    `SELECT * FROM ${COMMUNITIES_TABLE} WHERE id = $1::uuid LIMIT 1`,
-    [id],
-  );
-  const row = result.rows[0];
-  return row ? toCommunityRow(row) : null;
+  const result = await fetchAdminBackendJson(`${REDDIT_COMMUNITIES_BACKEND_PATH}/${id}`, {
+    routeName: "reddit-sources:get-community",
+  });
+  if (result.status === 404) return null;
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to get reddit community");
+  }
+  const community = result.data.community;
+  if (typeof community !== "object" || community === null || Array.isArray(community)) {
+    return null;
+  }
+  return toCommunityRow(community as RedditCommunityRowRaw);
 }
 
 export async function createRedditCommunity(
   authContext: AuthContext,
   input: CreateRedditCommunityInput,
 ): Promise<RedditCommunityRow> {
-  return withAuthTransaction(authContext, async (client) => {
-    const focusState = resolveCommunityFocusState({
-      isShowFocused: input.isShowFocused,
-      networkFocusTargets: input.networkFocusTargets,
-      franchiseFocusTargets: input.franchiseFocusTargets,
-    });
-
-    const result = await client.query<RedditCommunityRowRaw>(
-      `INSERT INTO ${COMMUNITIES_TABLE} (
-        trr_show_id,
-        trr_show_name,
-        subreddit,
-        display_name,
-        notes,
-        is_active,
-        is_show_focused,
-        network_focus_targets,
-        franchise_focus_targets,
-        episode_title_patterns,
-        created_by_firebase_uid
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
-      RETURNING *`,
-      [
-        input.trrShowId,
-        input.trrShowName,
-        input.subreddit,
-        input.displayName ?? null,
-        input.notes ?? null,
-        input.isActive ?? true,
-        focusState.is_show_focused,
-        JSON.stringify(focusState.network_focus_targets),
-        JSON.stringify(focusState.franchise_focus_targets),
-        JSON.stringify(sanitizeEpisodeTitlePatterns(input.episodeTitlePatterns ?? [])),
-        authContext.firebaseUid,
-      ],
-    );
-    return toCommunityRow(result.rows[0]);
+  const payload = compactPayload({
+    trr_show_id: input.trrShowId,
+    trr_show_name: input.trrShowName,
+    subreddit: input.subreddit,
+    display_name: input.displayName ?? null,
+    notes: input.notes ?? null,
+    is_active: input.isActive ?? true,
+    is_show_focused: input.isShowFocused,
+    network_focus_targets: input.networkFocusTargets,
+    franchise_focus_targets: input.franchiseFocusTargets,
+    episode_title_patterns: input.episodeTitlePatterns,
   });
+  const result = await fetchAdminBackendJson(REDDIT_COMMUNITIES_BACKEND_PATH, {
+    method: "POST",
+    headers: authHeaders(authContext, true),
+    body: JSON.stringify(payload),
+    routeName: "reddit-sources:create-community",
+  });
+  if (result.status !== 201) {
+    throw backendError(result.status, result.data, "Failed to create reddit community");
+  }
+  return toCommunityRow(result.data.community as RedditCommunityRowRaw);
 }
 
 export async function updateRedditCommunity(
@@ -493,142 +512,35 @@ export async function updateRedditCommunity(
   id: string,
   input: UpdateRedditCommunityInput,
 ): Promise<RedditCommunityRow | null> {
-  return withAuthTransaction(authContext, async (client) => {
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    let idx = 1;
-    const shouldResolveFocus =
-      input.isShowFocused !== undefined ||
-      input.networkFocusTargets !== undefined ||
-      input.franchiseFocusTargets !== undefined;
-    const shouldResolveAnalysis =
-      input.analysisFlairs !== undefined || input.analysisAllFlairs !== undefined;
-    const shouldResolveEpisodeRules = input.episodeTitlePatterns !== undefined;
-
-    interface CommunityUpdateLookup {
-      subreddit: string;
-      is_show_focused: boolean;
-      network_focus_targets: unknown;
-      franchise_focus_targets: unknown;
-      analysis_flairs: unknown;
-      analysis_all_flairs: unknown;
-      episode_title_patterns: unknown;
-    }
-
-    let lookupRow: CommunityUpdateLookup | null = null;
-    if (shouldResolveFocus || shouldResolveAnalysis || shouldResolveEpisodeRules) {
-      const communityLookup = await client.query<CommunityUpdateLookup>(
-        `SELECT subreddit
-               , is_show_focused
-               , network_focus_targets
-               , franchise_focus_targets
-               , analysis_flairs
-               , analysis_all_flairs
-               , episode_title_patterns
-           FROM ${COMMUNITIES_TABLE}
-          WHERE id = $1::uuid
-          LIMIT 1`,
-        [id],
-      );
-      lookupRow = communityLookup.rows[0] ?? null;
-    }
-
-    const subredditForFlairSanitization = input.subreddit ?? lookupRow?.subreddit ?? "";
-
-    if (input.subreddit !== undefined) {
-      sets.push(`subreddit = $${idx++}`);
-      values.push(input.subreddit);
-    }
-    if (input.displayName !== undefined) {
-      sets.push(`display_name = $${idx++}`);
-      values.push(input.displayName);
-    }
-    if (input.notes !== undefined) {
-      sets.push(`notes = $${idx++}`);
-      values.push(input.notes);
-    }
-    if (input.isActive !== undefined) {
-      sets.push(`is_active = $${idx++}`);
-      values.push(input.isActive);
-    }
-    if (shouldResolveFocus) {
-      const focusState = resolveCommunityFocusState(
-        {
-          isShowFocused: input.isShowFocused,
-          networkFocusTargets: input.networkFocusTargets,
-          franchiseFocusTargets: input.franchiseFocusTargets,
-        },
-        lookupRow
-          ? {
-              is_show_focused: lookupRow.is_show_focused,
-              network_focus_targets: toFocusTargets(lookupRow.network_focus_targets),
-              franchise_focus_targets: toFocusTargets(lookupRow.franchise_focus_targets),
-            }
-          : undefined,
-      );
-      sets.push(`is_show_focused = $${idx++}`);
-      values.push(focusState.is_show_focused);
-      sets.push(`network_focus_targets = $${idx++}::jsonb`);
-      values.push(JSON.stringify(focusState.network_focus_targets));
-      sets.push(`franchise_focus_targets = $${idx++}::jsonb`);
-      values.push(JSON.stringify(focusState.franchise_focus_targets));
-    }
-
-    if (shouldResolveAnalysis) {
-      const existingAnalysisFlairs = lookupRow
-        ? toFlairArray(subredditForFlairSanitization, lookupRow.analysis_flairs)
-        : [];
-      const existingAnalysisAllFlairs = lookupRow
-        ? toFlairArray(subredditForFlairSanitization, lookupRow.analysis_all_flairs)
-        : [];
-      const sanitizedAnalysis = sanitizeAnalysisFlairModes(subredditForFlairSanitization, {
-        existingAnalysisFlairs,
-        existingAnalysisAllFlairs,
-        analysisFlairs: input.analysisFlairs,
-        analysisAllFlairs: input.analysisAllFlairs,
-      });
-      sets.push(`analysis_flairs = $${idx++}::jsonb`);
-      values.push(JSON.stringify(sanitizedAnalysis.analysisFlairs));
-      sets.push(`analysis_all_flairs = $${idx++}::jsonb`);
-      values.push(JSON.stringify(sanitizedAnalysis.analysisAllFlairs));
-    }
-
-    if (shouldResolveEpisodeRules) {
-      const nextEpisodeTitlePatterns = sanitizeEpisodeTitlePatterns(
-        input.episodeTitlePatterns ??
-          (lookupRow ? toEpisodeTitlePatterns(lookupRow.episode_title_patterns) : []),
-      );
-      sets.push(`episode_title_patterns = $${idx++}::jsonb`);
-      values.push(JSON.stringify(nextEpisodeTitlePatterns));
-    }
-
-    if (input.postFlairCategories !== undefined) {
-      const sanitized = toFlairCategoriesMap(input.postFlairCategories);
-      sets.push(`post_flair_categories = $${idx++}::jsonb`);
-      values.push(JSON.stringify(sanitized));
-    }
-
-    if (input.postFlairAssignments !== undefined) {
-      const sanitized = toFlairAssignmentsMap(input.postFlairAssignments);
-      sets.push(`post_flair_assignments = $${idx++}::jsonb`);
-      values.push(JSON.stringify(sanitized));
-    }
-
-    if (sets.length === 0) {
-      return getRedditCommunityById(id);
-    }
-
-    values.push(id);
-    const result = await client.query<RedditCommunityRowRaw>(
-      `UPDATE ${COMMUNITIES_TABLE}
-          SET ${sets.join(", ")}
-        WHERE id = $${idx}::uuid
-      RETURNING *`,
-      values,
-    );
-    const row = result.rows[0];
-    return row ? toCommunityRow(row) : null;
+  const payload = compactPayload({
+    subreddit: input.subreddit,
+    display_name: input.displayName,
+    notes: input.notes,
+    is_active: input.isActive,
+    analysis_flairs: input.analysisFlairs,
+    analysis_all_flairs: input.analysisAllFlairs,
+    is_show_focused: input.isShowFocused,
+    network_focus_targets: input.networkFocusTargets,
+    franchise_focus_targets: input.franchiseFocusTargets,
+    episode_title_patterns: input.episodeTitlePatterns,
+    post_flair_categories: input.postFlairCategories,
+    post_flair_assignments: input.postFlairAssignments,
   });
+  if (Object.keys(payload).length === 0) {
+    return getRedditCommunityById(id);
+  }
+
+  const result = await fetchAdminBackendJson(`${REDDIT_COMMUNITIES_BACKEND_PATH}/${id}`, {
+    method: "PATCH",
+    headers: authHeaders(authContext, true),
+    body: JSON.stringify(payload),
+    routeName: "reddit-sources:update-community",
+  });
+  if (result.status === 404) return null;
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to update reddit community");
+  }
+  return toCommunityRow(result.data.community as RedditCommunityRowRaw);
 }
 
 export async function updateRedditCommunityPostFlairs(
@@ -637,160 +549,111 @@ export async function updateRedditCommunityPostFlairs(
   postFlairs: string[],
   postFlairsUpdatedAt: string,
 ): Promise<RedditCommunityRow | null> {
-  return withAuthTransaction(authContext, async (client) => {
-    const communityLookup = await client.query<{ subreddit: string }>(
-      `SELECT subreddit
-         FROM ${COMMUNITIES_TABLE}
-        WHERE id = $1::uuid
-        LIMIT 1`,
-      [id],
-    );
-    const subreddit = communityLookup.rows[0]?.subreddit;
-    if (!subreddit) {
-      return null;
-    }
-
-    const sanitizedPostFlairs = sanitizeRedditFlairList(subreddit, postFlairs);
-    const result = await client.query<RedditCommunityRowRaw>(
-      `UPDATE ${COMMUNITIES_TABLE}
-          SET post_flairs = $1::jsonb,
-              post_flairs_updated_at = $2::timestamptz
-        WHERE id = $3::uuid
-      RETURNING *`,
-      [JSON.stringify(sanitizedPostFlairs), postFlairsUpdatedAt, id],
-    );
-    const row = result.rows[0];
-    return row ? toCommunityRow(row) : null;
-  });
+  const result = await fetchAdminBackendJson(
+    `${REDDIT_COMMUNITIES_BACKEND_PATH}/${id}/post-flairs`,
+    {
+      method: "PATCH",
+      headers: authHeaders(authContext, true),
+      body: JSON.stringify({
+        post_flairs: postFlairs,
+        post_flairs_updated_at: postFlairsUpdatedAt,
+      }),
+      routeName: "reddit-sources:update-community-post-flairs",
+    },
+  );
+  if (result.status === 404) return null;
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to update reddit community post flairs");
+  }
+  const community = result.data.community;
+  if (typeof community !== "object" || community === null || Array.isArray(community)) {
+    return null;
+  }
+  return toCommunityRow(community as RedditCommunityRowRaw);
 }
 
 export async function deleteRedditCommunity(
   authContext: AuthContext,
   id: string,
 ): Promise<boolean> {
-  return withAuthTransaction(authContext, async (client) => {
-    const result = await client.query(
-      `DELETE FROM ${COMMUNITIES_TABLE} WHERE id = $1::uuid`,
-      [id],
-    );
-    return (result.rowCount ?? 0) > 0;
+  const result = await fetchAdminBackendJson(`${REDDIT_COMMUNITIES_BACKEND_PATH}/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(authContext),
+    routeName: "reddit-sources:delete-community",
   });
+  if (result.status === 404) return false;
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to delete reddit community");
+  }
+  return result.data.success === true;
 }
 
 export async function listRedditThreads(
   options: ListRedditThreadsOptions = {},
 ): Promise<RedditThreadRow[]> {
   const includeGlobalThreadsForSeason = options.includeGlobalThreadsForSeason ?? true;
-  const result = await query<RedditThreadRow>(
-    `SELECT *
-       FROM ${THREADS_TABLE}
-      WHERE ($1::uuid IS NULL OR community_id = $1::uuid)
-        AND ($2::uuid IS NULL OR trr_show_id = $2::uuid)
-        AND (
-          $3::uuid IS NULL
-          OR trr_season_id = $3::uuid
-          OR ($4::boolean AND trr_season_id IS NULL)
-        )
-      ORDER BY posted_at DESC NULLS LAST, created_at DESC`,
-    [
-      options.communityId ?? null,
-      options.trrShowId ?? null,
-      options.trrSeasonId ?? null,
-      includeGlobalThreadsForSeason,
-    ],
+  const queryString = new URLSearchParams();
+  if (options.communityId) queryString.set("community_id", options.communityId);
+  if (options.trrShowId) queryString.set("trr_show_id", options.trrShowId);
+  if (options.trrSeasonId) queryString.set("trr_season_id", options.trrSeasonId);
+  queryString.set(
+    "include_global_threads_for_season",
+    includeGlobalThreadsForSeason ? "true" : "false",
   );
-  return result.rows;
+
+  const result = await fetchAdminBackendJson(REDDIT_THREADS_BACKEND_PATH, {
+    queryString: queryString.toString(),
+    routeName: "reddit-sources:list-threads",
+  });
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to list reddit threads");
+  }
+  return toThreadRows(result.data.threads);
 }
 
 export async function getRedditThreadById(id: string): Promise<RedditThreadRow | null> {
-  const result = await query<RedditThreadRow>(
-    `SELECT * FROM ${THREADS_TABLE} WHERE id = $1::uuid LIMIT 1`,
-    [id],
-  );
-  return result.rows[0] ?? null;
+  const result = await fetchAdminBackendJson(`${REDDIT_THREADS_BACKEND_PATH}/${id}`, {
+    routeName: "reddit-sources:get-thread",
+  });
+  if (result.status === 404) return null;
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to get reddit thread");
+  }
+  return toThreadRow(result.data.thread);
 }
 
 export async function createRedditThread(
   authContext: AuthContext,
   input: CreateRedditThreadInput,
 ): Promise<RedditThreadRow> {
-  return withAuthTransaction(authContext, async (client) => {
-    const result = await client.query<RedditThreadRow>(
-      `INSERT INTO ${THREADS_TABLE} (
-        community_id,
-        trr_show_id,
-        trr_show_name,
-        trr_season_id,
-        reddit_post_id,
-        title,
-        url,
-        permalink,
-        author,
-        score,
-        num_comments,
-        posted_at,
-        notes,
-        source_kind,
-        created_by_firebase_uid
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::text, $15
-      )
-      ON CONFLICT (trr_show_id, reddit_post_id)
-      DO UPDATE SET
-        community_id = EXCLUDED.community_id,
-        trr_show_name = EXCLUDED.trr_show_name,
-        trr_season_id = EXCLUDED.trr_season_id,
-        title = EXCLUDED.title,
-        url = EXCLUDED.url,
-        permalink = EXCLUDED.permalink,
-        author = EXCLUDED.author,
-        score = EXCLUDED.score,
-        num_comments = EXCLUDED.num_comments,
-        posted_at = EXCLUDED.posted_at,
-        notes = EXCLUDED.notes,
-        source_kind = CASE
-          WHEN $16::boolean THEN EXCLUDED.source_kind
-          ELSE ${THREADS_TABLE}.source_kind
-        END
-      WHERE ${THREADS_TABLE}.community_id = EXCLUDED.community_id
-      RETURNING *`,
-      [
-        input.communityId,
-        input.trrShowId,
-        input.trrShowName,
-        input.trrSeasonId ?? null,
-        input.redditPostId,
-        input.title,
-        input.url,
-        input.permalink ?? null,
-        input.author ?? null,
-        toNumberOrZero(input.score ?? 0),
-        toNumberOrZero(input.numComments ?? 0),
-        input.postedAt ?? null,
-        input.notes ?? null,
-        input.sourceKind ?? "manual",
-        authContext.firebaseUid,
-        input.sourceKind !== undefined,
-      ],
-    );
-    const row = result.rows[0];
-    if (row) {
-      return row;
-    }
-
-    const conflictLookup = await client.query<Pick<RedditThreadRow, "id">>(
-      `SELECT id
-         FROM ${THREADS_TABLE}
-        WHERE trr_show_id = $1
-          AND reddit_post_id = $2
-        LIMIT 1`,
-      [input.trrShowId, input.redditPostId],
-    );
-    if (conflictLookup.rowCount && conflictLookup.rowCount > 0) {
-      throw new Error("Thread already exists in another community for this show");
-    }
-    throw new Error("Failed to create reddit thread");
+  const payload = compactPayload({
+    community_id: input.communityId,
+    trr_show_id: input.trrShowId,
+    trr_show_name: input.trrShowName,
+    trr_season_id: input.trrSeasonId ?? null,
+    source_kind: input.sourceKind ?? "manual",
+    reddit_post_id: input.redditPostId,
+    title: input.title,
+    url: input.url,
+    permalink: input.permalink ?? null,
+    author: input.author ?? null,
+    score: toNumberOrZero(input.score ?? 0),
+    num_comments: toNumberOrZero(input.numComments ?? 0),
+    posted_at: input.postedAt ?? null,
+    notes: input.notes ?? null,
   });
+  const result = await fetchAdminBackendJson(REDDIT_THREADS_BACKEND_PATH, {
+    method: "POST",
+    headers: authHeaders(authContext, true),
+    body: JSON.stringify(payload),
+    routeName: "reddit-sources:create-thread",
+  });
+  if (result.status !== 201) {
+    throw backendError(result.status, result.data, "Failed to create reddit thread");
+  }
+  const thread = toThreadRow(result.data.thread);
+  if (!thread) throw new Error("Failed to create reddit thread");
+  return thread;
 }
 
 export async function updateRedditThread(
@@ -798,91 +661,53 @@ export async function updateRedditThread(
   id: string,
   input: UpdateRedditThreadInput,
 ): Promise<RedditThreadRow | null> {
-  return withAuthTransaction(authContext, async (client) => {
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    let idx = 1;
-
-    if (input.communityId !== undefined) {
-      sets.push(`community_id = $${idx++}`);
-      values.push(input.communityId);
-    }
-    if (input.trrShowId !== undefined) {
-      sets.push(`trr_show_id = $${idx++}`);
-      values.push(input.trrShowId);
-    }
-    if (input.trrShowName !== undefined) {
-      sets.push(`trr_show_name = $${idx++}`);
-      values.push(input.trrShowName);
-    }
-    if (input.trrSeasonId !== undefined) {
-      sets.push(`trr_season_id = $${idx++}`);
-      values.push(input.trrSeasonId);
-    }
-    if (input.sourceKind !== undefined) {
-      sets.push(`source_kind = $${idx++}`);
-      values.push(input.sourceKind);
-    }
-    if (input.title !== undefined) {
-      sets.push(`title = $${idx++}`);
-      values.push(input.title);
-    }
-    if (input.url !== undefined) {
-      sets.push(`url = $${idx++}`);
-      values.push(input.url);
-    }
-    if (input.permalink !== undefined) {
-      sets.push(`permalink = $${idx++}`);
-      values.push(input.permalink);
-    }
-    if (input.author !== undefined) {
-      sets.push(`author = $${idx++}`);
-      values.push(input.author);
-    }
-    if (input.score !== undefined) {
-      sets.push(`score = $${idx++}`);
-      values.push(toNumberOrZero(input.score));
-    }
-    if (input.numComments !== undefined) {
-      sets.push(`num_comments = $${idx++}`);
-      values.push(toNumberOrZero(input.numComments));
-    }
-    if (input.postedAt !== undefined) {
-      sets.push(`posted_at = $${idx++}`);
-      values.push(input.postedAt);
-    }
-    if (input.notes !== undefined) {
-      sets.push(`notes = $${idx++}`);
-      values.push(input.notes);
-    }
-
-    if (sets.length === 0) {
-      return getRedditThreadById(id);
-    }
-
-    values.push(id);
-    const result = await client.query<RedditThreadRow>(
-      `UPDATE ${THREADS_TABLE}
-          SET ${sets.join(", ")}
-        WHERE id = $${idx}::uuid
-      RETURNING *`,
-      values,
-    );
-    return result.rows[0] ?? null;
+  const payload = compactPayload({
+    community_id: input.communityId,
+    trr_show_id: input.trrShowId,
+    trr_show_name: input.trrShowName,
+    trr_season_id: input.trrSeasonId,
+    source_kind: input.sourceKind,
+    title: input.title,
+    url: input.url,
+    permalink: input.permalink,
+    author: input.author,
+    score: input.score === undefined ? undefined : toNumberOrZero(input.score),
+    num_comments:
+      input.numComments === undefined ? undefined : toNumberOrZero(input.numComments),
+    posted_at: input.postedAt,
+    notes: input.notes,
   });
+  if (Object.keys(payload).length === 0) {
+    return getRedditThreadById(id);
+  }
+
+  const result = await fetchAdminBackendJson(`${REDDIT_THREADS_BACKEND_PATH}/${id}`, {
+    method: "PATCH",
+    headers: authHeaders(authContext, true),
+    body: JSON.stringify(payload),
+    routeName: "reddit-sources:update-thread",
+  });
+  if (result.status === 404) return null;
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to update reddit thread");
+  }
+  return toThreadRow(result.data.thread);
 }
 
 export async function deleteRedditThread(
   authContext: AuthContext,
   id: string,
 ): Promise<boolean> {
-  return withAuthTransaction(authContext, async (client) => {
-    const result = await client.query(
-      `DELETE FROM ${THREADS_TABLE} WHERE id = $1::uuid`,
-      [id],
-    );
-    return (result.rowCount ?? 0) > 0;
+  const result = await fetchAdminBackendJson(`${REDDIT_THREADS_BACKEND_PATH}/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(authContext),
+    routeName: "reddit-sources:delete-thread",
   });
+  if (result.status === 404) return false;
+  if (result.status !== 200) {
+    throw backendError(result.status, result.data, "Failed to delete reddit thread");
+  }
+  return result.data.success === true;
 }
 
 export interface RedditPostMatchContextRow {

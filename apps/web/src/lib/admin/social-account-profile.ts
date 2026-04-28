@@ -50,7 +50,17 @@ export type SocialBladeProfileStatsLabels = Partial<{
   chart_metric_label: string;
 }>;
 
-export type SocialAccountProfileSummaryDetail = "lite" | "full";
+export type SocialAccountProfileSummaryDetail = "lite" | "distribution" | "full";
+
+export type SocialAccountDashboardFreshnessStatus = "fresh" | "stale" | "missing" | "error";
+export type SocialAccountDashboardFreshnessSource = "live" | "cache" | "materialized";
+
+export type SocialAccountDashboardFreshness = {
+  status: SocialAccountDashboardFreshnessStatus;
+  generated_at: string | null;
+  age_seconds: number | null;
+  source: SocialAccountDashboardFreshnessSource;
+};
 
 export type SocialAccountProfileSummary = {
   summary_detail?: SocialAccountProfileSummaryDetail | null;
@@ -198,6 +208,13 @@ export type SocialAccountProfilePost = {
   mentions?: string[];
   collaborators?: string[];
   tags?: string[];
+  thumbnail_url?: string | null;
+  source_thumbnail_url?: string | null;
+  hosted_thumbnail_url?: string | null;
+  media_urls?: string[] | null;
+  source_media_urls?: string[] | null;
+  hosted_media_urls?: string[] | null;
+  post_format?: string | null;
   match_mode?: "owner" | "collaborator";
   source_surface?: "materialized" | "catalog";
   saved_comments?: number | null;
@@ -263,19 +280,40 @@ export type SocialAccountMediaCoverage = {
 export type SocialAccountProfileComment = {
   id: string;
   comment_id: string;
+  external_id?: string | null;
   post_id?: string | null;
   post_source_id?: string | null;
   post_url?: string | null;
   username?: string | null;
+  user_id?: string | null;
   display_name?: string | null;
+  author_full_name?: string | null;
+  author_profile_pic_url?: string | null;
+  hosted_author_profile_pic_url?: string | null;
+  author_profile_pic_url_hd?: string | null;
+  author_is_verified?: boolean | null;
   text?: string | null;
   discussion_type?: string | null;
   likes?: number | null;
+  likes_count?: number | null;
+  likesCount?: number | null;
+  reply_count?: number | null;
+  replies_count?: number | null;
+  repliesCount?: number | null;
+  replies?: SocialAccountProfileComment[];
   is_reply?: boolean;
   created_at?: string | null;
+  timestamp?: string | null;
   parent_comment_id?: string | null;
+  parent_comment_external_id?: string | null;
+  reply_depth?: number | null;
+  source_snapshot_type?: string | null;
   media_urls?: string[] | null;
   hosted_media_urls?: string[] | null;
+  ownerUsername?: string | null;
+  ownerProfilePicUrl?: string | null;
+  owner?: Record<string, unknown> | null;
+  user?: Record<string, unknown> | null;
 };
 
 export type SocialAccountProfileCommentsResponse = {

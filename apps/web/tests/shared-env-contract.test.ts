@@ -26,7 +26,12 @@ describe("workspace shared env contract", () => {
     const envExamplePath = path.join(process.cwd(), ".env.example");
     const expectedKeys = [
       "TRR_API_URL",
+      "TRR_DB_DIRECT_URL",
+      "TRR_DB_SESSION_URL",
       "TRR_DB_URL",
+      "TRR_DB_TRANSACTION_URL",
+      "TRR_DB_RUNTIME_LANE",
+      "TRR_DB_TRANSACTION_FLIGHT_TEST",
       "TRR_DB_FALLBACK_URL",
       "TRR_CORE_SUPABASE_URL",
       "TRR_CORE_SUPABASE_SERVICE_ROLE_KEY",

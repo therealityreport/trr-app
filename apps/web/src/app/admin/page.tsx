@@ -1,11 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import ClientOnly from "@/components/ClientOnly";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminGlobalHeader from "@/components/admin/AdminGlobalHeader";
 import AdminGlobalSearch from "@/components/admin/AdminGlobalSearch";
 import { buildAdminRootBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
+import { fetchAdminWithAuth } from "@/lib/admin/client-auth";
 import { ADMIN_DASHBOARD_TOOLS } from "@/lib/admin/admin-navigation";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
@@ -21,6 +23,92 @@ const STATUS_NOTES = [
   "Use Settings and Users for access work instead of editing local state directly.",
 ] as const;
 const ACCENT = "#7A0307";
+
+type DbPressureSnapshot = {
+  status?: string;
+  application_name?: string;
+  db_configured?: boolean;
+  vercel_pool_attached?: boolean;
+  pool_max?: number;
+  max_concurrent_operations?: number;
+  active_permit_count?: number;
+  queued_operation_count?: number;
+  pool_total_count?: number;
+  pool_idle_count?: number;
+  pool_waiting_count?: number;
+};
+
+function ConnectionBudgetCard() {
+  const [snapshot, setSnapshot] = useState<DbPressureSnapshot | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetchAdminWithAuth("/api/admin/health/app-db-pressure", {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`status ${response.status}`);
+        const payload = (await response.json()) as DbPressureSnapshot;
+        if (!cancelled) {
+          setSnapshot(payload);
+          setState("ready");
+        }
+      } catch {
+        if (!cancelled) {
+          setSnapshot(null);
+          setState("error");
+        }
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const queueDepth = snapshot?.queued_operation_count ?? 0;
+  const waitingClients = snapshot?.pool_waiting_count ?? 0;
+  const statusLabel = state === "ready" && queueDepth === 0 && waitingClients === 0 ? "OK" : state.toUpperCase();
+
+  return (
+    <section className="rounded-[1.8rem] border border-black bg-white p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: ACCENT }}>
+            DB budget
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-black">
+            App pool pressure
+          </h2>
+        </div>
+        <span className="rounded-full border border-black px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-black">
+          {statusLabel}
+        </span>
+      </div>
+      <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+        {[
+          ["Pool max", snapshot?.pool_max ?? "-"],
+          ["Max ops", snapshot?.max_concurrent_operations ?? "-"],
+          ["Active", snapshot?.active_permit_count ?? "-"],
+          ["Queued", snapshot?.queued_operation_count ?? "-"],
+          ["Clients", snapshot?.pool_total_count ?? "-"],
+          ["Idle", snapshot?.pool_idle_count ?? "-"],
+        ].map(([label, value]) => (
+          <div key={label} className="border border-black px-3 py-3">
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.18em] text-black/50">{label}</dt>
+            <dd className="mt-1 text-lg font-semibold text-black">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-4 break-words text-xs leading-6 text-black/60">
+        {snapshot?.application_name ?? "No app pool snapshot yet"}
+        {snapshot?.vercel_pool_attached ? " - Vercel pool attached" : ""}
+      </p>
+    </section>
+  );
+}
 
 export default function AdminDashboardPage() {
   const { user, checking, hasAccess } = useAdminGuard();
@@ -197,6 +285,8 @@ export default function AdminDashboardPage() {
           </section>
 
           <aside className="space-y-6">
+            <ConnectionBudgetCard />
+
             <section className="rounded-[1.8rem] border border-black bg-white p-6">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: ACCENT }}>
                 Status notes

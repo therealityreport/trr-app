@@ -40,8 +40,6 @@ type TypographyAssignmentRow = {
   updated_at: string;
 };
 
-let schemaEnsured = false;
-let schemaEnsuring: Promise<void> | null = null;
 const TYPOGRAPHY_STATE_CACHE_NAMESPACE = "typography-state";
 const TYPOGRAPHY_STATE_CACHE_KEY = "state";
 const TYPOGRAPHY_STATE_CACHE_TTL_MS = 30_000;
@@ -104,100 +102,12 @@ function invalidateTypographyStateCache(): void {
   invalidateRouteResponseCache(TYPOGRAPHY_STATE_CACHE_NAMESPACE, TYPOGRAPHY_STATE_CACHE_KEY);
 }
 
-async function ensureTypographySchema(): Promise<void> {
-  if (schemaEnsured) return;
-  if (schemaEnsuring) return schemaEnsuring;
-
-  schemaEnsuring = (async () => {
-    await query(`
-      CREATE TABLE IF NOT EXISTS site_typography_sets (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        slug text NOT NULL UNIQUE,
-        name text NOT NULL,
-        area text NOT NULL CHECK (area IN ('user-frontend', 'surveys', 'admin')),
-        seed_source text NOT NULL,
-        roles jsonb NOT NULL DEFAULT '{}'::jsonb,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now()
-      )
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS site_typography_assignments (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        area text NOT NULL CHECK (area IN ('user-frontend', 'surveys', 'admin')),
-        page_key text,
-        instance_key text,
-        set_id uuid NOT NULL REFERENCES site_typography_sets(id) ON DELETE RESTRICT,
-        source_path text NOT NULL,
-        notes text,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now()
-      )
-    `);
-
-    await query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_site_typography_assignments_scope
-      ON site_typography_assignments (
-        area,
-        COALESCE(page_key, ''),
-        COALESCE(instance_key, '')
-      )
-    `);
-
-    await query(`
-      CREATE INDEX IF NOT EXISTS idx_site_typography_assignments_set_id
-      ON site_typography_assignments (set_id)
-    `);
-
-    await query(`
-      CREATE OR REPLACE FUNCTION set_site_typography_updated_at()
-      RETURNS TRIGGER AS $$
-      BEGIN
-        NEW.updated_at = now();
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-    `);
-
-    await query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM pg_trigger WHERE tgname = 'trg_site_typography_sets_updated_at'
-        ) THEN
-          CREATE TRIGGER trg_site_typography_sets_updated_at
-          BEFORE UPDATE ON site_typography_sets
-          FOR EACH ROW EXECUTE FUNCTION set_site_typography_updated_at();
-        END IF;
-      END;
-      $$;
-    `);
-
-    await query(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM pg_trigger WHERE tgname = 'trg_site_typography_assignments_updated_at'
-        ) THEN
-          CREATE TRIGGER trg_site_typography_assignments_updated_at
-          BEFORE UPDATE ON site_typography_assignments
-          FOR EACH ROW EXECUTE FUNCTION set_site_typography_updated_at();
-        END IF;
-      END;
-      $$;
-    `);
-
-    schemaEnsured = true;
-    schemaEnsuring = null;
-  })();
-
-  return schemaEnsuring;
-}
+// Schema ownership moved to backend migration
+// 20260427140000_quarantine_typography_runtime_ddl.sql (Wave A E1/I4 mirror, 2026-04-27).
+// Request-time schema bootstrap was removed; runtime now assumes the backend
+// migration has applied site_typography_sets / site_typography_assignments.
 
 async function seedTypographyIfMissing(): Promise<void> {
-  await ensureTypographySchema();
-
   const seeded = buildSeededTypographyState();
 
   for (const set of seeded.sets) {

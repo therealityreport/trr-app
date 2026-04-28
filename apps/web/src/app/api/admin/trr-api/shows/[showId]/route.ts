@@ -12,6 +12,7 @@ import {
   fetchAdminBackendJson,
   invalidateAdminBackendCache,
 } from "@/lib/server/trr-api/admin-read-proxy";
+import { fetchSocialBackendJson } from "@/lib/server/trr-api/social-admin-proxy";
 import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
@@ -66,6 +67,7 @@ const SHOW_SOCIAL_EXTERNAL_ID_KEYS_BY_FIELD: Record<ShowSocialHandleField, reado
   twitter_handle: ["twitter_handle", "twitter", "x_handle"],
   youtube_handle: ["youtube_handle", "youtube"],
 };
+const SHOW_HANDLE_SHARED_SOURCE_SCOPE = "bravo";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -157,6 +159,171 @@ function normalizeOptionalShowSocialHandle(
     throw new Error(`${fieldName}_invalid`);
   }
   return canonicalHandle;
+}
+
+type SharedSourceUpdate = {
+  platform: string;
+  account_handle: string;
+  is_active: boolean;
+  scrape_priority: number;
+  metadata: Record<string, unknown>;
+};
+
+const toRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const normalizeSharedAccountHandle = (value: unknown): string =>
+  String(value ?? "").trim().replace(/^@+/, "");
+
+const buildShowSharedSourceMetadata = ({
+  showId,
+  showName,
+  platform,
+  accountHandle,
+  existingMetadata = {},
+}: {
+  showId: string;
+  showName: string;
+  platform: ShowSocialHandlePlatform;
+  accountHandle: string;
+  existingMetadata?: Record<string, unknown>;
+}): Record<string, unknown> => ({
+  ...existingMetadata,
+  seed_source: "admin-show-handle-edit",
+  display_name: showName,
+  network_name: showName,
+  profile_kind: "show_official",
+  assigned_show_id: showId,
+  source_scope: SHOW_HANDLE_SHARED_SOURCE_SCOPE,
+  account_handle: accountHandle,
+  platform,
+  assignment_mode: "community_match",
+  assignment_rules: {
+    use_hashtags: true,
+    use_mentions: true,
+    use_collaborators: platform === "instagram",
+    use_configured_aliases: true,
+    allow_multi_show_candidates: false,
+  },
+});
+
+async function syncShowHandleSharedSources({
+  showId,
+  showName,
+  socialHandleUpdates,
+}: {
+  showId: string;
+  showName: string;
+  socialHandleUpdates: Record<ShowSocialHandleField, string | null | undefined>;
+}): Promise<void> {
+  const changedFields = SHOW_SOCIAL_HANDLE_FIELDS.filter(
+    (field) => socialHandleUpdates[field] !== undefined,
+  );
+  if (changedFields.length === 0) return;
+
+  const current = (await fetchSocialBackendJson("/shared/sources", {
+    queryString: `source_scope=${SHOW_HANDLE_SHARED_SOURCE_SCOPE}&include_inactive=true`,
+    fallbackError: "Failed to load shared social account sources",
+    retries: 0,
+    timeoutMs: 30_000,
+  })) as { sources?: Array<Record<string, unknown>> };
+
+  const nextSources: SharedSourceUpdate[] = (Array.isArray(current.sources)
+    ? current.sources
+    : []
+  )
+    .map((source) => {
+      const platform = String(source.platform ?? "").trim().toLowerCase();
+      const accountHandle = normalizeSharedAccountHandle(source.account_handle);
+      if (!platform || !accountHandle) return null;
+      return {
+        platform,
+        account_handle: accountHandle,
+        is_active: source.is_active !== false,
+        scrape_priority: Number(source.scrape_priority || 100),
+        metadata: toRecord(source.metadata),
+      } satisfies SharedSourceUpdate;
+    })
+    .filter((source): source is SharedSourceUpdate => source !== null);
+
+  for (const field of changedFields) {
+    const platform = SHOW_SOCIAL_HANDLE_PLATFORM_BY_FIELD[field];
+    const nextHandle = socialHandleUpdates[field];
+    const normalizedNextHandle = nextHandle ? normalizeSharedAccountHandle(nextHandle) : null;
+    let foundActiveTarget = false;
+
+    for (let index = 0; index < nextSources.length; index += 1) {
+      const source = nextSources[index];
+      const assignedShowId = String(source.metadata.assigned_show_id ?? "").trim();
+      if (source.platform !== platform || assignedShowId !== showId) continue;
+
+      if (!normalizedNextHandle || source.account_handle.toLowerCase() !== normalizedNextHandle.toLowerCase()) {
+        nextSources[index] = {
+          ...source,
+          is_active: false,
+        };
+        continue;
+      }
+
+      foundActiveTarget = true;
+      nextSources[index] = {
+        ...source,
+        is_active: true,
+        metadata: buildShowSharedSourceMetadata({
+          showId,
+          showName,
+          platform,
+          accountHandle: normalizedNextHandle,
+          existingMetadata: source.metadata,
+        }),
+      };
+    }
+
+    if (!normalizedNextHandle || foundActiveTarget) continue;
+
+    const existingIndex = nextSources.findIndex(
+      (source) =>
+        source.platform === platform &&
+        source.account_handle.toLowerCase() === normalizedNextHandle.toLowerCase(),
+    );
+    const nextSource: SharedSourceUpdate = {
+      platform,
+      account_handle: normalizedNextHandle,
+      is_active: true,
+      scrape_priority: 100,
+      metadata: buildShowSharedSourceMetadata({
+        showId,
+        showName,
+        platform,
+        accountHandle: normalizedNextHandle,
+        existingMetadata: existingIndex >= 0 ? nextSources[existingIndex].metadata : {},
+      }),
+    };
+
+    if (existingIndex >= 0) {
+      nextSources[existingIndex] = {
+        ...nextSources[existingIndex],
+        ...nextSource,
+        scrape_priority: nextSources[existingIndex].scrape_priority,
+      };
+    } else {
+      nextSources.push(nextSource);
+    }
+  }
+
+  await fetchSocialBackendJson("/shared/sources", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      source_scope: SHOW_HANDLE_SHARED_SOURCE_SCOPE,
+      sources: nextSources,
+    }),
+    fallbackError: "Failed to update shared social account sources",
+    retries: 0,
+    timeoutMs: 45_000,
+  });
 }
 
 /**
@@ -436,6 +603,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     if (!show) {
       return NextResponse.json({ error: "Show not found" }, { status: 404 });
+    }
+
+    if (SHOW_SOCIAL_HANDLE_FIELDS.some((field) => socialHandleUpdates[field] !== undefined)) {
+      await syncShowHandleSharedSources({
+        showId,
+        showName: show.name || currentShow?.name || name || "Show",
+        socialHandleUpdates,
+      });
     }
 
     invalidateTrrShowReadCaches(`${user.uid}:`);

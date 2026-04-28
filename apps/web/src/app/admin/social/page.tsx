@@ -35,7 +35,7 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
-const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v2";
+const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v3";
 const CAST_SOCIALBLADE_PLATFORM_ORDER: CastSocialBladePlatform[] = [
   "instagram",
   "youtube",

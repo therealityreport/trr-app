@@ -146,8 +146,8 @@ export async function getOrCreateAdminSnapshot<T>(options: CacheOptions<T>): Pro
   const runFetch =
     existing ??
     (async () => {
-      const generatedAtMs = Date.now();
       const data = await options.fetcher();
+      const generatedAtMs = Date.now();
       const entry: SnapshotCacheEntry<T> = {
         data,
         generatedAtMs,

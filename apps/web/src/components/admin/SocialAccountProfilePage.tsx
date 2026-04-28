@@ -34,6 +34,7 @@ import {
   type SocialAccountCatalogRunProgressLogEntry,
   type SocialAccountCatalogRunProgressSnapshot,
   type SocialAccountCatalogRunProgressStage,
+  type SocialAccountDashboardFreshness,
   type SocialAccountOperationalAlert,
   type SocialAccountProfileHashtag,
   type SocialAccountProfileHashtagAssignment,
@@ -163,6 +164,8 @@ type CatalogRunProgressResponse = SocialAccountCatalogRunProgressSnapshot & Prox
 type SocialAccountProfileSnapshot = {
   summary?: SocialAccountProfileSummary | null;
   catalog_run_progress?: SocialAccountCatalogRunProgressSnapshot | null;
+  dashboard_freshness?: SocialAccountDashboardFreshness | null;
+  operational_alerts?: SocialAccountOperationalAlert[];
   generated_at?: string | null;
   cache_age_ms?: number;
   stale?: boolean;
@@ -304,6 +307,18 @@ const formatDateTime = (value?: string | null): string => {
   return parsed.toLocaleString();
 };
 
+const formatDashboardFreshnessAge = (ageSeconds: number | null | undefined): string => {
+  if (ageSeconds == null || !Number.isFinite(Number(ageSeconds))) {
+    return "moments ago";
+  }
+  const normalizedSeconds = Math.max(0, Math.round(Number(ageSeconds)));
+  if (normalizedSeconds < 60) {
+    return `${normalizedSeconds} second${normalizedSeconds === 1 ? "" : "s"} ago`;
+  }
+  const minutes = Math.round(normalizedSeconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+};
+
 export const defaultLocalCatalogCommandSelectedTasks = (
   platform: SocialPlatformSlug,
   action: "backfill" | "fill_missing_posts",
@@ -379,6 +394,46 @@ const formatMirrorStatusLabel = (value: unknown): string => {
 const isLikelyVideoUrl = (value?: string | null): boolean => {
   const normalized = String(value || "").trim().toLowerCase();
   return normalized.endsWith(".mp4") || normalized.endsWith(".mov") || normalized.endsWith(".webm") || normalized.includes(".mp4?");
+};
+
+const getCatalogPostMediaUrls = (item: SocialAccountCatalogPost): string[] => {
+  const values = [
+    item.hosted_thumbnail_url,
+    item.thumbnail_url,
+    item.source_thumbnail_url,
+    ...(item.hosted_media_urls ?? []),
+    ...(item.media_urls ?? []),
+    ...(item.source_media_urls ?? []),
+  ];
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  for (const value of values) {
+    const url = String(value || "").trim();
+    if (!url) continue;
+    const key = url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    urls.push(url);
+  }
+  return urls;
+};
+
+const getCatalogPostPreviewUrl = (item: SocialAccountCatalogPost): string | null => {
+  const urls = getCatalogPostMediaUrls(item);
+  return urls.find((url) => !isLikelyVideoUrl(url)) ?? urls[0] ?? null;
+};
+
+const getCatalogPostMetricSummary = (item: SocialAccountCatalogPost): string | null => {
+  const metrics = item.metrics ?? {};
+  const pieces = [
+    typeof metrics.likes === "number" ? `${formatInteger(metrics.likes)} likes` : null,
+    typeof metrics.comments_count === "number" ? `${formatInteger(metrics.comments_count)} comments` : null,
+    typeof metrics.views === "number" && metrics.views > 0 ? `${formatInteger(metrics.views)} views` : null,
+  ].filter(Boolean);
+  if (pieces.length > 0) return pieces.join(" · ");
+  return typeof metrics.engagement === "number" && metrics.engagement > 0
+    ? `${formatInteger(metrics.engagement)} engagement`
+    : null;
 };
 
 const formatHashtagWindowLabel = (value: (typeof HASHTAG_WINDOW_OPTIONS)[number]["value"]): string => {
@@ -730,6 +785,25 @@ const formatRunStatusLabel = (value?: string | null): string => {
     .split("_")
     .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
     .join(" ");
+};
+
+const formatSourceStatusActivityLabel = (
+  item: Record<string, unknown>,
+  summary?: SocialAccountProfileSummary | null,
+): string => {
+  const scrapeStatus = String(item.last_scrape_status ?? "").trim();
+  const scrapeAt = String(item.last_scrape_at ?? "").trim();
+  if (scrapeStatus || scrapeAt) {
+    const statusLabel = scrapeStatus ? formatRunStatusLabel(scrapeStatus) : "Unknown";
+    return `Scrape ${statusLabel} · Last scrape ${formatDateTime(scrapeAt)}`;
+  }
+  const catalogStatus = String(summary?.last_catalog_run_status ?? "").trim();
+  const catalogAt = String(summary?.last_catalog_run_at ?? "").trim();
+  if (catalogStatus || catalogAt) {
+    const statusLabel = catalogStatus ? formatRunStatusLabel(catalogStatus) : "Unknown";
+    return `Catalog ${statusLabel} · Last catalog ${formatDateTime(catalogAt)}`;
+  }
+  return "No scrape or catalog run recorded";
 };
 
 const getCatalogRunDisplayStatusLabel = (
@@ -1248,6 +1322,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [fullSummaryLoading, setFullSummaryLoading] = useState(false);
   const [fullSummaryError, setFullSummaryError] = useState<string | null>(null);
   const [summarySaturationActive, setSummarySaturationActive] = useState(false);
+  const [dashboardFreshness, setDashboardFreshness] = useState<SocialAccountDashboardFreshness | null>(null);
 
   const [posts, setPosts] = useState<PostsResponse | null>(null);
   const [postsLoading, setPostsLoading] = useState(false);
@@ -1366,7 +1441,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const selectedTab: SocialAccountProfileTab = supportsCatalog && activeTab === "posts" ? "catalog" : activeTab;
   const shouldShowCatalogRunProgressCard = selectedTab !== "comments";
   const hasSummary = summary !== null;
-  const hasFullSummary = Boolean(summary && (summary.summary_detail ?? "full") === "full");
+  const hasFullSummary = Boolean(summary && ["distribution", "full"].includes(summary.summary_detail ?? "full"));
   const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
   const shouldDeferSecondaryCatalogReads =
     !hasSummary || summaryLoading || summarySaturationActive || catalogProgressSaturationActive;
@@ -1387,14 +1462,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const latestCatalogRun = useMemo<SocialAccountCatalogRun | null>(() => {
     const runs = visibleCatalogRecentRuns;
     const normalize = (s: string | undefined | null) => String(s || "").trim().toLowerCase();
-    const completed = runs.find((r) => normalize(r.status) === "completed");
-    if (completed) return completed;
     const nonTerminal = runs.find((r) => !TERMINAL_CATALOG_RUN_STATUSES.has(normalize(r.status)));
     if (nonTerminal) return nonTerminal;
-    if (runs.length === 1 && normalize(runs[0]?.status) === "cancelled") {
-      return runs[0] ?? null;
-    }
-    return null;
+    return runs[0] ?? null;
   }, [visibleCatalogRecentRuns]);
   const latestCatalogRunStatus = useMemo(() => normalizeCatalogRunStatus(latestCatalogRun?.status), [latestCatalogRun?.status]);
   const activeCatalogRunStatusNormalized = useMemo(
@@ -1462,6 +1532,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setSummaryUninitialized(false);
     setSummaryLoading(false);
     setSummaryError(null);
+    setDashboardFreshness(null);
     setFullSummaryLoading(false);
     setFullSummaryError(null);
     setSummarySaturationActive(false);
@@ -1558,7 +1629,15 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         uninitialized: false,
       };
     });
-    setSummary(result.data);
+    setSummary((current) =>
+      detail === "distribution" && current
+        ? {
+            ...current,
+            ...result.data,
+            summary_detail: result.data.summary_detail ?? "distribution",
+          }
+        : result.data,
+    );
     setSummaryUninitialized(result.uninitialized);
     setSummaryError(null);
     return result;
@@ -1569,7 +1648,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setFullSummaryLoading(true);
     setFullSummaryError(null);
     try {
-      await refreshSummary({ detail: "full" });
+      await refreshSummary({ detail: "distribution" });
     } catch (error) {
       setFullSummaryError(
         error instanceof Error ? error.message : "Failed to load social account profile summary",
@@ -1578,6 +1657,37 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setFullSummaryLoading(false);
     }
   }, [refreshSummary, user]);
+
+  useEffect(() => {
+    if (
+      checking ||
+      !user ||
+      !hasAccess ||
+      selectedTab !== "stats" ||
+      !hasSummary ||
+      hasFullSummary ||
+      fullSummaryLoading ||
+      summaryUninitialized
+    ) {
+      return;
+    }
+    const requestKey = `${platform}:${handle}:stats`;
+    if (autoFullSummaryAttemptedRef.current === requestKey) return;
+    autoFullSummaryAttemptedRef.current = requestKey;
+    void loadFullSummary();
+  }, [
+    checking,
+    fullSummaryLoading,
+    handle,
+    hasAccess,
+    hasFullSummary,
+    hasSummary,
+    loadFullSummary,
+    platform,
+    selectedTab,
+    summaryUninitialized,
+    user,
+  ]);
 
   const fetchCatalogRunProgressSnapshot = useCallback(
     async (runId: string, options?: { signal?: AbortSignal; recentLogLimit?: number }) => {
@@ -1609,7 +1719,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   );
 
   const fetchProfileSnapshot = useCallback(
-    async (options?: { signal?: AbortSignal; forceRefresh?: boolean; runId?: string | null; detail?: SummaryFetchDetail }) => {
+    async (
+      options?: { signal?: AbortSignal; forceRefresh?: boolean; runId?: string | null; detail?: SummaryFetchDetail },
+    ): Promise<{ payload: SocialAccountProfileSnapshot; cacheStatus: string }> => {
       if (!user) {
         throw new Error("Missing admin user");
       }
@@ -1641,6 +1753,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             stale?: boolean;
           } & ProxyErrorPayload);
       if (!response.ok) {
+        if (response.status === 404) {
+          return {
+            payload: {
+              summary: buildEmptySocialAccountProfileSummary(platform, handle),
+              catalog_run_progress: null,
+              dashboard_freshness: {
+                status: "missing",
+                source: "live",
+                generated_at: null,
+                age_seconds: null,
+              } satisfies SocialAccountDashboardFreshness,
+            },
+            cacheStatus: response.headers.get("x-trr-cache") ?? "miss",
+          };
+        }
         throw buildSocialAccountRequestError(
           toProxyErrorPayload(envelope),
           "Failed to load social account profile snapshot",
@@ -1854,16 +1981,51 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (checking || !user || !hasAccess) return;
     let cancelled = false;
 
-    const loadSummary = async () => {
+    const loadDashboardSnapshot = async () => {
       setSummaryLoading(true);
       setSummaryError(null);
       try {
-        await refreshSummaryRef.current({ detail: "lite" });
+        const snapshot = await fetchProfileSnapshotRef.current({ detail: "lite" });
         if (cancelled) return;
+        setDashboardFreshness(snapshot.payload.dashboard_freshness ?? null);
+        if (snapshot.payload.summary) {
+          setSummary(snapshot.payload.summary);
+          setSummaryUninitialized(snapshot.payload.dashboard_freshness?.status === "missing");
+        } else {
+          setSummary(buildEmptySocialAccountProfileSummary(platform, handle));
+          setSummaryUninitialized(true);
+        }
+        if (snapshot.payload.catalog_run_progress) {
+          setCatalogRunProgress(snapshot.payload.catalog_run_progress);
+          setCatalogRunProgressError(null);
+          setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
+        }
         setSummarySaturationActive(false);
         setSummaryError(null);
       } catch (error) {
         if (cancelled) return;
+        const snapshotError = toSocialAccountRequestError(error, "Failed to load social account profile summary");
+        if (!snapshotError.code && snapshotError.upstreamStatus === undefined && !snapshotError.retryable) {
+          try {
+            const legacySummary = await refreshSummaryRef.current({ detail: "lite" });
+            if (cancelled) return;
+            if (legacySummary) {
+              setSummary(legacySummary.data);
+              setSummaryUninitialized(legacySummary.uninitialized);
+              setDashboardFreshness({
+                status: legacySummary.uninitialized ? "missing" : "fresh",
+                source: "live",
+                generated_at: null,
+                age_seconds: null,
+              } satisfies SocialAccountDashboardFreshness);
+              setSummarySaturationActive(false);
+              setSummaryError(null);
+              return;
+            }
+          } catch (legacyError) {
+            error = legacyError;
+          }
+        }
         setSummaryUninitialized(false);
         if (!isBackendSaturationError(error)) {
           setSummarySaturationActive(false);
@@ -1878,7 +2040,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       }
     };
 
-    void loadSummary();
+    void loadDashboardSnapshot();
     return () => {
       cancelled = true;
     };
@@ -1890,6 +2052,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !user ||
       !hasAccess ||
       platform !== "instagram" ||
+      selectedTab !== "catalog" ||
       summaryLoading ||
       !summary ||
       (platformRequiresCookies && !cookieHealth && !cookieHealthError)
@@ -1957,6 +2120,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     handle,
     hasAccess,
     platform,
+    selectedTab,
     platformRequiresCookies,
     summary,
     summaryLoading,
@@ -2101,7 +2265,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   });
 
   useEffect(() => {
-    const shouldLoadHashtags = selectedTab === "hashtags";
+    const shouldLoadHashtags = selectedTab === "hashtags" || selectedTab === "stats";
     if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
       return;
     }
@@ -2366,7 +2530,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [hashtags, summaryTopHashtagsPreview, useSummaryTopHashtagsPreview]);
 
   const statsHashtagsPending = useMemo(() => {
-    const shouldShowFetchedHashtags = selectedTab === "hashtags";
+    const shouldShowFetchedHashtags = selectedTab === "hashtags" || selectedTab === "stats";
     if (!shouldShowFetchedHashtags) {
       return false;
     }
@@ -2761,6 +2925,22 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     displayedCatalogRunId,
   ]);
 
+  const shouldDisplayCatalogRunProgressCard = useMemo(() => {
+    const normalizedDisplayedRunId = String(displayedCatalogRunId || "").trim();
+    if (!normalizedDisplayedRunId) return false;
+    if (ACTIVE_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "")) return true;
+    if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "")) return false;
+    if (displayedCatalogRunStatus === "cancelled") return true;
+    if (selectedCatalogRunId === normalizedDisplayedRunId) return true;
+    return activeCatalogRunId === normalizedDisplayedRunId && catalogRunProgress?.run_id === normalizedDisplayedRunId;
+  }, [
+    activeCatalogRunId,
+    catalogRunProgress?.run_id,
+    displayedCatalogRunId,
+    displayedCatalogRunStatus,
+    selectedCatalogRunId,
+  ]);
+
   useEffect(() => {
     if (checking || !user || !hasAccess || !supportsCatalog) return;
     const normalizedDisplayedRunId = String(displayedCatalogRunId || "").trim();
@@ -2768,6 +2948,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (normalizedDisplayedRunId === String(backgroundCatalogRunId || "").trim()) return;
     if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus)) return;
     if (summaryUninitialized) return;
+    const shouldHydrateTerminalRun =
+      selectedCatalogRunId === normalizedDisplayedRunId ||
+      displayedCatalogRunStatus === "cancelled" ||
+      activeCatalogRunId === normalizedDisplayedRunId;
+    if (!shouldHydrateTerminalRun) return;
     if (catalogRunProgress?.run_id === normalizedDisplayedRunId) {
       catalogTerminalProgressHydrationAttemptedRunIdRef.current = null;
       return;
@@ -2778,26 +2963,42 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogTerminalProgressHydrationAttemptedRunIdRef.current = normalizedDisplayedRunId;
     setCatalogRunProgressLoading(true);
 
-    void fetchProfileSnapshotRef.current({ runId: normalizedDisplayedRunId, detail: "lite" })
-      .then(async (snapshot) => {
-        if (cancelled) return;
-        if (snapshot.payload.summary) {
-          setSummary(snapshot.payload.summary);
-          setSummaryUninitialized(false);
-          setSummaryError(null);
+    void (async () => {
+      let snapshot: Awaited<ReturnType<typeof fetchProfileSnapshotRef.current>> | null = null;
+
+      try {
+        snapshot = await fetchProfileSnapshotRef.current({ runId: normalizedDisplayedRunId, detail: "lite" });
+      } catch (snapshotError) {
+        if (displayedCatalogRunStatus === "completed") {
+          throw snapshotError;
         }
-        const progress =
-          snapshot.payload.catalog_run_progress ??
-          (displayedCatalogRunStatus === "completed"
-            ? null
-            : await fetchCatalogRunProgressSnapshot(normalizedDisplayedRunId));
+        const progress = await fetchCatalogRunProgressSnapshot(normalizedDisplayedRunId);
         if (cancelled) return;
-        if (!progress) return;
         setCatalogProgressSaturationActive(false);
         setCatalogRunProgress(progress);
         setCatalogRunProgressError(null);
-        setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
-      })
+        setCatalogProgressLastSuccessAt(new Date().toISOString());
+        return;
+      }
+
+      if (cancelled) return;
+      if (snapshot.payload.summary) {
+        setSummary(snapshot.payload.summary);
+        setSummaryUninitialized(false);
+        setSummaryError(null);
+      }
+      const progress =
+        snapshot.payload.catalog_run_progress ??
+        (displayedCatalogRunStatus === "completed"
+          ? null
+          : await fetchCatalogRunProgressSnapshot(normalizedDisplayedRunId));
+      if (cancelled) return;
+      if (!progress) return;
+      setCatalogProgressSaturationActive(false);
+      setCatalogRunProgress(progress);
+      setCatalogRunProgressError(null);
+      setCatalogProgressLastSuccessAt(snapshot.payload.generated_at ?? new Date().toISOString());
+    })()
       .catch((error) => {
         if (cancelled) return;
         const requestError = toSocialAccountRequestError(error, "Failed to load catalog run progress");
@@ -2816,6 +3017,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       cancelled = true;
     };
   }, [
+    activeCatalogRunId,
     backgroundCatalogRunId,
     catalogRunProgress?.run_id,
     checking,
@@ -2823,6 +3025,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     displayedCatalogRunStatus,
     fetchCatalogRunProgressSnapshot,
     hasAccess,
+    selectedCatalogRunId,
     summaryUninitialized,
     supportsCatalog,
     user,
@@ -3218,12 +3421,23 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     catalogGapAnalysisStale,
   ]);
 
+  const shouldRunLiveProfileSnapshot =
+    !checking &&
+    Boolean(user) &&
+    hasAccess &&
+    supportsCatalog &&
+    Boolean(backgroundCatalogRunId) &&
+    ACTIVE_CATALOG_RUN_STATUSES.has(
+      normalizeCatalogRunStatus(catalogRunProgress?.run_status ?? activeCatalogRun?.status) || "",
+    ) &&
+    selectedTab === "catalog";
+
   const liveProfileSnapshot = useSharedPollingResource<{
     payload: SocialAccountProfileSnapshot;
     cacheStatus: string;
   }>({
     key: `social-account-profile-snapshot:${platform}:${handle}:${backgroundCatalogRunId ?? "none"}:${catalogProgressRequestNonce}`,
-    shouldRun: !checking && Boolean(user) && hasAccess && supportsCatalog && Boolean(backgroundCatalogRunId),
+    shouldRun: shouldRunLiveProfileSnapshot,
     intervalMs: CATALOG_PROGRESS_POLL_INTERVAL_MS,
     fetchData: async (signal, request) => {
       try {
@@ -3262,6 +3476,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       setSummary(payload.summary);
       setSummaryUninitialized(false);
       setSummaryError(null);
+    }
+    if (payload.dashboard_freshness) {
+      setDashboardFreshness(payload.dashboard_freshness);
     }
     if (payload.catalog_run_progress) {
       setCatalogProgressSaturationActive(false);
@@ -3824,6 +4041,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !user ||
       !hasAccess ||
       !platformRequiresCookies ||
+      selectedTab !== "catalog" ||
       summaryLoading ||
       !summary ||
       cookieHealth ||
@@ -3841,6 +4059,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     fetchCookieHealth,
     hasAccess,
     platformRequiresCookies,
+    selectedTab,
     summary,
     summaryLoading,
     user,
@@ -4902,10 +5121,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Comments Saved</p>
                     {summaryInitialStatePending || commentsSavedSummaryUnavailable ? (
                       <>
-                        <p className="mt-2 text-sm font-semibold text-zinc-500">Loading…</p>
-                        {commentsSavedSummaryUnavailable ? (
-                          <p className="mt-1 text-xs text-zinc-500">Loads with full profile insights.</p>
-                        ) : null}
+                        <p className="mt-2 text-sm font-semibold text-zinc-500">
+                          {summaryInitialStatePending ? "Loading…" : "Unavailable"}
+                        </p>
                       </>
                     ) : (
                       <>
@@ -4920,10 +5138,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Media Saved</p>
                     {summaryInitialStatePending || mediaCoverageUnavailable ? (
                       <>
-                        <p className="mt-2 text-sm font-semibold text-zinc-500">Loading…</p>
-                        {mediaCoverageUnavailable ? (
-                          <p className="mt-1 text-xs text-zinc-500">Loads with full profile insights.</p>
-                        ) : null}
+                        <p className="mt-2 text-sm font-semibold text-zinc-500">
+                          {summaryInitialStatePending ? "Loading…" : "Unavailable"}
+                        </p>
                       </>
                     ) : (
                       <>
@@ -5074,6 +5291,21 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           {summaryError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{summaryError}</div>
           ) : null}
+          {dashboardFreshness?.status === "stale" ? (
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Showing cached dashboard data from {formatDashboardFreshnessAge(dashboardFreshness.age_seconds)}.
+            </div>
+          ) : null}
+          {dashboardFreshness?.status === "error" && hasSummary ? (
+            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Backend dashboard refresh failed. Showing the last successful profile data.
+            </div>
+          ) : null}
+          {dashboardFreshness?.status === "missing" && !summaryUninitialized ? (
+            <div className="mb-6 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+              No profile dashboard snapshot has been generated yet.
+            </div>
+          ) : null}
           {summaryUninitialized ? (
             <section className="mb-6 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 text-sm text-sky-900">
               <p className="font-semibold">No saved posts yet for @{handle}.</p>
@@ -5084,7 +5316,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             </section>
           ) : null}
 
-          {shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && displayedCatalogRunId ? (
+          {shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && shouldDisplayCatalogRunProgressCard ? (
             <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -5187,7 +5419,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       {catalogBlockedAuthPresentation.canRepair ? (
                         <button
                           type="button"
-                          onClick={() => void runCatalogRepairAuth(displayedCatalogRunId)}
+                          onClick={() => {
+                            if (displayedCatalogRunId) {
+                              void runCatalogRepairAuth(displayedCatalogRunId);
+                            }
+                          }}
                           disabled={catalogActionsBlocked}
                           className="mt-3 inline-flex rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -5511,20 +5747,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 </div>
               ) : null}
             </section>
-          ) : shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog ? (
+          ) : shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && !activeCatalogRun ? (
             <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-zinc-900">Catalog Run Progress</h2>
-                  <p className="mt-2 text-sm text-zinc-600">No active catalog run. Ready to start the next backfill.</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Use Recent Catalog Runs to inspect or dismiss older failed runs without letting them own this page.
-                  </p>
-                </div>
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                  Ready
-                </span>
-              </div>
+              <p className="text-sm text-zinc-500">No active catalog run. Ready to start the next backfill.</p>
             </section>
           ) : null}
 
@@ -5540,28 +5765,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
               <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-semibold text-zinc-900">Distribution</h2>
                 {!hasFullSummary ? (
-                  <>
-                    <p className="mt-2 text-sm text-zinc-500">
-                      Keep the fast lite summary by default, then load full profile insights only when you need show and
-                      season distribution details.
-                    </p>
+                  <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
                     {fullSummaryError ? (
-                      <p className="mt-4 text-sm text-red-700">Full profile insights failed: {fullSummaryError}</p>
-                    ) : null}
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => void loadFullSummary()}
-                        disabled={fullSummaryLoading}
-                        className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {fullSummaryLoading ? "Loading Full Profile Insights…" : "Load Full Profile Insights"}
-                      </button>
-                      <p className="text-xs text-zinc-500">
-                        Hashtags, source status, and catalog metadata stay available without the heavier request.
-                      </p>
-                    </div>
-                  </>
+                      <p className="text-red-700">Distribution failed: {fullSummaryError}</p>
+                    ) : (
+                      <p>{fullSummaryLoading ? "Loading distribution…" : "Preparing distribution…"}</p>
+                    )}
+                  </div>
                 ) : (
                   <div className="mt-4 grid gap-6 md:grid-cols-2">
                     <div>
@@ -5609,19 +5819,22 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
               <section className="space-y-6">
                 {supportsCatalog ? (
-                  <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                    <h2 className="text-lg font-semibold text-zinc-900">Catalog Status</h2>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Assigned</p>
-                        <p className="mt-2 text-xl font-bold text-zinc-900">{formatInteger(summary?.catalog_assigned_posts)}</p>
-                      </div>
-                      <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Unassigned</p>
-                        <p className="mt-2 text-xl font-bold text-zinc-900">{formatInteger(summary?.catalog_unassigned_posts)}</p>
-                      </div>
+                  <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <h2 className="text-sm font-semibold text-zinc-900">Catalog Status</h2>
+                      <span className="text-xs font-medium text-zinc-500">
+                        {summary?.last_catalog_run_status ?? "Never run"}
+                      </span>
                     </div>
-                    <p className="mt-4 text-sm text-zinc-500">
+                    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+                      <p className="text-zinc-600">
+                        Assigned <span className="ml-2 font-semibold text-zinc-900">{formatInteger(summary?.catalog_assigned_posts)}</span>
+                      </p>
+                      <p className="text-zinc-600">
+                        Unassigned <span className="ml-2 font-semibold text-zinc-900">{formatInteger(summary?.catalog_unassigned_posts)}</span>
+                      </p>
+                    </div>
+                    <p className="mt-2 text-xs text-zinc-500">
                       Last catalog run {formatDateTime(summary?.last_catalog_run_at)} · {summary?.last_catalog_run_status ?? "Never run"}
                     </p>
                   </div>
@@ -5705,7 +5918,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                             {String(item.source_scope ?? "bravo")}
                           </p>
                           <p className="mt-1 text-xs text-zinc-500">
-                            Scrape {String(item.last_scrape_status ?? "Not run")} · Last scrape {formatDateTime(String(item.last_scrape_at ?? ""))}
+                            {formatSourceStatusActivityLabel(item, summary)}
                           </p>
                         </div>
                       ))
@@ -5748,66 +5961,87 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   {catalogPostsError ? <p className="mt-4 text-sm text-red-700">{catalogPostsError}</p> : null}
                   {!catalogPostsLoading && !catalogPostsError ? (
                     <>
-                      <div className="mt-4 overflow-x-auto">
-                        <table className="min-w-full divide-y divide-zinc-200 text-sm">
-                          <thead>
-                            <tr className="text-left text-xs uppercase tracking-[0.14em] text-zinc-500">
-                              <th className="pb-3 pr-4">Post</th>
-                              <th className="pb-3 pr-4">Status</th>
-                              <th className="pb-3 pr-4">Assigned</th>
-                              <th className="pb-3">Published</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-zinc-100">
-                            {(catalogPosts?.items ?? []).length === 0 ? (
-                              <tr>
-                                <td colSpan={4} className="py-6 text-sm text-zinc-500">
-                                  No catalog posts found for this filter.
-                                </td>
-                              </tr>
-                            ) : (
-                              (catalogPosts?.items ?? []).map((item) => (
-                                <tr
-                                  key={item.id}
-                                  onClick={() => {
-                                    if (supportsCatalogDetail) {
-                                      void openCatalogDetail(item.source_id);
-                                    }
-                                  }}
-                                  className={`${supportsCatalogDetail ? "cursor-pointer hover:bg-zinc-50" : ""}`}
-                                >
-                                  <td className="py-4 pr-4 align-top">
-                                    <div className="max-w-xl">
-                                      <p className="font-semibold text-zinc-900">{item.title || item.excerpt || "Untitled post"}</p>
-                                      {item.url ? (
-                                        <a
-                                          href={item.url}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          onClick={(event) => event.stopPropagation()}
-                                          className="mt-1 inline-flex text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline"
-                                        >
-                                          Open post
-                                        </a>
-                                      ) : null}
-                                      {item.content ? <p className="mt-2 text-xs leading-5 text-zinc-600">{item.content}</p> : null}
+                      {(catalogPosts?.items ?? []).length === 0 ? (
+                        <div className="mt-4 rounded-xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
+                          No catalog posts found for this filter.
+                        </div>
+                      ) : (
+                        <div data-testid="catalog-post-gallery" className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                          {(catalogPosts?.items ?? []).map((item) => {
+                            const previewUrl = getCatalogPostPreviewUrl(item);
+                            const title = item.title || item.excerpt || "Untitled post";
+                            const metricSummary = getCatalogPostMetricSummary(item);
+                            const assignmentLabel = String(item.assignment_status || "unassigned").replaceAll("_", " ");
+                            const assignedLabel = item.show_name
+                              ? `${item.show_name} · ${formatSeasonLabel(item.season_number)}`
+                              : "Not assigned";
+                            const canOpenDetail = supportsCatalogDetail && Boolean(item.source_id);
+                            return (
+                              <article
+                                key={item.id || item.source_id}
+                                role={canOpenDetail ? "button" : undefined}
+                                tabIndex={canOpenDetail ? 0 : undefined}
+                                onClick={() => {
+                                  if (canOpenDetail) {
+                                    void openCatalogDetail(item.source_id);
+                                  }
+                                }}
+                                onKeyDown={(event) => {
+                                  if (!canOpenDetail || (event.key !== "Enter" && event.key !== " ")) return;
+                                  event.preventDefault();
+                                  void openCatalogDetail(item.source_id);
+                                }}
+                                className={`h-full rounded-lg border border-zinc-200 bg-white p-3 shadow-sm transition ${
+                                  canOpenDetail ? "cursor-pointer hover:border-zinc-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-zinc-900/20" : ""
+                                }`}
+                              >
+                                <div className="relative aspect-[4/5] overflow-hidden rounded-md bg-zinc-100">
+                                  {previewUrl ? (
+                                    isLikelyVideoUrl(previewUrl) ? (
+                                      <video src={previewUrl} muted playsInline preload="metadata" className="h-full w-full bg-black object-cover" />
+                                    ) : (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={previewUrl} alt={title} loading="lazy" className="h-full w-full object-cover" />
+                                    )
+                                  ) : (
+                                    <div className="flex h-full items-center justify-center px-4 text-center text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
+                                      No media
                                     </div>
-                                  </td>
-                                  <td className="py-4 pr-4 align-top">
-                                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-semibold text-zinc-700">
-                                      {String(item.assignment_status || "unassigned").replace("_", " ")}
+                                  )}
+                                  <span className="absolute left-2 top-2 rounded-full border border-white/70 bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-700 shadow-sm">
+                                    {assignmentLabel}
+                                  </span>
+                                  {item.post_format ? (
+                                    <span className="absolute bottom-2 left-2 rounded-full bg-zinc-900/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
+                                      {item.post_format}
                                     </span>
-                                  </td>
-                                  <td className="py-4 pr-4 align-top text-zinc-700">
-                                    {item.show_name ? `${item.show_name} · ${formatSeasonLabel(item.season_number)}` : "Not assigned"}
-                                  </td>
-                                  <td className="py-4 align-top text-xs text-zinc-500">{formatDateTime(item.posted_at)}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                                  ) : null}
+                                </div>
+                                <div className="mt-3 space-y-2">
+                                  <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-zinc-900">{title}</h3>
+                                  {item.content ? <p className="line-clamp-3 text-xs leading-5 text-zinc-600">{item.content}</p> : null}
+                                  <p className="text-xs font-medium text-zinc-700">{assignedLabel}</p>
+                                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+                                    <span>{formatDateTime(item.posted_at)}</span>
+                                    {metricSummary ? <span>{metricSummary}</span> : null}
+                                  </div>
+                                  {item.url ? (
+                                    <a
+                                      href={item.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(event) => event.stopPropagation()}
+                                      className="inline-flex text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                                    >
+                                      Open post
+                                    </a>
+                                  ) : null}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      )}
                       <div className="mt-4 flex items-center justify-between">
                         <button
                           type="button"
@@ -5953,34 +6187,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           ) : null}
 
           {hasSummary && selectedTab === "comments" && supportsComments ? (
-            hasFullSummary ? (
-              <InstagramCommentsPanel
-                platform={platform}
-                handle={handle}
-                summary={summary}
-                onSummaryRefresh={async () => {
-                  await refreshSummary({ detail: "full" });
-                }}
-              />
-            ) : (
-              <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-semibold text-zinc-900">Comments</h2>
-                <p className={`mt-2 text-sm ${fullSummaryError ? "text-red-700" : "text-zinc-500"}`}>
-                  {fullSummaryLoading
-                    ? "Loading comments coverage…"
-                    : fullSummaryError ? `Comments coverage failed: ${fullSummaryError}` : "Loading comments coverage…"}
-                </p>
-                {!fullSummaryLoading ? (
-                  <button
-                    type="button"
-                    onClick={() => void loadFullSummary()}
-                    className="mt-4 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
-                  >
-                    {fullSummaryError ? "Retry Comments Coverage" : "Load Comments Coverage"}
-                  </button>
-                ) : null}
-              </section>
-            )
+            <InstagramCommentsPanel
+              platform={platform}
+              handle={handle}
+              summary={summary}
+              onSummaryRefresh={async () => {
+                await refreshSummary({ detail: "full" });
+              }}
+            />
           ) : null}
 
           {hasSummary && selectedTab === "posts" ? (

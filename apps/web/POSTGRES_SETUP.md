@@ -21,7 +21,18 @@ TRR_DB_FORCE_FALLBACK=
 
 The app server resolves Postgres in the same order as the runtime code in [src/lib/server/postgres.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/postgres.ts): `TRR_DB_URL`, then `TRR_DB_FALLBACK_URL`.
 
-For Supavisor session-mode runtimes, the committed local defaults are intentionally bounded: `POSTGRES_POOL_MAX=4` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=4` in development, with deployed session-pooler defaults of `POSTGRES_POOL_MAX=4` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=2`. Operators can dial these down explicitly via env vars when a narrower lane is needed.
+For Supavisor session-mode runtimes, the committed local defaults are intentionally bounded: `POSTGRES_POOL_MAX=1` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=1` in development. Deployed session-pooler defaults are `POSTGRES_POOL_MAX=2` and `POSTGRES_MAX_CONCURRENT_OPERATIONS=1` for production, and `POSTGRES_POOL_MAX=1` / `POSTGRES_MAX_CONCURRENT_OPERATIONS=1` for preview unless explicitly overridden.
+
+Every app pool sets `application_name` for `pg_stat_activity` attribution. The default is `trr-app:web`; override with `POSTGRES_APPLICATION_NAME` only when a deployment lane needs a more specific name.
+
+Session-mode clients can hold Supavisor slots while idle. Keep these timeout controls explicit when tuning the app pool:
+
+```bash
+POSTGRES_POOL_CONNECTION_TIMEOUT_MS=5000
+POSTGRES_POOL_IDLE_TIMEOUT_MS=5000
+# Supported by node-postgres as max uses rather than time-based lifetime in this app.
+POSTGRES_POOL_MAX_USES=
+```
 
 ## What The App Migration Runner Owns
 
@@ -31,7 +42,7 @@ That default lane covers the legacy/public-schema tables that still exist under 
 
 - legacy survey registry and response tables
 - survey editor support tables such as `surveys`, `survey_cast`, and `survey_episodes`
-- app-local survey show metadata tables such as `survey_shows`, `survey_show_seasons`, and `survey_show_palette_library`
+- legacy app-local/editor tables such as `survey_shows`, `survey_show_seasons`, and `survey_show_palette_library`
 
 Run it with the canonical env contract:
 
@@ -91,14 +102,15 @@ These files should be ported into backend-owned SQL migrations and removed from 
 - `035_add_post_flair_assignments_to_admin_reddit_communities.sql`
 - `036_backfill_admin_reddit_community_display_names.sql`
 
-### 2. App runtime bootstrap SQL still embedded in code
+### 2. Request-time DDL status
 
-These are not handled by the cleaned-up migration runner, but they are still SQL ownership debt that should be ported into canonical backend-owned migrations or dedicated tooling:
+The shows repository runtime DDL has been quarantined to backend-owned migration
+`TRR-Backend/supabase/migrations/20260427131550_quarantine_show_runtime_ddl.sql`.
+The app guard test [tests/shows-repository-ddl-guard.test.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/tests/shows-repository-ddl-guard.test.ts) blocks reintroducing DDL into
+[src/lib/server/shows/shows-repository.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/shows/shows-repository.ts).
 
-- [src/lib/server/shows/shows-repository.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/shows/shows-repository.ts)
-  - idempotent `ALTER TABLE survey_shows ... ADD COLUMN trr_show_id`
-  - idempotent `ALTER TABLE survey_shows ... ADD COLUMN fonts`
-  - `survey_show_palette_library` bootstrap DDL and trigger creation
+Remaining request-time DDL debt outside this runner cleanup:
+
 - [src/lib/server/admin/typography-repository.ts](/Users/thomashulihan/Projects/TRR/TRR-APP/apps/web/src/lib/server/admin/typography-repository.ts)
   - `site_typography_sets`
   - `site_typography_assignments`
@@ -126,7 +138,7 @@ These files still run in the default app-local lane and have not been moved duri
 - `022_link_brand_shows_to_trr.sql`
 - `030_create_show_palette_library.sql`
 
-Keeping them in the app-local lane is a present-tense tooling choice, not a statement that long-term ownership is settled.
+Keeping them in the app-local lane is a present-tense tooling choice, not a statement that long-term ownership is settled. The duplicate `022` prefix is intentional only as a documented legacy exception: `022_create_admin_season_cast_survey_roles.sql` is backend-owned shared-schema backlog and skipped by the app runner, while `022_link_brand_shows_to_trr.sql` remains a historical app-local/editor copy. The backend migration `20260427131550_quarantine_show_runtime_ddl.sql` is canonical for the request-time DDL that overlaps `022_link_brand_shows_to_trr.sql` and `030_create_show_palette_library.sql`.
 
 ## Practical Rule
 
