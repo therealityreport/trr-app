@@ -5419,7 +5419,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       {catalogBlockedAuthPresentation.canRepair ? (
                         <button
                           type="button"
-                          onClick={() => void runCatalogRepairAuth(displayedCatalogRunId)}
+                          onClick={() => {
+                            if (displayedCatalogRunId) {
+                              void runCatalogRepairAuth(displayedCatalogRunId);
+                            }
+                          }}
                           disabled={catalogActionsBlocked}
                           className="mt-3 inline-flex rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
