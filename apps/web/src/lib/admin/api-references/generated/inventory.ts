@@ -4,7 +4,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-26T15:07:34.718Z",
+  "generatedAt": "2026-04-28T10:48:54.251Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
@@ -644,6 +644,39 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "postgresAccess": "indirect",
       "viewKinds": [
         "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "high",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "backend:GET:/api/v1/admin/health/db-pressure",
+      "kind": "backend_endpoint",
+      "title": "GET /api/v1/admin/health/db-pressure",
+      "pathPattern": "/api/v1/admin/health/db-pressure",
+      "symbol": "GET",
+      "sourceFile": "src/app/api/admin/health/app-db-pressure/route.ts",
+      "sourceLocator": {
+        "line": 62,
+        "matchedText": "\"/admin/health/db-pressure\""
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ],
+      "usageTier": "high",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
+      "fansOutQueries": false,
+      "postgresAccess": "indirect",
+      "viewKinds": [
         "detail"
       ],
       "staticOnly": false,
@@ -7353,7 +7386,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/health/app-db-pressure/route.ts",
       "sourceLocator": {
-        "line": 7,
+        "line": 98,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -7368,14 +7401,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "low",
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {
@@ -8679,7 +8712,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 86,
+        "line": 207,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10237,7 +10270,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/route.ts",
       "sourceLocator": {
-        "line": 167,
+        "line": 334,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12234,7 +12267,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/collaborators-tags/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 23,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12367,7 +12400,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 23,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12466,7 +12499,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/posts/route.ts",
       "sourceLocator": {
-        "line": 15,
+        "line": 24,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14084,7 +14117,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 143,
+        "line": 264,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -18327,7 +18360,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/route.ts",
       "sourceLocator": {
-        "line": 227,
+        "line": 394,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -18429,7 +18462,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags/route.ts",
       "sourceLocator": {
-        "line": 33,
+        "line": 57,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -19883,6 +19916,24 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "sourceLocator": {
         "line": 149,
         "matchedText": "`/admin/covered-shows/${showId}`"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:getBackendApiUrl"
+      ]
+    },
+    {
+      "id": "proxies_to:route:GET:/api/admin/health/app-db-pressure:backend:GET:/api/v1/admin/health/db-pressure",
+      "kind": "proxies_to",
+      "from": "route:GET:/api/admin/health/app-db-pressure",
+      "to": "backend:GET:/api/v1/admin/health/db-pressure",
+      "title": null,
+      "sourceFile": "src/app/api/admin/health/app-db-pressure/route.ts",
+      "sourceLocator": {
+        "line": 62,
+        "matchedText": "\"/admin/health/db-pressure\""
       },
       "provenance": "static_scan",
       "confidence": "high",
@@ -22279,6 +22330,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "backend:GET:/api/v1/admin/bravotv/images/people/[personId]/latest",
         "backend:GET:/api/v1/admin/bravotv/images/shows/[showId]/latest",
         "backend:GET:/api/v1/admin/covered-shows/[showId]",
+        "backend:GET:/api/v1/admin/health/db-pressure",
         "backend:GET:/api/v1/admin/operations/[operationId]",
         "backend:GET:/api/v1/admin/operations/[operationId]/stream",
         "backend:GET:/api/v1/admin/operations/health",
@@ -22468,6 +22520,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "proxies_to:route:DELETE:/api/admin/trr-api/media-assets/[assetId]:backend:DELETE:/api/v1/admin/media-assets/[assetId]",
         "proxies_to:route:DELETE:/api/admin/trr-api/shows/[showId]/links/[linkId]:backend:DELETE:/api/v1/admin/shows/[showId]/links/[linkId]",
         "proxies_to:route:GET:/api/admin/covered-shows/[showId]:backend:GET:/api/v1/admin/covered-shows/[showId]",
+        "proxies_to:route:GET:/api/admin/health/app-db-pressure:backend:GET:/api/v1/admin/health/db-pressure",
         "proxies_to:route:GET:/api/admin/networks-streaming/overrides:backend:GET:/api/v1/admin/shows/networks-streaming/overrides",
         "proxies_to:route:GET:/api/admin/shows/[showKey]/icons:backend:GET:/api/v1/admin/shows/[showKey]/icons",
         "proxies_to:route:GET:/api/admin/social-posts/[postId]:backend:GET:/api/v1/admin/social-posts/[postId]",
@@ -22582,12 +22635,12 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 546,
-      "totalEdges": 186,
+      "totalNodes": 547,
+      "totalEdges": 187,
       "nodesByKind": {
         "ui_surface": 58,
         "api_route": 371,
-        "backend_endpoint": 111,
+        "backend_endpoint": 112,
         "repository_surface": 2,
         "polling_loop": 4
       },
@@ -22595,14 +22648,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "originates_request": 67,
         "contains_polling": 4,
         "calls": 0,
-        "proxies_to": 111,
+        "proxies_to": 112,
         "touches_repository": 4,
         "renders_view": 0
       },
       "automaticNodes": 37,
       "pollingNodes": 37,
       "directPostgresNodes": 2,
-      "indirectPostgresNodes": 133
+      "indirectPostgresNodes": 134
     }
   }
 } satisfies AdminApiReferenceInventory;
