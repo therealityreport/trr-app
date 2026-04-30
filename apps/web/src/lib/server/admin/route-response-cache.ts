@@ -2,6 +2,7 @@ import "server-only";
 
 type CacheEntry = {
   expiresAt: number;
+  staleExpiresAt: number;
   value: unknown;
 };
 
@@ -28,10 +29,13 @@ const makeStoreKey = (namespace: string, key: string): string => `${namespace}:$
 const normalizeTtlMs = (ttlMs: number): number =>
   Number.isFinite(ttlMs) && ttlMs > 0 ? Math.floor(ttlMs) : DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS;
 
+const normalizeStaleTtlMs = (ttlMs: number | undefined): number =>
+  Number.isFinite(ttlMs) && (ttlMs ?? 0) > 0 ? Math.floor(ttlMs ?? 0) : 0;
+
 const pruneCache = (): void => {
   const now = Date.now();
   for (const [key, entry] of CACHE.entries()) {
-    if (entry.expiresAt <= now) {
+    if ((entry.staleExpiresAt || entry.expiresAt) <= now) {
       CACHE.delete(key);
     }
   }
@@ -75,10 +79,26 @@ export const buildUserScopedRouteCacheKey = (
 
 export function getRouteResponseCache<T>(namespace: string, key: string): T | null {
   if (CACHE_DISABLED) return null;
-  const entry = CACHE.get(makeStoreKey(namespace, key));
+  const storeKey = makeStoreKey(namespace, key);
+  const entry = CACHE.get(storeKey);
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
-    CACHE.delete(makeStoreKey(namespace, key));
+    if ((entry.staleExpiresAt || entry.expiresAt) <= Date.now()) {
+      CACHE.delete(storeKey);
+    }
+    return null;
+  }
+  return entry.value as T;
+}
+
+export function getStaleRouteResponseCache<T>(namespace: string, key: string): T | null {
+  if (CACHE_DISABLED) return null;
+  const storeKey = makeStoreKey(namespace, key);
+  const entry = CACHE.get(storeKey);
+  if (!entry) return null;
+  const staleExpiresAt = entry.staleExpiresAt || entry.expiresAt;
+  if (staleExpiresAt <= Date.now()) {
+    CACHE.delete(storeKey);
     return null;
   }
   return entry.value as T;
@@ -88,11 +108,16 @@ export function setRouteResponseCache<T>(
   namespace: string,
   key: string,
   value: T,
-  ttlMs = DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS
+  ttlMs = DEFAULT_ADMIN_ROUTE_CACHE_TTL_MS,
+  staleTtlMs?: number,
 ): void {
   if (CACHE_DISABLED) return;
+  const normalizedTtlMs = normalizeTtlMs(ttlMs);
+  const normalizedStaleTtlMs = normalizeStaleTtlMs(staleTtlMs);
+  const expiresAt = Date.now() + normalizedTtlMs;
   CACHE.set(makeStoreKey(namespace, key), {
-    expiresAt: Date.now() + normalizeTtlMs(ttlMs),
+    expiresAt,
+    staleExpiresAt: expiresAt + normalizedStaleTtlMs,
     value,
   });
   pruneCache();

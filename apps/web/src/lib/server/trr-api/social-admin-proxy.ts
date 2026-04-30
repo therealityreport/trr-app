@@ -93,7 +93,7 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 export const SOCIAL_PROXY_SHORT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_SHORT_TIMEOUT_MS", 10_000);
 export const SOCIAL_PROXY_DEFAULT_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_DEFAULT_TIMEOUT_MS", 25_000);
 export const SOCIAL_PROXY_LONG_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROXY_LONG_TIMEOUT_MS", 60_000);
-export const SOCIAL_PROXY_PROGRESS_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROGRESS_PROXY_TIMEOUT_MS", 5_000);
+export const SOCIAL_PROXY_PROGRESS_TIMEOUT_MS = readPositiveIntEnv("TRR_SOCIAL_PROGRESS_PROXY_TIMEOUT_MS", 30_000);
 
 const readTimeoutTier = (timeoutMs: number): string => {
   if (timeoutMs === SOCIAL_PROXY_PROGRESS_TIMEOUT_MS) return "progress";

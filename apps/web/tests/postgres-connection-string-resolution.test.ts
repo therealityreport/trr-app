@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   classifyConnectionClass,
   isTransactionFlightTestEnabled,
@@ -152,6 +155,40 @@ describe("resolvePostgresSslConfig", () => {
     );
 
     expect(config).toEqual({ rejectUnauthorized: false });
+  });
+
+  it("loads ssl CA files from the canonical env name", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "trr-ca-"));
+    try {
+      const caPath = join(tempDir, "root.crt");
+      writeFileSync(caPath, "canonical-ca", "utf8");
+
+      const config = resolvePostgresSslConfig(
+        "postgresql://postgres.vwxfvzutyufrkhfgoeaa:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=verify-full",
+        { DATABASE_SSL_CA_FILE: caPath },
+      );
+
+      expect(config).toEqual({ rejectUnauthorized: true, ca: "canonical-ca" });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts DATABASE_SSL_CA_PATH as a compatibility alias", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "trr-ca-"));
+    try {
+      const caPath = join(tempDir, "root.crt");
+      writeFileSync(caPath, "alias-ca", "utf8");
+
+      const config = resolvePostgresSslConfig(
+        "postgresql://postgres.vwxfvzutyufrkhfgoeaa:secret@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=verify-ca",
+        { DATABASE_SSL_CA_PATH: caPath },
+      );
+
+      expect(config).toEqual({ rejectUnauthorized: true, ca: "alias-ca" });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

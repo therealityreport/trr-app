@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   ADMIN_API_REFERENCE_INVENTORY,
@@ -47,6 +46,10 @@ function derivePageUrlSlug(pathPattern: string | null): string {
   if (!pathPattern) return "n/a";
   const normalized = pathPattern.replace(/^\/admin\/?/, "");
   return normalized.length > 0 ? normalized : "(root)";
+}
+
+function isConcreteRouteHref(pathPattern: string | null): pathPattern is string {
+  return Boolean(pathPattern && !/\[[^\]]+\]/.test(pathPattern));
 }
 
 function describeKind(node: AdminApiReferenceNode): string {
@@ -657,9 +660,17 @@ export function AdminApiReferencesLibraryContent({
                               <div className="rounded-[1.2rem] border border-zinc-200 p-4">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Route & URL slug</p>
                                 <div className="mt-3 space-y-2">
-                                  <Link href={node.pathPattern ?? ADMIN_ROOT_PATH} className="text-sm font-semibold text-black underline decoration-zinc-300 underline-offset-4">
-                                    {node.pathPattern ?? ADMIN_ROOT_PATH}
-                                  </Link>
+                                  {node.pathPattern == null ? (
+                                    <a href={ADMIN_ROOT_PATH} className="text-sm font-semibold text-black underline decoration-zinc-300 underline-offset-4">
+                                      {ADMIN_ROOT_PATH}
+                                    </a>
+                                  ) : isConcreteRouteHref(node.pathPattern) ? (
+                                    <a href={node.pathPattern} className="text-sm font-semibold text-black underline decoration-zinc-300 underline-offset-4">
+                                      {node.pathPattern}
+                                    </a>
+                                  ) : (
+                                    <p className="break-all text-sm font-semibold text-black">{node.pathPattern}</p>
+                                  )}
                                   <p className="break-all font-mono text-xs text-zinc-600">{derivePageUrlSlug(node.pathPattern)}</p>
                                 </div>
                               </div>

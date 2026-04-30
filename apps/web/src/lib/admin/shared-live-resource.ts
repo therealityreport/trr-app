@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type AdminLiveResourceKey = string;
 
@@ -70,6 +70,17 @@ type SharedResourceConfig<T> =
   | ({ mode: "poll" } & SharedPollConfig<T>)
   | ({ mode: "sse" } & SharedSseConfig<T>)
   | ({ mode: "manualRefetch" } & SharedManualConfig);
+
+const areSharedLiveSnapshotsEqual = <T,>(
+  left: SharedLiveSnapshot<T>,
+  right: SharedLiveSnapshot<T>,
+): boolean =>
+  Object.is(left.data, right.data) &&
+  left.error === right.error &&
+  Object.is(left.errorDetails, right.errorDetails) &&
+  left.lastEventAtMs === right.lastEventAtMs &&
+  left.lastSuccessAtMs === right.lastSuccessAtMs &&
+  left.connected === right.connected;
 
 const DEFAULT_LEASE_DURATION_MS = 45_000;
 const DEFAULT_FOLLOWER_CHECK_INTERVAL_MS = 5_000;
@@ -255,6 +266,7 @@ class SharedLiveResourceCoordinator<T> {
         update.lastSuccessAtMs === undefined ? this.snapshot.lastSuccessAtMs : update.lastSuccessAtMs,
       connected: update.connected === undefined ? this.snapshot.connected : update.connected,
     };
+    if (areSharedLiveSnapshotsEqual(this.snapshot, nextSnapshot)) return;
     this.snapshot = nextSnapshot;
     for (const subscriber of this.subscribers.values()) {
       subscriber.onUpdate(nextSnapshot);
@@ -611,16 +623,35 @@ const useSharedLiveResource = <T,>(config: SharedResourceConfig<T>) => {
     connected: false,
   });
   const subscriberIdRef = useRef<string>(createTabId());
-  const coordinator = useMemo(() => getCoordinator(config), [config]);
+  const coordinatorRef = useRef<{
+    key: AdminLiveResourceKey;
+    coordinator: SharedLiveResourceCoordinator<T> | null;
+  } | null>(null);
+  if (!coordinatorRef.current || coordinatorRef.current.key !== config.key) {
+    coordinatorRef.current = {
+      key: config.key,
+      coordinator: getCoordinator(config),
+    };
+  }
+  const coordinator = coordinatorRef.current.coordinator;
+  const handleSnapshotUpdate = useCallback((nextSnapshot: SharedLiveSnapshot<T>) => {
+    setSnapshot((currentSnapshot) =>
+      areSharedLiveSnapshotsEqual(currentSnapshot, nextSnapshot) ? currentSnapshot : nextSnapshot,
+    );
+  }, []);
+
+  useEffect(() => {
+    coordinator?.updateConfig(config);
+  }, [config, coordinator]);
 
   useEffect(() => {
     if (!coordinator) return;
     const id = subscriberIdRef.current;
-    coordinator.subscribe(id, setSnapshot);
+    coordinator.subscribe(id, handleSnapshotUpdate);
     return () => {
       coordinator.unsubscribe(id);
     };
-  }, [coordinator]);
+  }, [coordinator, handleSnapshotUpdate]);
 
   useEffect(() => {
     if (!coordinator) return;

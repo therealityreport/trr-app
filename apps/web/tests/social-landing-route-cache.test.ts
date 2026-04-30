@@ -190,4 +190,28 @@ describe("social landing route cache", () => {
     expect(nextPayload.show_sets[0].show_id).toBe("good-again");
     expect(getSocialLandingPayloadResultMock).toHaveBeenCalledTimes(3);
   });
+
+  it("serves the last good landing payload when a normal rebuild fails after ttl expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-29T12:00:00Z"));
+      getSocialLandingPayloadResultMock
+        .mockResolvedValueOnce({ payload: buildPayload("good"), cacheable: true })
+        .mockResolvedValueOnce({ payload: buildPayload("fallback"), cacheable: false });
+
+      const baseRequest = new NextRequest("http://localhost/api/admin/social/landing");
+      await getLanding(baseRequest);
+
+      vi.advanceTimersByTime(301_000);
+      const staleResponse = await getLanding(baseRequest);
+      const stalePayload = await staleResponse.json();
+
+      expect(staleResponse.headers.get("x-trr-cache")).toBe("stale");
+      expect(staleResponse.headers.get("x-trr-cacheable")).toBe("0");
+      expect(stalePayload.show_sets[0].show_id).toBe("good");
+      expect(getSocialLandingPayloadResultMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

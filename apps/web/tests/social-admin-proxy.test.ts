@@ -533,7 +533,7 @@ describe("social-admin-proxy", () => {
         trace_id: payload.trace_id,
         context: expect.objectContaining({
           backend_path: "/api/v1/admin/socials/profiles/instagram/bravotv/catalog/runs/run-1/progress",
-          timeout_ms: 5_000,
+          timeout_ms: 30_000,
           timeout_tier: "progress",
         }),
       }),
