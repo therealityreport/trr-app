@@ -333,19 +333,89 @@ export type SocialAccountCommentsScrapeRequest =
       max_posts?: number;
       max_comments_per_post?: number;
       refresh_policy?: "stale_or_missing" | "all_saved_posts";
+      target_filter?: "incomplete";
       allow_inline_dev_fallback?: boolean;
+      dry_run?: boolean;
     }
   | {
       mode: "single_post";
       source_id: string;
       max_comments_per_post?: number;
       allow_inline_dev_fallback?: boolean;
+      dry_run?: boolean;
     };
 
 export type SocialAccountCommentsScrapeResponse = {
   run_id: string;
   status?: string | null;
   detail?: string | null;
+  target_source_ids_count?: number;
+  target_filter?: "incomplete" | string | null;
+  incomplete_fill?: boolean | null;
+  comments_shard_count?: number;
+  comments_sharding_enabled?: boolean;
+  comments_proxy_shard_sessions?: boolean;
+  recommended_comments_shard_count?: number;
+  timing?: Record<string, unknown> | null;
+};
+
+export type SocialAccountCommentsCancelResponse = {
+  run_id: string;
+  status?: string | null;
+  accepted?: boolean;
+  cancel_requested_at?: string | null;
+  cancelled_jobs?: number;
+  cancelled_job_ids?: string[];
+  summary?: Record<string, unknown> | null;
+};
+
+export type SocialAccountCommentsDryRunPreviewResponse = {
+  dry_run?: boolean;
+  platform?: SocialPlatformSlug | string;
+  account_handle?: string;
+  mode?: "profile" | "single_post" | string;
+  refresh_policy?: "stale_or_missing" | "all_saved_posts" | string | null;
+  target_filter?: "incomplete" | string | null;
+  incomplete_fill?: boolean | null;
+  target_priority?: string | null;
+  target_source_ids_count?: number;
+  comments_shard_count?: number;
+  comments_sharding_enabled?: boolean;
+  comments_proxy_shard_sessions?: boolean;
+  recommended_comments_shard_count?: number;
+  sample_target_source_ids?: string[];
+  timing?: Record<string, unknown> | null;
+  preview_cache?: Record<string, unknown> | string | null;
+  cache?: Record<string, unknown> | string | null;
+  cache_status?: string | null;
+  debug?: Record<string, unknown> | null;
+  warnings?: string[];
+  warning_code?: string | null;
+  warning_message?: string | null;
+};
+
+export type SocialAccountCommentsShardProgress = {
+  shard_index?: number | null;
+  shard_count?: number | null;
+  job_id?: string | null;
+  status?: string | null;
+  job_status?: string | null;
+  target_count?: number | null;
+  target_source_ids_count?: number | null;
+  comments_shard_target_count?: number | null;
+  processed_post_count?: number | null;
+  completed_posts?: number | null;
+  matched_posts?: number | null;
+  saved_posts?: number | null;
+  remaining_target_count?: number | null;
+  comments_upserted?: number | null;
+  replies_upserted?: number | null;
+  items_found_total?: number | null;
+  queue_wait_seconds?: number | null;
+  posts_per_minute?: number | null;
+  comments_per_minute?: number | null;
+  latest_failure_reason?: string | null;
+  error_message?: string | null;
 };
 
 export type SocialAccountCommentsRunProgress = {
@@ -361,6 +431,45 @@ export type SocialAccountCommentsRunProgress = {
   job_metadata?: Record<string, unknown> | null;
   error_message?: string | null;
   target_source_ids?: string[];
+  target_source_ids_count?: number;
+  target_filter?: "incomplete" | string | null;
+  incomplete_fill?: boolean | null;
+  comments_shard_count?: number;
+  comments_sharding_enabled?: boolean;
+  comments_proxy_shard_sessions?: boolean;
+  recommended_comments_shard_count?: number;
+  active_comment_jobs?: number;
+  queued_comment_jobs?: number;
+  completed_comment_jobs?: number;
+  failed_comment_jobs?: number;
+  post_progress?: {
+    completed_posts?: number;
+    matched_posts?: number;
+    saved_posts?: number;
+    total_posts?: number | null;
+  };
+  throughput?: {
+    elapsed_seconds?: number;
+    posts_per_minute?: number | null;
+    comments_per_minute?: number | null;
+  };
+  cancellation_summary?: {
+    cancelled_jobs?: number;
+    failed_jobs?: number;
+    remaining_target_source_ids_count?: number;
+    resume_recommendation?: "stale_or_missing" | null;
+  };
+  timing?: Record<string, unknown> | null;
+  comment_shards?: SocialAccountCommentsShardProgress[];
+  shards?: SocialAccountCommentsShardProgress[];
+  shard_progress?: SocialAccountCommentsShardProgress[];
+  stale_pre_sharding_run?: boolean;
+  pre_sharding_run?: boolean;
+  warning_code?: string | null;
+  warning_message?: string | null;
+  warnings?: string[];
+  started_at_epoch_seconds?: number | null;
+  updated_at?: string | null;
 };
 
 export type SocialAccountCatalogPost = SocialAccountProfilePost & {

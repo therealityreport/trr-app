@@ -5,6 +5,13 @@ import {
   SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
   socialProxyErrorResponse,
 } from "@/lib/server/trr-api/social-admin-proxy";
+import {
+  buildUserScopedRouteCacheKey,
+  getOrCreateRouteResponsePromise,
+  getRouteResponseCache,
+  getStaleRouteResponseCache,
+  setRouteResponseCache,
+} from "@/lib/server/admin/route-response-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +20,9 @@ type RouteContext = {
 };
 
 const elapsedMs = (start: number): number => Math.round(performance.now() - start);
+const PROGRESS_CACHE_NAMESPACE = "social-account-catalog-run-progress";
+const PROGRESS_CACHE_TTL_MS = 5_000;
+const PROGRESS_CACHE_STALE_MS = 60_000;
 
 export async function GET(request: NextRequest, context: RouteContext) {
   const totalStart = performance.now();
@@ -32,18 +42,46 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const paramsStart = performance.now();
     ({ platform, handle, runId } = await context.params);
     const query = request.nextUrl.searchParams.toString();
+    const cacheKey = buildUserScopedRouteCacheKey(
+      adminContext.uid,
+      `${platform}:${handle}:${runId}`,
+      request.nextUrl.searchParams,
+    );
+    const cached = getRouteResponseCache(PROGRESS_CACHE_NAMESPACE, cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
     const path = `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(runId)}/progress${
       query ? `?${query}` : ""
     }`;
     paramsMs = elapsedMs(paramsStart);
 
     const upstreamStart = performance.now();
-    const data = await fetchSocialBackendJson(path, {
-      adminContext,
-      fallbackError: "Failed to fetch social account catalog run progress",
-      retries: 0,
-      timeoutMs: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
-    });
+    let data: unknown;
+    try {
+      data = await getOrCreateRouteResponsePromise(PROGRESS_CACHE_NAMESPACE, cacheKey, () =>
+        fetchSocialBackendJson(path, {
+          adminContext,
+          fallbackError: "Failed to fetch social account catalog run progress",
+          retries: 0,
+          timeoutMs: SOCIAL_PROXY_PROGRESS_TIMEOUT_MS,
+        }),
+      );
+      setRouteResponseCache(
+        PROGRESS_CACHE_NAMESPACE,
+        cacheKey,
+        data,
+        PROGRESS_CACHE_TTL_MS,
+        PROGRESS_CACHE_STALE_MS,
+      );
+    } catch (error) {
+      const stale = getStaleRouteResponseCache(PROGRESS_CACHE_NAMESPACE, cacheKey);
+      if (stale) {
+        data = stale;
+      } else {
+        throw error;
+      }
+    }
     upstreamMs = elapsedMs(upstreamStart);
 
     const responseStart = performance.now();

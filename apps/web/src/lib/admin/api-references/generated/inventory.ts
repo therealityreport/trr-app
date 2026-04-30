@@ -4,7 +4,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-28T20:21:51.067Z",
+  "generatedAt": "2026-04-30T23:57:18.711Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
@@ -1233,7 +1233,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/stream/route.ts",
       "sourceLocator": {
-        "line": 11,
+        "line": 97,
         "matchedText": "\"/admin/socials/live-status/stream\""
       },
       "provenance": "static_scan",
@@ -8712,7 +8712,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 207,
+        "line": 212,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -11968,7 +11968,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/stream/route.ts",
       "sourceLocator": {
-        "line": 8,
+        "line": 94,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12097,7 +12097,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/posts/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 23,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12199,7 +12199,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/progress/route.ts",
       "sourceLocator": {
-        "line": 17,
+        "line": 27,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12333,7 +12333,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/progress/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 26,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12348,7 +12348,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -12356,7 +12356,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "low",
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {
@@ -12466,7 +12466,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/live-profile-total/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 25,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12481,14 +12481,15 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
+        "list",
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "low",
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {
@@ -12533,7 +12534,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot/route.ts",
       "sourceLocator": {
-        "line": 60,
+        "line": 62,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12600,7 +12601,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/summary/route.ts",
       "sourceLocator": {
-        "line": 26,
+        "line": 32,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -14117,7 +14118,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 264,
+        "line": 281,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17440,14 +17441,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fanoutRisk": "low"
     },
     {
-      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel",
       "kind": "api_route",
-      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
-      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel",
       "symbol": "POST",
-      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape/route.ts",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 15,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17462,14 +17463,48 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
+      "fansOutQueries": false,
+      "postgresAccess": "none",
+      "viewKinds": [
+        "list",
+        "detail"
+      ],
+      "staticOnly": false,
+      "payloadRisk": "low",
+      "fanoutRisk": "low"
+    },
+    {
+      "id": "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "kind": "api_route",
+      "title": "POST /api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "pathPattern": "/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
+      "symbol": "POST",
+      "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape/route.ts",
+      "sourceLocator": {
+        "line": 15,
+        "symbol": "POST"
+      },
+      "provenance": "static_scan",
+      "confidence": "high",
+      "verificationStatus": "verified",
+      "basis": [
+        "static_scan:app_api_route"
+      ],
+      "usageTier": "manual",
+      "polls": false,
+      "pollCadenceMs": null,
+      "automatic": false,
+      "loadsLargeDatasets": false,
+      "usesPagination": false,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -20454,7 +20489,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/stream/route.ts",
       "sourceLocator": {
-        "line": 11,
+        "line": 97,
         "matchedText": "\"/admin/socials/live-status/stream\""
       },
       "provenance": "static_scan",
@@ -22277,6 +22312,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/repair-auth",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-newer",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/sync-recent",
+        "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/runs/[runId]/cancel",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/cookies/refresh",
         "route:POST:/api/admin/trr-api/social/profiles/[platform]/[handle]/socialblade/refresh",
@@ -22635,11 +22671,11 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "renders_view": []
     },
     "summary": {
-      "totalNodes": 547,
+      "totalNodes": 548,
       "totalEdges": 187,
       "nodesByKind": {
         "ui_surface": 58,
-        "api_route": 371,
+        "api_route": 372,
         "backend_endpoint": 112,
         "repository_surface": 2,
         "polling_loop": 4

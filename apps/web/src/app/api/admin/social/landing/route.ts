@@ -10,6 +10,7 @@ import {
   buildUserScopedRouteCacheKey,
   getOrCreateRouteResponsePromise,
   getRouteResponseCache,
+  getStaleRouteResponseCache,
   invalidateRouteResponseCache,
   parseCacheTtlMs,
   setRouteResponseCache,
@@ -31,7 +32,11 @@ export const dynamic = "force-dynamic";
 
 const SOCIAL_LANDING_CACHE_TTL_MS = parseCacheTtlMs(
   process.env.TRR_ADMIN_SOCIAL_LANDING_CACHE_TTL_MS,
-  60_000,
+  300_000,
+);
+const SOCIAL_LANDING_STALE_CACHE_TTL_MS = parseCacheTtlMs(
+  process.env.TRR_ADMIN_SOCIAL_LANDING_STALE_CACHE_TTL_MS,
+  900_000,
 );
 const NETWORK_SOURCE_SCOPE_BY_KEY = {
   "bravo-tv": "bravo",
@@ -223,6 +228,12 @@ export async function GET(request: NextRequest) {
     if (cached && !shouldRefresh) {
       return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
     }
+    const staleCached = shouldRefresh
+      ? null
+      : getStaleRouteResponseCache<Record<string, unknown>>(
+          SOCIAL_LANDING_CACHE_NAMESPACE,
+          cacheKey,
+        );
 
     const result = await getOrCreateRouteResponsePromise(
       SOCIAL_LANDING_CACHE_NAMESPACE,
@@ -239,11 +250,17 @@ export async function GET(request: NextRequest) {
             cacheKey,
             nextResult.payload,
             SOCIAL_LANDING_CACHE_TTL_MS,
+            SOCIAL_LANDING_STALE_CACHE_TTL_MS,
           );
         }
         return nextResult;
       },
     );
+    if (!result.cacheable && staleCached && !shouldRefresh) {
+      return NextResponse.json(staleCached, {
+        headers: { "x-trr-cache": "stale", "x-trr-cacheable": "0" },
+      });
+    }
     const headers: Record<string, string> = {};
     if (shouldRefresh) {
       headers["x-trr-cache"] = "refresh";
@@ -409,6 +426,7 @@ export async function POST(request: NextRequest) {
         buildUserScopedRouteCacheKey(user.uid, "landing"),
         result.payload,
         SOCIAL_LANDING_CACHE_TTL_MS,
+        SOCIAL_LANDING_STALE_CACHE_TTL_MS,
       );
     }
     return NextResponse.json(result.payload, {

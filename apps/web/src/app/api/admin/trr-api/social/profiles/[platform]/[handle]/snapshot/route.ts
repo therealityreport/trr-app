@@ -17,7 +17,9 @@ type RouteContext = {
 };
 
 const LIVE_TTL_MS = 5 * 60_000;
-const LIVE_STALE_MS = 5 * 60_000;
+const LIVE_STALE_MS = 15 * 60_000;
+const RUN_PROGRESS_TTL_MS = 3_000;
+const RUN_PROGRESS_STALE_MS = 30_000;
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +73,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (runId) {
       backendParams.set("run_id", runId);
     }
+    const ttlMs = runId ? RUN_PROGRESS_TTL_MS : LIVE_TTL_MS;
+    const staleIfErrorTtlMs = runId ? RUN_PROGRESS_STALE_MS : LIVE_STALE_MS;
     const recentLogLimit = (searchParams.get("recent_log_limit") ?? "").trim();
     if (recentLogLimit) {
       backendParams.set("recent_log_limit", recentLogLimit);
@@ -84,8 +88,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
         scope: `${platform}:${handle}`,
         query: searchParams,
       }),
-      ttlMs: LIVE_TTL_MS,
-      staleIfErrorTtlMs: LIVE_STALE_MS,
+      ttlMs,
+      staleIfErrorTtlMs,
       forceRefresh,
       fetcher: async () => {
         const dashboard = await fetchSocialBackendJson(

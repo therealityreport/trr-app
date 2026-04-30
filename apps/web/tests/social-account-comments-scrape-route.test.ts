@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { requireAdminMock, fetchSocialBackendJsonMock, socialProxyErrorResponseMock } = vi.hoisted(() => ({
+const {
+  requireAdminMock,
+  fetchSocialBackendJsonMock,
+  invalidateAdminSnapshotFamiliesMock,
+  socialProxyErrorResponseMock,
+} = vi.hoisted(() => ({
   requireAdminMock: vi.fn(),
   fetchSocialBackendJsonMock: vi.fn(),
+  invalidateAdminSnapshotFamiliesMock: vi.fn(),
   socialProxyErrorResponseMock: vi.fn(),
 }));
 
@@ -16,12 +22,17 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   socialProxyErrorResponse: socialProxyErrorResponseMock,
 }));
 
+vi.mock("@/lib/server/admin/admin-snapshot-cache", () => ({
+  invalidateAdminSnapshotFamilies: invalidateAdminSnapshotFamiliesMock,
+}));
+
 import { POST } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape/route";
 
 describe("social account comments scrape proxy route", () => {
   beforeEach(() => {
     requireAdminMock.mockReset();
     fetchSocialBackendJsonMock.mockReset();
+    invalidateAdminSnapshotFamiliesMock.mockReset();
     socialProxyErrorResponseMock.mockReset();
 
     requireAdminMock.mockResolvedValue(undefined);
@@ -64,6 +75,9 @@ describe("social account comments scrape proxy route", () => {
         timeoutMs: 210_000,
       }),
     );
+    expect(invalidateAdminSnapshotFamiliesMock).toHaveBeenCalledWith([
+      { pageFamily: "social-profile", scope: "instagram:thetraitorsus" },
+    ]);
   });
 
   it("returns standardized proxy errors", async () => {
