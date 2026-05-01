@@ -116,6 +116,13 @@ describe("social account profile snapshot route", () => {
         timeoutMs: 25_000,
       }),
     );
+    expect(getOrCreateAdminSnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ttlMs: 3_000,
+        staleIfErrorTtlMs: 30_000,
+        forceRefresh: true,
+      }),
+    );
     expect(response.headers.get("x-trr-dashboard-freshness")).toBe("fresh");
     expect(response.headers.get("x-trr-dashboard-source")).toBe("live");
     expect(consoleInfoSpy).toHaveBeenCalledWith(

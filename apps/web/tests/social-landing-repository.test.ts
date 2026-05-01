@@ -621,6 +621,71 @@ describe("social landing repository", () => {
     });
   });
 
+  it("starts independent first-wave landing reads while shared sources are still loading", async () => {
+    let resolveSharedSources!: () => void;
+    let sharedSourcesStarted!: () => void;
+    const sharedSourcesStartedPromise = new Promise<void>((resolve) => {
+      sharedSourcesStarted = resolve;
+    });
+    const sharedSourcesPromise = new Promise<{ sources: [] }>((resolve) => {
+      resolveSharedSources = () => resolve({ sources: [] });
+    });
+
+    fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
+      if (path === "/shared/sources") {
+        sharedSourcesStarted();
+        return sharedSourcesPromise;
+      }
+      if (path === "/shared/ingest/runs") {
+        return [];
+      }
+      if (path === "/shared/review-queue") {
+        return { items: [] };
+      }
+      if (path === "/landing-socialblade-rows") {
+        return { rows: [] };
+      }
+      throw new Error(`Unhandled social path: ${path}`);
+    });
+    listShowExternalIdsByIdsMock.mockResolvedValue(new Map());
+    fetchAdminBackendJsonMock.mockResolvedValue({
+      status: 200,
+      data: { shows: [] },
+    });
+
+    const resultPromise = getSocialLandingPayloadResult();
+    await sharedSourcesStartedPromise;
+    await delay(0);
+
+    expect(listShowExternalIdsByIdsMock).toHaveBeenCalledWith([
+      "show-rhoslc",
+      "show-wwhl",
+    ]);
+    expect(fetchAdminBackendJsonMock).toHaveBeenCalledWith(
+      "/admin/shows/cast-summary",
+      expect.objectContaining({
+        timeoutMs: 5_000,
+      }),
+    );
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/shared/sources",
+      expect.objectContaining({
+        timeoutMs: 5_000,
+      }),
+    );
+
+    resolveSharedSources();
+    const result = await resultPromise;
+
+    expect(result.payload.network_sets).toEqual([
+      expect.objectContaining({
+        key: "bravo-tv",
+        handles: [],
+      }),
+    ]);
+    expect(result.cacheable).toBe(true);
+  });
+
   it("places show-assigned shared sources on the show instead of the Bravo network", async () => {
     getCoveredShowsMock.mockResolvedValue([
       {

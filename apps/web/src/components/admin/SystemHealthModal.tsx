@@ -306,10 +306,10 @@ const isSocialAdminPath = (pathname: string): boolean => {
 };
 
 function healthState(data: HealthDotStatus | null, error: string | null): HealthState {
-  if (error) return "error";
   if (!data) return "loading";
   if (!data.queue_enabled) return "down";
   if (!data.workers.healthy) return "degraded";
+  if (error) return "degraded";
   return "healthy";
 }
 

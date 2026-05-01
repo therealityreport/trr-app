@@ -12,7 +12,7 @@ vi.mock("@/lib/server/auth", () => ({
 }));
 
 vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
-  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS: 5_000,
+  SOCIAL_PROXY_PROGRESS_TIMEOUT_MS: 30_000,
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
 }));
@@ -64,7 +64,7 @@ describe("social account catalog run progress proxy route", () => {
         adminContext: expect.objectContaining({ uid: "admin-1" }),
         fallbackError: "Failed to fetch social account catalog run progress",
         retries: 0,
-        timeoutMs: 5_000,
+        timeoutMs: 30_000,
       }),
     );
   });

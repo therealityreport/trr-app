@@ -489,6 +489,24 @@ const buildEmptySocialAccountProfileSummary = (
   source_status: [],
 });
 
+const normalizePositiveFiniteNumber = (value: unknown): number | null => {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+};
+
+const mergeProfileSummaryPreservingLiveTotal = (
+  incoming: SocialAccountProfileSummary,
+  current: SocialAccountProfileSummary | null,
+): SocialAccountProfileSummary => {
+  const incomingLiveTotal = normalizePositiveFiniteNumber(incoming.live_total_posts);
+  const currentLiveTotal = normalizePositiveFiniteNumber(current?.live_total_posts);
+  const liveTotal = incomingLiveTotal ?? currentLiveTotal;
+  if (liveTotal === null) return incoming;
+  return {
+    ...incoming,
+    live_total_posts: liveTotal,
+  };
+};
+
 const hasBackendSaturationText = (value: string): boolean => {
   const message = value.toLowerCase();
   return (
@@ -925,6 +943,27 @@ const formatAttachedLaneSourceLabel = (value?: string | null): string | null => 
   return formatRunStatusLabel(normalized);
 };
 
+const shouldShowCatalogLaunchState = (runStatus?: string | null, launchState?: string | null): boolean => {
+  const normalizedRunStatus = String(runStatus || "").trim().toLowerCase();
+  const normalizedLaunchState = String(launchState || "").trim().toLowerCase();
+  if (!normalizedLaunchState) return false;
+  return !TERMINAL_CATALOG_RUN_STATUSES.has(normalizedRunStatus);
+};
+
+const shouldShowCatalogCompletedAt = (
+  completedAt?: string | null,
+  startedAt?: string | null,
+  createdAt?: string | null,
+): boolean => {
+  const completedMs = Date.parse(String(completedAt || ""));
+  if (!Number.isFinite(completedMs)) return false;
+  const startedMs = Date.parse(String(startedAt || ""));
+  if (Number.isFinite(startedMs) && completedMs < startedMs) return false;
+  const createdMs = Date.parse(String(createdAt || ""));
+  if (Number.isFinite(createdMs) && completedMs < createdMs) return false;
+  return true;
+};
+
 const buildCatalogLaneCards = (options: {
   runStatus?: string | null;
   selectedTasks?: CatalogBackfillSelectedTask[] | null;
@@ -938,6 +977,8 @@ const buildCatalogLaneCards = (options: {
   ]);
   const commentsFollowup = options.attachedFollowups?.comments ?? null;
   const mediaFollowup = options.attachedFollowups?.media ?? null;
+  const normalizedRunStatus = String(options.runStatus || "").trim().toLowerCase();
+  const terminalRunStatus = TERMINAL_CATALOG_RUN_STATUSES.has(normalizedRunStatus) ? normalizedRunStatus : null;
   const cards: CatalogLaneCard[] = [
     {
       key: "catalog",
@@ -948,21 +989,37 @@ const buildCatalogLaneCards = (options: {
   if (taskSet.has("comments") || commentsFollowup || options.commentsRunId) {
     const commentsRunId = String(commentsFollowup?.run_id || options.commentsRunId || "").trim() || null;
     const sourceLabel = formatAttachedLaneSourceLabel(commentsFollowup?.source);
+    const commentsStatus =
+      terminalRunStatus && !commentsRunId && commentsFollowup?.source === "deferred_after_catalog"
+        ? terminalRunStatus
+        : commentsFollowup?.status ?? (commentsRunId ? "queued" : null);
     cards.push({
       key: "comments",
       label: "Comments",
-      status: commentsFollowup?.status ?? (commentsRunId ? "queued" : null),
+      status: commentsStatus,
       sourceLabel,
-      detail: commentsRunId ? `Run ${shortRunId(commentsRunId)}` : sourceLabel === "Deferred" ? "Starts after catalog completion" : null,
+      detail: commentsRunId
+        ? `Run ${shortRunId(commentsRunId)}`
+        : sourceLabel === "Deferred" && !terminalRunStatus
+          ? "Starts after catalog completion"
+          : null,
     });
   }
   if (taskSet.has("media") || mediaFollowup) {
     const attachmentId = String(mediaFollowup?.attachment_id || "").trim() || null;
     const enqueuedCount = typeof mediaFollowup?.enqueued_job_count === "number" ? mediaFollowup.enqueued_job_count : null;
+    const mediaJobIds = Array.isArray(mediaFollowup?.enqueued_job_ids) ? mediaFollowup.enqueued_job_ids : [];
+    const mediaStatus =
+      terminalRunStatus &&
+      mediaFollowup?.source === "catalog_media_mirror" &&
+      mediaJobIds.length === 0 &&
+      (enqueuedCount === null || enqueuedCount <= 0)
+        ? terminalRunStatus
+        : mediaFollowup?.status ?? null;
     cards.push({
       key: "media",
       label: "Media",
-      status: mediaFollowup?.status ?? null,
+      status: mediaStatus,
       sourceLabel: formatAttachedLaneSourceLabel(mediaFollowup?.source),
       detail:
         enqueuedCount && enqueuedCount > 0
@@ -1319,8 +1376,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [summaryUninitialized, setSummaryUninitialized] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [fullSummaryLoading, setFullSummaryLoading] = useState(false);
-  const [fullSummaryError, setFullSummaryError] = useState<string | null>(null);
   const [summarySaturationActive, setSummarySaturationActive] = useState(false);
   const [dashboardFreshness, setDashboardFreshness] = useState<SocialAccountDashboardFreshness | null>(null);
 
@@ -1432,7 +1487,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const [cookieRefreshMessage, setCookieRefreshMessage] = useState<string | null>(null);
   const pendingCatalogActionAfterCookieRepairRef = useRef<PendingCatalogAction | null>(null);
   const liveProfileTotalProbeKeyRef = useRef<string | null>(null);
-  const autoFullSummaryAttemptedRef = useRef<string | null>(null);
 
   const supportsCatalog = SOCIAL_ACCOUNT_CATALOG_ENABLED_PLATFORMS.includes(platform);
   const supportsCatalogDetail = SOCIAL_ACCOUNT_CATALOG_DETAIL_ENABLED_PLATFORMS.includes(platform);
@@ -1441,7 +1495,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   const selectedTab: SocialAccountProfileTab = supportsCatalog && activeTab === "posts" ? "catalog" : activeTab;
   const shouldShowCatalogRunProgressCard = selectedTab !== "comments";
   const hasSummary = summary !== null;
-  const hasFullSummary = Boolean(summary && ["distribution", "full"].includes(summary.summary_detail ?? "full"));
   const summaryInitialStatePending = !hasSummary && !summaryError && !summaryUninitialized;
   const shouldDeferSecondaryCatalogReads =
     !hasSummary || summaryLoading || summarySaturationActive || catalogProgressSaturationActive;
@@ -1521,6 +1574,11 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       ),
     [supportsCatalog, supportsComments, supportsSocialBlade],
   );
+  const shouldRenderCommentsPanel =
+    selectedTab === "comments" &&
+    supportsComments &&
+    !summaryUninitialized &&
+    (hasSummary || summaryLoading || Boolean(summaryError));
   const isLocalDevHost = useMemo(() => {
     return typeof window !== "undefined" && isLocalDevHostname(window.location.hostname);
   }, []);
@@ -1533,8 +1591,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setSummaryLoading(false);
     setSummaryError(null);
     setDashboardFreshness(null);
-    setFullSummaryLoading(false);
-    setFullSummaryError(null);
     setSummarySaturationActive(false);
     setPosts(null);
     setPostsLoading(false);
@@ -1587,7 +1643,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     setPostSearchLoading(false);
     setPostSearchError(null);
     liveProfileTotalProbeKeyRef.current = null;
-    autoFullSummaryAttemptedRef.current = null;
   }, [platform, handle]);
 
   useEffect(() => {
@@ -1629,68 +1684,28 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         uninitialized: false,
       };
     });
-    setSummary((current) =>
-      detail === "distribution" && current
-        ? {
-            ...current,
-            ...result.data,
-            summary_detail: result.data.summary_detail ?? "distribution",
-          }
-        : result.data,
-    );
+    setSummary((current) => {
+      const nextSummary =
+        detail === "distribution" && current
+          ? {
+              ...current,
+              ...result.data,
+              summary_detail: result.data.summary_detail ?? "distribution",
+            }
+          : result.data;
+      return mergeProfileSummaryPreservingLiveTotal(nextSummary, current);
+    });
     setSummaryUninitialized(result.uninitialized);
     setSummaryError(null);
     return result;
   }, [fetchAdminWithAuth, handle, platform, user]);
 
-  const loadFullSummary = useCallback(async () => {
-    if (!user) return;
-    setFullSummaryLoading(true);
-    setFullSummaryError(null);
-    try {
-      await refreshSummary({ detail: "distribution" });
-    } catch (error) {
-      setFullSummaryError(
-        error instanceof Error ? error.message : "Failed to load social account profile summary",
-      );
-    } finally {
-      setFullSummaryLoading(false);
-    }
-  }, [refreshSummary, user]);
-
-  useEffect(() => {
-    if (
-      checking ||
-      !user ||
-      !hasAccess ||
-      selectedTab !== "stats" ||
-      !hasSummary ||
-      hasFullSummary ||
-      fullSummaryLoading ||
-      summaryUninitialized
-    ) {
-      return;
-    }
-    const requestKey = `${platform}:${handle}:stats`;
-    if (autoFullSummaryAttemptedRef.current === requestKey) return;
-    autoFullSummaryAttemptedRef.current = requestKey;
-    void loadFullSummary();
-  }, [
-    checking,
-    fullSummaryLoading,
-    handle,
-    hasAccess,
-    hasFullSummary,
-    hasSummary,
-    loadFullSummary,
-    platform,
-    selectedTab,
-    summaryUninitialized,
-    user,
-  ]);
+  const refreshCommentsSummary = useCallback(async () => {
+    await refreshSummary({ detail: "full" });
+  }, [refreshSummary]);
 
   const fetchCatalogRunProgressSnapshot = useCallback(
-    async (runId: string, options?: { signal?: AbortSignal; recentLogLimit?: number }) => {
+    async (runId: string, options?: { signal?: AbortSignal; recentLogLimit?: number; fast?: boolean }) => {
       if (!user) {
         throw new Error("Missing admin user");
       }
@@ -1701,6 +1716,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       const query = new URLSearchParams({
         recent_log_limit: String(options?.recentLogLimit ?? 25),
       });
+      if (options?.fast) {
+        query.set("fast", "1");
+      }
       const response = await fetchAdminWithAuth(
         `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/runs/${encodeURIComponent(normalizedRunId)}/progress?${query.toString()}`,
         { signal: options?.signal },
@@ -1815,7 +1833,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         detail: "lite",
       });
       if (snapshot.payload.summary) {
-        setSummary(snapshot.payload.summary);
+        setSummary((current) => mergeProfileSummaryPreservingLiveTotal(snapshot.payload.summary!, current));
         setSummaryUninitialized(false);
         setSummaryError(null);
       }
@@ -1989,7 +2007,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
         if (cancelled) return;
         setDashboardFreshness(snapshot.payload.dashboard_freshness ?? null);
         if (snapshot.payload.summary) {
-          setSummary(snapshot.payload.summary);
+          setSummary((current) => mergeProfileSummaryPreservingLiveTotal(snapshot.payload.summary!, current));
           setSummaryUninitialized(snapshot.payload.dashboard_freshness?.status === "missing");
         } else {
           setSummary(buildEmptySocialAccountProfileSummary(platform, handle));
@@ -2010,7 +2028,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             const legacySummary = await refreshSummaryRef.current({ detail: "lite" });
             if (cancelled) return;
             if (legacySummary) {
-              setSummary(legacySummary.data);
+              setSummary((current) => mergeProfileSummaryPreservingLiveTotal(legacySummary.data, current));
               setSummaryUninitialized(legacySummary.uninitialized);
               setDashboardFreshness({
                 status: legacySummary.uninitialized ? "missing" : "fresh",
@@ -2052,21 +2070,23 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       !user ||
       !hasAccess ||
       platform !== "instagram" ||
-      selectedTab !== "catalog" ||
       summaryLoading ||
-      !summary ||
-      (platformRequiresCookies && !cookieHealth && !cookieHealthError)
+      !summary
     ) {
       return;
     }
 
     const probeKey = `${platform}:${handle}`;
-    if (liveProfileTotalProbeKeyRef.current === probeKey) {
+    const pendingProbeKey = `pending:${probeKey}`;
+    if (
+      liveProfileTotalProbeKeyRef.current === probeKey ||
+      liveProfileTotalProbeKeyRef.current === pendingProbeKey
+    ) {
       return;
     }
 
     let cancelled = false;
-    liveProfileTotalProbeKeyRef.current = probeKey;
+    liveProfileTotalProbeKeyRef.current = pendingProbeKey;
 
     const loadLiveProfileTotal = async () => {
       try {
@@ -2090,20 +2110,35 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             return payload as SocialAccountLiveProfileTotal;
           },
         );
-        if (cancelled) return;
+        const liveTotalFromProfile =
+          typeof data.live_total_posts_current === "number" && Number.isFinite(data.live_total_posts_current)
+            ? Math.max(0, data.live_total_posts_current)
+            : null;
+        if (cancelled) {
+          if (liveProfileTotalProbeKeyRef.current === pendingProbeKey) {
+            liveProfileTotalProbeKeyRef.current = null;
+          }
+          return;
+        }
+        if (liveTotalFromProfile === null) {
+          if (liveProfileTotalProbeKeyRef.current === pendingProbeKey) {
+            liveProfileTotalProbeKeyRef.current = null;
+          }
+          return;
+        }
+        liveProfileTotalProbeKeyRef.current = probeKey;
         setSummary((current) => {
           if (!current) return current;
-          const nextLiveTotal = Math.max(
-            Number(current.live_total_posts ?? 0),
-            Number(data.live_total_posts_current ?? 0),
-          );
           return {
             ...current,
-            live_total_posts: nextLiveTotal > 0 ? nextLiveTotal : current.live_total_posts ?? null,
+            live_total_posts: liveTotalFromProfile,
             profile_url: data.profile_url || current.profile_url,
           };
         });
       } catch {
+        if (liveProfileTotalProbeKeyRef.current === pendingProbeKey) {
+          liveProfileTotalProbeKeyRef.current = null;
+        }
         // Best-effort only; leave the cached summary values intact.
       }
     };
@@ -2111,17 +2146,16 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     void loadLiveProfileTotal();
     return () => {
       cancelled = true;
+      if (liveProfileTotalProbeKeyRef.current === pendingProbeKey) {
+        liveProfileTotalProbeKeyRef.current = null;
+      }
     };
   }, [
     checking,
-    cookieHealth,
-    cookieHealthError,
     fetchAdminWithAuth,
     handle,
     hasAccess,
     platform,
-    selectedTab,
-    platformRequiresCookies,
     summary,
     summaryLoading,
     summaryUninitialized,
@@ -2265,7 +2299,9 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   });
 
   useEffect(() => {
-    const shouldLoadHashtags = selectedTab === "hashtags" || selectedTab === "stats";
+    const shouldLoadHashtags =
+      selectedTab === "hashtags" ||
+      (selectedTab === "stats" && !useSummaryTopHashtagsPreview);
     if (checking || !user || !hasAccess || !shouldLoadHashtags || summaryUninitialized || shouldDeferSecondaryCatalogReads) {
       return;
     }
@@ -2457,14 +2493,14 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
   }, [displayCatalogTotalPosts, displayTotalPosts, supportsCatalog]);
 
   const postsSummaryLabel = useMemo(() => {
-    // All catalog-supporting platforms use "Saved / Account total" after the
-    // label refresh. The narrow Instagram-only condition was a pre-existing
-    // Codex inconsistency vs. the runtime test at line ~284 (twitter case).
+    if (supportsCatalog && Number(summary?.live_total_posts ?? 0) > 0) {
+      return "Cataloged / Profile total";
+    }
     if (supportsCatalog) {
-      return "Saved / Account total";
+      return "Cataloged / Stored total";
     }
     return "Cataloged / Profile total";
-  }, [supportsCatalog]);
+  }, [summary?.live_total_posts, supportsCatalog]);
 
   const applyCatalogGapAnalysisStatus = useCallback(
     (payload: CatalogGapAnalysisStatusPayload) => {
@@ -2930,7 +2966,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (!normalizedDisplayedRunId) return false;
     if (ACTIVE_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "")) return true;
     if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus || "")) return false;
-    if (displayedCatalogRunStatus === "cancelled") return true;
+    if (displayedCatalogRunStatus === "cancelled") return selectedCatalogRunId === normalizedDisplayedRunId;
     if (selectedCatalogRunId === normalizedDisplayedRunId) return true;
     return activeCatalogRunId === normalizedDisplayedRunId && catalogRunProgress?.run_id === normalizedDisplayedRunId;
   }, [
@@ -2945,13 +2981,20 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (checking || !user || !hasAccess || !supportsCatalog) return;
     const normalizedDisplayedRunId = String(displayedCatalogRunId || "").trim();
     if (!normalizedDisplayedRunId) return;
-    if (normalizedDisplayedRunId === String(backgroundCatalogRunId || "").trim()) return;
     if (!TERMINAL_CATALOG_RUN_STATUSES.has(displayedCatalogRunStatus)) return;
     if (summaryUninitialized) return;
+    const selectedMatchesDisplayedRun = selectedCatalogRunId === normalizedDisplayedRunId;
+    const activeMatchesDisplayedRun = activeCatalogRunId === normalizedDisplayedRunId;
+    if (
+      normalizedDisplayedRunId === String(backgroundCatalogRunId || "").trim() &&
+      !selectedMatchesDisplayedRun &&
+      !activeMatchesDisplayedRun
+    ) {
+      return;
+    }
     const shouldHydrateTerminalRun =
-      selectedCatalogRunId === normalizedDisplayedRunId ||
-      displayedCatalogRunStatus === "cancelled" ||
-      activeCatalogRunId === normalizedDisplayedRunId;
+      selectedMatchesDisplayedRun ||
+      activeMatchesDisplayedRun;
     if (!shouldHydrateTerminalRun) return;
     if (catalogRunProgress?.run_id === normalizedDisplayedRunId) {
       catalogTerminalProgressHydrationAttemptedRunIdRef.current = null;
@@ -2983,7 +3026,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
 
       if (cancelled) return;
       if (snapshot.payload.summary) {
-        setSummary(snapshot.payload.summary);
+        setSummary((current) => mergeProfileSummaryPreservingLiveTotal(snapshot.payload.summary!, current));
         setSummaryUninitialized(false);
         setSummaryError(null);
       }
@@ -3439,16 +3482,28 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     key: `social-account-profile-snapshot:${platform}:${handle}:${backgroundCatalogRunId ?? "none"}:${catalogProgressRequestNonce}`,
     shouldRun: shouldRunLiveProfileSnapshot,
     intervalMs: CATALOG_PROGRESS_POLL_INTERVAL_MS,
-    fetchData: async (signal, request) => {
+    fetchData: async (signal) => {
+      const normalizedRunId = String(backgroundCatalogRunId || "").trim();
+      if (normalizedRunId) {
+        const progressBody = await fetchCatalogRunProgressSnapshot(normalizedRunId, { signal, fast: true });
+        return {
+          payload: {
+            summary: null,
+            catalog_run_progress: progressBody,
+            generated_at: new Date().toISOString(),
+          } as SocialAccountProfileSnapshot,
+          cacheStatus: "direct-progress",
+        };
+      }
       try {
-        return await fetchProfileSnapshot({ signal, forceRefresh: request?.forceRefresh });
+        return await fetchProfileSnapshot({ signal });
       } catch (snapshotError) {
         // Fall back to the legacy direct catalog-progress endpoint so a degraded
         // snapshot cache does not break live polling of a running catalog job.
         if (!backgroundCatalogRunId || !user) throw snapshotError;
         const normalizedRunId = String(backgroundCatalogRunId).trim();
         if (!normalizedRunId) throw snapshotError;
-        const progressBody = await fetchCatalogRunProgressSnapshot(normalizedRunId, { signal });
+        const progressBody = await fetchCatalogRunProgressSnapshot(normalizedRunId, { signal, fast: true });
         return {
           payload: {
             summary: null,
@@ -3473,7 +3528,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
     if (!liveProfileSnapshot.data) return;
     const payload = liveProfileSnapshot.data.payload;
     if (payload.summary) {
-      setSummary(payload.summary);
+      setSummary((current) => mergeProfileSummaryPreservingLiveTotal(payload.summary!, current));
       setSummaryUninitialized(false);
       setSummaryError(null);
     }
@@ -3605,8 +3660,13 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       : terminalSummaryCompletedFallback;
     const persisted = Math.max(rawPersisted, terminalSummaryCompletedFallback);
     const fallbackTotal = summaryAccountTotal;
-    const total = payloadTotal || fallbackTotal;
-    const roundedCoveragePct = total > 0 ? Math.round((completed / total) * 100) : catalogProgressSummary.pct;
+    const total =
+      catalogProgressMode === "coverage"
+        ? Math.max(payloadTotal, fallbackTotal)
+        : payloadTotal || fallbackTotal;
+    const displayedCompleted = total > 0 ? Math.min(completed, total) : completed;
+    const displayedPersisted = total > 0 ? Math.min(persisted, total) : persisted;
+    const roundedCoveragePct = total > 0 ? Math.round((displayedCompleted / total) * 100) : catalogProgressSummary.pct;
     const pct =
       catalogProgressMode === "bounded"
         ? displayedCatalogRunStatus === "completed" && catalogProgressSummary.total <= 0 && completed > 0
@@ -3620,8 +3680,10 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
       persisted,
       total,
       pct: Math.max(0, Math.min(100, pct)),
+      displayedCompleted,
+      displayedPersisted,
       hasTotal: total > 0,
-      hasCompleted: completed > 0,
+      hasCompleted: displayedCompleted > 0,
     };
   }, [
     catalogProgressSummary.items,
@@ -4282,7 +4344,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           );
         }
         setRunningCatalogAction(null);
-        await refreshProfileSnapshotNow({ runId: catalogRunId || queuedRunId }).catch(() => {});
+        void refreshProfileSnapshotNow({ runId: catalogRunId || queuedRunId }).catch(() => {});
       } catch (error) {
         const requestError = toSocialAccountRequestError(
           error,
@@ -5129,7 +5191,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                       <>
                         <p className="mt-2 text-2xl font-bold text-zinc-900">{formatInteger(commentsSavedCount)}</p>
                         <p className="mt-1 text-xs text-zinc-500">
-                          {formatInteger(commentsSavedCount)} / {formatInteger(commentsRetrievedCount)} comments
+                          {formatInteger(commentsSavedCount)} saved / {formatInteger(commentsRetrievedCount)} reported
                         </p>
                       </>
                     )}
@@ -5361,7 +5423,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     Run {shortRunId(displayedCatalogRunId)} · {displayedCatalogRunStatusLabel}
                     {catalogRunProgress?.created_at ? ` · queued ${formatDateTime(catalogRunProgress.created_at)}` : ""}
                     {catalogRunProgress?.launch_group_id ? ` · launch ${shortRunId(catalogRunProgress.launch_group_id)}` : ""}
-                    {catalogRunProgress?.launch_state ? ` · ${formatRunStatusLabel(catalogRunProgress.launch_state)}` : ""}
+                    {shouldShowCatalogLaunchState(
+                      catalogRunProgress?.run_status ?? displayedCatalogRunStatus,
+                      catalogRunProgress?.launch_state,
+                    )
+                      ? ` · ${formatRunStatusLabel(catalogRunProgress?.launch_state)}`
+                      : ""}
                     {catalogProgressLastSuccessAt ? ` · last refresh ${formatDateTime(catalogProgressLastSuccessAt)}` : ""}
                   </p>
                   {catalogPhaseLabel ? <p className="mt-2 text-sm font-medium text-zinc-700">{catalogPhaseLabel}</p> : null}
@@ -5453,17 +5520,17 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   <p className="mt-1 text-sm text-zinc-600">
                     {catalogProgressMode === "bounded"
                       ? catalogPostProgress.hasCompleted
-                        ? `${formatInteger(catalogPostProgress.completed)} posts checked`
+                        ? `${formatInteger(catalogPostProgress.displayedCompleted)} posts checked`
                         : `${formatInteger(catalogProgressSummary.finished)} / ${formatInteger(catalogProgressSummary.total)} jobs`
                       : catalogPostProgress.hasTotal
-                      ? `${formatInteger(catalogPostProgress.completed)} / ${formatInteger(catalogPostProgress.total)} posts checked`
+                      ? `${formatInteger(catalogPostProgress.displayedCompleted)} / ${formatInteger(catalogPostProgress.total)} posts checked`
                       : catalogPostProgress.hasCompleted
-                        ? `${formatInteger(catalogPostProgress.completed)} posts checked`
+                        ? `${formatInteger(catalogPostProgress.displayedCompleted)} posts checked`
                         : `${formatInteger(catalogProgressSummary.finished)} / ${formatInteger(catalogProgressSummary.total)} jobs`}
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">
                     {catalogPostProgress.hasTotal || catalogPostProgress.hasCompleted
-                      ? `${formatInteger(catalogPostProgress.persisted)} persisted`
+                      ? `${formatInteger(catalogPostProgress.displayedPersisted)} persisted`
                       : `${formatInteger(catalogProgressSummary.items)} scraped`}
                     {catalogProgressSummary.running > 0 ? ` · ${formatInteger(catalogProgressSummary.running)} running` : ""}
                     {catalogProgressSummary.waiting > 0 ? ` · ${formatInteger(catalogProgressSummary.waiting)} queued` : ""}
@@ -5747,10 +5814,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                 </div>
               ) : null}
             </section>
-          ) : shouldShowCatalogRunProgressCard && hasSummary && supportsCatalog && !activeCatalogRun ? (
-            <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <p className="text-sm text-zinc-500">No active catalog run. Ready to start the next backfill.</p>
-            </section>
           ) : null}
 
           {selectedTab === "socialblade" ? (
@@ -5761,85 +5824,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
           ) : null}
 
           {hasSummary && selectedTab === "stats" ? (
-            <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-              <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                <h2 className="text-lg font-semibold text-zinc-900">Distribution</h2>
-                {!hasFullSummary ? (
-                  <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-600">
-                    {fullSummaryError ? (
-                      <p className="text-red-700">Distribution failed: {fullSummaryError}</p>
-                    ) : (
-                      <p>{fullSummaryLoading ? "Loading distribution…" : "Preparing distribution…"}</p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-6 md:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Shows</p>
-                      <div className="mt-3 space-y-2">
-                        {(summary?.per_show_counts ?? []).length === 0 ? (
-                          <p className="text-sm text-zinc-500">No show assignments yet.</p>
-                        ) : (
-                          (summary?.per_show_counts ?? []).map((item) => (
-                            <div key={item.show_id ?? item.show_name} className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3">
-                              <p className="font-semibold text-zinc-900">{item.show_name ?? "Unassigned show"}</p>
-                              <p className="mt-1 text-xs text-zinc-500">
-                                {formatInteger(item.post_count)} posts · {formatInteger(item.engagement)} engagement
-                              </p>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Seasons</p>
-                      <div className="mt-3 space-y-2">
-                        {(summary?.per_season_counts ?? []).length === 0 ? (
-                          <p className="text-sm text-zinc-500">No season assignments yet.</p>
-                        ) : (
-                          (summary?.per_season_counts ?? []).map((item) => (
-                            <div
-                              key={item.season_id ?? `${item.show_id}-${item.season_number}`}
-                              className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3"
-                            >
-                              <p className="font-semibold text-zinc-900">
-                                {item.show_name ?? "Unknown show"} · {formatSeasonLabel(item.season_number)}
-                              </p>
-                              <p className="mt-1 text-xs text-zinc-500">
-                                {formatInteger(item.post_count)} posts · {formatInteger(item.engagement)} engagement
-                              </p>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              <section className="space-y-6">
-                {supportsCatalog ? (
-                  <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <h2 className="text-sm font-semibold text-zinc-900">Catalog Status</h2>
-                      <span className="text-xs font-medium text-zinc-500">
-                        {summary?.last_catalog_run_status ?? "Never run"}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm">
-                      <p className="text-zinc-600">
-                        Assigned <span className="ml-2 font-semibold text-zinc-900">{formatInteger(summary?.catalog_assigned_posts)}</span>
-                      </p>
-                      <p className="text-zinc-600">
-                        Unassigned <span className="ml-2 font-semibold text-zinc-900">{formatInteger(summary?.catalog_unassigned_posts)}</span>
-                      </p>
-                    </div>
-                    <p className="mt-2 text-xs text-zinc-500">
-                      Last catalog run {formatDateTime(summary?.last_catalog_run_at)} · {summary?.last_catalog_run_status ?? "Never run"}
-                    </p>
-                  </div>
-                ) : null}
-
+            <section className="space-y-6">
                 <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -5926,7 +5911,6 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                   </div>
                 </div>
               </section>
-            </div>
           ) : null}
 
           {hasSummary && selectedTab === "catalog" ? (
@@ -5937,7 +5921,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                     <div>
                       <h2 className="text-lg font-semibold text-zinc-900">Catalog</h2>
                       <p className="text-sm text-zinc-500">
-                        Lightweight shared-account history staged for assignment before show-level hydration.
+                        Gallery view of saved catalog posts. Open a card to inspect details and media.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -5995,7 +5979,7 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                                   canOpenDetail ? "cursor-pointer hover:border-zinc-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-zinc-900/20" : ""
                                 }`}
                               >
-                                <div className="relative aspect-[4/5] overflow-hidden rounded-md bg-zinc-100">
+                                <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-zinc-100" data-testid="catalog-post-thumbnail">
                                   {previewUrl ? (
                                     isLikelyVideoUrl(previewUrl) ? (
                                       <video src={previewUrl} muted playsInline preload="metadata" className="h-full w-full bg-black object-cover" />
@@ -6095,8 +6079,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
                               <p className="mt-2 text-xs text-zinc-500">
                                 Queued {formatDateTime(run.created_at)}
                                 {run.started_at ? ` · started ${formatDateTime(run.started_at)}` : ""}
-                                {run.completed_at ? ` · finished ${formatDateTime(run.completed_at)}` : ""}
-                                {run.launch_state ? ` · ${formatRunStatusLabel(run.launch_state)}` : ""}
+                                {shouldShowCatalogCompletedAt(run.completed_at, run.started_at, run.created_at)
+                                  ? ` · finished ${formatDateTime(run.completed_at)}`
+                                  : ""}
+                                {shouldShowCatalogLaunchState(run.status, run.launch_state)
+                                  ? ` · ${formatRunStatusLabel(run.launch_state)}`
+                                  : ""}
                               </p>
                               {run.selected_tasks && run.selected_tasks.length > 0 ? (
                                 <p className="mt-2 text-xs text-zinc-500">
@@ -6186,14 +6174,12 @@ export default function SocialAccountProfilePage({ platform, handle, activeTab }
             )
           ) : null}
 
-          {hasSummary && selectedTab === "comments" && supportsComments ? (
+          {shouldRenderCommentsPanel ? (
             <InstagramCommentsPanel
               platform={platform}
               handle={handle}
               summary={summary}
-              onSummaryRefresh={async () => {
-                await refreshSummary({ detail: "full" });
-              }}
+              onSummaryRefresh={refreshCommentsSummary}
             />
           ) : null}
 

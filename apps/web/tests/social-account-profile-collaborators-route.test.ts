@@ -84,7 +84,7 @@ describe("social account profile collaborators/tags route", () => {
       expect.objectContaining({
         cacheKey: "collaborators-cache-key",
         ttlMs: 300_000,
-        staleIfErrorTtlMs: 300_000,
+        staleIfErrorTtlMs: 900_000,
         forceRefresh: true,
       }),
     );

@@ -18,7 +18,7 @@ type RouteContext = {
 };
 
 const HASHTAGS_TTL_MS = 5 * 60_000;
-const HASHTAGS_STALE_MS = 5 * 60_000;
+const HASHTAGS_STALE_MS = 15 * 60_000;
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {

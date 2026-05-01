@@ -43,18 +43,19 @@ const parseConnectionPort = (connectionString: string): string | null => {
   }
 };
 
-const resolveCaBundle = (): string | undefined => {
-  const inline = process.env.DATABASE_SSL_CA;
+const resolveCaBundle = (env: EnvLike = process.env): string | undefined => {
+  const inline = env.DATABASE_SSL_CA;
   if (inline && inline.trim().length > 0) {
     return inline.replace(/\\n/g, "\n");
   }
-  const caFile = process.env.DATABASE_SSL_CA_FILE;
+  const caFile = env.DATABASE_SSL_CA_FILE || env.DATABASE_SSL_CA_PATH;
   if (caFile && caFile.trim().length > 0) {
     try {
       const absolute = resolve(process.cwd(), caFile);
       return readFileSync(absolute, "utf8");
     } catch (error) {
-      console.warn(`[postgres] Failed to read DATABASE_SSL_CA_FILE (${caFile})`, error);
+      const source = env.DATABASE_SSL_CA_FILE ? "DATABASE_SSL_CA_FILE" : "DATABASE_SSL_CA_PATH";
+      console.warn(`[postgres] Failed to read ${source} (${caFile})`, error);
     }
   }
   return undefined;
@@ -248,7 +249,7 @@ export const resolvePostgresSslConfig = (
     return undefined;
   }
 
-  const sslCa = resolveCaBundle();
+  const sslCa = resolveCaBundle(env);
   return {
     rejectUnauthorized: shouldRejectUnauthorized,
     ...(sslCa ? { ca: sslCa } : {}),

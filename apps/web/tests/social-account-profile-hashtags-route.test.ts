@@ -85,7 +85,7 @@ describe("social account profile hashtags route", () => {
       expect.objectContaining({
         cacheKey: "hashtags-cache-key",
         ttlMs: 300_000,
-        staleIfErrorTtlMs: 300_000,
+        staleIfErrorTtlMs: 900_000,
         forceRefresh: true,
       }),
     );

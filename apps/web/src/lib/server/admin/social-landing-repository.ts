@@ -356,7 +356,7 @@ const safeLoadSharedSources = async (
       queryString: "source_scope=bravo&include_inactive=true",
       fallbackError: "Failed to fetch shared social account sources",
       retries: 0,
-      timeoutMs: 30_000,
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
     });
     return Array.isArray((payload as SharedSourcesPayload).sources)
       ? ((payload as SharedSourcesPayload).sources ?? [])
@@ -390,7 +390,7 @@ const safeLoadSharedRuns = async (
       queryString: "source_scope=bravo&limit=5",
       fallbackError: "Failed to fetch shared social ingest runs",
       retries: 0,
-      timeoutMs: 30_000,
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
     });
     return Array.isArray(payload)
       ? payload.filter(
@@ -416,7 +416,7 @@ const safeLoadSharedReviewItems = async (
       queryString: "source_scope=bravo&review_status=open&limit=10",
       fallbackError: "Failed to fetch shared social review queue",
       retries: 0,
-      timeoutMs: 30_000,
+      timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
     });
     return Array.isArray((payload as SharedReviewPayload).items)
       ? ((payload as SharedReviewPayload).items ?? []).filter(
@@ -1408,18 +1408,21 @@ export async function getSocialLandingPayloadResult(
 ): Promise<SocialLandingPayloadResult> {
   const { coveredShows, redditDashboard, cacheable: landingSummaryCacheable } =
     await safeLoadBackendLandingSummary(adminContext);
-  const sharedSources = await safeLoadSharedSources(adminContext);
-  const sharedRuns = await safeLoadSharedRuns(adminContext);
-  const sharedReviewItems = await safeLoadSharedReviewItems(adminContext);
-
-  const showExternalIdsByIdResult = await safeLoadShowExternalIdsMap(
-    coveredShows.map((show) => show.trr_show_id),
-  );
+  const coveredShowIds = coveredShows.map((show) => show.trr_show_id);
+  const [
+    sharedSources,
+    sharedRuns,
+    sharedReviewItems,
+    showExternalIdsByIdResult,
+    castByShowIdResult,
+  ] = await Promise.all([
+    safeLoadSharedSources(adminContext),
+    safeLoadSharedRuns(adminContext),
+    safeLoadSharedReviewItems(adminContext),
+    safeLoadShowExternalIdsMap(coveredShowIds),
+    safeLoadShowCastSummaryMap(coveredShowIds, adminContext),
+  ]);
   const showExternalIdsById = showExternalIdsByIdResult.value;
-  const castByShowIdResult = await safeLoadShowCastSummaryMap(
-    coveredShows.map((show) => show.trr_show_id),
-    adminContext,
-  );
   const castByShowId = castByShowIdResult.value;
   const {
     peopleProfiles,

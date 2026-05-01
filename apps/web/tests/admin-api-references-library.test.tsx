@@ -4,7 +4,7 @@ import { AdminApiReferencesLibraryContent } from "@/components/admin/AdminApiRef
 
 describe("admin api references library", () => {
   it("renders the generated inventory sections and metadata", () => {
-    render(<AdminApiReferencesLibraryContent />);
+    const { container } = render(<AdminApiReferencesLibraryContent />);
 
     expect(
       screen.getByRole("heading", {
@@ -19,6 +19,9 @@ describe("admin api references library", () => {
     expect(screen.getByText(/Generated .* Commit .* Override digest/i)).toBeInTheDocument();
     expect(screen.getAllByText("/admin/api-references").length).toBeGreaterThan(0);
     expect(screen.getAllByText("api-references").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("/admin/networks-and-streaming/[entityType]/[entitySlug]").length).toBeGreaterThan(0);
+    expect(container.querySelector('a[href="/admin/api-references"]')).toBeInTheDocument();
+    expect(container.querySelector('a[href="/admin/networks-and-streaming/[entityType]/[entitySlug]"]')).toBeNull();
   });
 
   it("filters down to backend endpoints and exposes source links in expanded detail", () => {
