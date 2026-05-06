@@ -14,6 +14,7 @@ import CastContentSection from "@/components/admin/cast-content-section";
 import { invalidateAdminSnapshotFamilies } from "@/lib/admin/admin-snapshot-client";
 import { fetchAdminWithAuth, getClientAuthHeaders } from "@/lib/admin/client-auth";
 import {
+  canonicalizeHostedMediaUrl,
   inferHostedMediaFileNameFromUrl,
   isLikelyHostedMediaUrl,
 } from "@/lib/hosted-media";
@@ -2125,13 +2126,41 @@ const getCanonicalLeaderboardThumbnailImage = (item: {
   display_thumbnail_url?: string | null;
   display_thumbnail_variants?: DisplayThumbnailVariants;
   display_thumbnail_srcset?: string | null;
-}): DisplayThumbnailSelection =>
-  selectDisplayThumbnail({
+}): DisplayThumbnailSelection => {
+  const imageThumbnail = selectDisplayThumbnail({
     displayThumbnail: item.display_thumbnail_url,
     displayThumbnailSrcSet: item.display_thumbnail_srcset,
     displayThumbnailVariants: item.display_thumbnail_variants,
     fallbackUrls: [item.hosted_thumbnail_url, item.thumbnail_url, item.source_thumbnail_url],
   });
+  if (imageThumbnail.src) return imageThumbnail;
+
+  const videoSrc = pickFirstVideoLikeLeaderboardThumbnailUrl([
+    item.display_thumbnail_url,
+    item.hosted_thumbnail_url,
+    item.thumbnail_url,
+    item.source_thumbnail_url,
+    ...Object.values(item.display_thumbnail_variants ?? {}),
+  ]);
+  return {
+    src: videoSrc,
+    srcSet: null,
+  };
+};
+
+const pickFirstVideoLikeLeaderboardThumbnailUrl = (values: unknown[]): string | null => {
+  for (const value of values) {
+    const rawUrl =
+      typeof value === "string"
+        ? value
+        : value && typeof value === "object" && "url" in value
+          ? String((value as { url?: unknown }).url ?? "")
+          : "";
+    const candidate = canonicalizeHostedMediaUrl(rawUrl) ?? rawUrl.trim();
+    if (candidate && isVideoLikeThumbnailUrl(candidate)) return candidate;
+  }
+  return null;
+};
 
 const getCanonicalLeaderboardThumbnailUrl = (item: {
   hosted_thumbnail_url?: string | null;

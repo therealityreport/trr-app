@@ -4,7 +4,7 @@ import type { AdminApiReferenceInventory } from "@/lib/admin/api-references/type
 export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
   "inventorySchemaVersion": "1.0.0",
   "generatorVersion": "1.0.0",
-  "generatedAt": "2026-04-30T23:57:18.711Z",
+  "generatedAt": "2026-05-06T04:39:13.248Z",
   "sourceCommitSha": "b4198ec471d55204af3f5bbeca194ac0a9706ab7",
   "overrideDigest": "ddca008fc34e0b3820391e86a4d0620aa57e942244342eab2e4b94e2bcfdb211",
   "nodes": [
@@ -5863,7 +5863,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7151,
+        "line": 7126,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -5894,7 +5894,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "set-interval",
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7159,
+        "line": 7134,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -8712,7 +8712,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 212,
+        "line": 301,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10304,7 +10304,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/assets/route.ts",
       "sourceLocator": {
-        "line": 31,
+        "line": 34,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -10681,7 +10681,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/shows/[showId]/seasons/[seasonNumber]/assets/route.ts",
       "sourceLocator": {
-        "line": 31,
+        "line": 34,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -11937,7 +11937,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/ingest/live-status/route.ts",
       "sourceLocator": {
-        "line": 19,
+        "line": 41,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -11952,12 +11952,12 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [],
       "staticOnly": false,
-      "payloadRisk": "low",
+      "payloadRisk": "high",
       "fanoutRisk": "low"
     },
     {
@@ -12199,7 +12199,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/progress/route.ts",
       "sourceLocator": {
-        "line": 27,
+        "line": 69,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12214,7 +12214,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": true,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": false,
+      "returnsWideRowsOrBlobsOrRawJson": true,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
@@ -12267,7 +12267,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/collaborators-tags/route.ts",
       "sourceLocator": {
-        "line": 23,
+        "line": 8,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12300,7 +12300,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/route.ts",
       "sourceLocator": {
-        "line": 14,
+        "line": 5,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12386,6 +12386,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
+        "list",
         "detail"
       ],
       "staticOnly": false,
@@ -12400,7 +12401,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags/route.ts",
       "sourceLocator": {
-        "line": 23,
+        "line": 18,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12500,7 +12501,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/posts/route.ts",
       "sourceLocator": {
-        "line": 24,
+        "line": 12,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12534,7 +12535,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/snapshot/route.ts",
       "sourceLocator": {
-        "line": 62,
+        "line": 107,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12601,7 +12602,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "GET",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/summary/route.ts",
       "sourceLocator": {
-        "line": 32,
+        "line": 20,
         "symbol": "GET"
       },
       "provenance": "static_scan",
@@ -12616,15 +12617,14 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "automatic": false,
       "loadsLargeDatasets": false,
       "usesPagination": false,
-      "returnsWideRowsOrBlobsOrRawJson": true,
+      "returnsWideRowsOrBlobsOrRawJson": false,
       "fansOutQueries": false,
       "postgresAccess": "none",
       "viewKinds": [
-        "list",
         "detail"
       ],
       "staticOnly": false,
-      "payloadRisk": "high",
+      "payloadRisk": "low",
       "fanoutRisk": "low"
     },
     {
@@ -14118,7 +14118,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/social/landing/route.ts",
       "sourceLocator": {
-        "line": 281,
+        "line": 370,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -17482,7 +17482,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "POST",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/comments/scrape/route.ts",
       "sourceLocator": {
-        "line": 15,
+        "line": 6,
         "symbol": "POST"
       },
       "provenance": "static_scan",
@@ -18497,7 +18497,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "symbol": "PUT",
       "sourceFile": "src/app/api/admin/trr-api/social/profiles/[platform]/[handle]/hashtags/route.ts",
       "sourceLocator": {
-        "line": 57,
+        "line": 33,
         "symbol": "PUT"
       },
       "provenance": "static_scan",
@@ -18599,7 +18599,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7151,
+        "line": 7126,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -18617,7 +18617,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 7159,
+        "line": 7134,
         "matchedText": "setInterval"
       },
       "provenance": "static_scan",
@@ -19175,7 +19175,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/components/admin/social-week/WeekDetailPageView.tsx",
       "sourceLocator": {
-        "line": 5078,
+        "line": 5051,
         "matchedText": "`/api/admin/trr-api/shows/resolve-slug?slug=${encodeURIComponent(raw)}`"
       },
       "provenance": "static_scan",
@@ -19319,7 +19319,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3865,
+        "line": 3994,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images`"
       },
       "provenance": "static_scan",
@@ -19337,7 +19337,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3779,
+        "line": 3908,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-images/stream`"
       },
       "provenance": "static_scan",
@@ -19355,7 +19355,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3572,
+        "line": 3701,
         "matchedText": "`/api/admin/trr-api/people/${personId}/refresh-profile/stream`"
       },
       "provenance": "static_scan",
@@ -19373,7 +19373,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 3949,
+        "line": 4078,
         "matchedText": "`/api/admin/trr-api/people/${personId}/reprocess-images/stream`"
       },
       "provenance": "static_scan",
@@ -19391,7 +19391,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 9780,
+        "line": 9949,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/assets/batch-jobs/stream`"
       },
       "provenance": "static_scan",
@@ -19409,7 +19409,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 6788,
+        "line": 6917,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/import-bravo/preview/stream`"
       },
       "provenance": "static_scan",
@@ -19427,7 +19427,7 @@ export const GENERATED_ADMIN_API_REFERENCE_INVENTORY = {
       "title": null,
       "sourceFile": "src/app/admin/trr-shows/[showId]/page.tsx",
       "sourceLocator": {
-        "line": 10740,
+        "line": 10909,
         "matchedText": "`/api/admin/trr-api/shows/${showId}/refresh/stream`"
       },
       "provenance": "static_scan",

@@ -73,6 +73,14 @@ export function pickFirstNonVideoUrl(urls: Array<string | null | undefined>): st
   return null;
 }
 
+function pickFirstAvailableUrl(urls: Array<string | null | undefined>): string | null {
+  for (const raw of urls) {
+    const candidate = normalizeCandidate(raw);
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
 function normalizeDisplayVariant(value: DisplayThumbnailVariantValue): {
   url: string | null;
   width: number | null;
@@ -191,19 +199,20 @@ export function selectTwitterThumbnail(input: {
   hostedMediaUrls: string[];
   mediaUrls: string[];
 }): DisplayThumbnailSelection {
-  const preferred = selectDisplayThumbnail({
-    displayThumbnail: input.displayThumbnail,
-    displayThumbnailSrcSet: input.displayThumbnailSrcSet,
-    displayThumbnailVariants: input.displayThumbnailVariants,
-    fallbackUrls: [
+  const fallbackUrls = [
     input.hostedThumbnail,
     input.thumbnail,
     ...(input.hostedMediaUrls || []),
     ...(input.mediaUrls || []),
-    ],
+  ];
+  const preferred = selectDisplayThumbnail({
+    displayThumbnail: input.displayThumbnail,
+    displayThumbnailSrcSet: input.displayThumbnailSrcSet,
+    displayThumbnailVariants: input.displayThumbnailVariants,
+    fallbackUrls,
   });
   if (preferred.src) return preferred;
-  return { src: null, srcSet: null };
+  return { src: pickFirstAvailableUrl(fallbackUrls), srcSet: null };
 }
 
 export function selectInstagramTikTokThumbnailUrl(input: {
@@ -231,18 +240,19 @@ export function selectInstagramTikTokThumbnail(input: {
   mediaUrls: string[];
   sourceMediaUrls?: string[];
 }): DisplayThumbnailSelection {
-  const preferred = selectDisplayThumbnail({
-    displayThumbnail: input.displayThumbnail,
-    displayThumbnailSrcSet: input.displayThumbnailSrcSet,
-    displayThumbnailVariants: input.displayThumbnailVariants,
-    fallbackUrls: [
+  const fallbackUrls = [
     input.hostedThumbnail,
     input.thumbnail,
     ...(input.hostedMediaUrls || []),
     ...(input.sourceMediaUrls || []),
     ...(input.mediaUrls || []),
-    ],
+  ];
+  const preferred = selectDisplayThumbnail({
+    displayThumbnail: input.displayThumbnail,
+    displayThumbnailSrcSet: input.displayThumbnailSrcSet,
+    displayThumbnailVariants: input.displayThumbnailVariants,
+    fallbackUrls,
   });
   if (preferred.src) return preferred;
-  return { src: null, srcSet: null };
+  return { src: pickFirstAvailableUrl(fallbackUrls), srcSet: null };
 }

@@ -299,11 +299,11 @@ describe("SocialAccountProfilePage", () => {
 
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="catalog" />);
 
-    const commentsTile = await screen.findByText("Instagram Rows");
+    const commentsTile = await screen.findByText("Saved Comments");
     const commentsCard = commentsTile.closest("div.rounded-2xl");
     expect(commentsCard).not.toBeNull();
     expect(within(commentsCard as HTMLElement).getByText("41")).toBeInTheDocument();
-    expect(within(commentsCard as HTMLElement).getByText("41 Instagram rows / 429 reported")).toBeInTheDocument();
+    expect(within(commentsCard as HTMLElement).getByText("41 saved comments / 429 reported comments")).toBeInTheDocument();
 
     const mediaTile = screen.getByText("Media Saved");
     const mediaCard = mediaTile.closest("div.rounded-2xl");
@@ -426,9 +426,9 @@ describe("SocialAccountProfilePage", () => {
     expect(screen.getByText("Posts", { selector: "p" }).parentElement?.textContent?.replace(/\s+/g, " ").trim()).toContain(
       "437 / 438",
     );
-    const commentsCard = screen.getByText("Instagram Rows").closest("div.rounded-2xl");
+    const commentsCard = screen.getByText("Saved Comments").closest("div.rounded-2xl");
     expect(commentsCard).not.toBeNull();
-    expect(within(commentsCard as HTMLElement).getByText("102,300 Instagram rows / 106,702 reported")).toBeInTheDocument();
+    expect(within(commentsCard as HTMLElement).getByText("102,300 saved comments / 106,702 reported comments")).toBeInTheDocument();
     const mediaCard = screen.getByText("Media Saved").closest("div.rounded-2xl");
     expect(mediaCard).not.toBeNull();
     expect(within(mediaCard as HTMLElement).queryByText("Unavailable")).not.toBeInTheDocument();
@@ -605,7 +605,7 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     expect(await screen.findByText("Showing cached dashboard data from 2 minutes ago.")).toBeInTheDocument();
-    expect(screen.getByText("Instagram Rows")).toBeInTheDocument();
+    expect(screen.getByText("Saved Comments")).toBeInTheDocument();
   });
 
   it("renders cached summary data when dashboard freshness is error", async () => {
@@ -636,7 +636,7 @@ describe("SocialAccountProfilePage", () => {
     expect(
       await screen.findByText("Backend dashboard refresh failed. Showing the last successful profile data."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Instagram Rows")).toBeInTheDocument();
+    expect(screen.getByText("Saved Comments")).toBeInTheDocument();
     expect(screen.queryByText("Failed to load social account profile summary")).not.toBeInTheDocument();
   });
 
@@ -682,9 +682,9 @@ describe("SocialAccountProfilePage", () => {
     render(<SocialAccountProfilePage platform="instagram" handle="bravotv" activeTab="stats" />);
 
     await waitFor(() => {
-      expect(screen.getByText("Instagram Rows")).toBeInTheDocument();
+      expect(screen.getByText("Saved Comments")).toBeInTheDocument();
     });
-    expect(screen.getByText("41 Instagram rows / 429 reported")).toBeInTheDocument();
+    expect(screen.getByText("41 saved comments / 429 reported comments")).toBeInTheDocument();
     expect(screen.getByText("1,289 / 1,400 files")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load Full Profile Insights" })).not.toBeInTheDocument();
     expect(screen.queryByText("Loads with full profile insights.")).not.toBeInTheDocument();
@@ -1313,7 +1313,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.body).toBe(
           JSON.stringify({
             mode: "profile",
-            source_scope: "bravo",
+            source_scope: "network",
             refresh_policy: "stale_or_missing",
           }),
         );
@@ -1408,7 +1408,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.body).toBe(
           JSON.stringify({
             mode: "profile",
-            source_scope: "bravo",
+            source_scope: "network",
             refresh_policy: "stale_or_missing",
             target_filter: "incomplete",
           }),
@@ -1670,13 +1670,17 @@ describe("SocialAccountProfilePage", () => {
     expect(await screen.findByText("4 shards: 2 active, 1 queued, 1 complete, 0 failed")).toBeInTheDocument();
     expect(await screen.findByText("5 / 12 posts checked")).toBeInTheDocument();
     expect(await screen.findByText("204 comments fetched this run")).toBeInTheDocument();
-    expect(await screen.findByText("120 DB rows written this run")).toBeInTheDocument();
-    expect(await screen.findByText("16 added or updated this run")).toBeInTheDocument();
+    expect(await screen.findByText("120 comments upserted this run")).toBeInTheDocument();
+    expect(await screen.findByText("7 new comments saved this run")).toBeInTheDocument();
+    expect(await screen.findByText("9 existing comments changed this run")).toBeInTheDocument();
+    expect(await screen.findByText("113 existing comments seen this run")).toBeInTheDocument();
     expect(screen.getByText("Shard 1 of 4 · job live-sha")).toBeInTheDocument();
-    expect(screen.getByText(/120 fetched .* 16 new .* 120 DB writes/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/120 fetched .* 7 new comments saved .* 113 existing comments seen .* 120 comments upserted/),
+    ).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getAllByText("52 Instagram rows / 429 reported").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("52 saved comments / 429 reported comments").length).toBeGreaterThan(0);
     });
   });
 
@@ -2065,7 +2069,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(
           JSON.stringify({
-            source_scope: "bravo",
+            source_scope: "network",
             backfill_scope: "full_history",
             selected_tasks: ["post_details", "comments", "media"],
           }),
@@ -2288,7 +2292,7 @@ describe("SocialAccountProfilePage", () => {
     expect(postLink).toBeInTheDocument();
     expect(screen.getByText("Reported Comments")).toBeInTheDocument();
     expect(screen.getByText("Instagram Saved")).toBeInTheDocument();
-    expect(screen.getByText("Missing Comments")).toBeInTheDocument();
+    expect(screen.getAllByText("Missing Comments").length).toBeGreaterThanOrEqual(2);
     const row = postLink.closest("tr") as HTMLElement;
     expect(within(row).getByText("27")).toBeInTheDocument();
     expect(within(row).getByText("13 parent")).toBeInTheDocument();
@@ -2562,7 +2566,7 @@ describe("SocialAccountProfilePage", () => {
     expect(incompletePostLink).toBeInTheDocument();
     const incompletePostRow = incompletePostLink.closest("tr") as HTMLElement;
     expect(within(incompletePostRow).getByText("7")).toBeInTheDocument();
-    expect(within(incompletePostRow).getByText("3")).toBeInTheDocument();
+    expect(within(incompletePostRow).getByText("3 saved comments")).toBeInTheDocument();
     expect(screen.getAllByText("Incomplete").length).toBeGreaterThanOrEqual(2);
 
     fireEvent.click(screen.getByRole("button", { name: /Not Commentable/i }));
@@ -3377,7 +3381,7 @@ describe("SocialAccountProfilePage", () => {
                 run_id: "catalog-run-pending-12345678",
                 run_status: "queued",
                 launch_state: "pending",
-                source_scope: "bravo",
+                source_scope: "network",
                 selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
                 effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
                 stages: {},
@@ -3394,7 +3398,7 @@ describe("SocialAccountProfilePage", () => {
           run_id: "catalog-run-pending-12345678",
           run_status: "queued",
           launch_state: "pending",
-          source_scope: "bravo",
+          source_scope: "network",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           stages: {},
@@ -3407,7 +3411,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
         expect(body).toEqual({
-          source_scope: "bravo",
+          source_scope: "network",
           backfill_scope: "full_history",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
         });
@@ -3457,7 +3461,7 @@ describe("SocialAccountProfilePage", () => {
           operational_state: "fetching",
           launch_group_id: "launch-group-running-12345678",
           launch_state: "ready",
-          source_scope: "bravo",
+          source_scope: "network",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           effective_selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           stages: {
@@ -3552,7 +3556,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(
           JSON.stringify({
-            source_scope: "bravo",
+            source_scope: "network",
             backfill_scope: "full_history",
             selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
           }),
@@ -3621,7 +3625,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(
           JSON.stringify({
-            source_scope: "bravo",
+            source_scope: "network",
             backfill_scope: "full_history",
             selected_tasks: [...TIKTOK_BACKFILL_DEFAULT_TASKS],
           }),
@@ -3671,7 +3675,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
         expect(body).toEqual({
-          source_scope: "bravo",
+          source_scope: "network",
           backfill_scope: "full_history",
           selected_tasks: ["post_details", "comments", "media"],
         });
@@ -3844,7 +3848,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "catalog-run-deferred-1",
           run_status: "running",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -3958,7 +3962,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "catalog-run-stale-terminal-1",
           run_status: "cancelled",
-          source_scope: "bravo",
+          source_scope: "network",
           selected_tasks: ["post_details", "comments", "media"],
           effective_selected_tasks: ["post_details", "comments", "media"],
           attached_followups: {
@@ -4014,7 +4018,7 @@ describe("SocialAccountProfilePage", () => {
     const progressPayload = {
       run_id: "catalog-run-reused-1",
       run_status: "running",
-      source_scope: "bravo",
+      source_scope: "network",
       selected_tasks: ["comments", "media"],
       effective_selected_tasks: ["comments", "media"],
       comments_run_id: "comments-run-reused-1",
@@ -4131,7 +4135,7 @@ describe("SocialAccountProfilePage", () => {
     const progressPayload = {
       run_id: "catalog-run-stale-stage-1",
       run_status: "completed",
-      source_scope: "bravo",
+      source_scope: "network",
       selected_tasks: ["post_details", "comments"],
       effective_selected_tasks: ["post_details", "comments"],
       comments_run_id: "comments-run-cancelled-1",
@@ -4278,7 +4282,7 @@ describe("SocialAccountProfilePage", () => {
             run_status: "completed",
             run_state: "completed",
             operational_state: "completed",
-            source_scope: "bravo",
+            source_scope: "network",
             created_at: "2026-04-21T12:00:00Z",
             stages: {},
             per_handle: [],
@@ -4404,8 +4408,8 @@ describe("SocialAccountProfilePage", () => {
     );
     expect(screen.getByText("Facebook Crosspost")).toBeInTheDocument();
     expect(screen.getByText("742 comments from Facebook")).toBeInTheDocument();
-    expect(screen.getByText(/12 Instagram rows of 17 Instagram-fetchable comments/)).toBeInTheDocument();
-    expect(screen.getByText(/742 Facebook accounted outside Instagram rows/)).toBeInTheDocument();
+    expect(screen.getByText(/12 saved comments out of 17 Instagram-fetchable comments/)).toBeInTheDocument();
+    expect(screen.getByText(/742 Facebook accounted outside Instagram comments/)).toBeInTheDocument();
     expect(screen.getByText("Shared to Facebook")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Facebook post" })).toHaveAttribute(
       "href",
@@ -4582,7 +4586,7 @@ describe("SocialAccountProfilePage", () => {
     await waitFor(() => {
       expect(backfillBodies).toEqual([
         {
-          source_scope: "bravo",
+          source_scope: "network",
           backfill_scope: "full_history",
           selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
         },
@@ -4803,7 +4807,7 @@ describe("SocialAccountProfilePage", () => {
       }
       if (url.includes("/catalog/sync-newer")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "network" }));
         return jsonResponse({ run_id: "catalog-run-head-1", status: "queued" });
       }
       if (url.includes("/snapshot")) {
@@ -4865,7 +4869,7 @@ describe("SocialAccountProfilePage", () => {
       }
       if (url.includes("/catalog/backfill")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo", backfill_scope: "full_history" }));
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "network", backfill_scope: "full_history" }));
         return jsonResponse({ run_id: "catalog-run-tail-2", status: "queued" });
       }
       if (url.includes("/snapshot")) {
@@ -4929,7 +4933,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(
           JSON.stringify({
-            source_scope: "bravo",
+            source_scope: "network",
             backfill_scope: "bounded_window",
             date_start: "2026-04-01T00:00:00Z",
             date_end: "2026-04-03T23:59:59Z",
@@ -5097,7 +5101,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(
           JSON.stringify({
-            source_scope: "bravo",
+            source_scope: "network",
             backfill_scope: "full_history",
             selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           }),
@@ -5216,7 +5220,7 @@ describe("SocialAccountProfilePage", () => {
       }
       if (url.includes("/catalog/sync-newer")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo" }));
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "network" }));
         return jsonResponse({
           run_id: "catalog-run-head-12345678",
           status: "queued",
@@ -5328,7 +5332,7 @@ describe("SocialAccountProfilePage", () => {
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(
           JSON.stringify({
-            source_scope: "bravo",
+            source_scope: "network",
             backfill_scope: "bounded_window",
             date_start: "2026-03-01T12:00:00Z",
             date_end: "2026-03-02T12:00:00Z",
@@ -5434,7 +5438,7 @@ describe("SocialAccountProfilePage", () => {
       }
       if (url.includes("/catalog/backfill")) {
         expect(init?.method).toBe("POST");
-        expect(init?.body).toBe(JSON.stringify({ source_scope: "bravo", backfill_scope: "full_history" }));
+        expect(init?.body).toBe(JSON.stringify({ source_scope: "network", backfill_scope: "full_history" }));
         return jsonResponse({
           run_id: "catalog-run-twitter-12345678",
           status: "queued",
@@ -5689,7 +5693,7 @@ describe("SocialAccountProfilePage", () => {
     const activeProgress = {
       run_id: "run-active-1",
       run_status: "running",
-      source_scope: "bravo",
+      source_scope: "network",
       created_at: "2026-03-18T11:00:00.000Z",
       stages: {
         shared_account_discovery: {
@@ -5780,7 +5784,7 @@ describe("SocialAccountProfilePage", () => {
       run_id: "run-rich-fields-1",
       run_status: "running",
       run_state: "fetching",
-      source_scope: "bravo",
+      source_scope: "network",
       selected_tasks: ["post_details", "comments", "media"],
       effective_selected_tasks: ["post_details", "comments", "media"],
       stages: {},
@@ -6013,7 +6017,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-frontier-1",
           run_status: "running",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_discovery: {
               jobs_total: 1,
@@ -6117,7 +6121,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-active-2",
           run_status: "retrying",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -6201,7 +6205,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-active-3",
           run_status: "running",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -6254,7 +6258,7 @@ describe("SocialAccountProfilePage", () => {
     const activeNewProgress = {
       run_id: "run-active-new",
       run_status: "running",
-      source_scope: "bravo",
+      source_scope: "network",
       stages: {},
       per_handle: [],
       recent_log: [],
@@ -6286,7 +6290,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-failed-old",
           run_status: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -6366,7 +6370,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-active-live",
           run_status: "running",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -6383,7 +6387,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-old-history",
           run_status: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -6459,7 +6463,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-live-1",
           run_status: "running",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -6513,7 +6517,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-modal-wait-1",
           run_status: "queued",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_discovery: {
               jobs_total: 1,
@@ -6590,7 +6594,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-modal-worker-1",
           run_status: "queued",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_discovery: {
               jobs_total: 1,
@@ -6665,7 +6669,7 @@ describe("SocialAccountProfilePage", () => {
         return jsonResponse({
           run_id: "run-classify-1",
           run_status: "queued",
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-04-02T23:18:10.000Z",
           scrape_complete: true,
           classify_incomplete: true,
@@ -6799,7 +6803,7 @@ it("shows recovering catalog state details when the backend is waiting on a reco
         run_id: "run-recov-1",
         run_status: "queued",
         run_state: "recovering",
-        source_scope: "bravo",
+        source_scope: "network",
         created_at: "2026-04-07T09:48:03.000Z",
         stages: {
           shared_account_discovery: {
@@ -6926,7 +6930,7 @@ it("shows Retry Locally for failed TikTok empty-body runs on local dev", async (
           run_id: "run-tiktok-failed-alert",
           run_status: "failed",
           run_state: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           last_error_code: "tiktok_discovery_empty_first_page",
           stages: {},
           per_handle: [],
@@ -7015,7 +7019,7 @@ it("hides Retry Locally while a TikTok recovery handoff is still active", async 
           run_id: "run-tiktok-recovery-active",
           run_status: "failed",
           run_state: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           last_error_code: "tiktok_discovery_empty_first_page",
           stages: {},
           per_handle: [],
@@ -7112,7 +7116,7 @@ it("sends the explicit local TikTok backfill payload when Retry Locally is click
             run_id: "run-tiktok-failed-payload",
             run_status: "failed",
             run_state: "failed",
-            source_scope: "bravo",
+            source_scope: "network",
             last_error_code: "tiktok_discovery_empty_first_page",
             stages: {},
             per_handle: [],
@@ -7147,7 +7151,7 @@ it("sends the explicit local TikTok backfill payload when Retry Locally is click
             run_id: "run-tiktok-retry-queued",
             run_status: "queued",
             run_state: "queued",
-            source_scope: "bravo",
+            source_scope: "network",
             stages: {},
             per_handle: [],
             recent_log: [],
@@ -7209,7 +7213,7 @@ it("sends the explicit local TikTok backfill payload when Retry Locally is click
   await waitFor(() => {
     expect(backfillBodies).toEqual([
       {
-        source_scope: "bravo",
+        source_scope: "network",
         backfill_scope: "full_history",
         allow_inline_dev_fallback: true,
         execution_preference: "prefer_local_inline",
@@ -7257,7 +7261,7 @@ it("shows the direct fallback recovery copy for active TikTok recovery handoffs"
           run_id: "run-tiktok-recovering",
           run_status: "queued",
           run_state: "recovering",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_posts: {
               jobs_total: 1,
@@ -7330,7 +7334,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         run_id: "run-cancelled-1",
         run_status: "cancelled",
         run_state: "recovering",
-        source_scope: "bravo",
+        source_scope: "network",
         created_at: "2026-04-07T09:48:03.000Z",
         stages: {
           shared_account_discovery: {
@@ -7378,7 +7382,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           run_id: "run-cancelled-1",
           run_status: "cancelled",
           run_state: "recovering",
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-04-07T09:48:03.000Z",
           stages: {
             shared_account_discovery: {
@@ -7454,7 +7458,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           run_id: "run-alerts-1",
           run_status: "running",
           run_state: "classifying",
-          source_scope: "bravo",
+          source_scope: "network",
           scrape_complete: true,
           classify_incomplete: true,
           alerts: [
@@ -7555,7 +7559,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           run_id: "run-stuck-1",
           run_status: "running",
           run_state: "discovering",
-          source_scope: "bravo",
+          source_scope: "network",
           alerts: [
             {
               code: "no_eligible_worker_for_required_runtime",
@@ -7840,7 +7844,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           source_status: [
             {
               id: "shared-source-1",
-              source_scope: "bravo",
+              source_scope: "network",
               network_name: "Bravo",
               profile_kind: "network_streaming",
               assignment_mode: "multi_show_match",
@@ -7861,7 +7865,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     });
     expect(screen.getByText("Source Status")).toBeInTheDocument();
     expect(screen.getAllByText("Bravo").length).toBeGreaterThan(0);
-    expect(screen.getByText(/network streaming · multi show match · bravo/i)).toBeInTheDocument();
+    expect(screen.getByText(/network streaming · multi show match · network/i)).toBeInTheDocument();
   });
 
   it("uses catalog run status when source scrape status has never been recorded", async () => {
@@ -7914,7 +7918,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     const blockedProgress = {
       run_id: "run-modal-blocked-1",
       run_status: "queued",
-      source_scope: "bravo",
+      source_scope: "network",
       stages: {
         shared_account_discovery: {
           jobs_total: 1,
@@ -8013,7 +8017,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         return jsonResponse({
           run_id: "run-retry-1",
           run_status: "queued",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_discovery: {
               jobs_total: 1,
@@ -8086,7 +8090,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         return jsonResponse({
           run_id: "run-fallback-fetch-1",
           run_status: "running",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_discovery: {
               jobs_total: 1,
@@ -8207,7 +8211,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         return jsonResponse({
           run_id: "run-stale-fail-1",
           run_status: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_discovery: {
               jobs_total: 1,
@@ -8265,7 +8269,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     const runningProgressBody = {
       run_id: "cancelok1-run",
       run_status: "running",
-      source_scope: "bravo",
+      source_scope: "network",
       stages: {},
       per_handle: [],
       recent_log: [],
@@ -8356,7 +8360,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     const runningProgress = {
       run_id: "cancel-race-1",
       run_status: "running",
-      source_scope: "bravo",
+      source_scope: "network",
       completed_at: null,
       stages: {
         shared_account_discovery: {
@@ -8471,7 +8475,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     const queuedProgress = {
       run_id: "queued-run-1",
       run_status: "queued",
-      source_scope: "bravo",
+      source_scope: "network",
       stages: {
         shared_account_discovery: {
           jobs_total: 1,
@@ -8629,7 +8633,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         return jsonResponse({
           run_id: "run-failed-1",
           run_status: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -8677,7 +8681,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     const frontierProgress = {
       run_id: "run-live-1",
       run_status: "running",
-      source_scope: "bravo",
+      source_scope: "network",
       stages: {
         shared_account_discovery: {
           jobs_total: 1,
@@ -8802,7 +8806,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           return jsonResponse({
             run_id: "run-refresh-1",
             run_status: "running",
-            source_scope: "bravo",
+            source_scope: "network",
             stages: {
               shared_account_discovery: {
                 jobs_total: 1,
@@ -8893,7 +8897,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           return jsonResponse({
             run_id: "run-timeout-1",
             run_status: "running",
-            source_scope: "bravo",
+            source_scope: "network",
             stages: {},
             per_handle: [],
             recent_log: [],
@@ -8936,7 +8940,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
               {
                 id: "source-bravo-network",
                 network_name: "Bravo network source",
-                source_scope: "bravo",
+                source_scope: "network",
                 profile_kind: "shared_profile",
                 assignment_mode: "multi_show_match",
               },
@@ -9279,7 +9283,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         return jsonResponse({
           run_id: "run-scrape-complete-1",
           run_status: "completed",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {
             shared_account_discovery: {
               jobs_total: 1,
@@ -9426,7 +9430,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         return jsonResponse({
           run_id: "run-preview-fallback-1",
           run_status: "completed",
-          source_scope: "bravo",
+          source_scope: "network",
           stages: {},
           per_handle: [],
           recent_log: [],
@@ -9476,7 +9480,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
         return jsonResponse({
           run_id: "run-discovery-only",
           run_status: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-03-18T18:04:00.000Z",
           stages: {
             shared_account_discovery: {
@@ -9700,7 +9704,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           catalog_run_progress: {
             run_id: "4485bca3-ebdc-4a6c-8696-1df2263f7cbf",
             run_status: "completed",
-            source_scope: "bravo",
+            source_scope: "network",
             created_at: "2026-04-21T15:12:51.564Z",
             stages: {
               shared_account_posts: {
@@ -9871,7 +9875,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           catalog_run_progress: {
             run_id: "run-completed-no-stage-telemetry",
             run_status: "completed",
-            source_scope: "bravo",
+            source_scope: "network",
             created_at: "2026-04-21T11:35:00.000Z",
             stages: {},
             per_handle: [],
@@ -9968,7 +9972,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
             run_status: "completed",
             catalog_action: "sync_newer",
             catalog_action_scope: "head_gap",
-            source_scope: "bravo",
+            source_scope: "network",
             created_at: "2026-04-07T20:36:47.000Z",
             stages: {
               shared_account_posts: {
@@ -10024,7 +10028,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           run_status: "completed",
           catalog_action: "sync_newer",
           catalog_action_scope: "head_gap",
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-04-07T20:36:47.000Z",
           stages: {
             shared_account_posts: {
@@ -10102,7 +10106,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
             run_status: "completed",
             catalog_action: "backfill",
             catalog_action_scope: "full_history",
-            source_scope: "bravo",
+            source_scope: "network",
             created_at: "2026-04-07T20:36:47.000Z",
             discovery: {
               status: "completed",
@@ -10178,7 +10182,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
           run_status: "completed",
           catalog_action: "backfill",
           catalog_action_scope: "full_history",
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-04-07T20:36:47.000Z",
           discovery: {
             status: "completed",
@@ -10264,7 +10268,7 @@ it("prefers terminal cancelled status labels over stale recovering state", async
     const discoveryMismatchProgress = {
       run_id: "run-discovery-classify-mismatch",
       run_status: "failed",
-      source_scope: "bravo",
+      source_scope: "network",
       created_at: "2026-04-07T13:36:41.000Z",
       stages: {
         shared_account_discovery: {
@@ -10383,7 +10387,7 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
               supported: true,
               repair_command: "python scripts/modal/repair_instagram_auth.py --json",
             },
-            source_scope: "bravo",
+            source_scope: "network",
             created_at: "2026-04-07T13:36:41.000Z",
             stages: {
               shared_account_discovery: {
@@ -10448,7 +10452,7 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
             supported: true,
             repair_command: "python scripts/modal/repair_instagram_auth.py --json",
           },
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-04-07T13:36:41.000Z",
           stages: {
             shared_account_discovery: {
@@ -10548,7 +10552,7 @@ it("renders blocked-auth repair controls and starts the repair flow", async () =
           repairable_reason: null,
           resume_stage: null,
           auto_resume_pending: false,
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-04-07T13:36:41.000Z",
           last_error_message: "Instagram returned no posts for @bravotv on the first page.",
           stages: {
@@ -10644,7 +10648,7 @@ it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and 
               repairable_reason: "discovery_empty_first_page",
               resume_stage: "discovery",
               auto_resume_pending: false,
-              source_scope: "bravo",
+              source_scope: "network",
               created_at: "2026-04-07T13:36:41.000Z",
               stages: {},
               per_handle: [],
@@ -10678,7 +10682,7 @@ it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and 
               run_id: "run-instagram-local-retry-queued",
               run_status: "queued",
               run_state: "queued",
-              source_scope: "bravo",
+              source_scope: "network",
               stages: {},
               per_handle: [],
               recent_log: [],
@@ -10737,7 +10741,7 @@ it("shows Retry Locally for failed Instagram blocked-auth runs on local dev and 
     await waitFor(() => {
       expect(backfillBodies).toEqual([
         {
-          source_scope: "bravo",
+          source_scope: "network",
           backfill_scope: "full_history",
           allow_inline_dev_fallback: true,
           execution_preference: "prefer_local_inline",
@@ -10773,7 +10777,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
           catalog_run_progress: {
             run_id: "run-discovery-new",
             run_status: "failed",
-            source_scope: "bravo",
+            source_scope: "network",
             created_at: "2026-03-18T12:00:00.000Z",
             stages: {
               shared_account_discovery: {
@@ -10821,7 +10825,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
         return jsonResponse({
           run_id: "run-discovery-new",
           run_status: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-03-18T12:00:00.000Z",
           stages: {
             shared_account_discovery: {
@@ -10954,7 +10958,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
                 run_id: "run-derived-failed",
                 run_status: "failed",
                 run_state: "failed",
-                source_scope: "bravo",
+                source_scope: "network",
                 created_at: "2026-04-08T17:08:30.000Z",
                 started_at: "2026-04-08T17:08:40.000Z",
                 completed_at: null,
@@ -10985,7 +10989,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
           run_id: "run-derived-failed",
           run_status: "failed",
           run_state: "failed",
-          source_scope: "bravo",
+          source_scope: "network",
           created_at: "2026-04-08T17:08:30.000Z",
           started_at: "2026-04-08T17:08:40.000Z",
           completed_at: null,
@@ -11261,7 +11265,7 @@ it("uses the newest inspected catalog run from the summary when discovery outran
         expect(init?.method).toBe("POST");
         expect(init?.body).toBe(
           JSON.stringify({
-            source_scope: "bravo",
+            source_scope: "network",
             backfill_scope: "full_history",
             selected_tasks: [...INSTAGRAM_BACKFILL_DEFAULT_TASKS],
           }),

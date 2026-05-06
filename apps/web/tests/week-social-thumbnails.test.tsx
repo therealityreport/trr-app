@@ -3752,7 +3752,7 @@ describe("WeekDetailPage thumbnails", () => {
     const syncSessionInit = syncSessionCall?.[1] as RequestInit;
     const body = JSON.parse(String(syncSessionInit.body ?? "{}")) as Record<string, unknown>;
 
-    expect(body.source_scope).toBe("bravo");
+    expect(body.source_scope).toBe("network");
     expect(body.sync_strategy).toBe("incremental");
     expect(body.date_start).toBe(weekPayload.week.start);
     expect(body.date_end).toBe(weekPayload.week.end);
