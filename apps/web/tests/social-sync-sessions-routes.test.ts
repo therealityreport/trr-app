@@ -65,7 +65,7 @@ describe("social sync session proxy routes", () => {
           "x-trr-tab-session-id": "tab-123",
           "x-trr-flow-key": "flow-456",
         },
-        body: JSON.stringify({ source_scope: "bravo", date_start: "2026-01-01T00:00:00Z", date_end: "2026-01-08T00:00:00Z" }),
+        body: JSON.stringify({ source_scope: "network", date_start: "2026-01-01T00:00:00Z", date_end: "2026-01-08T00:00:00Z" }),
       },
     );
 

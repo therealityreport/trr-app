@@ -92,4 +92,23 @@ describe("social live status stream proxy route", () => {
     expect(payload).toContain("event: error");
     expect(payload).toContain("socket closed");
   });
+
+  it("keeps SSE status 200 when the backend stream endpoint is degraded", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("backend busy", {
+          status: 500,
+          headers: { "content-type": "text/plain" },
+        }),
+      ),
+    );
+
+    const response = await GET(makeRequest());
+    const payload = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(payload).toContain("event: error");
+    expect(payload).toContain("backend busy");
+  });
 });

@@ -19,6 +19,10 @@ import {
 } from "@/lib/admin/run-session";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 import { useAdminOperationUnloadGuard } from "@/lib/admin/use-operation-unload-guard";
+import {
+  AdminCommentThread,
+  type AdminCommentThreadItem,
+} from "@/components/admin/comments/AdminCommentThread";
 import RedditAdminShell from "@/components/admin/RedditAdminShell";
 import { buildSeasonSocialBreadcrumb } from "@/lib/admin/admin-breadcrumbs";
 import { parseRedditDetailSlug } from "@/lib/admin/reddit-detail-slug";
@@ -147,6 +151,64 @@ interface RedditPostDetailsPayload {
   };
   assigned_threads: RedditThread[];
 }
+
+type RedditAdminCommentThreadItem = AdminCommentThreadItem & {
+  replies: RedditAdminCommentThreadItem[];
+};
+
+const normalizeRedditCommentLookupKey = (value: string | null | undefined): string | null => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return null;
+  return normalized.replace(/^t1_/i, "");
+};
+
+const redditCommentLookupKeys = (comment: RedditPostComment): string[] => {
+  const values = [
+    String(comment.reddit_comment_id || "").trim(),
+    normalizeRedditCommentLookupKey(comment.reddit_comment_id),
+  ].filter((value): value is string => Boolean(value));
+  return Array.from(new Set(values));
+};
+
+const buildRedditCommentThreadItems = (comments: RedditPostComment[]): AdminCommentThreadItem[] => {
+  const nodes = comments.map((comment): RedditAdminCommentThreadItem => {
+    const author = comment.author ? `u/${comment.author}` : "u/unknown";
+    return {
+      id: String(comment.reddit_comment_id || `${author}:${comment.created_at_utc ?? ""}:${comment.body}`),
+      authorName: author,
+      authorRole: comment.is_submitter ? "submitter" : null,
+      body: comment.body || "(empty body)",
+      timestamp: comment.created_at_utc,
+      timestampLabel: fmtDateTime(comment.created_at_utc),
+      likes: comment.score,
+      replyCount: null,
+      replies: [],
+    };
+  });
+  const nodeByLookupKey = new Map<string, RedditAdminCommentThreadItem>();
+  comments.forEach((comment, index) => {
+    const node = nodes[index];
+    if (!node) return;
+    for (const key of redditCommentLookupKeys(comment)) {
+      nodeByLookupKey.set(key, node);
+    }
+  });
+
+  const roots: RedditAdminCommentThreadItem[] = [];
+  comments.forEach((comment, index) => {
+    const node = nodes[index];
+    if (!node) return;
+    const parentKey = normalizeRedditCommentLookupKey(comment.parent_comment_id);
+    const parent = parentKey ? nodeByLookupKey.get(parentKey) : null;
+    if (parent && parent !== node) {
+      parent.replies.push(node);
+      parent.replyCount = Math.max(Number(parent.replyCount ?? 0) || 0, parent.replies.length);
+      return;
+    }
+    roots.push(node);
+  });
+  return roots;
+};
 
 interface PostContext {
   communityId: string;
@@ -1372,6 +1434,7 @@ function AdminRedditPostDetailsPageContent() {
   );
   const savedComments = post?.comment_summary.total_comments ?? 0;
   const redditComments = post?.num_comments ?? 0;
+  const redditCommentThreadItems = useMemo(() => buildRedditCommentThreadItems(post?.comments ?? []), [post?.comments]);
   const commentCoveragePercent =
     redditComments > 0 ? Math.min(100, Math.round((savedComments / redditComments) * 100)) : savedComments > 0 ? 100 : 0;
   const remainingComments = Math.max(redditComments - savedComments, 0);
@@ -1783,23 +1846,9 @@ function AdminRedditPostDetailsPageContent() {
                     {fmtNum(post.comment_summary.top_level_comments)} · replies {fmtNum(post.comment_summary.reply_comments)}
                   </p>
                   {post.comments.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No comments loaded.</p>
+                    <AdminCommentThread items={[]} emptyLabel="No comments loaded." />
                   ) : (
-                    <div className="space-y-2">
-                      {post.comments.map((comment) => (
-                        <div
-                          key={comment.reddit_comment_id}
-                          className="rounded border border-zinc-200 bg-white px-3 py-2 text-xs"
-                          style={{ marginLeft: `${Math.min(comment.depth, 8) * 12}px` }}
-                        >
-                          <p className="font-semibold text-zinc-900">
-                            u/{comment.author ?? "unknown"} · score {fmtNum(comment.score)}
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap text-zinc-700">{comment.body || "(empty body)"}</p>
-                          <p className="mt-1 text-zinc-500">{fmtDateTime(comment.created_at_utc)}</p>
-                        </div>
-                      ))}
-                    </div>
+                    <AdminCommentThread items={redditCommentThreadItems} defaultExpandedDepth={2} />
                   )}
                 </article>
               </div>

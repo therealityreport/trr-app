@@ -202,13 +202,13 @@ describe("social landing repository", () => {
         return { rows: Array.isArray(result?.rows) ? result.rows : [] };
       }
 
-      if (path === "/shared/sources") {
+      if (path.startsWith("/shared/sources")) {
         return {
           sources: [
             {
               id: "source-1",
               platform: "instagram",
-              source_scope: "bravo",
+              source_scope: "network",
               account_handle: "bravotv",
               is_active: true,
               scrape_priority: 10,
@@ -216,7 +216,7 @@ describe("social landing repository", () => {
             {
               id: "source-2",
               platform: "instagram",
-              source_scope: "bravo",
+              source_scope: "network",
               account_handle: "bravodailydish",
               is_active: true,
               scrape_priority: 9,
@@ -224,7 +224,7 @@ describe("social landing repository", () => {
             {
               id: "source-3",
               platform: "instagram",
-              source_scope: "bravo",
+              source_scope: "network",
               account_handle: "wwhlbravo",
               is_active: true,
               scrape_priority: 8,
@@ -232,7 +232,7 @@ describe("social landing repository", () => {
             {
               id: "source-4",
               platform: "tiktok",
-              source_scope: "bravo",
+              source_scope: "network",
               account_handle: "bravowwhl",
               is_active: true,
               scrape_priority: 8,
@@ -240,7 +240,7 @@ describe("social landing repository", () => {
             {
               id: "source-5",
               platform: "youtube",
-              source_scope: "bravo",
+              source_scope: "network",
               account_handle: "wwhl",
               is_active: true,
               scrape_priority: 8,
@@ -249,7 +249,7 @@ describe("social landing repository", () => {
         };
       }
 
-      if (path === "/shared/ingest/runs") {
+      if (path.startsWith("/shared/ingest/runs")) {
         return [
           {
             id: "run-1",
@@ -260,7 +260,7 @@ describe("social landing repository", () => {
         ];
       }
 
-      if (path === "/shared/review-queue") {
+      if (path.startsWith("/shared/review-queue")) {
         return {
           items: [
             {
@@ -632,14 +632,14 @@ describe("social landing repository", () => {
     });
 
     fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
-      if (path === "/shared/sources") {
+      if (path.startsWith("/shared/sources")) {
         sharedSourcesStarted();
         return sharedSourcesPromise;
       }
-      if (path === "/shared/ingest/runs") {
+      if (path.startsWith("/shared/ingest/runs")) {
         return [];
       }
-      if (path === "/shared/review-queue") {
+      if (path.startsWith("/shared/review-queue")) {
         return { items: [] };
       }
       if (path === "/landing-socialblade-rows") {
@@ -670,6 +670,7 @@ describe("social landing repository", () => {
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
       "/shared/sources",
       expect.objectContaining({
+        queryString: "source_scope=network&include_inactive=true",
         timeoutMs: 5_000,
       }),
     );
@@ -699,13 +700,13 @@ describe("social landing repository", () => {
       },
     ]);
     fetchSocialBackendJsonMock.mockImplementation(async (path: string) => {
-      if (path === "/shared/sources") {
+      if (path.startsWith("/shared/sources")) {
         return {
           sources: [
             {
               id: "source-bravo",
               platform: "instagram",
-              source_scope: "bravo",
+              source_scope: "network",
               account_handle: "bravotv",
               is_active: true,
               scrape_priority: 10,
@@ -714,7 +715,7 @@ describe("social landing repository", () => {
             {
               id: "source-traitors",
               platform: "twitter",
-              source_scope: "bravo",
+              source_scope: "network",
               account_handle: "thetraitorsus",
               is_active: true,
               scrape_priority: 85,
@@ -727,8 +728,8 @@ describe("social landing repository", () => {
           ],
         };
       }
-      if (path === "/shared/ingest/runs") return [];
-      if (path === "/shared/review-queue") return { items: [] };
+      if (path.startsWith("/shared/ingest/runs")) return [];
+      if (path.startsWith("/shared/review-queue")) return { items: [] };
       throw new Error(`Unhandled social path: ${path}`);
     });
     listShowExternalIdsByIdsMock.mockResolvedValue(

@@ -15,10 +15,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     await requireAdmin(request);
     const { platform, handle } = await context.params;
+    const forwardedSearchParams = new URLSearchParams(request.nextUrl.searchParams.toString());
     const data = await fetchSocialBackendJson(
       `/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/catalog/freshness`,
       {
         method: "POST",
+        queryString: forwardedSearchParams.toString(),
         fallbackError: "Failed to fetch social account catalog freshness",
         retries: 0,
         timeoutMs: 30_000,

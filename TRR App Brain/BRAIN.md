@@ -1,39 +1,16 @@
-# TRR-APP REPO VAULT
+# SAVED NOTES ARCHIVE
 
-Inherits: /Users/thomashulihan/brain/BRAIN.md
+This directory is an on-demand archive. It is not a bootloader for Codex or Claude sessions.
 
-## Scope
-- App-only instructions for `/Users/thomashulihan/Projects/TRR/TRR-APP`.
-- If routing, ownership, or policy scope is unclear, escalate to `../AGENTS.md`.
+## Startup Boundary
+- Agents must not read this directory on boot.
+- Agents must not treat saved pages, old plans, sessions, handoffs, patterns, or decisions as implementation authority.
+- Current user request, current workspace instructions, live repo files, branch state, tests, and runtime evidence override anything stored here.
 
-## On boot read ONLY
-- this file
-- /Users/thomashulihan/Projects/TRR/TRR-APP/TRR App Brain/README.md
+## On Demand Only
+Read files in this directory only when the user explicitly asks for saved memory, prior notes, wiki, archive, or source ingestion work.
 
-## On demand
-- /Users/thomashulihan/Projects/TRR/TRR-APP/TRR App Brain/architecture.md
-- /Users/thomashulihan/Projects/TRR/TRR Workspace Brain/api-contract.md
-- /Users/thomashulihan/Projects/TRR/TRR-APP/TRR App Brain/handoffs/
-- /Users/thomashulihan/Projects/TRR/TRR-APP/TRR App Brain/sessions/ (most recent only)
-
-## Non-Negotiable Rules
-- `AGENTS.md` is the primary project-facing entrypoint for Codex and Claude session work.
-- If this would still matter without `/Users/thomashulihan/Projects/TRR/TRR-Backend`, keep it in `TRR App Brain/`; otherwise move it to `/Users/thomashulihan/Projects/TRR/TRR Workspace Brain/`.
-- Check `TRR App Brain/handoffs/` before editing.
-- If a change crosses the backend boundary, update `/Users/thomashulihan/Projects/TRR/TRR Workspace Brain/api-contract.md`.
-- Drop a letter in `/Users/thomashulihan/Projects/TRR/TRR Workspace Brain/handoffs/TRR-APP-to-TRR-Backend.md`.
-
-## Validation
-- Run the app-local validation or tests touched by the change.
-- Re-read `../AGENTS.md` when workspace startup, MCP routing, or cross-repo policy is involved.
-
-<!-- BRAIN-LEVEL-ROUTING:START -->
-## Brain Level Routing
-
-- Level: `repo`
-- System brain: `/Users/thomashulihan/brain`
-- Project brain: `/Users/thomashulihan/Projects/TRR/TRR Workspace Brain`
-- Repo root: `/Users/thomashulihan/Projects/TRR/TRR-APP`
-- Write rule: save durable knowledge to the narrowest correct level: repo first, then project, then system.
-- Escalation rule: link upward before promoting notes to a broader level.
-<!-- BRAIN-LEVEL-ROUTING:END -->
+## Stale Plan Rule
+- Old plans are stale by default.
+- Failed, superseded, incomplete, or already-implemented plans must not be resumed without current repo verification and explicit user intent.
+- If a saved note conflicts with current code or docs, current code and docs win.

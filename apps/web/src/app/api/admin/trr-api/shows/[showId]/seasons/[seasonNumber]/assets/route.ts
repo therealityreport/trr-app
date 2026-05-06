@@ -8,7 +8,9 @@ import {
 } from "@/lib/server/admin/route-response-cache";
 import {
   ADMIN_READ_PROXY_GALLERY_TIMEOUT_MS,
+  buildAdminBackendStatusError,
   buildAdminProxyErrorResponse,
+  buildAdminReadResponseHeaders,
   fetchAdminBackendJson,
 } from "@/lib/server/trr-api/admin-read-proxy";
 import {
@@ -17,6 +19,7 @@ import {
 } from "@/lib/server/trr-api/trr-show-read-route-cache";
 
 export const dynamic = "force-dynamic";
+const DEFAULT_VISIBLE_ASSET_LIMIT = 48;
 const FULL_FETCH_LIMIT = 5000;
 
 interface RouteParams {
@@ -29,6 +32,7 @@ interface RouteParams {
  * Get all media assets (posters, stills, cast photos) for a show season.
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
+  const routeStartedAt = performance.now();
   try {
     const user = await requireAdmin(request);
 
@@ -50,9 +54,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const { searchParams } = new URL(request.url);
-    const parsedLimit = parseInt(searchParams.get("limit") ?? "200", 10);
+    const parsedLimit = parseInt(searchParams.get("limit") ?? String(DEFAULT_VISIBLE_ASSET_LIMIT), 10);
     const parsedOffset = parseInt(searchParams.get("offset") ?? "0", 10);
-    const limit = Number.isFinite(parsedLimit) ? parsedLimit : 200;
+    const limit = Number.isFinite(parsedLimit) ? parsedLimit : DEFAULT_VISIBLE_ASSET_LIMIT;
     const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
     const cursor = searchParams.get("cursor")?.trim() || null;
     const full =
@@ -82,9 +86,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     );
     const cached = getRouteResponseCache<Record<string, unknown>>(TRR_SEASON_ASSETS_CACHE_NAMESPACE, cacheKey);
     if (cached) {
-      return NextResponse.json(cached, { headers: { "x-trr-cache": "hit" } });
+      return NextResponse.json(cached, {
+        headers: buildAdminReadResponseHeaders({
+          cacheStatus: "hit",
+          totalMs: performance.now() - routeStartedAt,
+        }),
+      });
     }
 
+    let upstreamDurationMs: number | null = null;
     const payload = await getOrCreateRouteResponsePromise(
       TRR_SEASON_ASSETS_CACHE_NAMESPACE,
       cacheKey,
@@ -96,14 +106,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             routeName: "season-assets",
           },
         );
+        upstreamDurationMs = upstream.durationMs;
         if (upstream.status !== 200) {
-          throw new Error(
-            typeof upstream.data.error === "string"
-              ? upstream.data.error
-              : typeof upstream.data.detail === "string"
-                ? upstream.data.detail
-                : "Failed to fetch season assets",
-          );
+          throw buildAdminBackendStatusError({
+            status: upstream.status,
+            data: upstream.data,
+            fallbackMessage: "Failed to fetch season assets",
+            routeName: "season-assets",
+            requestRole: "secondary",
+          });
         }
         setRouteResponseCache(
           TRR_SEASON_ASSETS_CACHE_NAMESPACE,
@@ -115,7 +126,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     );
 
-    return NextResponse.json(payload);
+    return NextResponse.json(payload, {
+      headers: buildAdminReadResponseHeaders({
+        cacheStatus: "miss",
+        upstreamMs: upstreamDurationMs,
+        totalMs: performance.now() - routeStartedAt,
+      }),
+    });
   } catch (error) {
     console.error("[api] Failed to fetch season assets", error);
     return buildAdminProxyErrorResponse(error);

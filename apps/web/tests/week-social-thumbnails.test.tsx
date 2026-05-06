@@ -351,6 +351,39 @@ describe("WeekDetailPage thumbnails", () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/social/analytics/week/1/summary"))).toBe(false);
   });
 
+  it("prefers display thumbnail images and strips video entries from week card srcsets", async () => {
+    const payload = JSON.parse(JSON.stringify(weekPayload)) as typeof weekPayload;
+    Object.assign(payload.platforms.instagram.posts[0], {
+      display_thumbnail_url: "https://cdn.test/social/ig/card.webp",
+      display_thumbnail_srcset:
+        "https://cdn.test/social/ig/thumb.webp 320w, https://cdn.test/social/ig/video.mp4 720w, https://cdn.test/social/ig/card.webp 720w",
+      hosted_thumbnail_url: "https://images.test/ig-full-cover.jpg",
+      media_urls: ["https://video.test/ig-reel.mp4", "https://images.test/ig-preview.jpg"],
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/social/analytics/week/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => payload,
+        } as Response;
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(<WeekDetailPage />);
+    await waitForWeekDetailReady();
+
+    const instagramThumb = screen.getByAltText("Instagram post thumbnail");
+    expect(instagramThumb).toHaveAttribute("src", "https://cdn.test/social/ig/card.webp");
+    expect(instagramThumb.getAttribute("srcset")).toContain("https://cdn.test/social/ig/thumb.webp 320w");
+    expect(instagramThumb.getAttribute("srcset")).toContain("https://cdn.test/social/ig/card.webp 720w");
+    expect(instagramThumb.getAttribute("srcset")).not.toContain(".mp4");
+  });
+
   it("uses full-period metrics fetch for summary and token cards when initial gallery payload is truncated", async () => {
     const previewPayload = {
       ...weekPayload,
@@ -3719,7 +3752,7 @@ describe("WeekDetailPage thumbnails", () => {
     const syncSessionInit = syncSessionCall?.[1] as RequestInit;
     const body = JSON.parse(String(syncSessionInit.body ?? "{}")) as Record<string, unknown>;
 
-    expect(body.source_scope).toBe("bravo");
+    expect(body.source_scope).toBe("network");
     expect(body.sync_strategy).toBe("incremental");
     expect(body.date_start).toBe(weekPayload.week.start);
     expect(body.date_end).toBe(weekPayload.week.end);

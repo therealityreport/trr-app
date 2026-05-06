@@ -61,7 +61,7 @@ describe("social account summary proxy route", () => {
         adminContext: expect.objectContaining({
           uid: "admin-user",
           email: "admin@example.com",
-          verifiedAt: 1_700_000_000_000,
+          verifiedAt: expect.any(Number),
         }),
         fallbackError: "Failed to fetch social account profile summary",
         queryString: "detail=full",

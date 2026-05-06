@@ -59,9 +59,29 @@ describe("social account catalog freshness proxy route", () => {
       "/profiles/instagram/bravotv/catalog/freshness",
       expect.objectContaining({
         method: "POST",
+        queryString: "",
         fallbackError: "Failed to fetch social account catalog freshness",
         retries: 0,
         timeoutMs: 30_000,
+      }),
+    );
+  });
+
+  it("forwards explicit force probes to TRR-Backend", async () => {
+    await POST(
+      new NextRequest("http://localhost/api/admin/trr-api/social/profiles/instagram/bravotv/catalog/freshness?force=true", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({ platform: "instagram", handle: "bravotv" }),
+      },
+    );
+
+    expect(fetchSocialBackendJsonMock).toHaveBeenCalledWith(
+      "/profiles/instagram/bravotv/catalog/freshness",
+      expect.objectContaining({
+        method: "POST",
+        queryString: "force=true",
       }),
     );
   });

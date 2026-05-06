@@ -150,6 +150,44 @@ describe("admin-fetch", () => {
     vi.useRealTimers();
   });
 
+  it("preserves structured retryable timeout metadata from JSON error payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "Admin read request timed out after 15s",
+          code: "BACKEND_TIMEOUT",
+          reason: "awaiting_upstream_response",
+          retryable: true,
+          detail: {
+            route: "season-assets",
+            timeout_ms: 15_000,
+          },
+        }),
+        {
+          status: 504,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      adminGetJson("/api/admin/trr-api/shows/show-1/seasons/4/assets?limit=48", {
+        requestRole: "primary",
+      }),
+    ).rejects.toMatchObject({
+      name: "AdminRequestError",
+      status: 504,
+      code: "BACKEND_TIMEOUT",
+      reason: "awaiting_upstream_response",
+      retryable: true,
+      detail: {
+        route: "season-assets",
+        timeout_ms: 15_000,
+      },
+    });
+  });
+
   it("parses SSE events with adminStream", async () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, SearchIcon } from "lucide-react";
 import InstagramCommentsPostModal from "@/components/admin/instagram/InstagramCommentsPostModal";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { fetchAdminWithAuth as fetchAdminWithAuthBase } from "@/lib/admin/client-auth";
 import { useSharedPollingResource } from "@/lib/admin/shared-live-resource";
 import { useAdminGuard } from "@/lib/admin/useAdminGuard";
@@ -17,6 +28,7 @@ import type {
   SocialAccountCommentsShardProgress,
   SocialAccountCommentsScrapeRequest,
   SocialAccountCommentsScrapeResponse,
+  SocialAccountCommentBreakdown,
   SocialAccountProfilePost,
   SocialAccountProfilePostsResponse,
   SocialAccountProfileSummary,
@@ -32,6 +44,7 @@ type Props = {
   handle: string;
   summary: SocialAccountProfileSummary | null;
   onSummaryRefresh?: () => Promise<void> | void;
+  hideActiveRunProgress?: boolean;
 };
 
 type ProxyErrorPayload = InstagramCommentsProxyErrorPayload & {
@@ -41,6 +54,19 @@ type ProxyErrorPayload = InstagramCommentsProxyErrorPayload & {
 };
 
 type CommentsPostFilter = "commentable" | "incomplete" | "not_commentable";
+type CommentsSortField =
+  | "post"
+  | "created"
+  | "caption"
+  | "post_total"
+  | "saved_comments"
+  | "missing_comments"
+  | "likes";
+type CommentsSortDirection = "asc" | "desc";
+type CommentsSortState = {
+  field: CommentsSortField;
+  direction: CommentsSortDirection;
+};
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "pending", "retrying", "running"]);
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -58,6 +84,34 @@ const RETRYABLE_POSTS_PROXY_CODES = new Set([
   "BACKEND_SATURATED",
   "BACKEND_UNREACHABLE",
 ]);
+const COMMENTS_SORT_COLUMNS: Array<{ key: CommentsSortField; label: string }> = [
+  { key: "post", label: "Post" },
+  { key: "created", label: "Created" },
+  { key: "caption", label: "Caption" },
+  { key: "post_total", label: "Reported Comments" },
+  { key: "saved_comments", label: "Instagram Saved" },
+  { key: "missing_comments", label: "Missing Comments" },
+  { key: "likes", label: "Likes" },
+];
+const DEFAULT_COMMENTS_SORT: CommentsSortState = { field: "missing_comments", direction: "desc" };
+const TEXT_COMMENTS_SORT_FIELDS = new Set<CommentsSortField>(["post", "caption"]);
+type NormalizedPostCommentBreakdown = {
+  reportedComments: number;
+  savedInstagramComments: number;
+  parentComments: number | null;
+  childReplies: number | null;
+  facebookComments: number;
+  missingComments: number;
+  hasThreadBreakdown: boolean;
+  hasFacebookData: boolean;
+};
+
+const COMMENT_PHASE_LABELS: Record<string, string> = {
+  ranked: "ranked",
+  headload: "headload",
+  fb_crosspost: "FB crosspost",
+  child: "child",
+};
 
 const formatInteger = (value: number | null | undefined): string => {
   return new Intl.NumberFormat("en-US").format(Number.isFinite(Number(value)) ? Number(value) : 0);
@@ -89,16 +143,112 @@ const readFiniteNumber = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const readNonNegativeInteger = (value: unknown): number | null => {
+  const parsed = readFiniteNumber(value);
+  return parsed === null ? null : Math.max(0, Math.trunc(parsed));
+};
+
+const firstNonNegativeInteger = (...values: unknown[]): number | null => {
+  for (const value of values) {
+    const parsed = readNonNegativeInteger(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+};
+
+const formatCaptureRate = (value: unknown): string | null => {
+  const parsed = readFiniteNumber(value);
+  if (parsed === null) return null;
+  const percent = parsed <= 1 ? parsed * 100 : parsed;
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: percent < 10 ? 1 : 0 }).format(percent)}%`;
+};
+
+const formatCaptureHealthKey = (value: string, labels: Record<string, string> = {}): string => {
+  const normalized = value.trim();
+  return labels[normalized] ?? normalized.replace(/_/g, " ");
+};
+
+const formatCaptureCountRecord = (
+  value: Record<string, number | null | undefined> | null | undefined,
+  labels: Record<string, string> = {},
+): string | null => {
+  const items = Object.entries(value ?? {})
+    .map(([key, count]) => ({
+      label: formatCaptureHealthKey(key, labels),
+      count: readNonNegativeInteger(count),
+    }))
+    .filter((item): item is { label: string; count: number } => Boolean(item.label) && item.count !== null && item.count > 0)
+    .map((item) => `${formatInteger(item.count)} ${item.label}`);
+  return items.length ? items.join(", ") : null;
+};
+
+const formatPostCaptureHealthSummary = (breakdown?: SocialAccountCommentBreakdown | null): string | null => {
+  const health = breakdown?.capture_health;
+  if (!health) return null;
+  const phaseLabel = formatCaptureCountRecord(health.phase_counts, COMMENT_PHASE_LABELS);
+  const captureRateLabel = formatCaptureRate(health.capture_rate);
+  const coveredComments = firstNonNegativeInteger(health.covered_comments);
+  const bits = [
+    phaseLabel ? `Phases: ${phaseLabel}` : null,
+    captureRateLabel ? `Capture ${captureRateLabel}` : null,
+    coveredComments !== null && coveredComments > 0 ? `${formatInteger(coveredComments)} covered` : null,
+  ].filter(Boolean);
+  return bits.length ? bits.join(" · ") : "Capture health present";
+};
+
 const getPostReportedComments = (post: SocialAccountProfilePost): number => {
-  return Math.max(0, readFiniteNumber(post.metrics?.comments_count) ?? 0);
+  return (
+    firstNonNegativeInteger(
+      post.comment_breakdown?.reported_comments,
+      post.comment_completeness?.reported_comments,
+      post.metrics?.comments_count,
+    ) ?? 0
+  );
 };
 
-const getPostSavedComments = (post: SocialAccountProfilePost): number => {
-  return Math.max(0, readFiniteNumber(post.saved_comments) ?? 0);
+const getPostSavedInstagramComments = (post: SocialAccountProfilePost): number => {
+  return (
+    firstNonNegativeInteger(
+      post.comment_breakdown?.saved_instagram_comments,
+      post.comment_completeness?.saved_instagram_comments,
+      post.saved_comments,
+    ) ?? 0
+  );
 };
 
-const isPostCommentsIncomplete = (post: SocialAccountProfilePost): boolean => {
-  return getPostSavedComments(post) !== getPostReportedComments(post);
+const getPostCommentBreakdown = (post: SocialAccountProfilePost): NormalizedPostCommentBreakdown => {
+  const savedInstagramComments = getPostSavedInstagramComments(post);
+  const reportedComments = getPostReportedComments(post);
+  const parentComments = firstNonNegativeInteger(post.comment_breakdown?.saved_parent_comments);
+  const childReplies = firstNonNegativeInteger(post.comment_breakdown?.saved_child_replies);
+  const facebookComments =
+    firstNonNegativeInteger(
+      post.comment_breakdown?.facebook_comments,
+      post.facebook_crosspost?.comments_count,
+      post.comment_completeness?.external_facebook_comments,
+    ) ?? 0;
+  const missingComments =
+    firstNonNegativeInteger(
+      post.comment_breakdown?.missing_comments,
+      post.comment_completeness?.missing_instagram_comments,
+    ) ?? Math.max(reportedComments - savedInstagramComments - facebookComments, 0);
+  return {
+    reportedComments,
+    savedInstagramComments,
+    parentComments,
+    childReplies,
+    facebookComments,
+    missingComments,
+    hasThreadBreakdown: parentComments !== null || childReplies !== null,
+    hasFacebookData:
+      post.comment_breakdown?.facebook_comments != null ||
+      post.facebook_crosspost?.comments_count != null ||
+      post.comment_completeness?.external_facebook_comments != null,
+  };
+};
+
+const getDefaultCommentsSortDirection = (field: CommentsSortField): CommentsSortDirection => {
+  return TEXT_COMMENTS_SORT_FIELDS.has(field) ? "asc" : "desc";
 };
 
 const formatCommentsShardJobSummary = (progress: SocialAccountCommentsRunProgress): string | null => {
@@ -130,6 +280,12 @@ const formatCommentsProgressMessage = (progress: SocialAccountCommentsRunProgres
   const totalPosts =
     readFiniteNumber(progress.post_progress?.total_posts) ??
     readFiniteNumber(progress.target_source_ids_count);
+  const completePosts =
+    readFiniteNumber(progress.post_progress?.complete_posts) ??
+    readFiniteNumber(progress.summary?.complete_posts_total);
+  const incompletePosts =
+    readFiniteNumber(progress.post_progress?.incomplete_posts) ??
+    readFiniteNumber(progress.summary?.incomplete_posts_total);
   const shardJobSummary = formatCommentsShardJobSummary(progress);
   const postsPerMinute = readFiniteNumber(progress.throughput?.posts_per_minute);
   const commentsPerMinute = readFiniteNumber(progress.throughput?.comments_per_minute);
@@ -140,6 +296,14 @@ const formatCommentsProgressMessage = (progress: SocialAccountCommentsRunProgres
   const progressBits = [
     shardJobSummary,
     totalPosts !== null && totalPosts > 0 ? `${completedPosts} / ${totalPosts} posts checked` : null,
+    completePosts !== null || incompletePosts !== null
+      ? [
+          completePosts !== null ? `${formatInteger(completePosts)} complete` : null,
+          incompletePosts !== null ? `${formatInteger(incompletePosts)} incomplete` : null,
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : null,
     throughputBits.length ? throughputBits.join(", ") : null,
   ].filter(Boolean);
   return `Comments sync ${status}. Run ${runId.slice(0, 8)}${progressBits.length ? ` · ${progressBits.join(" · ")}` : ""}.`;
@@ -175,8 +339,24 @@ const formatShardProgressLabel = (row: SocialAccountCommentsShardProgress, index
   }`;
 };
 
+const formatReasonCounts = (
+  counts?: Record<string, number | null | undefined> | null,
+  limit = 3,
+): string | null => {
+  if (!counts) return null;
+  const entries = Object.entries(counts)
+    .map(([reason, count]) => [reason, readFiniteNumber(count)] as const)
+    .filter((entry): entry is readonly [string, number] => Boolean(entry[0]) && entry[1] !== null && entry[1] > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+  if (entries.length === 0) return null;
+  return entries.map(([reason, count]) => `${reason} ${formatInteger(count)}`).join(", ");
+};
+
 const formatShardProgressMetrics = (row: SocialAccountCommentsShardProgress): string => {
+  const rawStatus = String(row.status ?? row.job_status ?? "").trim().toLowerCase();
   const status = formatStatusLabel(row.status ?? row.job_status);
+  const canHaveUncheckedTargets = ["queued", "pending", "retrying", "running"].includes(rawStatus);
   const targetCount =
     readFiniteNumber(row.target_count) ??
     readFiniteNumber(row.target_source_ids_count) ??
@@ -185,21 +365,44 @@ const formatShardProgressMetrics = (row: SocialAccountCommentsShardProgress): st
     readFiniteNumber(row.processed_post_count) ??
     readFiniteNumber(row.completed_posts) ??
     readFiniteNumber(row.matched_posts);
+  const completePosts = readFiniteNumber(row.complete_posts);
+  const incompletePosts = readFiniteNumber(row.incomplete_posts);
   const savedPosts = readFiniteNumber(row.saved_posts);
   const remainingTargets = readFiniteNumber(row.remaining_target_count);
-  const commentsUpserted = readFiniteNumber(row.comments_upserted) ?? readFiniteNumber(row.items_found_total);
+  const retryTargets = readFiniteNumber(row.retry_target_count);
+  const itemsFound = readFiniteNumber(row.items_found_total);
+  const commentsProcessed =
+    readFiniteNumber(row.comments_processed) ??
+    (itemsFound !== null && completedPosts !== null ? Math.max(itemsFound - completedPosts, 0) : itemsFound);
+  const commentsWritten = readFiniteNumber(row.comments_upserted);
+  const commentsInserted = readFiniteNumber(row.comments_inserted);
+  const commentsRefreshed = readFiniteNumber(row.comments_refreshed);
   const repliesUpserted = readFiniteNumber(row.replies_upserted);
   const queueWaitSeconds = readFiniteNumber(row.queue_wait_seconds);
   const postsPerMinute = readFiniteNumber(row.posts_per_minute);
   const commentsPerMinute = readFiniteNumber(row.comments_per_minute);
+  const fetchReasons = formatReasonCounts(row.fetch_reason_counts);
+  const stopReasons = formatReasonCounts(row.stop_reason_counts);
   return [
     status,
     targetCount !== null ? `${formatInteger(targetCount)} targets` : null,
     completedPosts !== null ? `${formatInteger(completedPosts)} checked` : null,
-    remainingTargets !== null ? `${formatInteger(remainingTargets)} remaining` : null,
+    completePosts !== null ? `${formatInteger(completePosts)} complete` : null,
+    incompletePosts !== null ? `${formatInteger(incompletePosts)} incomplete` : null,
+    canHaveUncheckedTargets && remainingTargets !== null && remainingTargets > 0
+      ? `${formatInteger(remainingTargets)} unchecked`
+      : null,
+    retryTargets !== null && retryTargets > 0 ? `${formatInteger(retryTargets)} retry targets` : null,
     savedPosts !== null ? `${formatInteger(savedPosts)} saved posts` : null,
-    commentsUpserted !== null ? `${formatInteger(commentsUpserted)} comments` : null,
+    commentsProcessed !== null ? `${formatInteger(commentsProcessed)} fetched` : null,
+    commentsInserted !== null ? `${formatInteger(commentsInserted)} new comments saved` : null,
+    commentsRefreshed !== null ? `${formatInteger(commentsRefreshed)} existing comments seen` : null,
+    commentsWritten !== null ? `${formatInteger(commentsWritten)} comments upserted` : null,
     repliesUpserted !== null ? `${formatInteger(repliesUpserted)} replies` : null,
+    row.latest_fetch_reason ? `fetch ${row.latest_fetch_reason}` : null,
+    fetchReasons ? `fetch reasons ${fetchReasons}` : null,
+    row.latest_stop_reason ? `stop ${row.latest_stop_reason}` : null,
+    stopReasons ? `stop reasons ${stopReasons}` : null,
     queueWaitSeconds !== null ? `${formatInteger(queueWaitSeconds)}s queue wait` : null,
     postsPerMinute !== null ? `${postsPerMinute.toFixed(1)} posts/min` : null,
     commentsPerMinute !== null ? `${commentsPerMinute.toFixed(1)} comments/min` : null,
@@ -229,6 +432,61 @@ const formatCommentsProgressWarning = (progress?: SocialAccountCommentsRunProgre
   return targetCount !== null
     ? `Pre-sharding run: one comments job is covering ${formatInteger(targetCount)} targets. New launches should use sharded workers.`
     : "Pre-sharding run: this older comments job may not include shard-level progress.";
+};
+
+const readProgressString = (value: unknown): string | null => {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+};
+
+const formatCommentsLaunchQueuedMessage = (
+  data: Pick<SocialAccountCommentsScrapeResponse, "auth_repair_attempted" | "auth_repair_status">,
+  fallback: string,
+): string => {
+  if (data.auth_repair_attempted && data.auth_repair_status === "succeeded") {
+    return `Instagram auth repaired. ${fallback}`;
+  }
+  return fallback;
+};
+
+const readProgressBoolean = (value: unknown): boolean | null => {
+  return typeof value === "boolean" ? value : null;
+};
+
+const readProgressMetadata = (progress?: SocialAccountCommentsRunProgress | null): Record<string, unknown> => {
+  return progress?.job_metadata && typeof progress.job_metadata === "object" ? progress.job_metadata : {};
+};
+
+const getCommentsRunScopeNotice = (progress?: SocialAccountCommentsRunProgress | null): string | null => {
+  if (!progress) return null;
+  const metadata = readProgressMetadata(progress);
+  const mode = readProgressString(progress.mode) ?? readProgressString(metadata.mode);
+  const targetFilter = readProgressString(progress.target_filter) ?? readProgressString(metadata.target_filter);
+  const incompleteFill =
+    readProgressBoolean(progress.incomplete_fill) ?? readProgressBoolean(metadata.incomplete_fill) ?? false;
+  const targetCount =
+    readFiniteNumber(progress.target_source_ids_count) ??
+    readFiniteNumber(metadata.target_source_ids_count) ??
+    readFiniteNumber(progress.post_progress?.total_posts);
+  const sourceIds =
+    progress.target_source_ids ??
+    (Array.isArray(metadata.target_source_ids)
+      ? metadata.target_source_ids.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : []);
+  const firstSourceId = sourceIds[0];
+
+  if (mode === "single_post") {
+    const targetLabel = firstSourceId ? ` for ${firstSourceId}` : "";
+    return `Single-post repair${targetLabel}: this run only updates one post and will not close the account-wide comments gap. Run Incomplete Fill after it finishes to target every incomplete post.`;
+  }
+  if (targetFilter === "incomplete" || incompleteFill) {
+    return targetCount && targetCount > 0
+      ? `Incomplete Fill active: this run is targeting ${formatInteger(targetCount)} incomplete posts.`
+      : "Incomplete Fill active: this run is targeting incomplete posts.";
+  }
+  if (mode === "profile" && targetCount && targetCount > 0) {
+    return `Profile comments sync active: this run is targeting ${formatInteger(targetCount)} posts.`;
+  }
+  return null;
 };
 
 const sleep = async (ms: number): Promise<void> => {
@@ -261,8 +519,17 @@ const readCommentsRunId = (value: unknown): string | null => {
   );
 };
 
-export default function InstagramCommentsPanel({ platform, handle, summary, onSummaryRefresh }: Props) {
+export default function InstagramCommentsPanel({
+  platform,
+  handle,
+  summary,
+  onSummaryRefresh,
+  hideActiveRunProgress = false,
+}: Props) {
   const { user, checking, hasAccess } = useAdminGuard();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const fetchAdminWithAuth = useCallback(
     (
       input: RequestInfo | URL,
@@ -281,6 +548,8 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   const [postsError, setPostsError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [commentsPostFilter, setCommentsPostFilter] = useState<CommentsPostFilter>("commentable");
+  const [commentsSearch, setCommentsSearch] = useState("");
+  const [commentsSort, setCommentsSort] = useState<CommentsSortState>(DEFAULT_COMMENTS_SORT);
   const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   const [scrapeRunId, setScrapeRunId] = useState<string | null>(null);
@@ -295,14 +564,32 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   const supportsComments = SOCIAL_ACCOUNT_COMMENTS_ENABLED_PLATFORMS.includes(platform);
   const supportsInlineCommentsSync = platform === "instagram";
   const platformLabel = SOCIAL_ACCOUNT_PLATFORM_LABELS[platform] ?? platform;
+  const selectedPostParam = searchParams.get("post");
+
+  const replacePostParam = useCallback(
+    (sourceId: string | null) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (sourceId) {
+        params.set("post", sourceId);
+      } else {
+        params.delete("post");
+      }
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const refreshPosts = useCallback(async () => {
     if (checking || !user || !hasAccess) return;
     setPostsLoading(true);
     setPostsError(null);
     try {
+      const trimmedSearch = commentsSearch.trim();
+      const searchQuery = trimmedSearch ? `&search=${encodeURIComponent(trimmedSearch)}` : "";
       const filterQuery = supportsInlineCommentsSync ? `&comment_filter=${commentsPostFilter}` : "";
-      const postsUrl = `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/posts?page=${page}&page_size=25&comments_only=true${filterQuery}`;
+      const sortQuery = `&sort_by=${encodeURIComponent(commentsSort.field)}&sort_dir=${encodeURIComponent(commentsSort.direction)}`;
+      const postsUrl = `/api/admin/trr-api/social/profiles/${encodeURIComponent(platform)}/${encodeURIComponent(handle)}/posts?page=${page}&page_size=25&comments_only=true${filterQuery}${sortQuery}${searchQuery}`;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         const response = await fetchAdminWithAuth(postsUrl, undefined, { preferredUser: user });
         const data = (await response.json().catch(() => ({}))) as SocialAccountProfilePostsResponse & ProxyErrorPayload;
@@ -330,6 +617,9 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   }, [
     checking,
     commentsPostFilter,
+    commentsSearch,
+    commentsSort.direction,
+    commentsSort.field,
     fetchAdminWithAuth,
     handle,
     hasAccess,
@@ -354,6 +644,16 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
     }
   }, [posts, selectedPost]);
 
+  useEffect(() => {
+    const sourceId = String(selectedPostParam || "").trim();
+    if (!sourceId || !posts) return;
+    if (selectedPost?.source_id === sourceId) return;
+    const postFromUrl = posts.items.find((item) => item.source_id === sourceId);
+    if (postFromUrl) {
+      setSelectedPost(postFromUrl);
+    }
+  }, [posts, selectedPost?.source_id, selectedPostParam]);
+
   const runProgress = useSharedPollingResource<SocialAccountCommentsRunProgress>({
     key: `instagram-comments-run:${platform}:${handle}:${scrapeRunId ?? "none"}`,
     shouldRun: !checking && Boolean(user) && hasAccess && supportsInlineCommentsSync && Boolean(scrapeRunId),
@@ -376,12 +676,12 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   const startProfileScrape = useCallback(async () => {
     if (!user) return;
     setScrapeError(null);
-    setScrapeMessage(null);
+    setScrapeMessage("Repairing Instagram auth if needed...");
     setCommentsLaunchPending(true);
     handledTerminalRunRef.current = null;
     const body: SocialAccountCommentsScrapeRequest = {
       mode: "profile",
-      source_scope: "bravo",
+      source_scope: "network",
       refresh_policy: "stale_or_missing",
     };
     try {
@@ -408,7 +708,12 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
       }
       const runId = String(data.run_id || "").trim();
       setScrapeRunId(runId || null);
-      setScrapeMessage(runId ? `Comments sync queued. Run ${runId.slice(0, 8)}.` : "Comments sync queued.");
+      setScrapeMessage(
+        formatCommentsLaunchQueuedMessage(
+          data,
+          runId ? `Comments sync queued. Run ${runId.slice(0, 8)}.` : "Comments sync queued.",
+        ),
+      );
     } catch (error) {
       setScrapeError(error instanceof Error ? error.message : "Failed to start comments sync");
     } finally {
@@ -419,12 +724,12 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   const startIncompleteFillScrape = useCallback(async () => {
     if (!user) return;
     setScrapeError(null);
-    setScrapeMessage(null);
+    setScrapeMessage("Repairing Instagram auth if needed...");
     setCommentsLaunchPending(true);
     handledTerminalRunRef.current = null;
     const body: SocialAccountCommentsScrapeRequest = {
       mode: "profile",
-      source_scope: "bravo",
+      source_scope: "network",
       refresh_policy: "stale_or_missing",
       target_filter: "incomplete",
     };
@@ -452,7 +757,12 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
       }
       const runId = String(data.run_id || "").trim();
       setScrapeRunId(runId || null);
-      setScrapeMessage(runId ? `Incomplete Fill queued. Run ${runId.slice(0, 8)}.` : "Incomplete Fill queued.");
+      setScrapeMessage(
+        formatCommentsLaunchQueuedMessage(
+          data,
+          runId ? `Incomplete Fill queued. Run ${runId.slice(0, 8)}.` : "Incomplete Fill queued.",
+        ),
+      );
     } catch (error) {
       setScrapeError(error instanceof Error ? error.message : "Failed to start incomplete fill");
     } finally {
@@ -463,10 +773,10 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   const startCatalogRefresh = useCallback(async () => {
     if (!user) return;
     setScrapeError(null);
-    setScrapeMessage(null);
+    setScrapeMessage("Repairing Instagram auth if needed before queueing refresh...");
     setCatalogRefreshPending(true);
     const body: CatalogBackfillRequest = {
-      source_scope: "bravo",
+      source_scope: "network",
       backfill_scope: "full_history",
       selected_tasks: COMMENTS_REFRESH_SELECTED_TASKS,
     };
@@ -485,8 +795,13 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
         throw new Error(readInstagramCommentsErrorMessage(data, "Failed to queue discussion refresh"));
       }
       const runId = String(data.catalog_run_id || data.run_id || "").trim();
+      const queuedMessage = runId
+        ? `Refresh queued. Run ${runId.slice(0, 8)}.`
+        : "Refresh queued for saved posts and discussion.";
       setScrapeMessage(
-        runId ? `Refresh queued. Run ${runId.slice(0, 8)}.` : "Refresh queued for saved posts and discussion.",
+        data.auth_repair_attempted && data.auth_repair_status === "succeeded"
+          ? `Instagram auth repaired. ${queuedMessage}`
+          : queuedMessage,
       );
       void refreshPosts();
       void onSummaryRefresh?.();
@@ -625,16 +940,12 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
   const activePostsFilterTotal = posts?.pagination.total ?? null;
   const incompletePosts =
     commentsPostFilter === "incomplete" && activePostsFilterTotal !== null ? activePostsFilterTotal : null;
-  const knownIncompletePosts =
-    incompletePosts ??
-    Math.max(readFiniteNumber(coverage?.missing_posts) ?? 0, 0) +
-      Math.max(readFiniteNumber(coverage?.stale_posts) ?? 0, 0);
   const notCommentablePosts =
     commentsPostFilter === "not_commentable" && activePostsFilterTotal !== null
       ? activePostsFilterTotal
       : Math.max(availablePosts - commentablePosts, 0);
   const effectiveCoverageLabel = String(coverage?.effective_label || "").trim()
-    || (savedSummary ? "Saved" : formatStatusLabel(coverage?.effective_status ?? coverage?.last_comments_run_status));
+    || (savedSummary ? "Rows saved" : formatStatusLabel(coverage?.effective_status ?? coverage?.last_comments_run_status));
   const historicalFailure = Boolean(coverage?.historical_failure);
   const lastAttemptStatus = normalizeRunStatus(coverage?.last_attempt_status);
   const lastAttemptAt = coverage?.last_attempt_at ?? coverage?.last_comments_run_at;
@@ -651,7 +962,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
     : `No saved ${platformLabel} posts with discussion are available for this account yet.`;
   const panelTitle = supportsInlineCommentsSync ? `${platformLabel} Comments` : `${platformLabel} Discussion`;
   const panelDescription = supportsInlineCommentsSync
-    ? `Review saved comment coverage and run a full-account comments sync across saved ${platformLabel} posts.`
+    ? `Review parent-thread coverage and run a full-account comments sync across saved ${platformLabel} posts.`
     : `Review saved discussion coverage and queue a catalog-driven refresh for post details, comments, and media across saved ${platformLabel} posts.`;
   const primaryActionLabel = supportsInlineCommentsSync
     ? primaryActionPending
@@ -662,19 +973,80 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
     : primaryActionPending
       ? "Queuing Refresh..."
       : "Refresh Details + Comments + Media";
-  const progressWarning = useMemo(() => formatCommentsProgressWarning(displayedRunProgress), [displayedRunProgress]);
-  const shardProgressRows = useMemo(() => getCommentsShardProgressRows(displayedRunProgress), [displayedRunProgress]);
+  const progressWarning = useMemo(
+    () => (hideActiveRunProgress ? null : formatCommentsProgressWarning(displayedRunProgress)),
+    [displayedRunProgress, hideActiveRunProgress],
+  );
+  const progressScopeNotice = useMemo(
+    () => (hideActiveRunProgress ? null : getCommentsRunScopeNotice(displayedRunProgress)),
+    [displayedRunProgress, hideActiveRunProgress],
+  );
+  const shardProgressRows = useMemo(
+    () => (hideActiveRunProgress ? [] : getCommentsShardProgressRows(displayedRunProgress)),
+    [displayedRunProgress, hideActiveRunProgress],
+  );
   const openPostComments = useCallback(
     (post: SocialAccountProfilePost, event?: MouseEvent<HTMLAnchorElement | HTMLButtonElement>) => {
       event?.preventDefault();
       setSelectedPost(post);
+      replacePostParam(String(post.source_id || "").trim() || null);
     },
-    [],
+    [replacePostParam],
   );
+  const closePostComments = useCallback(() => {
+    setSelectedPost(null);
+    replacePostParam(null);
+  }, [replacePostParam]);
   const selectCommentsPostFilter = useCallback((filter: CommentsPostFilter) => {
     setCommentsPostFilter(filter);
     setPage(1);
   }, []);
+  const updateCommentsSearch = useCallback((value: string) => {
+    setCommentsSearch(value);
+    setPage(1);
+  }, []);
+  const selectCommentsSort = useCallback((field: CommentsSortField) => {
+    setCommentsSort((current) => {
+      if (current.field === field) {
+        return { field, direction: current.direction === "asc" ? "desc" : "asc" };
+      }
+      return { field, direction: getDefaultCommentsSortDirection(field) };
+    });
+    setPage(1);
+  }, []);
+  const renderSortableHeader = useCallback(
+    (column: (typeof COMMENTS_SORT_COLUMNS)[number]) => {
+      const active = commentsSort.field === column.key;
+      const nextDirection =
+        active
+          ? commentsSort.direction === "asc"
+            ? "desc"
+            : "asc"
+          : getDefaultCommentsSortDirection(column.key);
+      const SortIcon = active ? (commentsSort.direction === "asc" ? ArrowUpIcon : ArrowDownIcon) : ArrowUpDownIcon;
+      return (
+        <TableHead
+          key={column.key}
+          aria-sort={active ? (commentsSort.direction === "asc" ? "ascending" : "descending") : "none"}
+          className="pb-3 pr-4"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={`Sort by ${column.label} ${nextDirection === "asc" ? "ascending" : "descending"}`}
+            onClick={() => selectCommentsSort(column.key)}
+            className="-ml-2 h-auto min-h-0 justify-start gap-1.5 px-2 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900 [&_svg]:size-3"
+          >
+            <span>{column.label}</span>
+            <SortIcon aria-hidden="true" data-icon="inline-end" />
+            {active ? <span className="sr-only">sorted {commentsSort.direction}</span> : null}
+          </Button>
+        </TableHead>
+      );
+    },
+    [commentsSort.direction, commentsSort.field, selectCommentsSort],
+  );
 
   useEffect(() => {
     if (!supportsInlineCommentsSync || !coverageActiveRunId) return;
@@ -765,6 +1137,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
         </div>
 
         {scrapeMessage ? <p className="mt-4 text-sm text-zinc-600">{scrapeMessage}</p> : null}
+        {progressScopeNotice ? <p className="mt-3 text-sm font-medium text-sky-700">{progressScopeNotice}</p> : null}
         {progressWarning ? <p className="mt-3 text-sm font-medium text-amber-700">{progressWarning}</p> : null}
         {scrapeError ? <p className="mt-4 text-sm text-red-700">{scrapeError}</p> : null}
         {shardProgressRows.length > 0 ? (
@@ -785,74 +1158,83 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
         ) : null}
 
         {supportsInlineCommentsSync ? (
-          <div className="mt-6 flex flex-wrap gap-2">
-            {[
-              { label: "Commentable", value: "commentable" as const, count: commentablePosts },
-              { label: "Incomplete", value: "incomplete" as const, count: incompletePosts },
-              { label: "Not Commentable", value: "not_commentable" as const, count: notCommentablePosts },
-            ].map((filter) => {
-              const active = commentsPostFilter === filter.value;
-              return (
-                <button
-                  key={filter.value}
-                  type="button"
-                  onClick={() => selectCommentsPostFilter(filter.value)}
-                  aria-pressed={active}
-                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold ${
-                    active
-                      ? "border-zinc-900 bg-zinc-900 text-white"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300"
-                  }`}
-                >
-                  <span>{filter.label}</span>
-                  {filter.count !== null ? (
-                    <span className={active ? "text-zinc-200" : "text-zinc-500"}>{formatInteger(filter.count)}</span>
-                  ) : null}
-                </button>
-              );
-            })}
+          <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: "Commentable", value: "commentable" as const, count: commentablePosts },
+                { label: "Incomplete", value: "incomplete" as const, count: incompletePosts },
+                { label: "Not Commentable", value: "not_commentable" as const, count: notCommentablePosts },
+              ].map((filter) => {
+                const active = commentsPostFilter === filter.value;
+                return (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    onClick={() => selectCommentsPostFilter(filter.value)}
+                    aria-pressed={active}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold ${
+                      active
+                        ? "border-zinc-900 bg-zinc-900 text-white"
+                        : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300"
+                    }`}
+                  >
+                    <span>{filter.label}</span>
+                    {filter.count !== null ? (
+                      <span className={active ? "text-zinc-200" : "text-zinc-500"}>{formatInteger(filter.count)}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+            <label className="relative block w-full max-w-sm">
+              <span className="sr-only">Search comments posts</span>
+              <SearchIcon
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400"
+              />
+              <input
+                type="search"
+                value={commentsSearch}
+                onChange={(event) => updateCommentsSearch(event.target.value)}
+                placeholder="Search post, caption, tag..."
+                className="h-10 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
+              />
+            </label>
           </div>
         ) : null}
 
-        <div className={supportsInlineCommentsSync ? "mt-4 overflow-x-auto" : "mt-6 overflow-x-auto"}>
-          <table className="min-w-full divide-y divide-zinc-200 text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-[0.14em] text-zinc-500">
-                <th className="pb-3 pr-4">Post</th>
-                <th className="pb-3 pr-4">Created</th>
-                <th className="pb-3 pr-4">Caption</th>
-                <th className="pb-3 pr-4">Post Total</th>
-                <th className="pb-3 pr-4">Saved Comments</th>
-                <th className="pb-3">Likes</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
+        <div className={supportsInlineCommentsSync ? "mt-4" : "mt-6"}>
+          <Table className="min-w-full">
+            <TableHeader>
+              <TableRow>{COMMENTS_SORT_COLUMNS.map(renderSortableHeader)}</TableRow>
+            </TableHeader>
+            <TableBody>
               {postsLoading ? (
-                <tr>
-                  <td colSpan={6} className="py-6 text-sm text-zinc-500">
+                <TableRow>
+                  <TableCell colSpan={7} className="py-6 text-sm text-zinc-500">
                     Loading posts with comments...
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : postsError ? (
-                <tr>
-                  <td colSpan={6} className="py-6 text-sm text-red-700">
+                <TableRow>
+                  <TableCell colSpan={7} className="py-6 text-sm text-red-700">
                     {postsError}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : (posts?.items ?? []).length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-6 text-sm text-zinc-500">
+                <TableRow>
+                  <TableCell colSpan={7} className="py-6 text-sm text-zinc-500">
                     {emptyPostsLabel}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : (
                 (posts?.items ?? []).map((item) => {
-                  const reportedComments = getPostReportedComments(item);
-                  const savedComments = getPostSavedComments(item);
-                  const incomplete = isPostCommentsIncomplete(item);
+                  const breakdown = getPostCommentBreakdown(item);
+                  const captureHealthSummary = formatPostCaptureHealthSummary(item.comment_breakdown);
+                  const incomplete = breakdown.missingComments > 0;
                   return (
-                    <tr key={item.id}>
-                      <td className="py-4 pr-4 align-top text-zinc-700">
+                    <TableRow key={item.id}>
+                      <TableCell className="py-4 pr-4 align-top text-zinc-700">
                         {item.url ? (
                           <a
                             href={item.url}
@@ -870,33 +1252,63 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
                             {item.source_id || "Open post"}
                           </button>
                         )}
-                      </td>
-                      <td className="py-4 pr-4 align-top text-xs text-zinc-500">{formatDateTime(item.posted_at)}</td>
-                      <td className="py-4 pr-4 align-top text-zinc-700">
+                      </TableCell>
+                      <TableCell className="py-4 pr-4 align-top text-xs text-zinc-500">
+                        {formatDateTime(item.posted_at)}
+                      </TableCell>
+                      <TableCell className="whitespace-normal py-4 pr-4 align-top text-zinc-700">
                         <div className="max-w-xl">
                           <p className="whitespace-pre-wrap break-words leading-5 text-zinc-700">
                             {getCaptionPreview(item)}
                           </p>
                         </div>
-                      </td>
-                      <td className="py-4 pr-4 align-top text-zinc-700">{formatInteger(reportedComments)}</td>
-                      <td className="py-4 pr-4 align-top text-zinc-700">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span>{formatInteger(savedComments)}</span>
+                      </TableCell>
+                      <TableCell className="py-4 pr-4 align-top tabular-nums text-zinc-700">
+                        {formatInteger(breakdown.reportedComments)}
+                      </TableCell>
+                      <TableCell className="py-4 pr-4 align-top text-zinc-700">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {breakdown.hasThreadBreakdown ? (
+                              <>
+                                <span className="tabular-nums">{formatInteger(breakdown.parentComments ?? 0)} parent</span>
+                                <span className="tabular-nums">{formatInteger(breakdown.childReplies ?? 0)} replies</span>
+                              </>
+                            ) : (
+                              <span className="tabular-nums">{formatInteger(breakdown.savedInstagramComments)} saved comments</span>
+                            )}
                           {incomplete ? (
                             <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
                               Incomplete
                             </span>
                           ) : null}
+                          </div>
+                          {breakdown.hasFacebookData ? (
+                            <p className="text-xs text-zinc-500">
+                              {formatInteger(breakdown.facebookComments)} Facebook accounted
+                            </p>
+                          ) : null}
+                          {captureHealthSummary ? (
+                            <p className="text-xs text-zinc-500">{captureHealthSummary}</p>
+                          ) : null}
                         </div>
-                      </td>
-                      <td className="py-4 align-top text-zinc-700">{formatInteger(item.metrics.likes)}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell
+                        className={`py-4 pr-4 align-top tabular-nums ${
+                          breakdown.missingComments > 0 ? "font-semibold text-amber-700" : "text-zinc-700"
+                        }`}
+                      >
+                        {formatInteger(breakdown.missingComments)}
+                      </TableCell>
+                      <TableCell className="py-4 align-top tabular-nums text-zinc-700">
+                        {formatInteger(item.metrics.likes)}
+                      </TableCell>
+                    </TableRow>
                   );
                 })
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
 
         <div className="mt-4 flex items-center justify-between">
@@ -924,7 +1336,7 @@ export default function InstagramCommentsPanel({ platform, handle, summary, onSu
 
       <InstagramCommentsPostModal
         isOpen={Boolean(selectedPost)}
-        onClose={() => setSelectedPost(null)}
+        onClose={closePostComments}
         platform={platform}
         handle={handle}
         post={selectedPost}

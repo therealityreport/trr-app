@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   fetchAllPaginatedGalleryRowsWithMeta,
+  fetchFirstPaginatedGalleryRowsWithMeta,
+  mapGalleryInputsSettledWithConcurrency,
   mapGalleryInputsWithConcurrency,
 } from "@/lib/admin/paginated-gallery-fetch";
 
@@ -48,6 +50,29 @@ describe("fetchAllPaginatedGalleryRowsWithMeta", () => {
     ]);
   });
 
+  it("can return only the first page while preserving truncation metadata", async () => {
+    const requests: Array<{ cursor: string | null; limit: number }> = [];
+
+    const result = await fetchFirstPaginatedGalleryRowsWithMeta({
+      pageSize: 48,
+      async fetchPage(cursor, limit) {
+        requests.push({ cursor, limit });
+        return {
+          rows: Array.from({ length: 48 }, (_, index) => `asset-${index + 1}`),
+          nextCursor: "offset:48",
+        };
+      },
+    });
+
+    expect(result).toMatchObject({
+      truncated: true,
+      pagesFetched: 1,
+      rowsFetched: 48,
+    });
+    expect(result.rows).toHaveLength(48);
+    expect(requests).toEqual([{ cursor: null, limit: 48 }]);
+  });
+
   it("limits concurrent gallery input fetches while preserving result order", async () => {
     let active = 0;
     let maxActive = 0;
@@ -75,5 +100,33 @@ describe("fetchAllPaginatedGalleryRowsWithMeta", () => {
     ]);
     expect(maxActive).toBeLessThanOrEqual(2);
     expect(started).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("preserves fulfilled source rows when another source fails", async () => {
+    const results = await mapGalleryInputsSettledWithConcurrency({
+      inputs: ["show", "season-4", "season-5"],
+      concurrency: 2,
+      async fetchInput(input) {
+        if (input === "season-4") {
+          throw Object.assign(new Error("Admin read request timed out after 15s"), {
+            code: "BACKEND_TIMEOUT",
+            retryable: true,
+          });
+        }
+        return [`${input}-asset`];
+      },
+    });
+
+    expect(results).toHaveLength(3);
+    expect(results.filter((result) => result.status === "fulfilled").map((result) => result.value)).toEqual([
+      ["show-asset"],
+      ["season-5-asset"],
+    ]);
+    const failed = results.find((result) => result.status === "rejected");
+    expect(failed?.input).toBe("season-4");
+    expect(failed?.reason).toMatchObject({
+      code: "BACKEND_TIMEOUT",
+      retryable: true,
+    });
   });
 });

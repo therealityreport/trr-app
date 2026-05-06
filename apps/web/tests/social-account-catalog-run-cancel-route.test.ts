@@ -15,6 +15,7 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 45_000,
+  SOCIAL_PROXY_SHORT_TIMEOUT_MS: 10_000,
 }));
 
 import { POST } from "@/app/api/admin/trr-api/social/profiles/[platform]/[handle]/catalog/runs/[runId]/cancel/route";
@@ -59,8 +60,8 @@ describe("social account catalog run cancel proxy route", () => {
       expect.objectContaining({
         method: "POST",
         fallbackError: "Failed to cancel social account catalog run",
-        retries: 1,
-        timeoutMs: 45_000,
+        retries: 0,
+        timeoutMs: 10_000,
       }),
     );
   });

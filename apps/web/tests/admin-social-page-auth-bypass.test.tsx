@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const mocks = vi.hoisted(() => ({
   fetchAdminWithAuth: vi.fn(),
@@ -224,7 +224,7 @@ const buildInitialLandingPayload = () => ({
       {
         id: "source-1",
         platform: "instagram",
-        source_scope: "bravo",
+        source_scope: "network",
         account_handle: "bravotv",
         is_active: true,
         scrape_priority: 10,
@@ -249,6 +249,59 @@ const buildInitialLandingPayload = () => ({
       },
     ],
   },
+  shared_source_sets: [
+    {
+      key: "bravo-tv",
+      title: "Bravo TV",
+      source_scope: "network",
+      description: "Network-owned social accounts and network-level shared ingest.",
+      sources: [
+        {
+          id: "source-1",
+          platform: "instagram",
+          source_scope: "network",
+          account_handle: "bravotv",
+          is_active: true,
+          scrape_priority: 10,
+          metadata: { display_name: "Bravo TV" },
+        },
+      ],
+    },
+    {
+      key: "news",
+      title: "News",
+      source_scope: "news",
+      description: "Outlet and publication accounts used for social news coverage.",
+      sources: [
+        {
+          id: "source-news-1",
+          platform: "instagram",
+          source_scope: "news",
+          account_handle: "bravodaily",
+          is_active: true,
+          scrape_priority: 20,
+          metadata: { display_name: "Bravo Daily" },
+        },
+      ],
+    },
+    {
+      key: "creators",
+      title: "Creators",
+      source_scope: "creator",
+      description: "Independent creator accounts such as queensofbravo.",
+      sources: [
+        {
+          id: "source-creator-1",
+          platform: "instagram",
+          source_scope: "creator",
+          account_handle: "queensofbravo",
+          is_active: true,
+          scrape_priority: 20,
+          metadata: { display_name: "Queens of Bravo" },
+        },
+      ],
+    },
+  ],
   reddit_dashboard: {
     active_community_count: 0,
     archived_community_count: 0,
@@ -284,7 +337,7 @@ const buildUpdatedLandingPayload = () => ({
 });
 
 describe("admin social page auth bypass", () => {
-  const landingCacheKey = "trr-admin-social-landing:v3";
+  const landingCacheKey = "trr-admin-social-landing:v4";
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -316,6 +369,9 @@ describe("admin social page auth bypass", () => {
 
         if (url.includes("/social/shared/ingest")) {
           expect(init?.method).toBe("POST");
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            source_scope: "network",
+          });
           return jsonResponse({
             message: "Shared ingest queued",
             run_id: "run-queued-1",
@@ -349,6 +405,9 @@ describe("admin social page auth bypass", () => {
 
       if (url.includes("/social/shared/ingest")) {
         expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          source_scope: "network",
+        });
         return jsonResponse({
           message: "Shared ingest queued",
           run_id: "run-queued-1",
@@ -449,9 +508,14 @@ describe("admin social page auth bypass", () => {
       expect(screen.getByRole("heading", { name: "NETWORKS" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "SHOWS" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
+      expect(screen.getAllByRole("heading", { name: "PEOPLE" })).toHaveLength(1);
+      expect(screen.getByRole("heading", { name: "NEWS" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "CREATORS" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Bravo TV" })).toBeInTheDocument();
       expect(screen.getAllByText("The Traitors").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Andy Cohen").length).toBeGreaterThan(0);
+      expect(screen.getByText("Bravo Daily")).toBeInTheDocument();
+      expect(screen.getByText("Queens of Bravo")).toBeInTheDocument();
     });
 
     expect(
@@ -493,7 +557,7 @@ describe("admin social page auth bypass", () => {
     });
   });
 
-  it("renders cast SocialBlade shows and reveals grouped platform accounts", async () => {
+  it("renders show-grouped people SocialBlade rows and reveals grouped platform accounts", async () => {
     const landingPayload = buildInitialLandingPayload();
     mocks.fetchAdminWithAuth.mockImplementationOnce(async () =>
       jsonResponse({
@@ -537,7 +601,8 @@ describe("admin social page auth bypass", () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "CAST SOCIALBLADE" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "CAST SOCIALBLADE" })).not.toBeInTheDocument();
       const rhoslcButton = screen.getByRole("button", { name: /RHOSLC/ });
       const rhonyButton = screen.getByRole("button", { name: /RHONY/ });
       expect(rhoslcButton).toHaveAttribute("aria-pressed", "true");
@@ -637,6 +702,9 @@ describe("admin social page auth bypass", () => {
 
       if (url.includes("/social/shared/ingest")) {
         expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          source_scope: "network",
+        });
         return jsonResponse({
           message: "Shared ingest queued",
           run_id: "run-queued-1",
@@ -649,7 +717,7 @@ describe("admin social page auth bypass", () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "CAST SOCIALBLADE" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /RHOSLC/ })).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -746,6 +814,9 @@ describe("admin social page auth bypass", () => {
 
       if (url.includes("/social/shared/ingest")) {
         expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          source_scope: "network",
+        });
         return jsonResponse({
           message: "Shared ingest queued",
           run_id: "run-queued-1",
@@ -814,7 +885,7 @@ describe("admin social page auth bypass", () => {
     });
   });
 
-  it("keeps a quiet cast SocialBlade empty state when the landing payload has no cast rows", async () => {
+  it("keeps a quiet people empty state when the landing payload has no cast rows", async () => {
     mocks.fetchAdminWithAuth.mockImplementationOnce(async () =>
       jsonResponse({
         ...buildInitialLandingPayload(),
@@ -825,12 +896,133 @@ describe("admin social page auth bypass", () => {
     render(<AdminSocialPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "CAST SOCIALBLADE" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
+      expect(screen.getAllByRole("heading", { name: "PEOPLE" })).toHaveLength(1);
       expect(
-        screen.getByText("No cast SocialBlade rows are available yet."),
+        screen.getByText("No people SocialBlade rows are available yet."),
       ).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "NETWORKS" })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "PEOPLE" })).toBeInTheDocument();
+    });
+  });
+
+  it("adds news and creator accounts through their scoped containers", async () => {
+    let postCount = 0;
+    mocks.fetchAdminWithAuth.mockImplementation(async (input, init, options) => {
+      if (!options?.allowDevAdminBypass) {
+        throw new Error("Not authenticated");
+      }
+
+      const url = String(input);
+      if (url === "/api/admin/social/landing" && init?.method === "POST") {
+        postCount += 1;
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        if (postCount === 1) {
+          expect(body).toMatchObject({
+            target_type: "shared_source",
+            target_id: "news",
+            source_scope: "news",
+            platform: "instagram",
+            value: "@realityblurb",
+            display_name: "Reality Blurb",
+          });
+          return jsonResponse({
+            ...buildInitialLandingPayload(),
+            shared_source_sets: buildInitialLandingPayload().shared_source_sets.map(
+              (sourceSet) =>
+                sourceSet.source_scope === "news"
+                  ? {
+                      ...sourceSet,
+                      sources: [
+                        ...sourceSet.sources,
+                        {
+                          id: "source-news-2",
+                          platform: "instagram",
+                          source_scope: "news",
+                          account_handle: "realityblurb",
+                          is_active: true,
+                          scrape_priority: 20,
+                          metadata: { display_name: "Reality Blurb" },
+                        },
+                      ],
+                    }
+                  : sourceSet,
+            ),
+          });
+        }
+
+        expect(body).toMatchObject({
+          target_type: "shared_source",
+          target_id: "creator",
+          source_scope: "creator",
+          platform: "instagram",
+          value: "@bravobravoduckingbravo",
+          display_name: "Bravo Bravo Ducking Bravo",
+        });
+        return jsonResponse({
+          ...buildInitialLandingPayload(),
+          shared_source_sets: buildInitialLandingPayload().shared_source_sets.map(
+            (sourceSet) =>
+              sourceSet.source_scope === "creator"
+                ? {
+                    ...sourceSet,
+                    sources: [
+                      ...sourceSet.sources,
+                      {
+                        id: "source-creator-2",
+                        platform: "instagram",
+                        source_scope: "creator",
+                        account_handle: "bravobravoduckingbravo",
+                        is_active: true,
+                        scrape_priority: 20,
+                        metadata: { display_name: "Bravo Bravo Ducking Bravo" },
+                      },
+                    ],
+                  }
+                : sourceSet,
+          ),
+        });
+      }
+
+      if (url.startsWith("/api/admin/social/landing")) {
+        return jsonResponse(buildInitialLandingPayload());
+      }
+
+      throw new Error(`Unhandled request: ${url}`);
+    });
+
+    render(<AdminSocialPage />);
+
+    const newsSection = await waitFor(() => {
+      const heading = screen.getByRole("heading", { name: "NEWS" });
+      const section = heading.closest("section");
+      expect(section).not.toBeNull();
+      return section as HTMLElement;
+    });
+    fireEvent.change(within(newsSection).getByRole("textbox", { name: "Handle or URL" }), {
+      target: { value: "@realityblurb" },
+    });
+    fireEvent.change(within(newsSection).getByRole("textbox", { name: "Display name" }), {
+      target: { value: "Reality Blurb" },
+    });
+    fireEvent.click(within(newsSection).getByRole("button", { name: "Add Source" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Reality Blurb")).toBeInTheDocument();
+    });
+
+    const creatorSection = screen
+      .getByRole("heading", { name: "CREATORS" })
+      .closest("section") as HTMLElement;
+    fireEvent.change(within(creatorSection).getByRole("textbox", { name: "Handle or URL" }), {
+      target: { value: "@bravobravoduckingbravo" },
+    });
+    fireEvent.change(within(creatorSection).getByRole("textbox", { name: "Display name" }), {
+      target: { value: "Bravo Bravo Ducking Bravo" },
+    });
+    fireEvent.click(within(creatorSection).getByRole("button", { name: "Add Source" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Bravo Bravo Ducking Bravo")).toBeInTheDocument();
     });
   });
 
@@ -860,7 +1052,6 @@ describe("admin social page auth bypass", () => {
       expect(
         screen.getByText("Saved Threads for Producer Without Handles."),
       ).toBeInTheDocument();
-      expect(screen.getByText("@producerhandles")).toBeInTheDocument();
     });
 
     const saveCall = mocks.fetchAdminWithAuth.mock.calls.find(
@@ -937,9 +1128,8 @@ describe("admin social page auth bypass", () => {
       expect(
         screen.getByText("Saved Threads for Producer Without Handles."),
       ).toBeInTheDocument();
-      expect(screen.getByText("@producerhandles")).toBeInTheDocument();
       expect(
-        screen.getByText("No cast SocialBlade rows are available yet."),
+        screen.getByText("No people SocialBlade rows are available yet."),
       ).toBeInTheDocument();
     });
 

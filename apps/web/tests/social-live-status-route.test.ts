@@ -15,6 +15,7 @@ vi.mock("@/lib/server/trr-api/social-admin-proxy", () => ({
   fetchSocialBackendJson: fetchSocialBackendJsonMock,
   socialProxyErrorResponse: socialProxyErrorResponseMock,
   SOCIAL_PROXY_DEFAULT_TIMEOUT_MS: 25_000,
+  SOCIAL_PROXY_SHORT_TIMEOUT_MS: 10_000,
 }));
 
 import { GET } from "@/app/api/admin/trr-api/social/ingest/live-status/route";
@@ -61,7 +62,7 @@ describe("social live status route", () => {
       expect.objectContaining({
         fallbackError: "Failed to fetch social live status",
         retries: 0,
-        timeoutMs: 25_000,
+        timeoutMs: 10_000,
       }),
     );
   });
@@ -95,7 +96,7 @@ describe("social live status route", () => {
     expect(fetchSocialBackendJsonMock).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to the last good snapshot when the backend errors during a refresh window", async () => {
+  it("returns degraded live status when the backend errors during refresh", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:00:00.000Z"));
     fetchSocialBackendJsonMock
@@ -117,14 +118,14 @@ describe("social live status route", () => {
     const payload = (await stale.json()) as {
       stale?: boolean;
       cache_age_ms?: number;
-      data?: { health_dot?: { sequence?: number } };
+      data?: { degraded?: boolean; degraded_reason?: string };
     };
 
     expect(stale.status).toBe(200);
-    expect(stale.headers.get("x-trr-cache")).toBe("hit");
-    expect(payload.stale).toBe(true);
-    expect(payload.data?.health_dot?.sequence).toBe(1);
-    expect((payload.cache_age_ms ?? 0) >= 6_000).toBe(true);
+    expect(stale.headers.get("x-trr-cache")).toBe("miss");
+    expect(payload.stale).toBe(false);
+    expect(payload.data?.degraded).toBe(true);
+    expect(payload.data?.degraded_reason).toBe("live_status_timeout");
     vi.useRealTimers();
   });
 });

@@ -55,6 +55,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!forwardedSearchParams.has("max_comments_per_post")) {
       forwardedSearchParams.set("max_comments_per_post", "0");
     }
+    if (!forwardedSearchParams.has("include_status")) {
+      forwardedSearchParams.set("include_status", "false");
+    }
     // post_limit and post_offset are passed through unchanged to support paginated requests from the admin UI.
 
     const data = await fetchSeasonBackendJson(

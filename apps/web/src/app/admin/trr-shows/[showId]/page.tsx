@@ -120,8 +120,8 @@ import {
 } from "@/lib/gallery-filter-utils";
 import { applyAdvancedFiltersToSeasonAssets } from "@/lib/gallery-advanced-filtering";
 import {
-  fetchAllPaginatedGalleryRowsWithMeta,
-  mapGalleryInputsWithConcurrency,
+  fetchFirstPaginatedGalleryRowsWithMeta,
+  mapGalleryInputsSettledWithConcurrency,
 } from "@/lib/admin/paginated-gallery-fetch";
 import { resolveBravoVideoThumbnailUrl } from "@/lib/admin/bravo-video-thumbnails";
 import {
@@ -854,6 +854,53 @@ type SeasonUrlCoverageRow = {
 };
 
 type ShowGalleryVisibleBySection = Partial<Record<AssetSectionKey, number>>;
+type GalleryAssetSourceRequest = {
+  id: string;
+  label: string;
+  baseUrl: string;
+};
+type GalleryAssetSourceFailure = {
+  sourceId: string;
+  label: string;
+  message: string;
+  status: number;
+  retryable: boolean;
+  code?: string;
+  reason?: string;
+  detail?: Record<string, unknown>;
+};
+
+class GalleryAssetSourceError extends Error {
+  status: number;
+  retryable: boolean;
+  code?: string;
+  reason?: string;
+  detail?: Record<string, unknown>;
+
+  constructor({
+    message,
+    status,
+    retryable,
+    code,
+    reason,
+    detail,
+  }: {
+    message: string;
+    status: number;
+    retryable: boolean;
+    code?: string;
+    reason?: string;
+    detail?: Record<string, unknown>;
+  }) {
+    super(message);
+    this.name = "GalleryAssetSourceError";
+    this.status = status;
+    this.retryable = retryable;
+    this.code = code;
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
 
 const TabLoadingFallback = ({ label }: { label: string }) => (
   <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -1145,7 +1192,7 @@ const PERSON_REFRESH_STREAM_TIMEOUT_MS = 4 * 60 * 1000;
 const PERSON_REFRESH_STREAM_IDLE_TIMEOUT_MS = 600_000;
 const PERSON_REFRESH_FALLBACK_TIMEOUT_MS = 8 * 60 * 1000;
 const GALLERY_ASSET_LOAD_TIMEOUT_MS = 60_000;
-const GALLERY_ASSET_PAGE_SIZE = 500;
+const GALLERY_ASSET_PAGE_SIZE = 48;
 const GALLERY_ASSET_FETCH_CONCURRENCY = 1;
 const ASSET_PIPELINE_STEP_TIMEOUT_MS = 8 * 60 * 1000;
 const CAST_PROFILE_SYNC_CONCURRENCY = 3;
@@ -1964,6 +2011,87 @@ const parseProgressNumber = (value: unknown): number | null => {
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
+
+const isRetryableGalleryStatus = (status: number): boolean =>
+  status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+
+const readGalleryErrorString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+const readGalleryErrorBoolean = (value: unknown): boolean | undefined =>
+  typeof value === "boolean" ? value : undefined;
+
+const parseGalleryAssetErrorPayload = async (
+  response: Response,
+): Promise<{
+  message: string;
+  code?: string;
+  reason?: string;
+  retryable: boolean;
+  detail?: Record<string, unknown>;
+}> => {
+  let payload: Record<string, unknown> | null = null;
+  try {
+    const parsed = (await response.clone().json()) as unknown;
+    payload = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    payload = null;
+  }
+
+  const detail =
+    payload?.detail && typeof payload.detail === "object" && !Array.isArray(payload.detail)
+      ? (payload.detail as Record<string, unknown>)
+      : null;
+  const code = readGalleryErrorString(payload?.code) ?? readGalleryErrorString(detail?.code);
+  const reason = readGalleryErrorString(payload?.reason) ?? readGalleryErrorString(detail?.reason);
+  return {
+    message:
+      readGalleryErrorString(payload?.error) ??
+      readGalleryErrorString(payload?.detail) ??
+      readGalleryErrorString(detail?.message) ??
+      `${response.status} ${response.statusText || "Failed to load gallery assets"}`,
+    ...(code ? { code } : {}),
+    ...(reason ? { reason } : {}),
+    retryable:
+      readGalleryErrorBoolean(payload?.retryable) ??
+      readGalleryErrorBoolean(detail?.retryable) ??
+      isRetryableGalleryStatus(response.status),
+    ...(detail ? { detail } : {}),
+  };
+};
+
+const normalizeGallerySourceFailure = (
+  source: GalleryAssetSourceRequest,
+  reason: unknown,
+): GalleryAssetSourceFailure => {
+  if (reason instanceof GalleryAssetSourceError) {
+    return {
+      sourceId: source.id,
+      label: source.label,
+      message: reason.message,
+      status: reason.status,
+      retryable: reason.retryable,
+      ...(reason.code ? { code: reason.code } : {}),
+      ...(reason.reason ? { reason: reason.reason } : {}),
+      ...(reason.detail ? { detail: reason.detail } : {}),
+    };
+  }
+  return {
+    sourceId: source.id,
+    label: source.label,
+    message: reason instanceof Error ? reason.message : "Failed to load gallery assets",
+    status: 500,
+    retryable: false,
+  };
+};
+
+const formatGallerySourceFailure = (failure: GalleryAssetSourceFailure): string => {
+  const retryLabel = failure.retryable ? "retryable" : "not retryable";
+  const codeLabel = failure.code ? ` (${failure.code})` : "";
+  return `${failure.label}: ${failure.message}${codeLabel}, ${retryLabel}`;
+};
 
 const formatSnapshotAgeLabel = (timestampMs: number): string => {
   const diffMs = Math.max(0, Date.now() - timestampMs);
@@ -2843,6 +2971,7 @@ export default function TrrShowDetailPage() {
   const [gallerySeasonInitialized, setGallerySeasonInitialized] = useState(false);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryTruncatedWarning, setGalleryTruncatedWarning] = useState<string | null>(null);
+  const [gallerySourceFailures, setGallerySourceFailures] = useState<GalleryAssetSourceFailure[]>([]);
   const [galleryFallbackTelemetry, setGalleryFallbackTelemetry] = useState({
     fallbackRecoveredCount: 0,
     allCandidatesFailedCount: 0,
@@ -9481,6 +9610,7 @@ export default function TrrShowDetailPage() {
       if (!showId) return;
       setGalleryLoading(true);
       setGalleryTruncatedWarning(null);
+      setGallerySourceFailures([]);
       setGalleryFallbackTelemetry({
         fallbackRecoveredCount: 0,
         allCandidatesFailedCount: 0,
@@ -9521,12 +9651,12 @@ export default function TrrShowDetailPage() {
         };
 
         const fetchAssetPage = async (
-          baseUrl: string,
+          source: GalleryAssetSourceRequest,
           cursor: string | null,
           limit: number,
         ): Promise<{ rows: SeasonAsset[]; nextCursor: string | null }> => {
-          const separator = baseUrl.includes("?") ? "&" : "?";
-          const url = `${baseUrl}${separator}limit=${limit}${
+          const separator = source.baseUrl.includes("?") ? "&" : "?";
+          const url = `${source.baseUrl}${separator}limit=${limit}${
             cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
           }`;
           let res: Response;
@@ -9534,15 +9664,29 @@ export default function TrrShowDetailPage() {
             res = await fetchWithTimeout(url, { headers }, GALLERY_ASSET_LOAD_TIMEOUT_MS);
           } catch (error) {
             if (isAbortError(error)) {
-              throw new Error(
-                `Timed out loading gallery assets after ${Math.round(
+              throw new GalleryAssetSourceError({
+                message: `Timed out loading ${source.label.toLowerCase()} after ${Math.round(
                   GALLERY_ASSET_LOAD_TIMEOUT_MS / 1000
-                )}s.`
-              );
+                )}s.`,
+                status: 408,
+                retryable: true,
+                code: "REQUEST_TIMEOUT",
+                reason: "client_timeout",
+              });
             }
             throw error;
           }
-          if (!res.ok) return { rows: [], nextCursor: null };
+          if (!res.ok) {
+            const errorPayload = await parseGalleryAssetErrorPayload(res);
+            throw new GalleryAssetSourceError({
+              message: errorPayload.message,
+              status: res.status,
+              retryable: errorPayload.retryable,
+              ...(errorPayload.code ? { code: errorPayload.code } : {}),
+              ...(errorPayload.reason ? { reason: errorPayload.reason } : {}),
+              ...(errorPayload.detail ? { detail: errorPayload.detail } : {}),
+            });
+          }
           const data = await res.json().catch(() => ({}));
           const assets = (data as { assets?: unknown }).assets;
           const pagination =
@@ -9565,12 +9709,18 @@ export default function TrrShowDetailPage() {
         };
 
         const fetchAssetRows = async (
-          baseUrl: string,
-        ): Promise<{ rows: SeasonAsset[]; truncated: boolean }> =>
-          fetchAllPaginatedGalleryRowsWithMeta({
+          source: GalleryAssetSourceRequest,
+        ): Promise<{ source: GalleryAssetSourceRequest; rows: SeasonAsset[]; truncated: boolean }> => {
+          const result = await fetchFirstPaginatedGalleryRowsWithMeta({
             pageSize: GALLERY_ASSET_PAGE_SIZE,
-            fetchPage: (cursor, limit) => fetchAssetPage(baseUrl, cursor, limit),
+            fetchPage: (cursor, limit) => fetchAssetPage(source, cursor, limit),
           });
+          return {
+            source,
+            rows: result.rows,
+            truncated: result.truncated,
+          };
+        };
 
         const fetchShowAssetsBaseUrl = advancedFilters.sources.length
           ? `/api/admin/trr-api/shows/${showId}/assets?sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
@@ -9581,37 +9731,56 @@ export default function TrrShowDetailPage() {
             ? `/api/admin/trr-api/shows/${showId}/seasons/${targetSeasonNumber}/assets?sources=${encodeURIComponent(advancedFilters.sources.join(","))}`
             : `/api/admin/trr-api/shows/${showId}/seasons/${targetSeasonNumber}/assets`;
 
-        const fetchAssetRowsForBaseUrls = (baseUrls: string[]) =>
-          mapGalleryInputsWithConcurrency({
-            inputs: baseUrls,
+        const fetchAssetRowsForSources = (sources: GalleryAssetSourceRequest[]) =>
+          mapGalleryInputsSettledWithConcurrency({
+            inputs: sources,
             concurrency: GALLERY_ASSET_FETCH_CONCURRENCY,
-            fetchInput: (baseUrl) => fetchAssetRows(baseUrl),
+            fetchInput: (source) => fetchAssetRows(source),
           });
 
-        if (seasonNumber === "all") {
-          // Fetch show-level assets once + season assets for all seasons without
-          // saturating backend DB pools with one request per season.
-          const [showAssets, ...seasonResults] = await fetchAssetRowsForBaseUrls([
-            fetchShowAssetsBaseUrl,
-            ...visibleSeasons.map((season) => fetchSeasonAssetsBaseUrl(season.season_number)),
-          ]);
-          const dedupedAssets = dedupe([
-            ...(showAssets?.rows ?? []),
-            ...seasonResults.flatMap((result) => result.rows),
-          ]);
-          setGalleryAssets(dedupedAssets);
-          setGalleryTruncatedWarning(null);
-          setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
-        } else {
-          const [showAssets, seasonAssets] = await fetchAssetRowsForBaseUrls([
-            fetchShowAssetsBaseUrl,
-            fetchSeasonAssetsBaseUrl(seasonNumber),
-          ]);
-          const dedupedAssets = dedupe([...(showAssets?.rows ?? []), ...(seasonAssets?.rows ?? [])]);
-          setGalleryAssets(dedupedAssets);
-          setGalleryTruncatedWarning(null);
-          setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
-        }
+        const sourceRequests: GalleryAssetSourceRequest[] =
+          seasonNumber === "all"
+            ? [
+                { id: "show", label: "Show assets", baseUrl: fetchShowAssetsBaseUrl },
+                ...visibleSeasons.map((season) => ({
+                  id: `season-${season.season_number}`,
+                  label: `Season ${season.season_number} assets`,
+                  baseUrl: fetchSeasonAssetsBaseUrl(season.season_number),
+                })),
+              ]
+            : [
+                { id: "show", label: "Show assets", baseUrl: fetchShowAssetsBaseUrl },
+                {
+                  id: `season-${seasonNumber}`,
+                  label: `Season ${seasonNumber} assets`,
+                  baseUrl: fetchSeasonAssetsBaseUrl(seasonNumber),
+                },
+              ];
+
+        const settledResults = await fetchAssetRowsForSources(sourceRequests);
+        const successfulResults = settledResults
+          .filter((result) => result.status === "fulfilled")
+          .map((result) => result.value);
+        const sourceFailures = settledResults
+          .filter((result) => result.status === "rejected")
+          .map((result) => normalizeGallerySourceFailure(result.input, result.reason));
+        const dedupedAssets = dedupe(successfulResults.flatMap((result) => result.rows));
+        const truncatedSourceCount = successfulResults.filter((result) => result.truncated).length;
+        const warningParts = [
+          sourceFailures.length > 0
+            ? `Some gallery sources did not load: ${sourceFailures
+                .map((failure) => `${failure.label}${failure.code ? ` (${failure.code})` : ""}`)
+                .join("; ")}. Showing available assets.`
+            : null,
+          truncatedSourceCount > 0
+            ? `Showing the first ${GALLERY_ASSET_PAGE_SIZE} assets per gallery source.`
+            : null,
+        ].filter((message): message is string => Boolean(message));
+
+        setGalleryAssets(dedupedAssets);
+        setGallerySourceFailures(sourceFailures);
+        setGalleryTruncatedWarning(warningParts.length > 0 ? warningParts.join(" ") : null);
+        setGalleryMirrorTelemetry(computeMirrorTelemetry(dedupedAssets));
       } finally {
         setGalleryLoading(false);
       }
@@ -12804,6 +12973,18 @@ export default function TrrShowDetailPage() {
                     {galleryMirrorTelemetry.mirroredCount}/{galleryMirrorTelemetry.totalCount} (
                     {Math.round(galleryMirrorTelemetry.mirroredRatio * 100)}%).
                   </p>
+                  {process.env.NODE_ENV === "development" && gallerySourceFailures.length > 0 && (
+                    <details className="mb-4 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+                      <summary className="cursor-pointer font-medium text-zinc-900">
+                        Gallery source debug
+                      </summary>
+                      <ul className="mt-2 space-y-1">
+                        {gallerySourceFailures.map((failure) => (
+                          <li key={failure.sourceId}>{formatGallerySourceFailure(failure)}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
 
                   {galleryLoading ? (
                     <div className="flex items-center justify-center py-12">

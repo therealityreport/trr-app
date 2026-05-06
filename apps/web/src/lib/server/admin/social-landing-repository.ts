@@ -22,6 +22,8 @@ import type {
   PersonTargetSummary,
   RedditDashboardSummary,
   SharedAccountSourceSummary,
+  SharedAccountSourceSet,
+  SharedAccountSourceSetScope,
   SharedPipelineSummary,
   SharedReviewItemSummary,
   SharedRunSummary,
@@ -131,6 +133,32 @@ const PERSON_SOCIAL_SOURCES: readonly SupportedPersonSocialSource[] = [
   "tiktok",
   "youtube",
 ] as const;
+
+const SHARED_SOURCE_SETS: readonly {
+  key: string;
+  title: string;
+  source_scope: SharedAccountSourceSetScope;
+  description: string;
+}[] = [
+  {
+    key: "bravo-tv",
+    title: "Bravo TV",
+    source_scope: "network",
+    description: "Network social handles used in sends and profile backfills.",
+  },
+  {
+    key: "news",
+    title: "News",
+    source_scope: "news",
+    description: "Publication and news outlet social accounts.",
+  },
+  {
+    key: "creators",
+    title: "Creators",
+    source_scope: "creator",
+    description: "Independent content creator and fan account sources.",
+  },
+];
 
 const CAST_SOCIALBLADE_PLATFORMS =
   SOCIAL_ACCOUNT_SOCIALBLADE_ENABLED_PLATFORMS.filter(
@@ -349,11 +377,12 @@ const dedupeHandles = (
 
 const safeLoadSharedSources = async (
   adminContext?: VerifiedAdminContext,
+  sourceScope: SharedAccountSourceSetScope = "network",
 ): Promise<SharedAccountSourceSummary[]> => {
   try {
     const payload = await fetchSocialBackendJson("/shared/sources", {
       adminContext,
-      queryString: "source_scope=bravo&include_inactive=true",
+      queryString: `source_scope=${sourceScope}&include_inactive=true`,
       fallbackError: "Failed to fetch shared social account sources",
       retries: 0,
       timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
@@ -387,7 +416,7 @@ const safeLoadSharedRuns = async (
   try {
     const payload = await fetchSocialBackendJson("/shared/ingest/runs", {
       adminContext,
-      queryString: "source_scope=bravo&limit=5",
+      queryString: "source_scope=network&limit=5",
       fallbackError: "Failed to fetch shared social ingest runs",
       retries: 0,
       timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
@@ -413,7 +442,7 @@ const safeLoadSharedReviewItems = async (
   try {
     const payload = await fetchSocialBackendJson("/shared/review-queue", {
       adminContext,
-      queryString: "source_scope=bravo&review_status=open&limit=10",
+      queryString: "source_scope=network&review_status=open&limit=10",
       fallbackError: "Failed to fetch shared social review queue",
       retries: 0,
       timeoutMs: ADMIN_READ_PROXY_SHORT_TIMEOUT_MS,
@@ -973,6 +1002,22 @@ const buildNetworkSets = (
   ];
 };
 
+const buildSharedSourceSets = (
+  sourcesByScope: ReadonlyMap<SharedAccountSourceSetScope, readonly SharedAccountSourceSummary[]>,
+): SharedAccountSourceSet[] =>
+  SHARED_SOURCE_SETS.map((set) => ({
+    ...set,
+    sources: [...(sourcesByScope.get(set.source_scope) ?? [])].sort((left, right) => {
+      if (left.scrape_priority !== right.scrape_priority) {
+        return left.scrape_priority - right.scrape_priority;
+      }
+      if (left.platform !== right.platform) {
+        return left.platform.localeCompare(right.platform);
+      }
+      return left.account_handle.localeCompare(right.account_handle);
+    }),
+  }));
+
 const buildShowSets = (
   coveredShows: readonly CoveredShow[],
   showExternalIdsById: ReadonlyMap<string, Record<string, unknown> | null>,
@@ -1410,17 +1455,26 @@ export async function getSocialLandingPayloadResult(
     await safeLoadBackendLandingSummary(adminContext);
   const coveredShowIds = coveredShows.map((show) => show.trr_show_id);
   const [
-    sharedSources,
+    networkSharedSources,
+    creatorSharedSources,
+    newsSharedSources,
     sharedRuns,
     sharedReviewItems,
     showExternalIdsByIdResult,
     castByShowIdResult,
   ] = await Promise.all([
-    safeLoadSharedSources(adminContext),
+    safeLoadSharedSources(adminContext, "network"),
+    safeLoadSharedSources(adminContext, "creator"),
+    safeLoadSharedSources(adminContext, "news"),
     safeLoadSharedRuns(adminContext),
     safeLoadSharedReviewItems(adminContext),
     safeLoadShowExternalIdsMap(coveredShowIds),
     safeLoadShowCastSummaryMap(coveredShowIds, adminContext),
+  ]);
+  const sourcesByScope = new Map<SharedAccountSourceSetScope, readonly SharedAccountSourceSummary[]>([
+    ["network", networkSharedSources],
+    ["creator", creatorSharedSources],
+    ["news", newsSharedSources],
   ]);
   const showExternalIdsById = showExternalIdsByIdResult.value;
   const castByShowId = castByShowIdResult.value;
@@ -1440,13 +1494,14 @@ export async function getSocialLandingPayloadResult(
 
   return {
     payload: {
-      network_sets: buildNetworkSets(sharedSources),
-      show_sets: buildShowSets(coveredShows, showExternalIdsById, sharedSources),
+      network_sets: buildNetworkSets(networkSharedSources),
+      show_sets: buildShowSets(coveredShows, showExternalIdsById, networkSharedSources),
       people_profiles: peopleProfiles,
       person_targets: personTargets,
       cast_socialblade_shows: castSocialBladeShowsResult.value,
+      shared_source_sets: buildSharedSourceSets(sourcesByScope),
       shared_pipeline: {
-        sources: sharedSources,
+        sources: networkSharedSources,
         runs: sharedRuns,
         review_items: sharedReviewItems,
       } satisfies SharedPipelineSummary,

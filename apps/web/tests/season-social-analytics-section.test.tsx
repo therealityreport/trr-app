@@ -2750,7 +2750,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   });
 
   it("hydrates from cached social snapshot and suppresses transient timeout banners", async () => {
-    const cacheKey = "trr:season-social-analytics:v1:show-1:6:season-1:bravo:all:all";
+    const cacheKey = "trr:season-social-analytics:v1:show-1:6:season-1:network:all:all";
     window.localStorage.setItem(
       cacheKey,
       JSON.stringify({
@@ -2822,7 +2822,7 @@ describe("SeasonSocialAnalyticsSection weekly trend", () => {
   });
 
   it("hydrates from cached social snapshot and shows backend saturation stale fallback copy", async () => {
-    const cacheKey = "trr:season-social-analytics:v1:show-1:6:season-1:bravo:all:all";
+    const cacheKey = "trr:season-social-analytics:v1:show-1:6:season-1:network:all:all";
     window.localStorage.setItem(
       cacheKey,
       JSON.stringify({

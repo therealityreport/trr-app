@@ -27,6 +27,16 @@ export interface SharedAccountSourceSummary {
   last_classified_at?: string | null;
 }
 
+export type SharedAccountSourceSetScope = "network" | "creator" | "news";
+
+export interface SharedAccountSourceSet {
+  key: string;
+  title: string;
+  source_scope: SharedAccountSourceSetScope;
+  description: string | null;
+  sources: SharedAccountSourceSummary[];
+}
+
 export interface SharedRunSummary {
   id: string;
   status: string;
@@ -130,6 +140,7 @@ export interface SocialLandingPayload {
   people_profiles: PersonProfileSummary[];
   person_targets: PersonTargetSummary[];
   cast_socialblade_shows: CastSocialBladeShowSummary[];
+  shared_source_sets: SharedAccountSourceSet[];
   shared_pipeline: SharedPipelineSummary;
   reddit_dashboard: RedditDashboardSummary;
 }

@@ -18,6 +18,8 @@ import type {
   NetworkProfileSet,
   PersonTargetSummary,
   RedditDashboardSummary,
+  SharedAccountSourceSet,
+  SharedAccountSourceSetScope,
   ShowProfileSet,
   SocialHandleSummary,
   SocialLandingPlatform,
@@ -35,7 +37,27 @@ import { useAdminGuard } from "@/lib/admin/useAdminGuard";
 
 const sectionEyebrowClass =
   "text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500";
-const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v3";
+const SOCIAL_LANDING_CACHE_KEY = "trr-admin-social-landing:v4";
+const SOCIAL_SOURCE_SET_DEFINITIONS: Omit<SharedAccountSourceSet, "sources">[] = [
+  {
+    key: "bravo-tv",
+    title: "Bravo TV",
+    source_scope: "network",
+    description: "Network-owned social accounts and network-level shared ingest.",
+  },
+  {
+    key: "news",
+    title: "News",
+    source_scope: "news",
+    description: "Outlet and publication accounts used for social news coverage.",
+  },
+  {
+    key: "creators",
+    title: "Creators",
+    source_scope: "creator",
+    description: "Independent creator accounts such as queensofbravo.",
+  },
+];
 const CAST_SOCIALBLADE_PLATFORM_ORDER: CastSocialBladePlatform[] = [
   "instagram",
   "youtube",
@@ -51,6 +73,11 @@ const EDITABLE_SHOW_SOCIAL_PLATFORMS = [
 ] as const;
 type EditableShowSocialPlatform = (typeof EDITABLE_SHOW_SOCIAL_PLATFORMS)[number];
 type ShowHandleDraft = Record<EditableShowSocialPlatform, string>;
+type SharedSourceDraft = {
+  platform: SocialLandingPlatform;
+  handle: string;
+  displayName: string;
+};
 const SHOW_SOCIAL_HANDLE_FIELD_BY_PLATFORM: Record<EditableShowSocialPlatform, string> = {
   instagram: "instagram_handle",
   facebook: "facebook_handle",
@@ -96,6 +123,18 @@ const buildEmptyShowHandleDraft = (): ShowHandleDraft => ({
   youtube: "",
 });
 
+const buildEmptySharedSourceDraft = (): SharedSourceDraft => ({
+  platform: "instagram",
+  handle: "",
+  displayName: "",
+});
+
+const buildEmptySharedSourceSets = (): SharedAccountSourceSet[] =>
+  SOCIAL_SOURCE_SET_DEFINITIONS.map((definition) => ({
+    ...definition,
+    sources: [],
+  }));
+
 const coerceLandingPayload = (
   data: Partial<SocialLandingPayload> | undefined,
 ): SocialLandingPayload => ({
@@ -106,6 +145,17 @@ const coerceLandingPayload = (
   cast_socialblade_shows: Array.isArray(data?.cast_socialblade_shows)
     ? data.cast_socialblade_shows
     : [],
+  shared_source_sets: SOCIAL_SOURCE_SET_DEFINITIONS.map((definition) => {
+    const sourceSet = Array.isArray(data?.shared_source_sets)
+      ? data.shared_source_sets.find(
+          (entry) => entry.source_scope === definition.source_scope,
+        )
+      : undefined;
+    return {
+      ...definition,
+      sources: Array.isArray(sourceSet?.sources) ? sourceSet.sources : [],
+    };
+  }),
   shared_pipeline: {
     sources: Array.isArray(data?.shared_pipeline?.sources)
       ? data.shared_pipeline.sources
@@ -269,7 +319,7 @@ const CastMemberAvatar = ({
   );
 };
 
-const CastSocialBladeSection = ({
+const PeopleSocialBladeSection = ({
   shows,
 }: {
   shows: readonly CastSocialBladeShowSummary[];
@@ -298,12 +348,10 @@ const CastSocialBladeSection = ({
     <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className={sectionEyebrowClass}>Cast SocialBlade</p>
-          <h2 className="text-lg font-semibold text-zinc-900">
-            CAST SOCIALBLADE
-          </h2>
+          <p className={sectionEyebrowClass}>People</p>
+          <h2 className="text-lg font-semibold text-zinc-900">PEOPLE</h2>
           <p className="mt-1 max-w-3xl text-sm text-zinc-500">
-            Pick a show to inspect cast SocialBlade coverage by platform.
+            Pick a show to inspect people SocialBlade coverage by platform.
           </p>
         </div>
         <span className="w-fit rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
@@ -313,7 +361,7 @@ const CastSocialBladeSection = ({
 
       {shows.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5 text-sm text-zinc-500">
-          No cast SocialBlade rows are available yet.
+          No people SocialBlade rows are available yet.
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
@@ -373,7 +421,7 @@ const CastSocialBladeSection = ({
                     {selectedShow.show_name}
                   </h3>
                   <p className="mt-1 text-sm text-zinc-500">
-                    {selectedShow.members.length.toLocaleString()} cast members with
+                    {selectedShow.members.length.toLocaleString()} people with
                     linked SocialBlade account data.
                   </p>
                 </div>
@@ -700,6 +748,206 @@ const ShowCard = ({
   );
 };
 
+const SharedSourceSection = ({
+  sourceSet,
+  onSaveSource,
+}: {
+  sourceSet: SharedAccountSourceSet;
+  onSaveSource: (
+    sourceScope: SharedAccountSourceSetScope,
+    draft: SharedSourceDraft,
+  ) => Promise<void>;
+}) => {
+  const [draft, setDraft] = useState<SharedSourceDraft>(() =>
+    buildEmptySharedSourceDraft(),
+  );
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const saveSource = async () => {
+    if (!draft.handle.trim()) {
+      setError("Enter a username, handle, or URL.");
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await onSaveSource(sourceSet.source_scope, draft);
+      setDraft(buildEmptySharedSourceDraft());
+      setMessage(`Saved ${formatPlatformLabel(draft.platform)} source.`);
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Failed to save shared source",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className={sectionEyebrowClass}>{sourceSet.title}</p>
+          <h2 className="text-lg font-semibold uppercase text-zinc-900">
+            {sourceSet.source_scope === "creator"
+              ? "CREATORS"
+              : sourceSet.source_scope === "news"
+                ? "NEWS"
+                : sourceSet.title}
+          </h2>
+          {sourceSet.description ? (
+            <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+              {sourceSet.description}
+            </p>
+          ) : null}
+        </div>
+        <span className="w-fit rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
+          {sourceSet.sources.length} source
+          {sourceSet.sources.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+        <div className="space-y-3">
+          {sourceSet.sources.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5 text-sm text-zinc-500">
+              No {sourceSet.title.toLowerCase()} social sources have been added yet.
+            </div>
+          ) : (
+            sourceSet.sources.map((source) => {
+              const displayName =
+                typeof source.metadata?.display_name === "string" &&
+                source.metadata.display_name.trim()
+                  ? source.metadata.display_name.trim()
+                  : `@${source.account_handle}`;
+              return (
+                <div
+                  key={`${sourceSet.source_scope}:${source.platform}:${source.account_handle}`}
+                  className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="font-semibold text-zinc-900">{displayName}</p>
+                      <p className="mt-1 text-sm text-zinc-500">
+                        {formatPlatformLabel(source.platform)} @{source.account_handle}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                        Priority {source.scrape_priority}
+                      </span>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                          source.is_active
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-zinc-200 bg-white text-zinc-500"
+                        }`}
+                      >
+                        {source.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <form
+          className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveSource();
+          }}
+        >
+          <p className="text-sm font-semibold text-zinc-900">Add account</p>
+          <div className="mt-4 space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Platform
+              </span>
+              <select
+                value={draft.platform}
+                onChange={(event) => {
+                  setDraft((current) => ({
+                    ...current,
+                    platform: event.target.value as SocialLandingPlatform,
+                  }));
+                  setError(null);
+                  setMessage(null);
+                }}
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+              >
+                {EDITABLE_SHOW_SOCIAL_PLATFORMS.map((platform) => (
+                  <option key={`${sourceSet.source_scope}:${platform}`} value={platform}>
+                    {formatPlatformLabel(platform)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Handle or URL
+              </span>
+              <input
+                type="text"
+                value={draft.handle}
+                onChange={(event) => {
+                  setDraft((current) => ({
+                    ...current,
+                    handle: event.target.value,
+                  }));
+                  setError(null);
+                  setMessage(null);
+                }}
+                placeholder="@queensofbravo or full profile URL"
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Display name
+              </span>
+              <input
+                type="text"
+                value={draft.displayName}
+                onChange={(event) => {
+                  setDraft((current) => ({
+                    ...current,
+                    displayName: event.target.value,
+                  }));
+                  setError(null);
+                  setMessage(null);
+                }}
+                placeholder="Optional"
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+              />
+            </label>
+          </div>
+
+          {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+          {message ? <p className="mt-3 text-sm text-zinc-500">{message}</p> : null}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="mt-4 w-full rounded-lg border border-zinc-900 bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Add Source"}
+          </button>
+        </form>
+      </div>
+    </section>
+  );
+};
+
 const RedditDashboardCard = ({
   summary,
 }: {
@@ -832,7 +1080,7 @@ export default function AdminSocialMediaPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source_scope: "bravo" }),
+          body: JSON.stringify({ source_scope: "network" }),
         },
         { allowDevAdminBypass: true, preferredUser: user },
       );
@@ -914,14 +1162,66 @@ export default function AdminSocialMediaPage() {
       })
       .catch(() => {
         // Keep the optimistic card state if the background refresh fails.
-      });
+    });
+  };
+
+  const saveSharedSource = async (
+    sourceScope: SharedAccountSourceSetScope,
+    draft: SharedSourceDraft,
+  ) => {
+    if (!user) return;
+    const response = await fetchAdminWithAuth(
+      "/api/admin/social/landing",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_type: "shared_source",
+          target_id: sourceScope,
+          source_scope: sourceScope,
+          platform: draft.platform,
+          value: draft.handle,
+          display_name: draft.displayName,
+        }),
+      },
+      { allowDevAdminBypass: true, preferredUser: user },
+    );
+    const data = (await response.json().catch(() => ({}))) as
+      | ({ error?: string } & Partial<SocialLandingPayload>)
+      | undefined;
+    if (!response.ok) {
+      throw new Error(data?.error || "Failed to save shared source");
+    }
+
+    const nextPayload = coerceLandingPayload(data);
+    const cacheable = response.headers.get("x-trr-cacheable") !== "0";
+    setLanding(nextPayload);
+    if (cacheable) {
+      writeCachedLandingData(nextPayload);
+    }
   };
 
   const networkSets = landing?.network_sets ?? [];
   const showSets = landing?.show_sets ?? [];
-  const peopleProfiles = landing?.people_profiles ?? [];
   const personTargets = landing?.person_targets ?? [];
   const castSocialBladeShows = landing?.cast_socialblade_shows ?? [];
+  const sharedSourceSets = landing?.shared_source_sets ?? buildEmptySharedSourceSets();
+  const newsSourceSet =
+    sharedSourceSets.find((sourceSet) => sourceSet.source_scope === "news") ?? {
+      key: "news",
+      title: "News",
+      source_scope: "news",
+      description: "Outlet and publication accounts used for social news coverage.",
+      sources: [],
+    };
+  const creatorSourceSet =
+    sharedSourceSets.find((sourceSet) => sourceSet.source_scope === "creator") ?? {
+      key: "creators",
+      title: "Creators",
+      source_scope: "creator",
+      description: "Independent creator accounts such as queensofbravo.",
+      sources: [],
+    };
   const addHandleTargetOptions = buildAddHandleTargetOptions(
     networkSets,
     showSets,
@@ -1303,63 +1603,17 @@ export default function AdminSocialMediaPage() {
                 )}
               </section>
 
-              <CastSocialBladeSection shows={castSocialBladeShows} />
+              <PeopleSocialBladeSection shows={castSocialBladeShows} />
 
-              <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className={sectionEyebrowClass}>People</p>
-                    <h2 className="text-lg font-semibold text-zinc-900">
-                      PEOPLE
-                    </h2>
-                  </div>
-                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-600">
-                    {peopleProfiles.length} profiles
-                  </span>
-                </div>
+              <SharedSourceSection
+                sourceSet={newsSourceSet}
+                onSaveSource={saveSharedSource}
+              />
 
-                {peopleProfiles.length === 0 ? (
-                  <p className="text-sm text-zinc-500">
-                    No cast members with stored social handles were found for the
-                    current covered-show set.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {peopleProfiles.map((person) => (
-                      <div
-                        key={person.person_id}
-                        className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4"
-                      >
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div>
-                            <p className="text-base font-semibold text-zinc-900">
-                              {person.full_name}
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {person.shows.map((show) => (
-                                <span
-                                  key={`${person.person_id}:${show.show_id}`}
-                                  className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600"
-                                >
-                                  {show.show_name}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap gap-2 lg:justify-end">
-                            {person.handles.map((handle) => (
-                              <HandleChip
-                                key={`${person.person_id}:${handle.platform}:${handle.handle}`}
-                                handle={handle}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
+              <SharedSourceSection
+                sourceSet={creatorSourceSet}
+                onSaveSource={saveSharedSource}
+              />
             </div>
           )}
         </main>

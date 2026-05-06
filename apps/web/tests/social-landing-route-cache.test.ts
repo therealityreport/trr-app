@@ -111,7 +111,7 @@ describe("social landing route cache", () => {
     const ingestResponse = await postSharedIngest(
       new NextRequest("http://localhost/api/admin/trr-api/social/shared/ingest", {
         method: "POST",
-        body: JSON.stringify({ source_scope: "bravo" }),
+        body: JSON.stringify({ source_scope: "network" }),
         headers: { "content-type": "application/json" },
       }),
     );
@@ -148,7 +148,7 @@ describe("social landing route cache", () => {
     const ingestResponse = await postSharedIngest(
       new NextRequest("http://localhost/api/admin/trr-api/social/shared/ingest", {
         method: "POST",
-        body: JSON.stringify({ source_scope: "bravo" }),
+        body: JSON.stringify({ source_scope: "network" }),
         headers: { "content-type": "application/json" },
       }),
     );

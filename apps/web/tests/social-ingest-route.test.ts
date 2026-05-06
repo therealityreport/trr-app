@@ -42,7 +42,7 @@ describe("social ingest proxy route", () => {
       `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/ingest?season_id=${seasonId}`,
       {
         method: "POST",
-        body: JSON.stringify({ source_scope: "bravo" }),
+        body: JSON.stringify({ source_scope: "network" }),
       },
     );
 
@@ -64,7 +64,7 @@ describe("social ingest proxy route", () => {
       `http://localhost/api/admin/trr-api/shows/${showId}/seasons/6/social/ingest?season_id=bad-season-id`,
       {
         method: "POST",
-        body: JSON.stringify({ source_scope: "bravo" }),
+        body: JSON.stringify({ source_scope: "network" }),
       },
     );
 
@@ -83,7 +83,7 @@ describe("social ingest proxy route", () => {
       {
         method: "POST",
         body: JSON.stringify({
-          source_scope: "bravo",
+          source_scope: "network",
           runner_strategy: "adaptive_dual_runner",
           runner_count: 2,
           window_shard_hours: 2,
